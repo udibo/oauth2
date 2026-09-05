@@ -1,0 +1,197 @@
+{
+  "workspace": [
+    "./src",
+    "./scripts/doc-check",
+    "./examples/hono/app-with-own-auth",
+    "./examples/hono/app-with-external-auth",
+    "./examples/hono/api-service",
+    "./examples/juniper/app-with-own-auth",
+    "./examples/juniper/app-with-external-auth",
+    "./templates/juniper",
+    "./templates/react-router"
+  ],
+  "nodeModulesDir": "auto",
+  "unstable": [
+    "kv"
+  ],
+  "tasks": {
+    "serve:app-with-own-auth": {
+      "description": "Runs the Hono app-with-own-auth example in development mode.",
+      "command": "deno task --cwd=examples/hono/app-with-own-auth serve"
+    },
+    "serve:app-with-external-auth": {
+      "description": "Runs the Hono app-with-external-auth example in development mode.",
+      "command": "deno task --cwd=examples/hono/app-with-external-auth serve"
+    },
+    "serve:api-service": {
+      "description": "Runs the Hono api-service example in development mode.",
+      "command": "deno task --cwd=examples/hono/api-service serve"
+    },
+    "dev:app-with-own-auth": {
+      "description": "Runs the Hono app-with-own-auth example with auto-reload.",
+      "command": "deno task --cwd=examples/hono/app-with-own-auth dev"
+    },
+    "dev:app-with-external-auth": {
+      "description": "Runs the Hono app-with-external-auth example with auto-reload.",
+      "command": "deno task --cwd=examples/hono/app-with-external-auth dev"
+    },
+    "dev:api-service": {
+      "description": "Runs the Hono api-service example with auto-reload.",
+      "command": "deno task --cwd=examples/hono/api-service dev"
+    },
+    "test": {
+      "description": "Runs the OAuth2 package tests only. Use `test:all` before pushing — the examples and templates have their own suites.",
+      "command": "deno task --cwd=src test"
+    },
+    "test:scripts": {
+      "description": "Runs the tests for the repository scripts.",
+      "command": "deno test --allow-read --allow-write --allow-run --allow-env scripts/*.test.ts"
+    },
+    "test:all": {
+      "description": "Runs every test suite in the repository: the package, the scripts, the examples, and the starter templates.",
+      "command": "deno task test && deno task test:scripts && deno task test:examples && deno task test:templates"
+    },
+    "test:app-with-own-auth": {
+      "description": "Runs the Hono app-with-own-auth example tests.",
+      "command": "deno task --cwd=examples/hono/app-with-own-auth test"
+    },
+    "test:app-with-external-auth": {
+      "description": "Runs the Hono app-with-external-auth example tests.",
+      "command": "deno task --cwd=examples/hono/app-with-external-auth test"
+    },
+    "test:api-service": {
+      "description": "Runs the Hono api-service example tests.",
+      "command": "deno task --cwd=examples/hono/api-service test"
+    },
+    "serve:juniper-own-auth": {
+      "description": "Runs the Juniper app-with-own-auth example in development mode.",
+      "command": "deno task --cwd=examples/juniper/app-with-own-auth serve"
+    },
+    "dev:juniper-own-auth": {
+      "description": "Runs the Juniper app-with-own-auth example with auto-reload.",
+      "command": "deno task --cwd=examples/juniper/app-with-own-auth dev"
+    },
+    "test:juniper-own-auth": {
+      "description": "Runs the Juniper app-with-own-auth example tests.",
+      "command": "deno task --cwd=examples/juniper/app-with-own-auth test"
+    },
+    "serve:juniper-external-auth": {
+      "description": "Runs the Juniper app-with-external-auth example in development mode.",
+      "command": "deno task --cwd=examples/juniper/app-with-external-auth serve"
+    },
+    "dev:juniper-external-auth": {
+      "description": "Runs the Juniper app-with-external-auth example with auto-reload.",
+      "command": "deno task --cwd=examples/juniper/app-with-external-auth dev"
+    },
+    "test:juniper-external-auth": {
+      "description": "Runs the Juniper app-with-external-auth example tests.",
+      "command": "deno task --cwd=examples/juniper/app-with-external-auth test"
+    },
+    "serve:template-juniper": {
+      "description": "Runs the Juniper starter template in development mode.",
+      "command": "deno task --cwd=templates/juniper serve"
+    },
+    "test:template-juniper": {
+      "description": "Runs the Juniper starter template tests.",
+      "command": "deno task --cwd=templates/juniper test"
+    },
+    "serve:template-react-router": {
+      "description": "Runs the React Router starter template in development mode.",
+      "command": "deno task --cwd=templates/react-router serve"
+    },
+    "test:template-react-router": {
+      "description": "Runs the React Router starter template tests.",
+      "command": "deno task --cwd=templates/react-router test"
+    },
+    "test:examples": {
+      "description": "Runs every example's test suite.",
+      "command": "deno task test:app-with-own-auth && deno task test:app-with-external-auth && deno task test:api-service && deno task test:juniper-own-auth && deno task test:juniper-external-auth"
+    },
+    "test:templates": {
+      "description": "Runs every starter template's test suite.",
+      "command": "deno task test:template-juniper && deno task test:template-react-router"
+    },
+    "check": {
+      "description": "Checks the code for errors, formatting, and runs the linter.",
+      "command": "deno check && deno lint && deno fmt --check && deno task doc-lint && deno task doc-check && deno task doc-links && deno task llms:check && deno task check:publish && deno task check:packaging"
+    },
+    "doc-links": {
+      "description": "Fails when a shipped doc links the private monorepo or a monorepo-relative command.",
+      "command": "deno run --allow-read scripts/doc-links.ts"
+    },
+    "check:publish": {
+      "description": "Fails when the package would not publish to JSR, before a release tag makes the version immutable.",
+      "command": "deno task publish:prepare && cd src && deno publish --dry-run --allow-dirty"
+    },
+    "check:packaging": {
+      "description": "Type-checks the published entrypoints from outside the workspace, under a foreign import map and compilerOptions, and asserts the release-packaging invariants.",
+      "command": "deno task --cwd=smoke-consumer check && deno task --cwd=smoke-consumer test"
+    },
+    "npm:build": {
+      "description": "Builds the npm artifact from src/ into npm/ with dnt. Optional argument overrides the version (used by the release pipeline).",
+      "command": "deno run --allow-read --allow-write --allow-env --allow-run --allow-net scripts/build-npm.ts"
+    },
+    "npm:smoke": {
+      "description": "Packs the built npm artifact and proves it from Node: installs the tarball into npm-smoke-consumer/, type-checks with tsc, and imports every Node-supported subpath at runtime. Run npm:build first.",
+      "command": "deno run --allow-read --allow-write --allow-env --allow-run scripts/npm-smoke.ts"
+    },
+    "llms:generate": {
+      "description": "Regenerates llms-full.txt from the pages llms.txt indexes.",
+      "command": "deno run --allow-read --allow-write scripts/llms.ts"
+    },
+    "llms:check": {
+      "description": "Fails when a docs page is unindexed, a link is dead, or llms-full.txt is stale.",
+      "command": "deno run --allow-read scripts/llms.ts --check"
+    },
+    "doc-lint": {
+      "description": "Fails when any public export is missing contract-level JSDoc.",
+      "command": "deno run --allow-read --allow-run scripts/doc-lint.ts"
+    },
+    "doc-check": {
+      "description": "Type-checks every `ts`/`tsx` snippet in the README and docs, and every JSDoc `@example` in the API reference.",
+      "command": "deno run --allow-read --allow-write --allow-run scripts/doc-check.ts"
+    },
+    "psl:update": {
+      "description": "Regenerates the bundled Public Suffix List from publicsuffix.org.",
+      "command": "deno run --allow-net=publicsuffix.org --allow-read --allow-write --allow-run scripts/public-suffix-list.ts"
+    },
+    "psl:check": {
+      "description": "Fails when the bundled Public Suffix List has drifted from publicsuffix.org.",
+      "command": "deno run --allow-net=publicsuffix.org --allow-read scripts/public-suffix-list.ts --check"
+    },
+    "publish:prepare": {
+      "description": "Stages consumer documentation in src/ for a complete JSR payload.",
+      "command": "deno run --allow-read --allow-write scripts/prepare-publish.ts"
+    },
+    "release:prepare": {
+      "description": "Stages the release version and documentation without publishing.",
+      "command": "deno run --allow-read --allow-write scripts/prepare-release.ts"
+    }
+  },
+  "exclude": [
+    "smoke-consumer",
+    "npm-smoke-consumer",
+    "npm"
+  ],
+  "test": {
+    "sanitizeOps": true,
+    "sanitizeResources": true
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns",
+      "deno.unstable"
+    ]
+  },
+  "imports": {
+    "@deno/dnt": "jsr:@deno/dnt@^0.43.2",
+    "@std/assert": "jsr:@std/assert@^1.0.19",
+    "@std/semver": "jsr:@std/semver@^1.0.8",
+    "@std/testing": "jsr:@std/testing@^1.0.19"
+  },
+  "minimumDependencyAge": "P3D"
+}

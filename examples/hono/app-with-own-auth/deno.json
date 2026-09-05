@@ -1,0 +1,35 @@
+{
+  "tasks": {
+    "serve": {
+      "description": "Runs the app-with-own-auth example in development mode.",
+      "command": "deno serve --allow-net --port 8001 main.ts"
+    },
+    "dev": {
+      "description": "Runs the app-with-own-auth example with auto-reload.",
+      "command": "deno serve --allow-net --watch --port 8001 main.ts"
+    },
+    "test": {
+      "description": "Runs the example tests.",
+      "command": "deno test --allow-net"
+    }
+  },
+  "imports": {
+    "@udibo/oauth2": "jsr:@udibo/oauth2@^0.1.0",
+    "@std/assert": "jsr:@std/assert@^1.0.19",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "hono": "npm:hono@^4.12.23"
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns"
+    ]
+  },
+  "test": {
+    "sanitizeOps": true,
+    "sanitizeResources": true
+  }
+}

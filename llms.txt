@@ -1,0 +1,96 @@
+# @udibo/oauth2
+
+> OAuth2/OIDC integration tools for TypeScript applications. Two paths:
+> connect an app to Udibo's managed identity service, or host authorization
+> for the app's own users and API. Udibo is in private beta with a waitlist
+> at https://udibo.com; do not assume public registration is available.
+
+## Integration rules
+
+- Choose the path before implementing. A managed-service client needs a callback,
+  BFF/session storage, and API authorization; it does not implement an identity
+  service, password storage, MFA enrollment, or token issuance.
+- For a browser app with a backend, use HonoBff + BffClient. Keep client secrets,
+  access tokens, and refresh tokens off browser-accessible storage. DirectClient
+  is for the process that owns tokens; omit clientSecret for a public client.
+- Core servers accept Request/Response. HonoAuthorizationServer and
+  HonoResourceServer supply routing/protect middleware. React guards do not
+  replace API authorization.
+- Use exported subpaths; there is no package-root barrel or default export.
+  Check the typed API reference for exact signatures. In snippets, declare const
+  marks an app-owned dependency, not an implementation.
+- Keep PKCE, state, confidential-client authentication, and BFF CSRF enabled.
+  Configure issuers and callbacks from trusted settings, not browser parameters.
+- Persistent adapters must implement atomic code/OTP consumption and refresh
+  rotation. Stateful SessionStore.update rejects missing, expired, or revoked
+  sessions; it never recreates them. SessionSummary IDs are non-secret row IDs,
+  never cookie values, hashes, or token material.
+- IdentityUserStore.replaceCredential is optional, atomic compare-and-set for
+  password upgrades. Compare all previous credential fields; undefined expects
+  no native credential. Without it upgrades are skipped. Persist credential.params.
+- Rate limits, lockout, and bot challenges require explicit configuration.
+  Log-only mode does not enforce. MFA routes need authentication, CSRF, and a
+  pending first-factor state before creating a full session.
+- Generic OIDC/Google connectors trust direct TLS exchange and validate ID-token
+  claims without signature verification. Apple verifies signatures and uses
+  form_post; its transient cookie requires SameSite=None; Secure. Never use these
+  connectors to accept arbitrary ID tokens from other channels.
+- Memory stores are development fixtures. EncryptedCookieSessionStore is stateless
+  and cannot immediately revoke a copied cookie. Offline JWT validation cannot
+  immediately observe token revocation. Read known limitations before choosing.
+- Use exact deployed configuration and the actual store contract tests. The
+  complete suite runs on Deno; Node has import/type smoke coverage for 19 subpaths.
+  Bun is unverified. The CLI is Deno-only and is not a production dependency.
+- Public docs cover application integration. Do not infer hosted-service admin
+  APIs, tenant platform architecture, pricing, or beta availability from this package.
+
+## Docs
+
+- [README](README.md): package overview, runtime boundaries, and entrypoints
+- [Documentation index](docs/index.md): choose managed or app-hosted integration
+- [Use Udibo](docs/guides/use-udibo.md): private-beta prerequisites, BFF wiring, validation, troubleshooting
+- [Quickstart](docs/quickstart.md): run and inspect a complete local application
+- [Host authorization for your app](docs/guides/become-an-oauth-provider.md): services, endpoints, grants, consent, refresh, and OIDC issuance
+- [Add login](docs/guides/add-login.md): app-owned user/credential storage, sessions, mail, and protections
+- [Protect an API](docs/guides/protect-an-api.md): introspection/JWKS, scopes, and BFF proxying
+- [React integration](docs/guides/react.md): session state, guards, and forms for app-owned login
+- [Integration testing](docs/guides/testing.md): route fixtures, persistent store contracts, and browser checks
+- [MFA](docs/guides/add-mfa.md): enrollment, pending login, challenge, and recovery
+- [Passwordless](docs/guides/passwordless.md): email links/codes, storage, and request/verification behavior
+- [External sign-in](docs/guides/social-sign-in.md): trusted providers, callbacks, transient cookies, and linking
+- [Password migration](docs/guides/migrate-from-another-provider.md): import existing app credentials and upgrade on login
+- [Environment configuration](docs/guides/deploy-across-environments.md): local, preview, and production callback and secret configuration
+- [Application deployment](docs/guides/production-deployment.md): persistence, cookies, keys, and app-side operational requirements
+- [Deployment checklist](docs/guides/hardening-checklist.md): review the boundaries your integration enables
+- [Local identity provider](docs/guides/run-a-local-identity-provider.md): local OAuth2/OIDC development and CI without a hosted account
+- [Extension reference](docs/trigger-points.md): callbacks and stores, when they run, failure semantics
+- [Known limitations](docs/known-limitations.md): constraints and responsibilities that affect integration choices
+- [Stability](docs/stability.md): versioning and runtime support
+- [Issue triage](docs/triage.md): package issue handling
+- [Security](SECURITY.md): vulnerability reporting
+
+## Examples
+
+These runnable examples use isolated development data and are tested in CI.
+Run their tasks from the repository root; see each README for ports and setup.
+
+- [Hono with own auth](examples/hono/app-with-own-auth/README.md): authorization server, login, BFF, and API together
+- [Hono with external auth](examples/hono/app-with-external-auth/README.md): client/BFF integration with a separate issuer
+- [Hono API](examples/hono/api-service/README.md): a resource server without a frontend
+- [Juniper with own auth](examples/juniper/app-with-own-auth/README.md): SSR React with app-owned login
+- [Juniper with external auth](examples/juniper/app-with-external-auth/README.md): SSR React with delegated login
+
+## Starter templates
+
+Templates are repository files, not JSR package exports. Read the template's
+README before copying; replace all development-only settings before deployment.
+
+- [Juniper](templates/juniper/README.md): SSR React with app-owned auth and a BFF
+- [React Router](templates/react-router/README.md): a React SPA with a Hono BFF
+
+## API reference
+
+JSR renders the typed reference at https://jsr.io/@udibo/oauth2/doc. The 22
+exports are declared in src/deno.json. Full API documentation, code snippets,
+links, generated docs, and the publish payload are checked by deno task check.
+Run deno task test:all for package, script, example, and template suites.

@@ -1,0 +1,112 @@
+name: OAuth2 CI and release
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oauth2-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  oauth2-package:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    timeout-minutes: 10
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Setup Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        with:
+          deno-version: v2.x
+          cache: false
+      - name: Install dependencies
+        run: deno ci
+      - name: Run checks (includes doc-lint)
+        run: deno task check
+      - name: Verify the package publishes to JSR (dry run)
+        run: deno task check:publish
+      - name: Run package tests
+        run: deno task test
+      - name: Run repository script tests
+        run: deno task test:scripts
+      - name: Run example tests
+        run: deno task test:examples
+      - name: Run starter template tests
+        run: deno task test:templates
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build the npm artifact (publishes nothing)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          npm_config_ignore_scripts: "true"
+        run: deno task npm:build
+      - name: Smoke-test the npm artifact from Node
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          npm_config_ignore_scripts: "true"
+        run: deno task npm:smoke
+
+  release-oauth2-package:
+    name: Release @udibo/oauth2 to JSR
+    needs: [oauth2-package]
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && vars.OAUTH2_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Setup Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        with:
+          deno-version: v2.x
+          cache: false
+      - name: Install dependencies
+        run: deno ci
+      - name: Compute the next version (dry run, publishes nothing)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          npx
+          --package semantic-release@25.0.5
+          --package @semantic-release/changelog@6.0.3
+          --package @semantic-release/exec@7.1.0
+          --package @semantic-release/git@10.0.1
+          --package @semantic-release/github@12.0.8
+          --package @sebbo2002/semantic-release-jsr@3.2.1
+          semantic-release --dry-run
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          npx
+          --package semantic-release@25.0.5
+          --package @semantic-release/changelog@6.0.3
+          --package @semantic-release/exec@7.1.0
+          --package @semantic-release/git@10.0.1
+          --package @semantic-release/github@12.0.8
+          --package @sebbo2002/semantic-release-jsr@3.2.1
+          semantic-release

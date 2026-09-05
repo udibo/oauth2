@@ -1,0 +1,23 @@
+{
+  "name": "@udibo/oauth2-doc-snippets",
+  "version": "0.0.0",
+  "exports": {},
+  "imports": {
+    "hono": "npm:hono@^4.12.23",
+    "react": "npm:react@^19.2.7",
+    "@types/react": "npm:@types/react@^19.2.16"
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns",
+      "deno.unstable"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "jsxImportSourceTypes": "@types/react"
+  }
+}

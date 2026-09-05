@@ -1,0 +1,101 @@
+{
+  "name": "@udibo/oauth2",
+  "version": "0.1.0",
+  "description": "A flexible OAuth2 toolkit: framework-agnostic authorization & resource servers, a typed client, Hono adapters (including a backend-for-frontend), and React bindings.",
+  "license": "MIT",
+  "exports": {
+    "./server": "./server/mod.ts",
+    "./server/authorization": "./server/authorization-server.ts",
+    "./server/resource": "./server/resource-server.ts",
+    "./server/public-suffix": "./server/public-suffix/mod.ts",
+    "./client": "./client/mod.ts",
+    "./identity": "./identity/mod.ts",
+    "./identity/external": "./identity/external/mod.ts",
+    "./identity/mfa": "./identity/mfa/mod.ts",
+    "./identity/migration": "./identity/migration.ts",
+    "./hono/resource-server": "./adapters/hono/resource-server.ts",
+    "./hono/authorization-server": "./adapters/hono/authorization-server.ts",
+    "./hono/bff": "./adapters/hono/bff/mod.ts",
+    "./hono/bff/testing": "./adapters/hono/bff/testing.ts",
+    "./hono/identity": "./adapters/hono/identity.ts",
+    "./react": "./react/mod.ts",
+    "./react/components": "./react/components/mod.ts",
+    "./react/testing": "./react/testing.tsx",
+    "./testing": "./testing/mod.ts",
+    "./testing/contract": "./testing/contract/mod.ts",
+    "./crypto": "./utils/crypto.ts",
+    "./url": "./utils/url.ts",
+    "./cli": "./cli/mod.ts"
+  },
+  "tasks": {
+    "test": {
+      "description": "Runs the tests.",
+      "command": "deno test -P=test"
+    },
+    "test-update": {
+      "description": "Runs the tests and updates the snapshots.",
+      "command": "deno task test -- --update"
+    }
+  },
+  "imports": {
+    "@udibo/http-error": "jsr:@udibo/http-error@^0.11.1",
+    "@udibo/juniper": "jsr:@udibo/juniper@^0.9.2",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@std/assert": "jsr:@std/assert@^1.0.19",
+    "@std/async": "jsr:@std/async@^1.4.0",
+    "@std/crypto": "jsr:@std/crypto@^1.1.0",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "hono": "npm:hono@^4.7.0",
+    "react": "npm:react@^19.0.0",
+    "react-dom": "npm:react-dom@^19.2.7",
+    "@types/react": "npm:@types/react@^19.2.17",
+    "@testing-library/react": "npm:@testing-library/react@^16.3.2",
+    "axe-core": "npm:axe-core@^4.10.2"
+  },
+  "publish": {
+    "exclude": [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/_test_fixtures.ts",
+      "**/_test_setup.ts"
+    ],
+    "include": [
+      "**/*.ts",
+      "**/*.tsx",
+      "deno.json",
+      "README.md",
+      "LICENSE",
+      "SECURITY.md",
+      "CONTRIBUTING.md",
+      "llms.txt",
+      "llms-full.txt",
+      "docs/"
+    ]
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns",
+      "deno.unstable"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "jsxImportSourceTypes": "@types/react"
+  },
+  "permissions": {
+    "test": {
+      "net": true,
+      "env": true,
+      "read": true,
+      "write": true,
+      "run": true
+    }
+  },
+  "test": {
+    "sanitizeOps": true,
+    "sanitizeResources": true
+  }
+}

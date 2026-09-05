@@ -1,0 +1,11 @@
+/node_modules/
+/npm/
+/coverage/
+/coverage.lcov
+/src/README.md
+/src/LICENSE
+/src/SECURITY.md
+/src/CONTRIBUTING.md
+/src/llms.txt
+/src/llms-full.txt
+/src/docs/

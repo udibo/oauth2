@@ -1,0 +1,74 @@
+{
+  "tasks": {
+    "build": {
+      "description": "Bundles the browser app into public/build. Pass --watch to rebuild on change.",
+      "command": "deno run -P=build build.ts"
+    },
+    "serve": {
+      "description": "Builds the browser app, then serves everything on port 8000.",
+      "command": "deno task build && deno serve -P=serve --env-file --port 8000 main.ts"
+    },
+    "dev": {
+      "description": "Builds, then serves with server auto-restart on change. Run `deno task build --watch` in a second terminal for client rebuilds.",
+      "command": "deno task build && deno serve -P=serve --env-file --watch --port 8000 main.ts"
+    },
+    "test": {
+      "description": "Runs the tests.",
+      "command": "deno test -P=test"
+    },
+    "check": {
+      "description": "Checks the code for errors, formatting, and runs the linter.",
+      "command": "deno check && deno lint && deno fmt --check"
+    }
+  },
+  "imports": {
+    "@/": "./",
+    "@udibo/oauth2": "jsr:@udibo/oauth2@^0.1.0",
+    "@std/assert": "jsr:@std/assert@^1.0.19",
+    "@std/path": "jsr:@std/path@^1.1.5",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin@^1.2.1",
+    "esbuild": "npm:esbuild@^0.28.0",
+    "hono": "npm:hono@^4.12.23",
+    "react": "npm:react@^19.2.7",
+    "react-dom": "npm:react-dom@^19.2.7",
+    "@types/react": "npm:@types/react@^19.2.16",
+    "react-router": "npm:react-router@^8.3.0"
+  },
+  "permissions": {
+    "build": {
+      "env": true,
+      "read": true,
+      "write": true,
+      "run": true
+    },
+    "serve": {
+      "env": true,
+      "read": true,
+      "net": true
+    },
+    "test": {
+      "env": true,
+      "read": true,
+      "net": true
+    }
+  },
+  "compilerOptions": {
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns",
+      "deno.unstable"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "jsxImportSourceTypes": "@types/react"
+  },
+  "test": {
+    "sanitizeOps": true,
+    "sanitizeResources": true
+  },
+  "exclude": ["public/build"]
+}
