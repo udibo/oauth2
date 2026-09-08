@@ -283,6 +283,29 @@ export interface AuthorizationServerOptions<
     token: Token<Client, User, S>,
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
   /**
+   * Authorizes a client to introspect a resolved, unexpired token. A false
+   * result returns only `{ active: false }`, without invoking
+   * {@linkcode introspectionClaims}. An error fails the request closed.
+   * `tokenType` is the resolved kind, regardless of the request's hint.
+   *
+   * Omitted by default for compatibility with separately authorized resource
+   * servers: every client admitted to the endpoint may introspect any token.
+   * Configure this policy when ordinary client credentials can reach the
+   * endpoint. A public client ID alone does not authenticate its holder.
+   *
+   * @example
+   * ```ts
+   * const canIntrospectToken = (client: { id: string; confidential?: boolean },
+   *   token: { client: { id: string } }): boolean =>
+   *   client.confidential === true && client.id === token.client.id;
+   * ```
+   */
+  canIntrospectToken?: (
+    client: Client,
+    token: Token<Client, User, S>,
+    tokenType: "access_token" | "refresh_token",
+  ) => boolean | Promise<boolean>;
+  /**
    * Decides whether the domain under a wildcard redirect URI is a public
    * suffix, which is what bounds a wildcard registration to one registrant's
    * namespace. Import `isPublicSuffix` from
@@ -632,6 +655,11 @@ export class AuthorizationServer<
   #introspectionClaims?: (
     token: Token<Client, User, S>,
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  #canIntrospectToken?: AuthorizationServerOptions<
+    Client,
+    User,
+    S
+  >["canIntrospectToken"];
   /** Resolves the per-request {@link AuthorizationServerContext}. */
   #resolve: (
     request: Request,
@@ -681,6 +709,7 @@ export class AuthorizationServer<
     this.#subjectOf = options.subjectOf ?? defaultSubjectOf;
     this.#userClaims = options.userClaims;
     this.#introspectionClaims = options.introspectionClaims;
+    this.#canIntrospectToken = options.canIntrospectToken;
   }
 
   /**
@@ -1582,6 +1611,10 @@ export class AuthorizationServer<
    *
    * Per RFC 7662, requires client authentication and returns information
    * about the token including whether it is active.
+   * {@linkcode AuthorizationServerOptions.canIntrospectToken} controls which
+   * tokens an authenticated caller may inspect. A denial returns only
+   * `{ active: false }`; without a policy, all admitted clients may inspect
+   * any token, including separately authorized resource servers.
    *
    * Both access tokens and refresh tokens introspect. `token_type_hint` orders
    * the lookup rather than restricting it (RFC 7662 Section 2.1 requires the
@@ -1606,9 +1639,10 @@ export class AuthorizationServer<
    */
   async handleIntrospectionRequest(request: Request): Promise<Response> {
     try {
-      const { context, body } = await this.#beginClientAuthenticatedRequest(
-        request,
-      );
+      const { context, body, client } = await this
+        .#beginClientAuthenticatedRequest(
+          request,
+        );
 
       const tokenValue = body.get("token");
       if (typeof tokenValue !== "string") {
@@ -1629,7 +1663,15 @@ export class AuthorizationServer<
       );
       const expiresAt = resolved && this.#introspectedExpiry(resolved);
 
-      if (!resolved || (expiresAt && expiresAt < new Date())) {
+      if (
+        !resolved || (expiresAt && expiresAt < new Date()) ||
+        (this.#canIntrospectToken &&
+          await this.#canIntrospectToken(
+              client,
+              resolved.token,
+              resolved.tokenType,
+            ) !== true)
+      ) {
         response = { active: false };
       } else {
         const { token, tokenType } = resolved;
