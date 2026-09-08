@@ -86,6 +86,10 @@ signed-in post-login.)
 
 ## Testing
 
+The root middleware uses `requestLogger()` from `@udibo/oauth2/hono/log`. Both
+request and response lines redact every query value, including callback codes
+and state. Proxy and tracing logs need their own redaction configuration.
+
 `main.test.ts` runs entirely in-process (`server.request(...)`, no sockets, no
 Docker). Protected-endpoint tests skip the browser redirect flow by minting a
 token into the shared token service and injecting a BFF session with

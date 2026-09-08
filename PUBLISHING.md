@@ -18,7 +18,7 @@ deno task check
 deno task test:all
 ```
 
-`check` includes type checking, formatting, lint, all 22 public entrypoints'
+`check` includes type checking, formatting, lint, all 23 public entrypoints'
 JSDoc, documentation examples, links, and a JSR dry run. It first copies the
 README, license, security policy, contributor guide, guides and AI documentation
 into `src/`. Generated copies are ignored by Git but explicitly included in the

@@ -174,6 +174,7 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 | `/identity/external`         | Social and external OIDC sign-in for your own login pages                                       |
 | `/identity/migration`        | Verify imported password hashes and upgrade them at login                                       |
 | `/hono/identity`             | Hono routes for `IdentityService`                                                               |
+| `/hono/log`                  | Request logger and URL helper that redact every query value                                     |
 | `/react`                     | Context, hooks, authentication guards, and callback handling                                    |
 | `/react/components`          | Optional forms for login, signup, password reset, and MFA                                       |
 | `/crypto`                    | Random tokens, hashing, encoding, authenticated encryption                                      |
@@ -187,7 +188,7 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 ## Runtime support
 
 The library uses Web APIs. The complete suite runs on Deno. CI also builds an
-npm-format compatibility artifact and verifies 19 entrypoints with TypeScript
+npm-format compatibility artifact and verifies 20 entrypoints with TypeScript
 and Node; this does not publish an npm package.
 
 | Surface                                     | Deno                  | Node                     | Browser                                     | Bun           |
@@ -348,6 +349,7 @@ import {
   type SessionStore,
 } from "@udibo/oauth2/hono/bff";
 import type { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
+import { requestLogger } from "@udibo/oauth2/hono/log";
 import type { ClientInterface } from "@udibo/oauth2/server";
 
 declare const sessions: SessionStore;
@@ -378,6 +380,7 @@ const bff = new HonoBff({
 });
 
 const app = new Hono();
+app.use(requestLogger());
 app.route("/auth", bff.routes());
 app.use("/api/*", bff.protect());
 app.get("/api/message", (c) => c.json({ message: "Authenticated" }));
@@ -389,6 +392,10 @@ export default app;
 instance of this application. It protects the pending state and PKCE verifier
 across the redirect. Store it in your deployment's secret manager. The example
 keeps the BFF's HTTPS cookie and CSRF defaults enabled.
+
+`requestLogger()` redacts every query value on both log lines, including
+callback `code` and `state`. Configure reverse proxies and tracing separately;
+this middleware cannot redact logs emitted by other systems.
 
 Use `bff.protect("read")` for a scope required throughout an API mount, or layer
 `resourceServer.requireScope(...)` on individual routes after authentication.
@@ -5461,6 +5468,19 @@ Behavior to account for when choosing and deploying an integration. The API
 reference documents each option; this page collects cross-cutting limits and
 application-owned responsibilities.
 
+## Request logging
+
+OAuth callbacks carry authorization codes and state in query parameters. Mount
+`requestLogger()` from `@udibo/oauth2/hono/log` before authentication routes. It
+replaces every query value with `[redacted]` in request and response lines; the
+Juniper starter and examples use it by default. For other loggers or telemetry,
+use `redactedRequestTarget(url)` before recording the URL.
+
+The pathname and parameter names remain visible, so do not put secrets there.
+The middleware does not control reverse-proxy access logs, tracing exporters, or
+logs your own handlers emit. Configure those separately to avoid recording
+credentials, request bodies, or raw callback URLs.
+
 ## Deliberate deviations (stricter than spec)
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists
@@ -5781,7 +5801,7 @@ semantic-release from Conventional Commits (see
 ## Runtime support
 
 Deno runs the complete test suite. CI also builds an npm-format artifact and
-smoke-tests 19 entrypoints with TypeScript and Node. The generic testing exports
+smoke-tests 20 entrypoints with TypeScript and Node. The generic testing exports
 (`/testing`, `/testing/contract`) rely on Deno's test runner and are not
 verified on Node. `/cli` uses Deno runtime APIs and is Deno-only.
 

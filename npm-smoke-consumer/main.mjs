@@ -31,6 +31,7 @@ const KNOWN_EXPORTS = {
   "./hono/bff": "EncryptedCookieSessionStore",
   "./hono/bff/testing": "createTestSession",
   "./hono/identity": "honoIdentityRoutes",
+  "./hono/log": "requestLogger",
   "./react": "OAuth2Provider",
   "./react/components": "SignInForm",
   "./react/testing": "MockOAuth2Provider",
@@ -82,6 +83,13 @@ if (isPublicSuffix("com") !== true) {
 }
 
 const { BffClient } = await import("@udibo/oauth2/client");
+const { redactedRequestTarget } = await import("@udibo/oauth2/hono/log");
+if (
+  redactedRequestTarget("https://app.example.com/auth/callback?code=secret") !==
+    "/auth/callback?code=[redacted]"
+) {
+  failures.push("request target did not redact the callback code");
+}
 if (typeof new BffClient().subscribe !== "function") {
   failures.push("BffClient did not construct with a subscribe method");
 }

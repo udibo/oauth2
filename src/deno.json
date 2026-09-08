@@ -18,6 +18,7 @@
     "./hono/bff": "./adapters/hono/bff/mod.ts",
     "./hono/bff/testing": "./adapters/hono/bff/testing.ts",
     "./hono/identity": "./adapters/hono/identity.ts",
+    "./hono/log": "./adapters/hono/log.ts",
     "./react": "./react/mod.ts",
     "./react/components": "./react/components/mod.ts",
     "./react/testing": "./react/testing.tsx",
