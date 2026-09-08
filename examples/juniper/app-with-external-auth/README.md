@@ -69,6 +69,10 @@ sets `cookie: { secure: false }` for plain-HTTP local dev, so drop that override
 
 ## Testing
 
+The root middleware uses `requestLogger()` from `@udibo/oauth2/hono/log`. Both
+request and response lines redact every query value, including callback codes
+and state. Proxy and tracing logs need their own redaction configuration.
+
 `main.test.ts` runs in-process with no live IDP: it stubs `tokenReader.getToken`
 (the scoped-override pattern the package recommends over a global `fetch` stub)
 and injects a BFF session with `createTestSession`. CSRF is on by default, so a

@@ -33,7 +33,7 @@ semantic-release from Conventional Commits (see
 ## Runtime support
 
 Deno runs the complete test suite. CI also builds an npm-format artifact and
-smoke-tests 19 entrypoints with TypeScript and Node. The generic testing exports
+smoke-tests 20 entrypoints with TypeScript and Node. The generic testing exports
 (`/testing`, `/testing/contract`) rely on Deno's test runner and are not
 verified on Node. `/cli` uses Deno runtime APIs and is Deno-only.
 

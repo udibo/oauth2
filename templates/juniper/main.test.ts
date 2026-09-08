@@ -7,9 +7,14 @@
  * @module
  */
 
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertFalse,
+  assertStringIncludes,
+} from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 
 import { DEMO_USER, passwords } from "@/oauth2/server.ts";
 import { server } from "./main.ts";
@@ -79,6 +84,24 @@ class Session {
 }
 
 describe("app", () => {
+  it("redacts callback credentials from request and response logs", async () => {
+    const secret = crypto.randomUUID();
+    const lines: string[] = [];
+    using _log = stub(console, "log", (...args: unknown[]) => {
+      lines.push(args.join(" "));
+    });
+    const response = await server.request(
+      `http://localhost:8000/auth/callback?code=${secret}&state=${secret}`,
+    );
+    await response.body?.cancel();
+    assertFalse(lines.some((line) => line.includes(secret)));
+    assertEquals(
+      lines.filter((line) =>
+        line.includes("/auth/callback?code=[redacted]&state=[redacted]")
+      ).length,
+      2,
+    );
+  });
   it("renders the app shell at /", async () => {
     const res = await server.request(`${ORIGIN}/`);
     assertEquals(res.status, 200);

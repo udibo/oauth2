@@ -122,6 +122,10 @@ on restart. To change or remove seeding, edit the `DEMO_USER` block in
 
 ## Going to production
 
+`routes/main.ts` mounts `requestLogger()` from `@udibo/oauth2/hono/log`. It logs
+request paths and parameter names with every query value redacted, including
+callback codes and state. Configure proxy and tracing logs separately.
+
 The starter's shortcuts, and what replaces each:
 
 - **In-memory stores.** Replace the `Memory*Service` instances in

@@ -4,6 +4,19 @@ Behavior to account for when choosing and deploying an integration. The API
 reference documents each option; this page collects cross-cutting limits and
 application-owned responsibilities.
 
+## Request logging
+
+OAuth callbacks carry authorization codes and state in query parameters. Mount
+`requestLogger()` from `@udibo/oauth2/hono/log` before authentication routes. It
+replaces every query value with `[redacted]` in request and response lines; the
+Juniper starter and examples use it by default. For other loggers or telemetry,
+use `redactedRequestTarget(url)` before recording the URL.
+
+The pathname and parameter names remain visible, so do not put secrets there.
+The middleware does not control reverse-proxy access logs, tracing exporters, or
+logs your own handlers emit. Configure those separately to avoid recording
+credentials, request bodies, or raw callback URLs.
+
 ## Deliberate deviations (stricter than spec)
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists

@@ -46,6 +46,7 @@ import {
   type SessionStore,
 } from "@udibo/oauth2/hono/bff";
 import type { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
+import { requestLogger } from "@udibo/oauth2/hono/log";
 import type { ClientInterface } from "@udibo/oauth2/server";
 
 declare const sessions: SessionStore;
@@ -76,6 +77,7 @@ const bff = new HonoBff({
 });
 
 const app = new Hono();
+app.use(requestLogger());
 app.route("/auth", bff.routes());
 app.use("/api/*", bff.protect());
 app.get("/api/message", (c) => c.json({ message: "Authenticated" }));
@@ -87,6 +89,10 @@ export default app;
 instance of this application. It protects the pending state and PKCE verifier
 across the redirect. Store it in your deployment's secret manager. The example
 keeps the BFF's HTTPS cookie and CSRF defaults enabled.
+
+`requestLogger()` redacts every query value on both log lines, including
+callback `code` and `state`. Configure reverse proxies and tracing separately;
+this middleware cannot redact logs emitted by other systems.
 
 Use `bff.protect("read")` for a scope required throughout an API mount, or layer
 `resourceServer.requireScope(...)` on individual routes after authentication.

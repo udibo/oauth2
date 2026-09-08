@@ -118,6 +118,7 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 | `/identity/external`         | Social and external OIDC sign-in for your own login pages                                       |
 | `/identity/migration`        | Verify imported password hashes and upgrade them at login                                       |
 | `/hono/identity`             | Hono routes for `IdentityService`                                                               |
+| `/hono/log`                  | Request logger and URL helper that redact every query value                                     |
 | `/react`                     | Context, hooks, authentication guards, and callback handling                                    |
 | `/react/components`          | Optional forms for login, signup, password reset, and MFA                                       |
 | `/crypto`                    | Random tokens, hashing, encoding, authenticated encryption                                      |
@@ -131,7 +132,7 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 ## Runtime support
 
 The library uses Web APIs. The complete suite runs on Deno. CI also builds an
-npm-format compatibility artifact and verifies 19 entrypoints with TypeScript
+npm-format compatibility artifact and verifies 20 entrypoints with TypeScript
 and Node; this does not publish an npm package.
 
 | Surface                                     | Deno                  | Node                     | Browser                                     | Bun           |

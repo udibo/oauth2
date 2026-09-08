@@ -52,6 +52,7 @@ import {
   type CreateTestSessionOptions,
 } from "@udibo/oauth2/hono/bff/testing";
 import { honoIdentityRoutes } from "@udibo/oauth2/hono/identity";
+import { redactedRequestTarget, requestLogger } from "@udibo/oauth2/hono/log";
 import {
   HonoResourceServer,
   OAUTH2_CONTEXT_KEY,
@@ -73,6 +74,10 @@ import { loginContinuation, safeReturnTo } from "@udibo/oauth2/url";
 
 const client = new BffClient();
 const signedOut = SIGNED_OUT;
+export const logging = requestLogger();
+export const callbackTarget = redactedRequestTarget(
+  "https://app.example.com/auth/callback?code=secret",
+);
 
 export function SmokeConsumer(): ReactNode {
   return (

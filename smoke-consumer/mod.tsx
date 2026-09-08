@@ -24,9 +24,14 @@ import {
 } from "@udibo/oauth2/hono/bff";
 import { OAuth2Provider, RequireAuth } from "@udibo/oauth2/react";
 import { SignInForm } from "@udibo/oauth2/react/components";
+import { redactedRequestTarget, requestLogger } from "@udibo/oauth2/hono/log";
 
 const client = new BffClient();
 const signedOut = SIGNED_OUT;
+export const logging = requestLogger();
+export const callbackTarget = redactedRequestTarget(
+  "https://app.example.com/auth/callback?code=secret",
+);
 
 export function SmokeConsumer(): ReactNode {
   return (

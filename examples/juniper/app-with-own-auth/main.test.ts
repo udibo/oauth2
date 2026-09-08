@@ -9,8 +9,9 @@
  * @module
  */
 
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { BasicScope } from "@udibo/oauth2/server";
 import { createTestSession } from "@udibo/oauth2/hono/bff/testing";
 
@@ -45,6 +46,24 @@ async function sessionFor(user: DemoUser, scope: string): Promise<string> {
 }
 
 describe("app-with-own-auth (juniper)", () => {
+  it("redacts callback credentials from request and response logs", async () => {
+    const secret = crypto.randomUUID();
+    const lines: string[] = [];
+    using _log = stub(console, "log", (...args: unknown[]) => {
+      lines.push(args.join(" "));
+    });
+    const response = await server.request(
+      `http://localhost:8000/auth/callback?code=${secret}&state=${secret}`,
+    );
+    await response.body?.cancel();
+    assertFalse(lines.some((line) => line.includes(secret)));
+    assertEquals(
+      lines.filter((line) =>
+        line.includes("/auth/callback?code=[redacted]&state=[redacted]")
+      ).length,
+      2,
+    );
+  });
   it("renders the React SPA shell at /", async () => {
     const res = await server.request("http://localhost/");
     assertEquals(res.status, 200);
