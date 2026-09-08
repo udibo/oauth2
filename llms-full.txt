@@ -996,12 +996,14 @@ return live refresh tokens. A service whose `getRefreshToken` returns
 revocation and report `active: false` for every live refresh token, with a `200`
 either way and nothing in the logs.
 
-**`POST /introspect` answers for any client's token, by design.** RFC 7662 is
-written for resource servers, which are by construction not the issuing client,
-so there is no ownership check — every credential you grant introspection access
-can read the metadata (`active`, `client_id`, `scope`, `exp`, `iss`, and `sub` /
-`username` when there is a resource owner) of every live token the server
-issued. Who may introspect what is your policy: see
+**Configure `canIntrospectToken` to authorize introspection.** The callback on
+`AuthorizationServerOptions` receives the authenticated client, the resolved
+token and its actual kind (`access_token` or `refresh_token`). Return false to
+answer only `{ active: false }`; claims enrichment runs only after
+authorization. An error fails the request closed. Without this policy, the
+endpoint preserves its separate resource-server behavior: every admitted client
+can inspect any live token. Choose the policy when mounting the endpoint, and
+remember that a public client ID does not authenticate its holder. See
 [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#spec-level-gaps).
 
 Introspection answers for **refresh** tokens too: a live one reports
@@ -5280,25 +5282,26 @@ reached through an endpoint is caught by that endpoint and converted to an RFC
 6749 §5.2 error response (or, on the authorize path once the redirect URI is
 validated, a redirect to the client with `error=…`).
 
-| Trigger point            | Symbol                                                               | Fires                                                                                      | Required                       | Control         | On throw                                                                                                                             |
-| ------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| services-resolver        | `resolve` (`AuthorizationServerOptions`)                             | Top of every endpoint, to resolve per-request services                                     | yes                            | blocks          | Converted to an error response on token/authorize/revoke/introspect/device, and on the metadata and JWKS discovery endpoints         |
-| authenticate             | `AuthenticateUserFn` (`handleAuthorizeRequest` arg)                  | `GET /authorize`, after client/PKCE validation                                             | yes                            | blocks          | `null` → `access_denied`; a `Response` short-circuits; an OAuth2 error redirects to the client, other throws → direct error response |
-| consent                  | `HandleConsentFn` (`handleAuthorizeRequest` arg)                     | `GET /authorize`, only when the requested scope needs consent                              | no (omit → auto-grant)         | blocks          | `{ approved: false }` denies; same redirect/error conversion as authenticate                                                         |
-| token-claims             | `userClaims` (`AuthorizationServerOptions`)                          | Assembling id_token and UserInfo claims (never the access token)                           | no                             | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
-| subject                  | `subjectOf` (`AuthorizationServerOptions`)                           | Assembling the `sub` for id_token and UserInfo                                             | no (defaults to `user.id`)     | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
-| signing-key              | `SigningKeyProvider` (`signingKeys`)                                 | `mintIdToken` (`getSigningKey`) and `GET /jwks` (`getPublicJwks`)                          | no (unset → OIDC surface off)  | blocks          | `getSigningKey` throw → token-endpoint `server_error`; `getPublicJwks` throw → JWKS-endpoint error response                          |
-| redirect-guard           | `IsPublicSuffix` (`isPublicSuffix`)                                  | `GET /authorize`, validating a wildcard `redirect_uri`                                     | no (unset → wildcards refused) | blocks          | Caught before a redirect URI is chosen → direct error response (bundled impl never throws). Must be sync, no I/O                     |
-| challenge-method         | `ChallengeMethods` (`challengeMethods`)                              | PKCE verification during the code→token exchange                                           | no (defaults to `S256`)        | blocks          | Converted to a token-endpoint error response                                                                                         |
-| client-store             | `ClientServiceInterface` (`clientService`)                           | Client lookup/auth on every token/revoke/introspect/device call                            | yes                            | blocks          | `undefined` → `invalid_client`; other throws converted to an error response                                                          |
-| token-store              | `TokenServiceInterface` (`tokenService`)                             | Token issuance, refresh, revoke, introspect                                                | yes                            | blocks          | Converted to a token-endpoint error response                                                                                         |
-| token-reuse              | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed, after the family is revoked                       | no                             | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
-| refresh-cap              | `refreshTokenFamilyExpiresAt` (`TokenServiceInterface`)              | Refresh-token issuance and rotation                                                        | no (absent → uncapped)         | blocks          | A past cap → `invalid_grant`; other throws → token-endpoint error response                                                           |
-| accepted-scope           | `acceptedScope` (`TokenServiceInterface`)                            | Scope narrowing during issuance                                                            | yes (on the interface)         | blocks          | `false` → `invalid_scope`; other throws converted                                                                                    |
-| authorization-code-store | `AuthorizationCodeServiceInterface` (`authorizationCodeService`)     | Authorize (mint code) and code→token exchange                                              | with the code grant            | blocks          | Missing/expired → `invalid_grant`; other throws converted                                                                            |
-| device-code-store        | `DeviceAuthorizationServiceInterface` (`deviceAuthorizationService`) | Device-authorization request and polling                                                   | with the device grant          | blocks          | RFC 8628 codes (`authorization_pending`, `slow_down`, `expired_token`, …); other throws converted                                    |
-| user-authenticator       | `UserServiceInterface` (`userService`)                               | `PasswordGrant.token` — the only MFA-enforcement point for the (deprecated) password grant | with the password grant        | blocks          | `undefined` → `invalid_grant`; a thrown OAuth2 error surfaces verbatim, other throws → `server_error`                                |
-| scope-constructor        | `ScopeConstructor` (`Scope`)                                         | Parsing/comparing scope strings                                                            | no (defaults to `BasicScope`)  | blocks          | Follows its host flow's conversion path                                                                                              |
+| Trigger point               | Symbol                                                               | Fires                                                                                      | Required                                               | Control         | On throw                                                                                                                             |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| introspection-authorization | `canIntrospectToken` (`AuthorizationServerOptions`)                  | After client authentication and live-token lookup, before claims enrichment                | no (omit → all admitted clients may inspect any token) | blocks          | false → inactive response; throw → error response                                                                                    |
+| services-resolver           | `resolve` (`AuthorizationServerOptions`)                             | Top of every endpoint, to resolve per-request services                                     | yes                                                    | blocks          | Converted to an error response on token/authorize/revoke/introspect/device, and on the metadata and JWKS discovery endpoints         |
+| authenticate                | `AuthenticateUserFn` (`handleAuthorizeRequest` arg)                  | `GET /authorize`, after client/PKCE validation                                             | yes                                                    | blocks          | `null` → `access_denied`; a `Response` short-circuits; an OAuth2 error redirects to the client, other throws → direct error response |
+| consent                     | `HandleConsentFn` (`handleAuthorizeRequest` arg)                     | `GET /authorize`, only when the requested scope needs consent                              | no (omit → auto-grant)                                 | blocks          | `{ approved: false }` denies; same redirect/error conversion as authenticate                                                         |
+| token-claims                | `userClaims` (`AuthorizationServerOptions`)                          | Assembling id_token and UserInfo claims (never the access token)                           | no                                                     | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
+| subject                     | `subjectOf` (`AuthorizationServerOptions`)                           | Assembling the `sub` for id_token and UserInfo                                             | no (defaults to `user.id`)                             | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
+| signing-key                 | `SigningKeyProvider` (`signingKeys`)                                 | `mintIdToken` (`getSigningKey`) and `GET /jwks` (`getPublicJwks`)                          | no (unset → OIDC surface off)                          | blocks          | `getSigningKey` throw → token-endpoint `server_error`; `getPublicJwks` throw → JWKS-endpoint error response                          |
+| redirect-guard              | `IsPublicSuffix` (`isPublicSuffix`)                                  | `GET /authorize`, validating a wildcard `redirect_uri`                                     | no (unset → wildcards refused)                         | blocks          | Caught before a redirect URI is chosen → direct error response (bundled impl never throws). Must be sync, no I/O                     |
+| challenge-method            | `ChallengeMethods` (`challengeMethods`)                              | PKCE verification during the code→token exchange                                           | no (defaults to `S256`)                                | blocks          | Converted to a token-endpoint error response                                                                                         |
+| client-store                | `ClientServiceInterface` (`clientService`)                           | Client lookup/auth on every token/revoke/introspect/device call                            | yes                                                    | blocks          | `undefined` → `invalid_client`; other throws converted to an error response                                                          |
+| token-store                 | `TokenServiceInterface` (`tokenService`)                             | Token issuance, refresh, revoke, introspect                                                | yes                                                    | blocks          | Converted to a token-endpoint error response                                                                                         |
+| token-reuse                 | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed, after the family is revoked                       | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
+| refresh-cap                 | `refreshTokenFamilyExpiresAt` (`TokenServiceInterface`)              | Refresh-token issuance and rotation                                                        | no (absent → uncapped)                                 | blocks          | A past cap → `invalid_grant`; other throws → token-endpoint error response                                                           |
+| accepted-scope              | `acceptedScope` (`TokenServiceInterface`)                            | Scope narrowing during issuance                                                            | yes (on the interface)                                 | blocks          | `false` → `invalid_scope`; other throws converted                                                                                    |
+| authorization-code-store    | `AuthorizationCodeServiceInterface` (`authorizationCodeService`)     | Authorize (mint code) and code→token exchange                                              | with the code grant                                    | blocks          | Missing/expired → `invalid_grant`; other throws converted                                                                            |
+| device-code-store           | `DeviceAuthorizationServiceInterface` (`deviceAuthorizationService`) | Device-authorization request and polling                                                   | with the device grant                                  | blocks          | RFC 8628 codes (`authorization_pending`, `slow_down`, `expired_token`, …); other throws converted                                    |
+| user-authenticator          | `UserServiceInterface` (`userService`)                               | `PasswordGrant.token` — the only MFA-enforcement point for the (deprecated) password grant | with the password grant                                | blocks          | `undefined` → `invalid_grant`; a thrown OAuth2 error surfaces verbatim, other throws → `server_error`                                |
+| scope-constructor           | `ScopeConstructor` (`Scope`)                                         | Parsing/comparing scope strings                                                            | no (defaults to `BasicScope`)                          | blocks          | Follows its host flow's conversion path                                                                                              |
 
 ## Resource server — `@udibo/oauth2/server/resource`
 
@@ -5508,23 +5511,26 @@ should not be enabled for new deployments.
   issue JWT access tokens (`createJwtAccessTokenGenerator`) and validate them
   with `JwksTokenReader`, which enforces `aud`, if you need in-token
   audience/issued-at claims.
-- **Introspection answers for any client's token, by design.** `/introspect`
-  requires client authentication but does **not** check that the presented token
-  was issued to the authenticated client — deliberately, because RFC 7662 is
-  written for _resource servers_, which are by construction not the issuing
-  client, so an ownership check would break the endpoint's primary use. (Token
-  **revocation** does check ownership, per RFC 7009 §2.1.) That makes "who may
-  introspect what" application policy, delegated entirely to whoever mounts the
-  endpoint: every client you register with introspection access can read the
-  metadata of every live token the server issued.
+- **Introspection authorization is application policy.** By default,
+  `/introspect` allows any admitted client to inspect any live token, preserving
+  the separate resource-server use of RFC 7662. Configure
+  `AuthorizationServerOptions.canIntrospectToken` to decide which resolved
+  tokens each authenticated client may inspect. The callback receives the
+  client, token and actual token kind, independent of `token_type_hint`.
+  Returning false yields only `{ active: false }`, without claims enrichment;
+  throwing fails the request closed. Revocation always checks ownership.
 
   The disclosure surface of one successful call is `active`, `client_id`,
   `scope`, `exp`, `iss`, and — when the token has a resource owner — `sub` and
   `username`. That is enough to enumerate which user a captured token belongs to
   and what it may do. If your deployment has clients that should not learn that
-  about each other, gate the endpoint yourself: mount it on a network the
-  untrusted clients cannot reach, or register introspection-capable credentials
-  separately from ordinary client credentials.
+  about each other, configure this policy or mount the endpoint behind a
+  separate authorization boundary. A public client ID does not authenticate its
+  holder, so matching a token's client ID alone does not protect public-client
+  metadata. For confidential clients inspecting only their own tokens, require
+  verified confidentiality as well as matching client IDs. A separately
+  registered resource server needs an explicit policy for the tokens it may
+  read; do not grant it every client's refresh-token metadata by accident.
 - **A live refresh token introspects as `active: true`.** `/introspect` resolves
   both token kinds, so a refresh token reports `active: true` with `exp` taken
   from its own expiry, and carries **no** `token_type` (an access token carries

@@ -25,7 +25,10 @@ import { ClientCredentialsGrant } from "./grants/client-credentials.ts";
 import { RefreshTokenGrant } from "./grants/refresh-token.ts";
 import { AuthorizationCodeGrant } from "./grants/authorization-code.ts";
 import { DeviceAuthorizationGrant } from "./grants/device-authorization.ts";
-import { AuthorizationServer } from "./authorization-server.ts";
+import {
+  AuthorizationServer,
+  type AuthorizationServerOptions,
+} from "./authorization-server.ts";
 import type { DispatchableGrant } from "./grants/grant.ts";
 import { isPublicSuffix } from "./public-suffix/mod.ts";
 import type { IsPublicSuffix } from "./redirect-uri.ts";
@@ -106,6 +109,11 @@ function createTestServices() {
 function createTestServer(
   options: {
     isPublicSuffix?: IsPublicSuffix;
+    canIntrospectToken?: AuthorizationServerOptions<
+      TestClient,
+      TestUser,
+      BasicScope
+    >["canIntrospectToken"];
     introspectionClaims?: (
       token: Token<TestClient, TestUser, BasicScope>,
     ) => Record<string, unknown>;
@@ -152,6 +160,7 @@ function createTestServer(
     },
     isPublicSuffix: options.isPublicSuffix,
     introspectionClaims: options.introspectionClaims,
+    canIntrospectToken: options.canIntrospectToken,
   });
 
   return {
@@ -1893,6 +1902,144 @@ describe("AuthorizationServer", () => {
   });
 
   describe("handleIntrospectionRequest", () => {
+    for (const kind of ["accessToken", "refreshToken"] as const) {
+      for (const hint of [undefined, "access_token", "refresh_token"]) {
+        it(`applies introspection policy to ${kind} with hint ${hint}`, async () => {
+          let claimCalls = 0;
+          const decisions: string[] = [];
+          const result = createTestServer({
+            canIntrospectToken: (client, token, tokenType) => {
+              decisions.push(`${client.id}:${tokenType}`);
+              return Promise.resolve(
+                client.id.toString() === token.client.id.toString(),
+              );
+            },
+            introspectionClaims: () => {
+              claimCalls++;
+              return { private_claim: "owner-only" };
+            },
+          });
+          await setupTestData(result);
+          await result.clientService.add({ id: "public-client", grants: [] });
+          const token = await result.tokenService.save({
+            accessToken: "owned-access",
+            refreshToken: "owned-refresh",
+            accessTokenExpiresAt: new Date(Date.now() + 300_000),
+            refreshTokenExpiresAt: new Date(Date.now() + 600_000),
+            client: testClient,
+            user: testUser,
+            scope: new BasicScope("read"),
+          });
+          const fields = {
+            token: token[kind],
+            ...(hint ? { token_type_hint: hint } : {}),
+          };
+          const denied = await result.server.handleIntrospectionRequest(
+            formRequest(
+              "http://localhost/introspect",
+              { ...fields, client_id: "public-client" },
+            ),
+          );
+          assertStrictEquals(denied.status, 200);
+          assertEquals(await denied.json(), { active: false });
+          assertStrictEquals(claimCalls, 0);
+          assertStrictEquals(denied.headers.get("Cache-Control"), "no-store");
+          const allowed = await result.server.handleIntrospectionRequest(
+            formRequest(
+              "http://localhost/introspect",
+              fields,
+              basicAuthHeader("client-1", "secret"),
+            ),
+          );
+          assertStrictEquals(allowed.status, 200);
+          const body = await allowed.json();
+          assertStrictEquals(body.active, true);
+          assertStrictEquals(body.private_claim, "owner-only");
+          assertStrictEquals(claimCalls, 1);
+          const tokenType = kind === "accessToken"
+            ? "access_token"
+            : "refresh_token";
+          assertEquals(decisions, [
+            `public-client:${tokenType}`,
+            `client-1:${tokenType}`,
+          ]);
+          const revoked = await result.server.handleRevocationRequest(
+            formRequest(
+              "http://localhost/revoke",
+              { ...fields, client_id: "public-client" },
+            ),
+          );
+          assertStrictEquals(revoked.status, 200);
+          assertStrictEquals(await revoked.text(), "");
+          assertStrictEquals(
+            (await result.tokenService.getToken(token.accessToken))
+              ?.accessToken,
+            token.accessToken,
+          );
+          assertStrictEquals(
+            (await result.tokenService.getRefreshToken(token.refreshToken))
+              ?.refreshToken,
+            token.refreshToken,
+          );
+        });
+      }
+    }
+
+    for (const explicitPolicy of [false, true]) {
+      it(`allows authorized cross-client resource-server introspection with explicit policy ${explicitPolicy}`, async () => {
+        const result = createTestServer({
+          canIntrospectToken: explicitPolicy
+            ? (client, _token, tokenType) =>
+              client.id === "resource-server" && tokenType === "access_token"
+            : undefined,
+        });
+        await setupTestData(result);
+        await result.clientService.add(
+          { id: "resource-server", grants: [] },
+          "resource-secret",
+        );
+        await result.tokenService.save({
+          accessToken: "api-token",
+          client: testClient,
+          user: testUser,
+        });
+        const response = await result.server.handleIntrospectionRequest(
+          formRequest(
+            "http://localhost/introspect",
+            { token: "api-token" },
+            basicAuthHeader("resource-server", "resource-secret"),
+          ),
+        );
+        assertStrictEquals(response.status, 200);
+        assertStrictEquals((await response.json()).active, true);
+      });
+    }
+
+    it("returns no token claims when the policy rejects with an error", async () => {
+      const result = createTestServer({
+        canIntrospectToken: () =>
+          Promise.reject(new Error("policy unavailable")),
+      });
+      await setupTestData(result);
+      await result.tokenService.save({
+        accessToken: "policy-token",
+        client: testClient,
+        user: testUser,
+      });
+      const response = await result.server.handleIntrospectionRequest(
+        formRequest(
+          "http://localhost/introspect",
+          { token: "policy-token" },
+          basicAuthHeader("client-1", "secret"),
+        ),
+      );
+      assertStrictEquals(response.status, 500);
+      const body = await response.json();
+      assertStrictEquals(body.error, "server_error");
+      assertStrictEquals(body.active, undefined);
+      assertStrictEquals(body.sub, undefined);
+    });
+
     let server: ReturnType<typeof createTestServer>["server"];
     let tokenService: MemoryTokenService<TestClient, TestUser>;
 

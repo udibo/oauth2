@@ -54,23 +54,26 @@ should not be enabled for new deployments.
   issue JWT access tokens (`createJwtAccessTokenGenerator`) and validate them
   with `JwksTokenReader`, which enforces `aud`, if you need in-token
   audience/issued-at claims.
-- **Introspection answers for any client's token, by design.** `/introspect`
-  requires client authentication but does **not** check that the presented token
-  was issued to the authenticated client — deliberately, because RFC 7662 is
-  written for _resource servers_, which are by construction not the issuing
-  client, so an ownership check would break the endpoint's primary use. (Token
-  **revocation** does check ownership, per RFC 7009 §2.1.) That makes "who may
-  introspect what" application policy, delegated entirely to whoever mounts the
-  endpoint: every client you register with introspection access can read the
-  metadata of every live token the server issued.
+- **Introspection authorization is application policy.** By default,
+  `/introspect` allows any admitted client to inspect any live token, preserving
+  the separate resource-server use of RFC 7662. Configure
+  `AuthorizationServerOptions.canIntrospectToken` to decide which resolved
+  tokens each authenticated client may inspect. The callback receives the
+  client, token and actual token kind, independent of `token_type_hint`.
+  Returning false yields only `{ active: false }`, without claims enrichment;
+  throwing fails the request closed. Revocation always checks ownership.
 
   The disclosure surface of one successful call is `active`, `client_id`,
   `scope`, `exp`, `iss`, and — when the token has a resource owner — `sub` and
   `username`. That is enough to enumerate which user a captured token belongs to
   and what it may do. If your deployment has clients that should not learn that
-  about each other, gate the endpoint yourself: mount it on a network the
-  untrusted clients cannot reach, or register introspection-capable credentials
-  separately from ordinary client credentials.
+  about each other, configure this policy or mount the endpoint behind a
+  separate authorization boundary. A public client ID does not authenticate its
+  holder, so matching a token's client ID alone does not protect public-client
+  metadata. For confidential clients inspecting only their own tokens, require
+  verified confidentiality as well as matching client IDs. A separately
+  registered resource server needs an explicit policy for the tokens it may
+  read; do not grant it every client's refresh-token metadata by accident.
 - **A live refresh token introspects as `active: true`.** `/introspect` resolves
   both token kinds, so a refresh token reports `active: true` with `exp` taken
   from its own expiry, and carries **no** `token_type` (an access token carries

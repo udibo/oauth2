@@ -449,12 +449,14 @@ return live refresh tokens. A service whose `getRefreshToken` returns
 revocation and report `active: false` for every live refresh token, with a `200`
 either way and nothing in the logs.
 
-**`POST /introspect` answers for any client's token, by design.** RFC 7662 is
-written for resource servers, which are by construction not the issuing client,
-so there is no ownership check — every credential you grant introspection access
-can read the metadata (`active`, `client_id`, `scope`, `exp`, `iss`, and `sub` /
-`username` when there is a resource owner) of every live token the server
-issued. Who may introspect what is your policy: see
+**Configure `canIntrospectToken` to authorize introspection.** The callback on
+`AuthorizationServerOptions` receives the authenticated client, the resolved
+token and its actual kind (`access_token` or `refresh_token`). Return false to
+answer only `{ active: false }`; claims enrichment runs only after
+authorization. An error fails the request closed. Without this policy, the
+endpoint preserves its separate resource-server behavior: every admitted client
+can inspect any live token. Choose the policy when mounting the endpoint, and
+remember that a public client ID does not authenticate its holder. See
 [Known Limitations](../known-limitations.md#spec-level-gaps).
 
 Introspection answers for **refresh** tokens too: a live one reports
