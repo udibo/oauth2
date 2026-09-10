@@ -1716,6 +1716,42 @@ describe("IdentityService password rehash on sign-in", () => {
       }),
     );
   });
+
+  it("rejects the sign-in when the compare-and-set misses and the credential is then absent", async () => {
+    const { store, creds } = makeLegacyStore();
+    const { user } = await seedLegacyUser(store);
+    const replaceCredential = store.replaceCredential!;
+    store.replaceCredential = (userId, expected, credential) => {
+      creds.delete(userId);
+      return replaceCredential(userId, expected, credential);
+    };
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    assertEquals(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "hunter2hunter2",
+      }),
+      null,
+      "an absent credential authenticates nobody",
+    );
+
+    assertEquals(
+      eventsOfType(events, "sign_in.failed").map((e) => e.reason),
+      ["wrong_password"],
+    );
+    assertEquals(eventsOfType(events, "sign_in.succeeded"), []);
+    assertEquals(failures, [user.id]);
+    assertEquals(creds.has(user.id), false, "the miss must not write");
+  });
 });
 
 describe("IdentityService upgrade-on-login", () => {

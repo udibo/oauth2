@@ -80,7 +80,16 @@ export interface IdentityUserStore<User extends IdentityUser> {
   findByIdentifier(identifier: string): Promise<User | undefined>;
   /** Find a user by email (password-reset / re-verification requests). */
   findByEmail(email: string): Promise<User | undefined>;
-  /** The user's stored password credential, or `undefined`. */
+  /**
+   * The user's stored password credential, or `undefined`.
+   *
+   * Must reflect every write committed before a
+   * {@link IdentityUserStore.replaceCredential} call returned `false` — read
+   * the primary, never a cache, a lagging replica, or a snapshot shared with
+   * the compare-and-set. The service re-reads through this to decide a sign-in
+   * that lost the compare-and-set, so a stale read lets a password retired by
+   * the winning write still sign in.
+   */
   getCredential(userId: string): Promise<PasswordCredential | undefined>;
   /** Replace the user's password credential (reset / change). */
   setCredential(userId: string, credential: PasswordCredential): Promise<void>;
