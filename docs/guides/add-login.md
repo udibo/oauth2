@@ -224,8 +224,10 @@ after it verifies on the owner's next successful sign-in. A credential with no
 `params` at all is treated as `LEGACY_PBKDF2_ITERATIONS` (100,000) and upgraded
 the same way. A persist failure during that rehash is logged and swallowed — a
 storage hiccup must never deny a sign-in the credential just proved. An atomic
-replacement that returns `false` rejects that sign-in because a newer credential
-has superseded the password just checked.
+replacement that returns `false` means a newer credential superseded the one
+just checked, so the service re-reads it and re-verifies the password: a sign-in
+that lost the race to another correct sign-in still succeeds, while one that
+lost to a reset or a change to a different password is rejected.
 
 Measure hashing and verification on your deployment hardware and choose a work
 factor consistent with your security and latency requirements.
