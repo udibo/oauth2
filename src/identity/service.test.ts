@@ -1512,6 +1512,29 @@ function fakeHashVerifier(id: string, prefix: string) {
   return { verifier, calls: () => calls };
 }
 
+function trackReplaceCredential(store: IdentityUserStore<TestUser>) {
+  const replaceCredential = store.replaceCredential!;
+  const tracked = { calls: 0, wins: 0 };
+  store.replaceCredential = async (userId, expected, credential) => {
+    tracked.calls++;
+    const replaced = await replaceCredential(userId, expected, credential);
+    if (replaced) tracked.wins++;
+    return replaced;
+  };
+  return tracked;
+}
+
+function countingLockout(failures: string[]): AccountLockoutLike {
+  return {
+    status: () => Promise.resolve({ locked: false, failures: 0 }),
+    recordFailure: (userId) => {
+      failures.push(userId);
+      return Promise.resolve({ failures: 1, locked: false, justLocked: false });
+    },
+    reset: () => Promise.resolve(),
+  };
+}
+
 describe("IdentityService password rehash on sign-in", () => {
   async function seedLegacyUser(store: IdentityUserStore<TestUser>) {
     const salt = generateSalt();
@@ -1616,6 +1639,83 @@ describe("IdentityService password rehash on sign-in", () => {
     assertEquals(signedIn?.id, user.id);
     assertEquals(errorLog.calls.length, 1);
   });
+  it("signs in both of two overlapping correct sign-ins when only one rehash can win the compare-and-set", async () => {
+    const { store, creds } = makeLegacyStore();
+    const { user } = await seedLegacyUser(store);
+    const replace = trackReplaceCredential(store);
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" }),
+      service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" }),
+    ]);
+
+    assertEquals(replace.calls, 2);
+    assertEquals(replace.wins, 1, "exactly one rehash may win the race");
+    assertEquals(
+      [first?.id, second?.id],
+      [user.id, user.id],
+      "the compare-and-set loser verified the same correct password",
+    );
+    assertEquals(
+      events.map((e) => e.type),
+      ["sign_in.succeeded", "sign_in.succeeded"],
+    );
+    assertEquals(failures, [], "a lost rehash race is not a failed attempt");
+    assertEquals(
+      creds.get(user.id)!.params?.iterations,
+      DEFAULT_PBKDF2_ITERATIONS,
+    );
+  });
+
+  it("still rejects the sign-in when the compare-and-set misses because the password changed after it verified", async () => {
+    const { store, creds } = makeLegacyStore();
+    const { user } = await seedLegacyUser(store);
+    const changed = await new PasswordIdentityService().hash("changed-pw-1234");
+    const replaceCredential = store.replaceCredential!;
+    store.replaceCredential = (userId, expected, credential) => {
+      creds.set(userId, changed);
+      return replaceCredential(userId, expected, credential);
+    };
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    assertEquals(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "hunter2hunter2",
+      }),
+      null,
+    );
+
+    assertEquals(
+      eventsOfType(events, "sign_in.failed").map((e) => e.reason),
+      ["wrong_password"],
+    );
+    assertEquals(failures, [user.id]);
+    assert(creds.get(user.id) === changed, "the miss must not write");
+    assertExists(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "changed-pw-1234",
+      }),
+    );
+  });
 });
 
 describe("IdentityService upgrade-on-login", () => {
@@ -1711,6 +1811,82 @@ describe("IdentityService upgrade-on-login", () => {
     });
     assertEquals(user?.id, userId);
     assertEquals(events.map((e) => e.type), ["sign_in.succeeded"]);
+  });
+
+  it("signs in both of two overlapping correct sign-ins on an imported hash and upgrades it once", async () => {
+    const { store, creds, legacy, importUser } = makeLegacyStore();
+    const userId = importUser("dev@b.co", "fakebcrypt$s3cret-pw");
+    const bcrypt = fakeHashVerifier("bcrypt", "fakebcrypt");
+    const replace = trackReplaceCredential(store);
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      legacyVerifiers: [bcrypt.verifier],
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
+      service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
+    ]);
+
+    assertEquals(replace.calls, 2);
+    assertEquals(replace.wins, 1, "exactly one upgrade may win the race");
+    assertEquals(
+      [first?.id, second?.id],
+      [userId, userId],
+      "the compare-and-set loser verified the same correct password",
+    );
+    assertEquals(eventsOfType(events, "password.upgraded").length, 1);
+    assertEquals(eventsOfType(events, "sign_in.succeeded").length, 2);
+    assertEquals(eventsOfType(events, "sign_in.failed"), []);
+    assertEquals(failures, [], "a lost upgrade race is not a failed attempt");
+    assertExists(creds.get(userId));
+    assertEquals(legacy.has(userId), false);
+  });
+
+  it("still rejects the imported-hash sign-in when the compare-and-set misses because a different password was set", async () => {
+    const { store, creds, legacy, importUser } = makeLegacyStore();
+    const userId = importUser("dev@b.co", "fakebcrypt$s3cret-pw");
+    const bcrypt = fakeHashVerifier("bcrypt", "fakebcrypt");
+    const changed = await new PasswordIdentityService().hash("changed-pw-1234");
+    const replaceCredential = store.replaceCredential!;
+    store.replaceCredential = (id, expected, credential) => {
+      creds.set(id, changed);
+      return replaceCredential(id, expected, credential);
+    };
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      legacyVerifiers: [bcrypt.verifier],
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    assertEquals(
+      await service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
+      null,
+    );
+
+    assertEquals(
+      events.map((e) => e.type),
+      ["sign_in.failed"],
+      "a miss that fails re-verification upgrades nothing",
+    );
+    assertEquals(
+      eventsOfType(events, "sign_in.failed").map((e) => e.reason),
+      ["wrong_password"],
+    );
+    assertEquals(failures, [userId]);
+    assert(creds.get(userId) === changed, "the miss must not write");
+    assertEquals(legacy.get(userId), "fakebcrypt$s3cret-pw");
   });
 
   it("resetPassword still revokes sessions and completes when clearLegacyCredential throws", async () => {

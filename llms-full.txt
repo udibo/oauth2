@@ -1444,8 +1444,10 @@ after it verifies on the owner's next successful sign-in. A credential with no
 `params` at all is treated as `LEGACY_PBKDF2_ITERATIONS` (100,000) and upgraded
 the same way. A persist failure during that rehash is logged and swallowed — a
 storage hiccup must never deny a sign-in the credential just proved. An atomic
-replacement that returns `false` rejects that sign-in because a newer credential
-has superseded the password just checked.
+replacement that returns `false` means a newer credential superseded the one
+just checked, so the service re-reads it and re-verifies the password: a sign-in
+that lost the race to another correct sign-in still succeeds, while one that
+lost to a reset or a change to a different password is rejected.
 
 Measure hashing and verification on your deployment hardware and choose a work
 factor consistent with your security and latency requirements.
@@ -4631,9 +4633,10 @@ an `OtpStore`, while reset links and magic links use `TokenFlowStore`.
 
 Automatic password rehash or import upgrades require
 `IdentityUserStore.replaceCredential`. It must atomically compare all old
-credential fields before writing the replacement. A failed comparison rejects
-that sign-in; omitting the capability skips automatic upgrades. Explicit
-password resets still use `setCredential`.
+credential fields before writing the replacement. A failed comparison writes
+nothing and the password is re-verified against the credential now stored;
+omitting the capability skips automatic upgrades. Explicit password resets still
+use `setCredential`.
 
 For rotating refresh tokens, `revokeRotated` (or the fallback `revoke`) must
 return `true` only to the caller that consumed the old credential. Keep replay
@@ -4817,7 +4820,8 @@ sections apply only when you host those flows.
 
 - [ ] The full password credential, including `params`, is persisted.
 - [ ] Automatic rehash/import uses atomic `replaceCredential`; a failed
-      comparison does not sign in.
+      comparison writes nothing, and the sign-in proceeds only if the password
+      re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
 - [ ] Email requests and OTP/MFA attempts are throttled; concurrent resend
       policy is explicit.
@@ -5627,8 +5631,10 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 ## Identity flows (`@udibo/oauth2/identity`)
 
 - Automatic password upgrades require atomic
-  `IdentityUserStore.replaceCredential`. Stores without it skip upgrades; a
-  failed comparison rejects the login that raced with a reset.
+  `IdentityUserStore.replaceCredential`. Stores without it skip upgrades. A
+  failed comparison re-verifies the password against the credential now stored:
+  a login that raced with a reset is rejected, one that raced with another
+  correct login is not.
 - OTP `consume` must atomically return whether this caller consumed the record.
   Concurrent issuance is separate: invalidate/create are not one transaction, so
   serialize requests when only one code may remain outstanding.

@@ -163,8 +163,10 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 ## Identity flows (`@udibo/oauth2/identity`)
 
 - Automatic password upgrades require atomic
-  `IdentityUserStore.replaceCredential`. Stores without it skip upgrades; a
-  failed comparison rejects the login that raced with a reset.
+  `IdentityUserStore.replaceCredential`. Stores without it skip upgrades. A
+  failed comparison re-verifies the password against the credential now stored:
+  a login that raced with a reset is rejected, one that raced with another
+  correct login is not.
 - OTP `consume` must atomically return whether this caller consumed the record.
   Concurrent issuance is separate: invalidate/create are not one transaction, so
   serialize requests when only one code may remain outstanding.

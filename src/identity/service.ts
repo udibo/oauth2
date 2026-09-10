@@ -87,10 +87,14 @@ export interface IdentityUserStore<User extends IdentityUser> {
   /**
    * Atomically replace the credential only if it still equals `expected`.
    * `undefined` expects no native credential, for an imported-password upgrade.
-   * Return `false` if a reset/change won the race. Compare all stored credential
-   * fields in the same database operation as the write, never read then write.
-   * Without this capability, sign-in succeeds but automatic rehash and imported
-   * credential upgrades are skipped; explicit password resets still work.
+   * Return `false` without writing if anything changed. Compare all stored
+   * credential fields in the same database operation as the write, never read
+   * then write. On `false` the service re-reads the credential and re-verifies
+   * the password against it, so a concurrent sign-in that rehashed first still
+   * lets this one in while a reset or change to a different password rejects
+   * it. Without this capability, sign-in succeeds but automatic rehash and
+   * imported credential upgrades are skipped; explicit password resets still
+   * work.
    */
   replaceCredential?(
     userId: string,
@@ -1132,19 +1136,18 @@ export class IdentityService<User extends IdentityUser> {
       !this.#users.replaceCredential ||
       !this.#passwords.needsRehash?.(credential)
     ) return true;
+    let replaced: boolean;
     try {
-      return await this.#users.replaceCredential(
+      replaced = await this.#users.replaceCredential(
         userId,
         credential,
         await this.#passwords.hash(password),
       );
     } catch (error) {
-      console.error(
-        "[@udibo/oauth2] password rehash persist failed:",
-        error instanceof Error ? error.message : error,
-      );
+      this.#logPersistFailure("password rehash", error);
       return true;
     }
+    return replaced || await this.#verifyCurrentCredential(userId, password);
   }
 
   async #upgradeCredential(
@@ -1153,25 +1156,41 @@ export class IdentityService<User extends IdentityUser> {
     verifierId: string,
   ): Promise<boolean> {
     if (!this.#users.replaceCredential) return true;
-    let upgraded = false;
+    let upgraded: boolean;
     try {
       upgraded = await this.#users.replaceCredential(
         userId,
         undefined,
         await this.#passwords.hash(password),
       );
-      if (!upgraded) return false;
+    } catch (error) {
+      this.#logPersistFailure("upgrade-on-login", error);
+      return true;
+    }
+    if (!upgraded) return await this.#verifyCurrentCredential(userId, password);
+    try {
       await this.#users.clearLegacyCredential?.(userId);
     } catch (error) {
-      console.error(
-        "[@udibo/oauth2] upgrade-on-login persist failed:",
-        error instanceof Error ? error.message : error,
-      );
+      this.#logPersistFailure("upgrade-on-login", error);
     }
-    if (upgraded) {
-      await this.#emit({ type: "password.upgraded", userId, verifierId });
-    }
+    await this.#emit({ type: "password.upgraded", userId, verifierId });
     return true;
+  }
+
+  async #verifyCurrentCredential(
+    userId: string,
+    password: string,
+  ): Promise<boolean> {
+    const current = await this.#users.getCredential(userId);
+    return current !== undefined &&
+      await this.#passwords.verify(password, current);
+  }
+
+  #logPersistFailure(operation: string, error: unknown): void {
+    console.error(
+      `[@udibo/oauth2] ${operation} persist failed:`,
+      error instanceof Error ? error.message : error,
+    );
   }
 
   async #recordSignInFailure(
