@@ -483,7 +483,10 @@ export interface HonoBffOptions {
    * Server-chosen: a browser cannot change it by putting `scope` on the login
    * URL. An application that wants the browser to choose lists `scope` in
    * {@link forwardedParams}, and a forwarded value then **replaces** this one
-   * rather than narrowing it.
+   * rather than narrowing it. An empty forwarded value counts as none
+   * supplied, so this value stands: a login link ending `?scope=` would
+   * otherwise send no `scope` at all, leaving an authorization server that
+   * defaults an absent scope to pick the grant instead.
    */
   scope?: string;
   /**
@@ -565,11 +568,12 @@ export interface HonoBffOptions {
    * the most thought before listing. Listing `scope` lets whoever writes the
    * login link choose the breadth of the grant the session is minted with:
    * the value replaces {@link scope} rather than narrowing it, bounded only
-   * by what the authorization server will grant this client. Listing `prompt`
-   * hands over the authentication ceremony instead of the grant — it is what
-   * a SPA needs to start a silent renew with `/auth/login?prompt=none`, and
-   * the same entry lets a link suppress a re-authentication the application
-   * meant to force. Where the deployment should decide either one, use
+   * by what the authorization server will grant this client. An empty `scope`
+   * is the one exception, and counts as absent so {@link scope} stands.
+   * Listing `prompt` hands over the authentication ceremony instead of the
+   * grant — it is what a SPA needs to start a silent renew with
+   * `/auth/login?prompt=none`, and the same entry lets a link suppress a
+   * re-authentication the application meant to force. Where the deployment should decide either one, use
    * {@link scope} or a pinned {@link extraParams} entry, which no browser can
    * reach.
    *
@@ -870,7 +874,7 @@ function authorizeParamsForRequest(
   const extraParams: Record<string, string> = {};
   for (const [name, value] of entries) {
     const folded = name.toLowerCase();
-    if (folded === "scope") resolvedParams.scope = value;
+    if (folded === "scope") resolvedParams.scope = value || undefined;
     else if (folded === "prompt") resolvedParams.prompt = value;
     else extraParams[name] = value;
   }

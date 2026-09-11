@@ -1814,6 +1814,41 @@ describe("HonoBff", () => {
       assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
     });
 
+    it("keeps the configured scope when a forwarding request sends an empty scope", async () => {
+      const app = makeApp(
+        makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=");
+      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+      assertEquals(paramNames(url), [...BASE_AUTHORIZE_PARAMS, "scope"].sort());
+    });
+
+    it("records the configured scope when a forwarding request sends an empty scope", async () => {
+      const records = new Map<string, AuthRequestRecord>();
+      const storage: AuthRequestStorage = {
+        set: (state, value) => {
+          records.set(state, value);
+        },
+        get: (state) => records.get(state) ?? null,
+        delete: (state) => {
+          records.delete(state);
+        },
+        clear: () => {
+          records.clear();
+        },
+      };
+      const app = makeApp(
+        makeBff({
+          scope: "openid profile",
+          forwardedParams: ["scope"],
+          authRequestStorage: { forRequest: () => storage },
+        }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=");
+      const state = url.searchParams.get("state")!;
+      assertEquals(records.get(state)?.scope, "openid profile");
+    });
+
     it("records a forwarded scope as the scope the authorization requested", async () => {
       const records = new Map<string, AuthRequestRecord>();
       const storage: AuthRequestStorage = {
