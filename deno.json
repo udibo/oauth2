@@ -193,5 +193,8 @@
     "@std/semver": "jsr:@std/semver@^1.0.8",
     "@std/testing": "jsr:@std/testing@^1.0.20"
   },
-  "minimumDependencyAge": "P3D"
+  "minimumDependencyAge": {
+    "age": "P3D",
+    "exclude": ["jsr:@udibo/*"]
+  }
 }
