@@ -1036,7 +1036,9 @@ a fixed string.
 `token_endpoint_auth_methods_supported` always carries `none` — the RFC 7591
 method for a client with no secret — because the token endpoint accepts it
 unconditionally: a request that presents only `client_id` reaches your
-`clientService.getAuthenticated` with no secret, and resolving a public client
+`clientService.getAuthenticated` with no secret (an authorization-code exchange
+carrying a `code_verifier` looks the client up with `clientService.get` instead,
+unless `requireClientAuthentication` is set), and resolving a public client
 there is part of that interface's contract. There is no option that switches it
 off, and `requireClientAuthentication` on the authorization-code grant does not
 (it constrains confidential clients that send a `code_verifier` in place of
