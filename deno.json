@@ -196,5 +196,12 @@
   "minimumDependencyAge": {
     "age": "P3D",
     "exclude": ["jsr:@udibo/*"]
+  },
+  "allowScripts": {
+    "allow": [],
+    "deny": [
+      "npm:esbuild@0.25.12",
+      "npm:esbuild@0.28.2"
+    ]
   }
 }
