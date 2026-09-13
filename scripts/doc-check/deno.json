@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "exports": {},
   "imports": {
-    "hono": "npm:hono@^4.12.23",
+    "hono": "npm:hono@^4.13.7",
     "react": "npm:react@^19.2.7",
     "@types/react": "npm:@types/react@^19.2.16"
   },

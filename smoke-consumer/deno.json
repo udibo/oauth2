@@ -3,7 +3,7 @@
   "imports": {
     "@udibo/oauth2": "jsr:@udibo/oauth2@^0.1.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
-    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@std/testing": "jsr:@std/testing@^1.0.20",
     "@std/yaml": "jsr:@std/yaml@^1.0.9",
     "react": "npm:react@^19.0.0",
     "@types/react": "npm:@types/react@^19.2.17"
