@@ -181,9 +181,9 @@ export class AuthorizationCodeGrant<
    * Extracts client credentials from a request, carrying the PKCE
    * `code_verifier` alongside them when the client sent one.
    *
-   * Unless {@linkcode requireClientAuthentication} is set, a `code_verifier`
-   * drops the `client_secret` from the returned credentials, so the client is
-   * looked up rather than authenticated.
+   * When {@linkcode requireClientAuthentication} is explicitly `false`, a
+   * `code_verifier` drops the `client_secret` from the returned credentials,
+   * so the client is looked up rather than authenticated.
    */
   protected override getClientCredentials(
     request: Request,
@@ -216,10 +216,10 @@ export class AuthorizationCodeGrant<
   /**
    * Authenticates a client from a request.
    *
-   * By default a `code_verifier` stands in for `client_secret` authentication,
-   * so the client is only looked up by id. Set
-   * {@linkcode requireClientAuthentication} to `true` to require credentials
-   * from a confidential client even when it sends a `code_verifier`.
+   * Confidential clients authenticate with their registered secret by default,
+   * including when they send a `code_verifier`. Setting
+   * {@linkcode requireClientAuthentication} to `false` makes a request carrying
+   * a `code_verifier` look up the client by id without authenticating it.
    *
    * @throws {InvalidClientError} When the client is unknown or its credentials do not authenticate it.
    */

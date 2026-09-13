@@ -1746,8 +1746,8 @@ export class AuthorizationServer<
    * `client_id` reaches `ClientServiceInterface.getAuthenticated` with no
    * secret, which that interface's contract requires to resolve a public
    * client (an authorization-code exchange carrying a `code_verifier` looks
-   * the client up with `get` instead, unless `requireClientAuthentication` is
-   * set) — and there is no option that turns it off, so it is not
+   * the client up with `get` instead when `requireClientAuthentication` is
+   * explicitly `false`) — and there is no option that turns it off, so it is not
    * conditional on anything a caller configures. Which clients may use it is
    * decided per client, by whether the client has a secret; discovery
    * describes the endpoint, not the client population.
