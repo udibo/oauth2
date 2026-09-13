@@ -482,15 +482,18 @@ a fixed string.
 `token_endpoint_auth_methods_supported` always carries `none` — the RFC 7591
 method for a client with no secret — because the token endpoint accepts it
 unconditionally: a request that presents only `client_id` reaches your
-`clientService.getAuthenticated` with no secret, and resolving a public client
-there is part of that interface's contract. There is no option that switches it
-off, and `requireClientAuthentication` on the authorization-code grant does not
-(it constrains confidential clients that send a `code_verifier` in place of
-their secret). Whether a given client may authenticate with `none` is still
-decided per client, by whether it has a secret; discovery describes the
-endpoint, not which clients you registered. Clients that discover — including
-this package's `DirectClient` via `discover()` — configure themselves from it,
-so keep the advertised endpoints matching where you actually mounted the routes.
+`clientService.getAuthenticated` with no secret (an authorization-code exchange
+carrying a `code_verifier` looks the client up with `clientService.get` instead,
+when `requireClientAuthentication` is explicitly `false`), and resolving a
+public client there is part of that interface's contract. There is no option
+that switches it off, and `requireClientAuthentication` on the
+authorization-code grant does not (it constrains confidential clients that send
+a `code_verifier` in place of their secret). Whether a given client may
+authenticate with `none` is still decided per client, by whether it has a
+secret; discovery describes the endpoint, not which clients you registered.
+Clients that discover — including this package's `DirectClient` via `discover()`
+— configure themselves from it, so keep the advertised endpoints matching where
+you actually mounted the routes.
 
 ## Turning on OIDC issuance
 
