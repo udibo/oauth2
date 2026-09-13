@@ -1624,6 +1624,36 @@ describe("IdentityService password rehash on sign-in", () => {
     assertEquals(setCredential.calls.length, 0);
   });
 
+  it("rejects an unavailable credential read after losing a rehash comparison", async () => {
+    const { store } = makeLegacyStore();
+    await seedLegacyUser(store);
+    store.replaceCredential = () => {
+      store.getCredential = () =>
+        Promise.reject(new Error("credential read unavailable"));
+      return Promise.resolve(false);
+    };
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    await assertRejects(
+      () =>
+        service.signIn({
+          identifier: "a@b.co",
+          password: "hunter2hunter2",
+        }),
+      Error,
+      "credential read unavailable",
+    );
+    assertEquals(events, []);
+    assertEquals(failures, []);
+  });
+
   it("signs the user in even when persisting the rehash fails", async () => {
     const { store } = makeLegacyStore();
     const { user } = await seedLegacyUser(store);
@@ -1825,6 +1855,38 @@ describe("IdentityService upgrade-on-login", () => {
         password: "brand-new-pw-1",
       }),
     );
+  });
+
+  it("rejects an unavailable credential read after losing an imported upgrade comparison", async () => {
+    const { store, importUser } = makeLegacyStore();
+    importUser("dev@b.co", "fakebcrypt$s3cret-pw");
+    store.replaceCredential = () => {
+      store.getCredential = () =>
+        Promise.reject(new Error("credential read unavailable"));
+      return Promise.resolve(false);
+    };
+    const bcrypt = fakeHashVerifier("bcrypt", "fakebcrypt");
+    const events: IdentityEvent[] = [];
+    const failures: string[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      legacyVerifiers: [bcrypt.verifier],
+      lockout: countingLockout(failures),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    await assertRejects(
+      () =>
+        service.signIn({
+          identifier: "dev@b.co",
+          password: "s3cret-pw",
+        }),
+      Error,
+      "credential read unavailable",
+    );
+    assertEquals(events, []);
+    assertEquals(failures, []);
   });
 
   it("signs in but does not emit password.upgraded when the upgrade persist fails", async () => {
