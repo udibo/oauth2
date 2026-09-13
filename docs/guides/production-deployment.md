@@ -102,9 +102,10 @@ an `OtpStore`, while reset links and magic links use `TokenFlowStore`.
 
 Automatic password rehash or import upgrades require
 `IdentityUserStore.replaceCredential`. It must atomically compare all old
-credential fields before writing the replacement. A failed comparison rejects
-that sign-in; omitting the capability skips automatic upgrades. Explicit
-password resets still use `setCredential`.
+credential fields before writing the replacement. A failed comparison writes
+nothing and the password is re-verified against the credential now stored;
+omitting the capability skips automatic upgrades. Explicit password resets still
+use `setCredential`.
 
 For rotating refresh tokens, `revokeRotated` (or the fallback `revoke`) must
 return `true` only to the caller that consumed the old credential. Keep replay

@@ -54,7 +54,8 @@ sections apply only when you host those flows.
 
 - [ ] The full password credential, including `params`, is persisted.
 - [ ] Automatic rehash/import uses atomic `replaceCredential`; a failed
-      comparison does not sign in.
+      comparison writes nothing, and the sign-in proceeds only if the password
+      re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
 - [ ] Email requests and OTP/MFA attempts are throttled; concurrent resend
       policy is explicit.
