@@ -476,7 +476,18 @@ export interface HonoBffOptions {
   backchannelLogout?: HonoBffBackchannelOptions;
   /** Endpoint paths (within whatever base the caller mounts this under). */
   paths?: HonoBffPaths;
-  /** Default scope string requested at `/auth/login`. */
+  /**
+   * Scope string requested at `/auth/login`, and the scope the login flow
+   * records for the authorization request it started.
+   *
+   * Server-chosen: a browser cannot change it by putting `scope` on the login
+   * URL. An application that wants the browser to choose lists `scope` in
+   * {@link forwardedParams}, and a forwarded value then **replaces** this one
+   * rather than narrowing it. An empty forwarded value counts as none
+   * supplied, so this value stands: a login link ending `?scope=` would
+   * otherwise send no `scope` at all, leaving an authorization server that
+   * defaults an absent scope to pick the grant instead.
+   */
   scope?: string;
   /**
    * Extra parameters added to every authorize request `/auth/login` builds —
@@ -488,6 +499,11 @@ export interface HonoBffOptions {
    * carry the same trust as {@link scope} and nothing a browser sends can
    * change them. When the browser is the one that should choose a parameter's
    * value, name it in {@link forwardedParams} instead.
+   *
+   * `prompt` is an ordinary name here — pin `{ prompt: "login" }` to make
+   * every sign-in re-authenticate. `scope` is refused, because {@link scope}
+   * already carries it and is the value the login flow records as the scope
+   * it requested; setting both would leave which one applies ambiguous.
    *
    * A name the login flow reserves is refused at construction rather than
    * quietly dropped — {@link forwardedParams} carries the list and the reason.
@@ -503,11 +519,9 @@ export interface HonoBffOptions {
   /**
    * Names of extra authorize parameters `/auth/login` may take off its own
    * query string. Empty by default, so a parameter that is not listed here is
-   * not forwarded no matter who puts it on the login URL — apart from `scope`
-   * and `prompt`, which `loginHandler` reads off the query string itself and
-   * which this option cannot name (both are reserved below). `routes()` serves
-   * login at `GET` and `POST` alike, and both read the query string only,
-   * never a request body.
+   * not forwarded no matter who puts it on the login URL — `scope` and
+   * `prompt` included. `routes()` serves login at `GET` and `POST` alike, and
+   * both read the query string only, never a request body.
    *
    * Browser-chosen, and so untrusted: whatever a browser puts in
    * `/auth/login?<name>=…` reaches the authorization server verbatim, and the
@@ -538,8 +552,6 @@ export interface HonoBffOptions {
    *   replaces it, which variously redirects the authorization code, breaks
    *   the PKCE binding the token exchange depends on, or unpicks the `state`
    *   the login-state cookie commits to.
-   * - `scope`, `prompt` — the BFF already resolves both, from {@link scope}
-   *   and `/auth/login?scope=…` / `/auth/login?prompt=…`. Use those.
    * - `response_mode` — moves the authorization response out of the callback
    *   URL's query string, the only place `/auth/callback` reads it from.
    * - `nonce` — this client neither sends nor verifies one, so a supplied
@@ -551,6 +563,19 @@ export interface HonoBffOptions {
    * Naming the same parameter both here and in {@link extraParams} is refused
    * as well: one pins the value every sign-in carries and the other lets the
    * browser choose it, so which one applies would be ambiguous.
+   *
+   * `scope` and `prompt` are ordinary names on this option, and the two worth
+   * the most thought before listing. Listing `scope` lets whoever writes the
+   * login link choose the breadth of the grant the session is minted with:
+   * the value replaces {@link scope} rather than narrowing it, bounded only
+   * by what the authorization server will grant this client. An empty `scope`
+   * is the one exception, and counts as absent so {@link scope} stands.
+   * Listing `prompt` hands over the authentication ceremony instead of the
+   * grant — it is what a SPA needs to start a silent renew with
+   * `/auth/login?prompt=none`, and the same entry lets a link suppress a
+   * re-authentication the application meant to force. Where the deployment should decide either one, use
+   * {@link scope} or a pinned {@link extraParams} entry, which no browser can
+   * reach.
    *
    * @example Let a sign-in link choose the organization
    * ```ts
@@ -746,8 +771,6 @@ const RESERVED_AUTHORIZE_PARAMS = [
   "state",
   "code_challenge",
   "code_challenge_method",
-  "scope",
-  "prompt",
   "response_mode",
   "nonce",
   "request",
@@ -784,9 +807,7 @@ function assertUsableAuthorizeParamName(name: string, option: string): void {
       "the token exchange depends on, unpick the state the login-state " +
       "cookie commits to, move the authorization response off the callback " +
       "URL, pass off replay protection nothing verifies, or supersede the " +
-      "parameters beside it. Set the scope through HonoBffOptions.scope or " +
-      "/auth/login?scope=…, and the prompt through /auth/login?prompt=…; the " +
-      "rest have no supported override.",
+      "parameters beside it. None of them has a supported override.",
   );
 }
 
@@ -798,6 +819,17 @@ function resolveExtraAuthorizeParams(
   const pinnedByFoldedName = new Map<string, string>();
   for (const name of Object.keys(fixed)) {
     assertUsableAuthorizeParamName(name, "extraParams");
+    if (name.toLowerCase() === "scope" && options.scope !== undefined) {
+      throw new Error(
+        `extraParams may not set ${JSON.stringify(name)} while ` +
+          "HonoBffOptions.scope is set: both fix the scope every authorize " +
+          "request carries, so which one a sign-in should send would be " +
+          "ambiguous. The two are compared case-insensitively, since an " +
+          "authorization server that folds parameter-name case would read " +
+          "them as one parameter. Keep HonoBffOptions.scope, which is also " +
+          "the value the login flow records as the scope it requested.",
+      );
+    }
     pinnedByFoldedName.set(name.toLowerCase(), name);
   }
   for (const name of forwarded) {
@@ -819,16 +851,37 @@ function resolveExtraAuthorizeParams(
   return { fixed, forwarded };
 }
 
+/**
+ * What one login request sends beyond the protocol parameters, with the two
+ * the login call takes as their own options split out from the rest.
+ */
+interface RequestAuthorizeParams {
+  scope?: string;
+  prompt?: string;
+  extraParams?: Record<string, string>;
+}
+
 function authorizeParamsForRequest(
   resolved: ResolvedExtraAuthorizeParams,
   requestParams: URLSearchParams,
-): Record<string, string> | undefined {
+): RequestAuthorizeParams {
   const entries = Object.entries(resolved.fixed);
   for (const name of resolved.forwarded) {
     const value = requestParams.get(name);
     if (value !== null) entries.push([name, value]);
   }
-  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+  const resolvedParams: RequestAuthorizeParams = {};
+  const extraParams: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    const folded = name.toLowerCase();
+    if (folded === "scope") resolvedParams.scope = value || undefined;
+    else if (folded === "prompt") resolvedParams.prompt = value;
+    else extraParams[name] = value;
+  }
+  if (Object.keys(extraParams).length > 0) {
+    resolvedParams.extraParams = extraParams;
+  }
+  return resolvedParams;
 }
 
 function cookieOpts(
@@ -952,7 +1005,9 @@ export class HonoBff {
    * {@linkcode HonoBffOptions.forwardedParams} names a reserved authorize
    * parameter, gives one a name that is empty or not equal to its trimmed
    * form (`" state"` and `"organization "` are refused rather than trimmed),
-   * or names the same parameter in both.
+   * names the same parameter in both, or pins `scope` in
+   * {@linkcode HonoBffOptions.extraParams} while
+   * {@linkcode HonoBffOptions.scope} is also set.
    */
   constructor(options: HonoBffOptions) {
     this.#options = options;
@@ -1247,11 +1302,12 @@ export class HonoBff {
    * Login handler — builds the authorize URL, binds the `state` it minted to
    * this browser with the login-state cookie, and redirects the browser.
    *
-   * The authorize request also carries every
-   * {@link HonoBffOptions.extraParams} entry, plus each
-   * {@link HonoBffOptions.forwardedParams} name this request's query string
-   * supplies a value for. Beyond those, `scope` and `prompt` are the only
-   * query parameters of this request that reach the authorize URL.
+   * The authorize request carries every {@link HonoBffOptions.extraParams}
+   * entry, plus each {@link HonoBffOptions.forwardedParams} name this
+   * request's query string supplies a value for. Nothing else off this
+   * request's query string reaches the authorize URL: `scope` falls back to
+   * {@link HonoBffOptions.scope} and `prompt` is sent only when one of those
+   * two options supplies it.
    */
   loginHandler(): Handler {
     return async (c) => {
@@ -1260,18 +1316,17 @@ export class HonoBff {
         c.req.query("return_to"),
         this.#options.defaultReturnTo ?? "/",
       );
-      const scope = c.req.query("scope") ?? this.#options.scope;
       const origin = this.#options.resolveOrigin?.(c);
-      const prompt = c.req.query("prompt") ?? undefined;
+      const requested = authorizeParamsForRequest(
+        this.#extraAuthorizeParams,
+        new URL(c.req.url).searchParams,
+      );
       const { url, state } = await this.#client.login({
         returnTo,
-        scope,
+        scope: requested.scope ?? this.#options.scope,
         origin,
-        prompt,
-        extraParams: authorizeParamsForRequest(
-          this.#extraAuthorizeParams,
-          new URL(c.req.url).searchParams,
-        ),
+        prompt: requested.prompt,
+        extraParams: requested.extraParams,
         redirectUri: this.#derivedRedirectUri(c, origin),
         authRequestStorage: this.#options.authRequestStorage?.forRequest(c),
       });

@@ -26,7 +26,11 @@ import {
   type TestClient,
   type TestUser,
 } from "../../../testing/_test_fixtures.ts";
-import { DirectClient } from "../../../client/mod.ts";
+import {
+  type AuthRequestRecord,
+  type AuthRequestStorage,
+  DirectClient,
+} from "../../../client/mod.ts";
 import { HonoAuthorizationServer } from "../authorization-server.ts";
 import { HonoResourceServer } from "../resource-server.ts";
 
@@ -71,8 +75,6 @@ const RESERVED_AUTHORIZE_PARAMS = [
   "state",
   "code_challenge",
   "code_challenge_method",
-  "scope",
-  "prompt",
   "response_mode",
   "nonce",
   "request",
@@ -1765,11 +1767,170 @@ describe("HonoBff", () => {
       const url = await authorizeUrl(app, "/auth/login?toString=ok");
       assertEquals(url.searchParams.get("toString"), "ok");
     });
+
+    it("ignores a scope the browser puts on the login URL", async () => {
+      const app = makeApp(makeBff({ scope: "openid profile" }));
+      const url = await authorizeUrl(app, "/auth/login?scope=openid+admin");
+      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+    });
+
+    it("requests no scope when the browser asks for one and none is configured", async () => {
+      const url = await authorizeUrl(
+        makeApp(makeBff()),
+        "/auth/login?scope=admin",
+      );
+      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+    });
+
+    it("ignores a prompt the browser puts on the login URL", async () => {
+      const url = await authorizeUrl(
+        makeApp(makeBff()),
+        "/auth/login?prompt=none",
+      );
+      assertFalse(url.searchParams.has("prompt"));
+      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+    });
+
+    it("sends the configured scope when the browser asks for none", async () => {
+      const app = makeApp(makeBff({ scope: "openid profile" }));
+      const url = await authorizeUrl(app, "/auth/login?return_to=/dashboard");
+      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+    });
+
+    it("forwards a scope when forwardedParams names it", async () => {
+      const app = makeApp(
+        makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=openid+email");
+      assertEquals(url.searchParams.getAll("scope"), ["openid email"]);
+      assertEquals(paramNames(url), [...BASE_AUTHORIZE_PARAMS, "scope"].sort());
+    });
+
+    it("falls back to the configured scope when a forwarding request omits it", async () => {
+      const app = makeApp(
+        makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?return_to=/dashboard");
+      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+    });
+
+    it("keeps the configured scope when a forwarding request sends an empty scope", async () => {
+      const app = makeApp(
+        makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=");
+      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+      assertEquals(paramNames(url), [...BASE_AUTHORIZE_PARAMS, "scope"].sort());
+    });
+
+    it("records the configured scope when a forwarding request sends an empty scope", async () => {
+      const records = new Map<string, AuthRequestRecord>();
+      const storage: AuthRequestStorage = {
+        set: (state, value) => {
+          records.set(state, value);
+        },
+        get: (state) => records.get(state) ?? null,
+        delete: (state) => {
+          records.delete(state);
+        },
+        clear: () => {
+          records.clear();
+        },
+      };
+      const app = makeApp(
+        makeBff({
+          scope: "openid profile",
+          forwardedParams: ["scope"],
+          authRequestStorage: { forRequest: () => storage },
+        }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=");
+      const state = url.searchParams.get("state")!;
+      assertEquals(records.get(state)?.scope, "openid profile");
+    });
+
+    it("records a forwarded scope as the scope the authorization requested", async () => {
+      const records = new Map<string, AuthRequestRecord>();
+      const storage: AuthRequestStorage = {
+        set: (state, value) => {
+          records.set(state, value);
+        },
+        get: (state) => records.get(state) ?? null,
+        delete: (state) => {
+          records.delete(state);
+        },
+        clear: () => {
+          records.clear();
+        },
+      };
+      const app = makeApp(
+        makeBff({
+          scope: "openid profile",
+          forwardedParams: ["scope"],
+          authRequestStorage: { forRequest: () => storage },
+        }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?scope=openid+email");
+      const state = url.searchParams.get("state")!;
+      assertEquals(records.get(state)?.scope, "openid email");
+    });
+
+    it("sends one scope when a forwarded name differs from it only in case", async () => {
+      const app = makeApp(
+        makeBff({ scope: "openid profile", forwardedParams: ["Scope"] }),
+      );
+      const url = await authorizeUrl(app, "/auth/login?Scope=openid+email");
+      assertEquals(url.searchParams.getAll("scope"), ["openid email"]);
+      assertFalse(url.searchParams.has("Scope"));
+    });
+
+    it("forwards a prompt when forwardedParams names it", async () => {
+      const app = makeApp(makeBff({ forwardedParams: ["prompt"] }));
+      const url = await authorizeUrl(app, "/auth/login?prompt=login");
+      assertEquals(url.searchParams.getAll("prompt"), ["login"]);
+    });
+
+    it("keeps a pinned prompt out of the browser's reach", async () => {
+      const app = makeApp(makeBff({ extraParams: { prompt: "consent" } }));
+      const url = await authorizeUrl(app, "/auth/login?prompt=none");
+      assertEquals(url.searchParams.getAll("prompt"), ["consent"]);
+    });
+
+    it("sends one prompt when a pinned name differs from it only in case", async () => {
+      const app = makeApp(makeBff({ extraParams: { Prompt: "consent" } }));
+      const url = await authorizeUrl(app, "/auth/login?prompt=none");
+      assertEquals(url.searchParams.getAll("prompt"), ["consent"]);
+      assertFalse(url.searchParams.has("Prompt"));
+    });
+
+    it("refuses a pinned scope beside the scope option", () => {
+      assertThrows(
+        () =>
+          makeBff({
+            scope: "openid",
+            extraParams: { scope: "openid email" },
+          }),
+        Error,
+        'extraParams may not set "scope" while HonoBffOptions.scope is set',
+      );
+    });
+
+    it("refuses a pinned scope that differs from the option only in case", () => {
+      assertThrows(
+        () =>
+          makeBff({
+            scope: "openid",
+            extraParams: { Scope: "openid email" },
+          }),
+        Error,
+        'extraParams may not set "Scope" while HonoBffOptions.scope is set',
+      );
+    });
   });
 
   describe("login handler", () => {
-    it("forwards prompt=none to the authorize endpoint (silent renew)", async () => {
-      const bff = makeBff();
+    it("forwards prompt=none once forwardedParams names prompt (silent renew)", async () => {
+      const bff = makeBff({ forwardedParams: ["prompt"] });
       const app = makeApp(bff);
       const res = await app.request("/auth/login?prompt=none&return_to=/x");
       assertStrictEquals(res.status, 302);
