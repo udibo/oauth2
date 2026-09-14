@@ -585,6 +585,24 @@ describe("AuthorizationCodeGrant", () => {
       assertStrictEquals(client.id, "public-client");
     });
 
+    it("refuses a public client that attaches a secret to its PKCE exchange", async () => {
+      const { grant, clientService } = await createTestGrant();
+      await clientService.add(publicClient);
+
+      const request = tokenRequest({
+        client_id: "public-client",
+        client_secret: "never-issued",
+        code_verifier: "test-verifier",
+      });
+      const body = await request.clone().formData();
+
+      await assertRejects(
+        () => grant.getAuthenticatedClient(request, body),
+        InvalidClientError,
+        "client authentication failed",
+      );
+    });
+
     it("should throw InvalidClientError for non-existent PKCE client", async () => {
       const { grant } = await createTestGrant();
 
