@@ -43,13 +43,18 @@ Three services back the server:
 
 - **`ClientServiceInterface<Client, User>`** — `get(id)`,
   `getAuthenticated(id, secret?)`, and `getUser(client)` (the subject of a
-  client-credentials token). Returning `undefined` is the conformant default:
-  RFC 6749 §4.4 has no resource owner, so the grant issues a token with no user
-  and the client itself is the subject (RFC 9068 §2.2). Return a user only when
-  that user is a principal of its own — a per-application service account.
-  Returning the human who owns the application hands the machine that person's
-  identity, which is the _Client Impersonating Resource Owner_ attack of RFC
-  9700 §4.15.
+  client-credentials token). For `getUser`, returning `undefined` is the
+  conformant default: RFC 6749 §4.4 has no resource owner, so the grant issues a
+  token with no user and the client itself is the subject (RFC 9068 §2.2).
+  Return a user only when that user is a principal of its own — a
+  per-application service account. Returning the human who owns the application
+  hands the machine that person's identity, which is the _Client Impersonating
+  Resource Owner_ attack of RFC 9700 §4.15. `getAuthenticated` resolves a
+  confidential client only with its correct secret, and a public client only
+  when the request presents none — a public client that sends a secret it was
+  never issued resolves `undefined`, which the server answers with
+  `invalid_client`. `runClientServiceContractTests` from
+  `@udibo/oauth2/testing/contract` pins all three rules.
 - **`TokenServiceInterface<Client, User, Scope>`** — token generation, storage,
   and revocation. Extend `AbstractTokenService` (from
   `@udibo/oauth2/server/authorization`) and implement the five storage methods
@@ -490,7 +495,10 @@ that switches it off, and `requireClientAuthentication` on the
 authorization-code grant does not (it constrains confidential clients that send
 a `code_verifier` in place of their secret). Whether a given client may
 authenticate with `none` is still decided per client, by whether it has a
-secret; discovery describes the endpoint, not which clients you registered.
+secret; discovery describes the endpoint, not which clients you registered. A
+public client that presents a non-empty `client_secret` anyway is refused with
+`invalid_client` rather than authenticated as public — it was issued no secret,
+so the request is misconfigured — and the contract suite pins that answer.
 Clients that discover — including this package's `DirectClient` via `discover()`
 — configure themselves from it, so keep the advertised endpoints matching where
 you actually mounted the routes.

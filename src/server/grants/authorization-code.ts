@@ -85,10 +85,13 @@ export interface AuthorizationCodeGrantOptions<
    * authentication, never a replacement for it, so a confidential client's
    * secret is still required on this grant.
    *
-   * Defaults to `true`: confidential clients authenticate alongside PKCE.
-   * Public clients, which have no secret, are unaffected. Setting `false`
-   * explicitly enables legacy behavior where PKCE replaces client credentials;
-   * use that opt-out only for an integration that requires it.
+   * Defaults to `true`: confidential clients authenticate alongside PKCE, and
+   * a public client authenticates by `client_id` alone — one that attaches a
+   * `client_secret` it was never issued is refused, as on every other grant.
+   * Setting `false` explicitly enables legacy behavior where PKCE replaces
+   * client credentials: a request carrying a `code_verifier` is looked up by
+   * id, so a presented secret is not checked at all. Use that opt-out only for
+   * an integration that requires it.
    *
    * @default true
    * @see https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1#section-4.1.3

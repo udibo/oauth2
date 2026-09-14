@@ -162,7 +162,7 @@ export class MemoryUserService<U extends MemoryUserShape>
  * A client is treated as confidential when {@link add} is called with a
  * secret, and public when it is not — there is no separate flag to
  * remember. `getAuthenticated` requires the secret for confidential
- * clients and accepts a missing secret for public clients.
+ * clients, and requires public clients to present none.
  */
 export class MemoryClientService<C extends ClientInterface, U>
   implements ClientServiceInterface<C, U> {
@@ -212,7 +212,9 @@ export class MemoryClientService<C extends ClientInterface, U>
   /**
    * Resolves the client when authentication succeeds, otherwise `undefined`.
    * Confidential clients (registered with a secret) require a matching
-   * `secret`; public clients (registered without one) ignore it.
+   * `secret`; public clients (registered without one) must present none, so a
+   * secret they were never issued fails authentication rather than being
+   * ignored. An empty `secret` counts as none.
    */
   async getAuthenticated(
     id: string,
@@ -221,10 +223,9 @@ export class MemoryClientService<C extends ClientInterface, U>
     const client = this.#clientsById.get(id);
     if (!client) return undefined;
     const storedHash = this.#secretHashByClientId.get(id);
-    if (storedHash) {
-      if (!secret) return undefined;
-      if (await sha256Hash(secret) !== storedHash) return undefined;
-    }
+    if (!storedHash) return secret ? undefined : client;
+    if (!secret) return undefined;
+    if (await sha256Hash(secret) !== storedHash) return undefined;
     return client;
   }
 
