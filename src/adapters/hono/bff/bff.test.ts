@@ -1596,6 +1596,24 @@ describe("HonoBff", () => {
       assertEquals(typeof cookieValue(res, "oauth2_session"), "string");
     });
 
+    for (const name of ["acr_values", "ACR_VALUES", "max_age", "MAX_AGE"]) {
+      it(`refuses browser-chosen authentication control ${name}`, () => {
+        assertThrows(() => makeBff({ forwardedParams: [name] }), Error);
+      });
+    }
+
+    it("keeps authentication controls server-pinned despite browser overrides", async () => {
+      const bff = makeBff({ extraParams: { acr_values: "mfa", max_age: "0" } });
+      const app = makeApp(bff);
+      const response = await app.request(
+        "/auth/login?acr_values=single&max_age=9999",
+      );
+      const location = new URL(response.headers.get("location")!);
+      await response.body?.cancel();
+      assertEquals(location.searchParams.get("acr_values"), "mfa");
+      assertEquals(location.searchParams.get("max_age"), "0");
+    });
+
     for (const reserved of RESERVED_AUTHORIZE_PARAMS) {
       it(`refuses "${reserved}" in extraParams at construction`, () => {
         assertThrows(

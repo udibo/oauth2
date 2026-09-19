@@ -645,6 +645,63 @@ token — a client-credentials token never carries user claims — and the proto
 claims (`iss`, `sub`, `aud`, `client_id`, `iat`, `exp`, `jti`, `scope`) always
 win over anything it returns.
 
+### Preserve the authentication event
+
+Return `authenticationContext` from your `authenticateUser` callback when your
+application has verified evidence for `auth_time` (Unix seconds), `acr`, or
+`amr`. Omit any claim you cannot establish. Session creation, a refresh, or a
+federated callback alone does not prove when or how the user authenticated.
+
+The authorization code captures a snapshot. Its tokens and every refresh
+generation retain that event even if the user later signs in with stronger
+authentication. Your code store must persist and restore
+`AuthorizationCode.authenticationContext`; your token store must do the same for
+`Token.authenticationContext`, including refresh records. Leave legacy records
+without context rather than backfilling timestamps.
+
+Claims are opt-in through the existing hooks. Use the credential's context in
+each response, rather than looking up the current session:
+
+```ts
+import type { AuthenticationContext } from "@udibo/oauth2/server";
+
+const claims = (event?: AuthenticationContext): Record<string, unknown> => ({
+  ...event,
+});
+
+const oidcClaims = (
+  _user: unknown,
+  _scope: unknown,
+  event?: AuthenticationContext,
+): Record<string, unknown> => claims(event);
+
+const accessTokenClaims = (
+  _user: unknown,
+  _scope: unknown,
+  _client: unknown,
+  event?: AuthenticationContext,
+): Record<string, unknown> => claims(event);
+
+const introspectionClaims = (
+  token: { authenticationContext?: AuthenticationContext },
+): Record<string, unknown> => claims(token.authenticationContext);
+```
+
+Set `AuthorizationServer.userClaims` to `oidcClaims` for ID tokens and UserInfo,
+`createJwtAccessTokenGenerator.userClaims` to `accessTokenClaims` for JWT access
+tokens, and `AuthorizationServer.introspectionClaims` to `introspectionClaims`.
+Custom `generateAccessToken` wrappers must forward the new fourth argument to
+the JWT generator. Tokens without a resource owner receive no event context.
+
+`parseAuthorizeParameters` exposes `acrValues`, `maxAge`, and `prompt` as raw
+strings, including invalid values. Your application must validate and enforce
+the authentication and consent policy before returning a user. Parsing these
+controls does not implement step-up or freshness enforcement.
+
+For a BFF requesting assurance or freshness, pin `acr_values` and `max_age` in
+`extraParams`. They are forbidden in `forwardedParams`, case-insensitively,
+because browser-chosen values could weaken the server's requirements.
+
 ## Where to go next
 
 - [Protect an API](./protect-an-api.md) — the consumer side of the tokens you

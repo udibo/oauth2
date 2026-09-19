@@ -22,6 +22,8 @@ import type {
   ClientInterface,
 } from "../../models/client.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
+import type { AuthenticationContext } from "../../models/authentication.ts";
+import { snapshotAuthenticationContext } from "../../utils/authentication-context.ts";
 import type { AbstractScope, ScopeConstructor } from "../../models/scope.ts";
 import { BasicScope } from "../../models/scope.ts";
 import { InvalidScopeError } from "../../errors.ts";
@@ -233,17 +235,31 @@ export abstract class AbstractGrant<
    * owner (client credentials, RFC 6749 §4.4). Such a token is never issued a
    * refresh token whatever `allowRefreshToken` says — there is no resource
    * owner whose authorization a rotation could carry forward.
+   * `authenticationContext` is verified event evidence, snapshotted before
+   * generation and carried to storage. Omit it when unknown; it is discarded
+   * for tokens with no user.
    */
   async generateToken(
     client: Client,
     user: User | undefined,
     scope: Scope | null | undefined,
     tokenService: TokenServiceInterface<Client, User, Scope>,
+    authenticationContext?: AuthenticationContext,
   ): Promise<Token<Client, User, Scope>> {
+    const event = user === undefined
+      ? undefined
+      : snapshotAuthenticationContext(authenticationContext);
     const token: Token<Client, User, Scope> = {
-      accessToken: await tokenService.generateAccessToken(client, user, scope),
+      accessToken: await tokenService.generateAccessToken(
+        client,
+        user,
+        scope,
+        event,
+      ),
       client,
     };
+
+    if (event) token.authenticationContext = event;
 
     if (user !== undefined) token.user = user;
     if (scope) token.scope = scope;

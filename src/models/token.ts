@@ -1,5 +1,6 @@
 import type { AbstractScope, BasicScope } from "./scope.ts";
 import type { ClientInterface } from "./client.ts";
+import type { AuthenticationContext } from "./authentication.ts";
 
 /**
  * Token model representing an access token.
@@ -39,6 +40,12 @@ export interface Token<
    * endpoint can echo it in the id_token. Not persisted by token stores.
    */
   nonce?: string;
+  /**
+   * Immutable event inherited from the code or refresh ancestor. Token stores
+   * must persist and restore it; never reconstruct it from the current session.
+   * Machine credentials omit it.
+   */
+  authenticationContext?: AuthenticationContext;
 }
 
 /** Token with refresh token capability. */

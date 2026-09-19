@@ -5,6 +5,8 @@
  */
 
 import type { AuthorizationCode } from "../../models/authorization-code.ts";
+import type { AuthenticationContext } from "../../models/authentication.ts";
+import { snapshotAuthenticationContext } from "../../utils/authentication-context.ts";
 import type {
   ClientCredentials,
   ClientInterface,
@@ -110,6 +112,8 @@ export interface GenerateAuthorizationCodeOptions<
   User,
   S extends AbstractScope,
 > {
+  /** Verified event to capture on this code, supplied by authentication policy. */
+  authenticationContext?: AuthenticationContext;
   /** The client the code is issued to. */
   client: Client;
   /** The resource owner the code authorizes. */
@@ -293,6 +297,9 @@ export class AuthorizationCodeGrant<
     options: GenerateAuthorizationCodeOptions<Client, User, S>,
     request: Request,
   ): Promise<AuthorizationCode<Client, User, S>> {
+    const authenticationContext = snapshotAuthenticationContext(
+      options.authenticationContext,
+    );
     const { authorizationCodeService } = await this.resolveServices(request);
     const {
       client,
@@ -316,6 +323,9 @@ export class AuthorizationCodeGrant<
     if (challenge) authorizationCode.challenge = challenge;
     if (challengeMethod) authorizationCode.challengeMethod = challengeMethod;
     if (nonce) authorizationCode.nonce = nonce;
+    if (authenticationContext) {
+      authorizationCode.authenticationContext = authenticationContext;
+    }
 
     return await authorizationCodeService.save(authorizationCode);
   }
@@ -398,7 +408,13 @@ export class AuthorizationCodeGrant<
       throw new InvalidGrantError("did not expect redirect_uri parameter");
     }
 
-    const token = await this.generateToken(client, user, scope, tokenService);
+    const token = await this.generateToken(
+      client,
+      user,
+      scope,
+      tokenService,
+      authorizationCode.authenticationContext,
+    );
     token.code = code;
     const saved = await tokenService.save(token);
     if (authorizationCode.nonce) saved.nonce = authorizationCode.nonce;

@@ -530,11 +530,9 @@ export interface HonoBffOptions {
    * authorization server validate this parameter" but **"would I accept every
    * value it could carry"** — the two are different properties, and a
    * parameter can pass the first and fail the second. `acr_values` and
-   * `max_age` are the cautionary pair: a server validates both and then
-   * *honors* them, so a browser naming a weaker authentication context or a
-   * longer re-authentication window gets a downgrade the server cooperates
-   * with. For a value this deployment decides, use {@link extraParams}, which
-   * no browser can reach.
+   * `max_age` are refused here, case-insensitively, because browser choices
+   * could weaken assurance or lengthen the re-authentication window. Pin these
+   * controls in {@link extraParams}, which no browser can change.
    *
    * A parameter already baked into the configured authorization endpoint's
    * own query string is overridable this way too, and silently: the client
@@ -835,6 +833,12 @@ function resolveExtraAuthorizeParams(
   }
   for (const name of forwarded) {
     assertUsableAuthorizeParamName(name, "forwardedParams");
+    if (["acr_values", "max_age"].includes(name.toLowerCase())) {
+      throw new Error(
+        `forwardedParams may not name the authentication control "${name}"; ` +
+          "pin it in extraParams so the server chooses the assurance and freshness requirements.",
+      );
+    }
     const pinned = pinnedByFoldedName.get(name.toLowerCase());
     if (pinned !== undefined) {
       throw new Error(

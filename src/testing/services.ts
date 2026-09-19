@@ -27,6 +27,8 @@
  */
 
 import type { ClientInterface } from "../models/client.ts";
+import type { AuthenticationContext } from "../models/authentication.ts";
+import { snapshotAuthenticationContext } from "../utils/authentication-context.ts";
 import type { AuthorizationCode } from "../models/authorization-code.ts";
 import type { RefreshToken, Token } from "../models/token.ts";
 import type { DeviceAuthorization } from "../models/device-authorization.ts";
@@ -262,6 +264,7 @@ export interface MemoryTokenServiceOptions<
 }
 
 interface StoredToken<S extends AbstractScope> {
+  authenticationContext?: AuthenticationContext;
   accessTokenHash: string;
   accessTokenExpiresAt?: Date;
   clientId: string;
@@ -418,6 +421,9 @@ export class MemoryTokenService<
       client,
       user,
       scope: stored.scope,
+      authenticationContext: snapshotAuthenticationContext(
+        stored.authenticationContext,
+      ),
     };
     if (stored.refreshTokenHash) {
       return {
@@ -480,6 +486,9 @@ export class MemoryTokenService<
       clientId: token.client.id,
       userId: token.user?.id,
       scope: token.scope,
+      authenticationContext: snapshotAuthenticationContext(
+        token.authenticationContext,
+      ),
     };
     if (token.code) {
       stored.codeHash = await sha256Hash(token.code);
@@ -623,6 +632,7 @@ export interface MemoryAuthorizationCodeServiceOptions<
 }
 
 interface StoredAuthorizationCode<S extends AbstractScope> {
+  authenticationContext?: AuthenticationContext;
   codeHash: string;
   expiresAt: Date;
   clientId: string;
@@ -695,6 +705,9 @@ export class MemoryAuthorizationCodeService<
       challenge: stored.challenge,
       challengeMethod: stored.challengeMethod,
       nonce: stored.nonce,
+      authenticationContext: snapshotAuthenticationContext(
+        stored.authenticationContext,
+      ),
     };
   }
 
@@ -716,6 +729,9 @@ export class MemoryAuthorizationCodeService<
       challenge: authorizationCode.challenge,
       challengeMethod: authorizationCode.challengeMethod,
       nonce: authorizationCode.nonce,
+      authenticationContext: snapshotAuthenticationContext(
+        authorizationCode.authenticationContext,
+      ),
     });
     return authorizationCode;
   }

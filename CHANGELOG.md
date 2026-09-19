@@ -19,6 +19,16 @@ Initial public package:
 
 Release hardening:
 
+- Preserve application-supplied authentication context on authorization codes,
+  token records, and refresh descendants. Claims hooks receive the credential's
+  original event for ID tokens, UserInfo, and JWT access tokens; introspection
+  hooks can read it from the token. Custom stores must persist and restore
+  `authenticationContext`, and JWT generator wrappers must forward its fourth
+  argument. Missing legacy context stays absent. Authorization request parsing
+  exposes raw `acrValues`, `maxAge`, and `prompt`; applications own enforcement.
+- **Breaking:** reject `acr_values` and `max_age` in BFF `forwardedParams`
+  (including mixed-case names). Move each requirement to a fixed value in
+  `extraParams` so browser input cannot weaken assurance or freshness.
 - Require confidential-client authentication alongside PKCE by default.
 - Enforce single-winner refresh rotation and OTP consumption.
 - Keep logout and replacement login authoritative during asynchronous refreshes.

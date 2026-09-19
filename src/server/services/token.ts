@@ -1,4 +1,5 @@
 import type { ClientInterface } from "../../models/client.ts";
+import type { AuthenticationContext } from "../../models/authentication.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
 import type { ClientServiceInterface } from "./client.ts";
@@ -69,11 +70,14 @@ export interface TokenServiceInterface<
    * Generates an access token string. `user` is `undefined` for a client
    * acting as its own resource owner (client credentials) — a signed-token
    * generator names the client as the subject then, per RFC 9068 §2.2.
+   * Forward `authenticationContext` to a signed-token generator so it uses
+   * the credential's event, including the original event on refresh.
    */
   generateAccessToken(
     client: Client,
     user: User | undefined,
     scope?: Scope | null,
+    authenticationContext?: AuthenticationContext,
   ): Promise<string>;
 
   /** Generates a refresh token string. */
@@ -134,7 +138,11 @@ export interface TokenServiceInterface<
   ): Promise<RefreshToken<Client, User, Scope>>;
   /** Persists an access token and returns the saved record. */
   save(token: Token<Client, User, Scope>): Promise<Token<Client, User, Scope>>;
-  /** Persists either token kind and returns the saved record. */
+  /**
+   * Persists either token kind and returns the saved record. Preserve
+   * `authenticationContext` on save and every read, including refresh and
+   * revoked records; never reconstruct it from a user's current session.
+   */
   save(
     token: Token<Client, User, Scope> | RefreshToken<Client, User, Scope>,
   ): Promise<Token<Client, User, Scope> | RefreshToken<Client, User, Scope>>;
@@ -300,6 +308,7 @@ export abstract class AbstractTokenService<
     _client: Client,
     _user: User | undefined,
     _scope?: Scope | null,
+    _authenticationContext?: AuthenticationContext,
   ): Promise<string> {
     return Promise.resolve(crypto.randomUUID());
   }

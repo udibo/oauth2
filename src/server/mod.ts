@@ -10,6 +10,7 @@
  */
 
 export type { ClientCredentials, ClientInterface } from "../models/client.ts";
+export type { AuthenticationContext } from "../models/authentication.ts";
 export type {
   IntrospectionResponse,
   RefreshToken,

@@ -13,6 +13,8 @@
  */
 
 import { base64urlDecode, base64urlEncode } from "../utils/crypto.ts";
+import type { AuthenticationContext } from "../models/authentication.ts";
+import { snapshotAuthenticationContext } from "../utils/authentication-context.ts";
 
 /** A ready-to-use signing key: private half signs, public JWK is published. */
 export interface SigningKey {
@@ -324,24 +326,32 @@ export function createJwtAccessTokenGenerator(options: {
    * claims. The protocol claims (`iss`, `sub`, `aud`, `client_id`, `iat`,
    * `exp`, `jti`, `scope`) always win — a returned claim under one of those
    * names is discarded, never merged.
+   * The fourth argument is the token's recorded authentication event. Return
+   * its fields to emit them, without consulting a newer session. Custom token
+   * service wrappers must forward the fourth `generateAccessToken` argument.
    */
   userClaims?: (
     user: unknown,
     scope?: { toString(): string } | null,
     client?: { id: string },
+    authenticationContext?: AuthenticationContext,
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
 }): (
   client: { id: string },
   user: unknown,
   scope?: { toString(): string } | null,
+  authenticationContext?: AuthenticationContext,
 ) => Promise<string> {
   const lifetime = options.lifetimeSeconds ?? 3600;
   const subjectOf = options.subjectOf ?? defaultSubjectOf;
-  return async (client, user, scope) => {
+  return async (client, user, scope, authenticationContext) => {
+    const event = user
+      ? snapshotAuthenticationContext(authenticationContext)
+      : undefined;
     const key = await options.signingKeys.getSigningKey();
     const now = Math.floor(Date.now() / 1000);
     const extraClaims = user && options.userClaims
-      ? await options.userClaims(user, scope, client)
+      ? await options.userClaims(user, scope, client, event)
       : undefined;
     const payload: Record<string, unknown> = {
       ...extraClaims,
