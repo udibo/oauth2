@@ -1768,6 +1768,20 @@ describe("HonoBff", () => {
       assertEquals(url.searchParams.get("toString"), "ok");
     });
 
+    it("forwards an explicitly allowed prototype setter name", async () => {
+      const app = makeApp(makeBff({ forwardedParams: ["__proto__"] }));
+      const url = await authorizeUrl(app, "/auth/login?__proto__=configured");
+      assertEquals(url.searchParams.getAll("__proto__"), ["configured"]);
+    });
+
+    it("preserves a pinned prototype setter name", async () => {
+      const app = makeApp(makeBff({
+        extraParams: { ["__proto__"]: "configured" },
+      }));
+      const url = await authorizeUrl(app, "/auth/login?__proto__=untrusted");
+      assertEquals(url.searchParams.getAll("__proto__"), ["configured"]);
+    });
+
     it("ignores a scope the browser puts on the login URL", async () => {
       const app = makeApp(makeBff({ scope: "openid profile" }));
       const url = await authorizeUrl(app, "/auth/login?scope=openid+admin");

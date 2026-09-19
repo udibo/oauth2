@@ -501,9 +501,10 @@ export interface HonoBffOptions {
    * value, name it in {@link forwardedParams} instead.
    *
    * `prompt` is an ordinary name here — pin `{ prompt: "login" }` to make
-   * every sign-in re-authenticate. `scope` is refused, because {@link scope}
-   * already carries it and is the value the login flow records as the scope
-   * it requested; setting both would leave which one applies ambiguous.
+   * every sign-in re-authenticate. A pinned `scope` is accepted only when
+   * {@link scope} is unset; setting both would leave which one applies
+   * ambiguous. Either configuration supplies the scope the login flow records
+   * for its authorization request.
    *
    * A name the login flow reserves is refused at construction rather than
    * quietly dropped — {@link forwardedParams} carries the list and the reason.
@@ -871,15 +872,15 @@ function authorizeParamsForRequest(
     if (value !== null) entries.push([name, value]);
   }
   const resolvedParams: RequestAuthorizeParams = {};
-  const extraParams: Record<string, string> = {};
+  const extraEntries: [string, string][] = [];
   for (const [name, value] of entries) {
     const folded = name.toLowerCase();
     if (folded === "scope") resolvedParams.scope = value || undefined;
     else if (folded === "prompt") resolvedParams.prompt = value;
-    else extraParams[name] = value;
+    else extraEntries.push([name, value]);
   }
-  if (Object.keys(extraParams).length > 0) {
-    resolvedParams.extraParams = extraParams;
+  if (extraEntries.length > 0) {
+    resolvedParams.extraParams = Object.fromEntries(extraEntries);
   }
   return resolvedParams;
 }
