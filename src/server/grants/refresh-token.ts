@@ -209,6 +209,7 @@ export class RefreshTokenGrant<
       user,
       nextScope,
       tokenService,
+      currentToken.authenticationContext,
     );
 
     const nextRefreshToken: RefreshToken<Client, User, S> =

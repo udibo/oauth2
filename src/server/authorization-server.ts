@@ -21,6 +21,8 @@
  */
 
 import type { AuthorizeParameters } from "../models/authorization-code.ts";
+import type { AuthenticationContext } from "../models/authentication.ts";
+import { snapshotAuthenticationContext } from "../utils/authentication-context.ts";
 import type { ClientInterface } from "../models/client.ts";
 import type {
   IntrospectionResponse,
@@ -265,10 +267,14 @@ export interface AuthorizationServerOptions<
    * `email` when the scope allows). Merged under the protocol claims — `sub`
    * (from `subjectOf`) and the id_token's `iss`/`aud`/`iat`/`exp`/`nonce`
    * always win.
+   * The third argument is this credential's recorded authentication event,
+   * including on refresh and UserInfo. Return its fields to emit them; never
+   * substitute a user's newer session event. It is absent for legacy records.
    */
   userClaims?: (
     user: User,
     scope?: S | null,
+    authenticationContext?: AuthenticationContext,
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
   /**
    * Extension fields for an **active** introspection response (RFC 7662
@@ -324,7 +330,7 @@ export interface AuthorizationServerOptions<
  *
  * Return one of:
  *
- * - `{ user, authorizedScope? }` — user is authenticated; the authorize flow
+ * - `{ user, authorizedScope?, authenticationContext? }` — user is authenticated; the authorize flow
  *   continues. `authorizedScope` declares scopes the user has already
  *   pre-authorized for this client; anything in the requested scope not
  *   covered by it triggers consent. **Omitting `authorizedScope` means
@@ -332,6 +338,8 @@ export interface AuthorizationServerOptions<
  *   framework calls `handleConsent` when one is configured, and otherwise
  *   treats the request as consented and grants the accepted scope. To
  *   pre-authorize everything, return the requested scope as `authorizedScope`.
+ *   Supply only verified event claims in `authenticationContext`; the code,
+ *   token and refresh descendants retain a snapshot. Omit unknown claims.
  * - `null` — explicit denial. The framework redirects the browser to
  *   `redirect_uri` with `error=access_denied`. Use this for "the user said
  *   no", not for "the user isn't signed in yet."
@@ -342,7 +350,13 @@ export interface AuthorizationServerOptions<
 export type AuthenticateUserFn<User> = (
   request: Request,
 ) => Promise<
-  { user: User; authorizedScope?: AbstractScope } | Response | null
+  | {
+    user: User;
+    authorizedScope?: AbstractScope;
+    authenticationContext?: AuthenticationContext;
+  }
+  | Response
+  | null
 >;
 
 /**
@@ -651,6 +665,7 @@ export class AuthorizationServer<
   #userClaims?: (
     user: User,
     scope?: S | null,
+    authenticationContext?: AuthenticationContext,
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
   #introspectionClaims?: (
     token: Token<Client, User, S>,
@@ -947,7 +962,11 @@ export class AuthorizationServer<
     const key = await this.signingKeys.getSigningKey();
     const now = Math.floor(Date.now() / 1000);
     const claims: Record<string, unknown> = {
-      ...(await this.#oidcClaims(token.user, token.scope)),
+      ...(await this.#oidcClaims(
+        token.user,
+        token.scope,
+        token.authenticationContext,
+      )),
       iss: context.issuer,
       aud: token.client.id,
       iat: now,
@@ -961,9 +980,14 @@ export class AuthorizationServer<
   async #oidcClaims(
     user: User,
     scope?: S | null,
+    authenticationContext?: AuthenticationContext,
   ): Promise<Record<string, unknown>> {
     return {
-      ...(await this.#userClaims?.(user, scope) ?? {}),
+      ...(await this.#userClaims?.(
+        user,
+        scope,
+        snapshotAuthenticationContext(authenticationContext),
+      ) ?? {}),
       sub: this.#subjectOf(user),
     };
   }
@@ -1027,12 +1051,16 @@ export class AuthorizationServer<
    */
   async handleUserInfoRequest(request: Request): Promise<Response> {
     try {
-      const { user, scope } = await this.authenticate(request);
+      const { user, scope, token } = await this.authenticate(request);
       this.assertScope(scope, "openid");
       if (!user) {
         throw new InvalidTokenError("access token has no resource owner");
       }
-      const claims = await this.#oidcClaims(user, scope);
+      const claims = await this.#oidcClaims(
+        user,
+        scope,
+        token.authenticationContext,
+      );
       return new Response(JSON.stringify(claims), {
         status: 200,
         headers: {
@@ -1209,6 +1237,9 @@ export class AuthorizationServer<
       challenge: params.get("code_challenge") ?? undefined,
       challengeMethod: params.get("code_challenge_method") ?? undefined,
       nonce: params.get("nonce") ?? undefined,
+      acrValues: params.get("acr_values") ?? undefined,
+      maxAge: params.get("max_age") ?? undefined,
+      prompt: params.get("prompt") ?? undefined,
     };
   }
 
@@ -1286,6 +1317,9 @@ export class AuthorizationServer<
       throw new AccessDeniedError("authentication required");
     }
     const { user, authorizedScope } = authResult;
+    const authenticationContext = snapshotAuthenticationContext(
+      authResult.authenticationContext,
+    );
 
     if (grant.requirePKCE && !params.challenge) {
       throw new InvalidRequestError(
@@ -1312,6 +1346,7 @@ export class AuthorizationServer<
       challenge: params.challenge ?? null,
       challengeMethod: params.challengeMethod ?? null,
       nonce: params.nonce ?? null,
+      authenticationContext,
     }, request);
 
     redirectUrl.searchParams.set("code", authorizationCode.code);

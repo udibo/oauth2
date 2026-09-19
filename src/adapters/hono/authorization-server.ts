@@ -37,6 +37,7 @@ import { Hono } from "hono";
 import type { Context, Handler, MiddlewareHandler } from "hono";
 
 import type { RequireConditions } from "../../models/authorization.ts";
+import type { AuthenticationContext } from "../../models/authentication.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
 import {
@@ -64,8 +65,9 @@ import {
  * or session variables without reconstructing a {@link Request}. Return one
  * of:
  *
- * - `{ user, authorizedScope? }` — user is authenticated; the authorize flow
- *   continues.
+ * - `{ user, authorizedScope?, authenticationContext? }` — user is authenticated;
+ *   the authorize flow continues. Supply only verified event claims in
+ *   `authenticationContext`; the code and its tokens retain that snapshot.
  * - `null` — explicit denial; the framework redirects to `redirect_uri` with
  *   `error=access_denied`.
  * - A `Response` (typically `c.redirect(...)` to a login page) —
@@ -76,7 +78,13 @@ import {
 export type HonoAuthenticateUserFn<User> = (
   c: Context,
 ) => Promise<
-  { user: User; authorizedScope?: AbstractScope } | Response | null
+  | {
+    user: User;
+    authorizedScope?: AbstractScope;
+    authenticationContext?: AuthenticationContext;
+  }
+  | Response
+  | null
 >;
 
 /**

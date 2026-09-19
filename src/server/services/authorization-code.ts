@@ -39,7 +39,10 @@ export interface AuthorizationCodeServiceInterface<
     code: string,
   ): Promise<AuthorizationCode<Client, User, Scope> | undefined>;
 
-  /** Saves an authorization code. */
+  /**
+   * Saves an authorization code, preserving its `authenticationContext`
+   * snapshot on save and retrieval. Leave legacy context absent.
+   */
   save(
     authorizationCode: AuthorizationCode<Client, User, Scope>,
   ): Promise<AuthorizationCode<Client, User, Scope>>;
