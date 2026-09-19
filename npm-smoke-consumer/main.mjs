@@ -13,6 +13,7 @@
  * @module
  */
 import { readFile } from "node:fs/promises";
+import { Hono } from "hono";
 
 export const UNVERIFIED_ON_NODE = ["./testing", "./testing/contract"];
 
@@ -83,6 +84,34 @@ if (isPublicSuffix("com") !== true) {
 }
 
 const { BffClient } = await import("@udibo/oauth2/client");
+const { DirectClient } = await import("@udibo/oauth2/client");
+const { HonoBff } = await import("@udibo/oauth2/hono/bff");
+for (const options of [
+  { forwardedParams: ["__proto__"] },
+  { extraParams: { ["__proto__"]: "configured" } },
+]) {
+  const client = new DirectClient({
+    clientId: "node-smoke",
+    redirectUri: "https://app.example.com/auth/callback",
+    endpoints: {
+      authorization: "https://issuer.example.com/authorize",
+      token: "https://issuer.example.com/token",
+    },
+  });
+  const bff = new HonoBff({ client, ...options });
+  const app = new Hono().route("/auth", bff.routes());
+  const response = await app.request(
+    "https://app.example.com/auth/login?__proto__=configured",
+  );
+  await response.body?.cancel();
+  const location = response.headers.get("location");
+  if (
+    response.status !== 302 || !location ||
+    new URL(location).searchParams.get("__proto__") !== "configured"
+  ) {
+    failures.push("HonoBff dropped an explicitly configured __proto__ parameter");
+  }
+}
 const { redactedRequestTarget } = await import("@udibo/oauth2/hono/log");
 if (
   redactedRequestTarget("https://app.example.com/auth/callback?code=secret") !==
