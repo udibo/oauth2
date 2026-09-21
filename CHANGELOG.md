@@ -1,3 +1,47 @@
+# [0.1.0](https://github.com/udibo/oauth2/compare/0.0.0...0.1.0) (2026-09-21)
+
+- feat!: preserve authentication event context
+  ([be79fc7](https://github.com/udibo/oauth2/commit/be79fc749088794333c8c031b37b66e6fc9656e4))
+- feat(hono)!: server-configure the BFF login scope and prompt
+  ([03d57f0](https://github.com/udibo/oauth2/commit/03d57f05cc97d7721e4d810cd232a51690e469c9))
+
+### Bug Fixes
+
+- **release:** drop the tarballDir value the npm plugin rejects
+  ([#20](https://github.com/udibo/oauth2/issues/20))
+  ([969af10](https://github.com/udibo/oauth2/commit/969af103ff9713e843d81c1cce0c161212ca48d9))
+- **release:** give the dry run the npm credential too
+  ([#22](https://github.com/udibo/oauth2/issues/22))
+  ([7da21fd](https://github.com/udibo/oauth2/commit/7da21fd5b66c8c8ff5b5ab90c03c968dd35c8cdd))
+- **identity:** re-verify after a lost credential compare-and-set
+  ([#6](https://github.com/udibo/oauth2/issues/6))
+  ([c473b4d](https://github.com/udibo/oauth2/commit/c473b4dbe3ed86694daf07a63f3732d1aab52d01)),
+  closes [udibo/udibo#1167](https://github.com/udibo/udibo/issues/1167)
+- **release:** stop setup-node seeding a placeholder npm token
+  ([#21](https://github.com/udibo/oauth2/issues/21))
+  ([4b298da](https://github.com/udibo/oauth2/commit/4b298da6883d373cbf6ea0306528a192c71988e3))
+
+### Features
+
+- **server:** authorize token introspection
+  ([#4](https://github.com/udibo/oauth2/issues/4))
+  ([f4e82d1](https://github.com/udibo/oauth2/commit/f4e82d141334c28f1a7e79fa5e4fe0498c8ff128))
+- **release:** publish the npm artifact alongside the JSR one
+  ([#18](https://github.com/udibo/oauth2/issues/18))
+  ([569f151](https://github.com/udibo/oauth2/commit/569f151a6cec1f32bd43e928d3c25e6ce3d24384))
+- **hono:** redact query values in request logs
+  ([#5](https://github.com/udibo/oauth2/issues/5))
+  ([3e10d2e](https://github.com/udibo/oauth2/commit/3e10d2e23fe85167281a2859de4b8165ee3ee1b1))
+
+### BREAKING CHANGES
+
+- BFF forwardedParams rejects acr_values and max_age, case-insensitively. Pin
+  server-chosen requirements in extraParams.
+- Login ignores browser scope and prompt unless explicitly listed in
+  forwardedParams. Configure forwardedParams: ["prompt"] to retain
+  browser-triggered silent renewal or signup navigation. Scope forwarding
+  replaces the configured scope; an empty value falls back.
+
 # Changelog
 
 Release history for `@udibo/oauth2`. See

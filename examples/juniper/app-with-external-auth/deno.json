@@ -88,5 +88,7 @@
     "sanitizeOps": true,
     "sanitizeResources": true
   },
-  "exclude": ["public/build"]
+  "exclude": [
+    "public/build"
+  ]
 }
