@@ -534,6 +534,19 @@ describe("release workflow", () => {
     );
   });
 
+  it("gives both semantic-release invocations the same credentials", () => {
+    const npxSteps = release.steps.filter((step) => step.run?.includes("npx"));
+    assertEquals(npxSteps.length, 2);
+    for (const step of npxSteps) {
+      for (const name of ["GITHUB_TOKEN", "NPM_TOKEN"]) {
+        assert(
+          step.env?.[name] !== undefined,
+          `${name} is missing from a semantic-release step: the dry run resolves the same plugins as the real run, so a credential absent from either fails verifyConditions before anything publishes`,
+        );
+      }
+    }
+  });
+
   it("pins every npx package to an exact version", () => {
     const npxSteps = release.steps.filter((step) => step.run?.includes("npx"));
     assertEquals(npxSteps.length, 2);
