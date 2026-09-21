@@ -415,6 +415,15 @@ describe("release configuration", () => {
     assertEquals(pluginOptions("@semantic-release/npm").pkgRoot, "npm");
   });
 
+  it("passes the npm plugin no option it rejects before publishing", () => {
+    const npm = pluginOptions("@semantic-release/npm");
+    const tarballDir = npm.tarballDir;
+    assert(
+      tarballDir === undefined || typeof tarballDir === "string",
+      "tarballDir must be a string or absent; the plugin rejects any other value during verifyConditions, which fails the release run rather than this suite",
+    );
+  });
+
   it("builds the npm artifact at the released version before publishing it", () => {
     const buildAt = plugins.findIndex((plugin) =>
       Array.isArray(plugin) && plugin[0] === "@semantic-release/exec" &&
