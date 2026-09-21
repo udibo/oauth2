@@ -15,8 +15,7 @@
   ([7da21fd](https://github.com/udibo/oauth2/commit/7da21fd5b66c8c8ff5b5ab90c03c968dd35c8cdd))
 - **identity:** re-verify after a lost credential compare-and-set
   ([#6](https://github.com/udibo/oauth2/issues/6))
-  ([c473b4d](https://github.com/udibo/oauth2/commit/c473b4dbe3ed86694daf07a63f3732d1aab52d01)),
-  closes [udibo/udibo#1167](https://github.com/udibo/udibo/issues/1167)
+  ([c473b4d](https://github.com/udibo/oauth2/commit/c473b4dbe3ed86694daf07a63f3732d1aab52d01))
 - **release:** stop setup-node seeding a placeholder npm token
   ([#21](https://github.com/udibo/oauth2/issues/21))
   ([4b298da](https://github.com/udibo/oauth2/commit/4b298da6883d373cbf6ea0306528a192c71988e3))
