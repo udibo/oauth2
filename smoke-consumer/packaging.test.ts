@@ -511,6 +511,22 @@ describe("release workflow", () => {
     assert(buildAt < dryRunAt, "the npm artifact must be built first");
   });
 
+  it("never leaves npm authentication to setup-node's placeholder token", () => {
+    const configuresRegistry = release.steps.some((step) =>
+      step.uses?.startsWith("actions/setup-node@") &&
+      step.with?.["registry-url"] !== undefined
+    );
+    if (!configuresRegistry) return;
+    const suppliesToken = release.steps.some((step) =>
+      step.with?.["node-auth-token"] !== undefined ||
+      step.env?.NODE_AUTH_TOKEN !== undefined
+    );
+    assert(
+      suppliesToken,
+      "setup-node's registry-url writes an .npmrc reading ${NODE_AUTH_TOKEN} and points NPM_CONFIG_USERCONFIG at it; with no token supplied that resolves to a placeholder the registry rejects, and @semantic-release/npm reads it in preference to writing its own from NPM_TOKEN",
+    );
+  });
+
   it("runs an npm new enough for trusted publishing", () => {
     assert(
       release.steps.some((step) => step.run?.includes("npm install -g npm@")),

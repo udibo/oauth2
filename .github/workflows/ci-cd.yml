@@ -75,11 +75,16 @@ jobs:
         with:
           fetch-depth: 0
           ssh-key: ${{ secrets.DEPLOY_KEY }}
+      # No `registry-url` here on purpose. It makes setup-node write an .npmrc
+      # whose auth line reads ${NODE_AUTH_TOKEN} and point NPM_CONFIG_USERCONFIG
+      # at it; with no node-auth-token input that variable is a placeholder, and
+      # @semantic-release/npm reads that file instead of writing its own from
+      # NPM_TOKEN. npm then rejects the placeholder with a 401 on whoami, which
+      # reads as a bad credential rather than a workflow mistake.
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       # npm trusted publishing (OIDC) needs npm 11.5.1 or later; the version
       # bundled with a Node release is not guaranteed to be new enough.
       - name: Ensure npm supports trusted publishing
