@@ -106,9 +106,14 @@ jobs:
         env:
           npm_config_ignore_scripts: "true"
         run: deno task npm:build
+      # The dry run resolves the same plugins as the real run, so it needs the
+      # same credentials: @semantic-release/npm verifies registry auth in
+      # verifyConditions, which runs in both. Omitting it here fails the
+      # release before the publish step is ever reached.
       - name: Compute the next version (dry run, publishes nothing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: >-
           npx
           --package semantic-release@25.0.5
