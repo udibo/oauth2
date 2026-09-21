@@ -39,12 +39,11 @@ proves the Node claims in the README's runtime table.
    `udibo/oauth2` in the package settings. The release job uses GitHub OIDC; no
    JSR token is stored. See
    [JSR publishing](https://jsr.io/docs/publishing-packages).
-1. Own the `@udibo` scope on npm, then create a **granular access token** with
-   write access to it and store it as the `NPM_TOKEN` repository secret. This
-   token is needed only for the first release: npm cannot configure a trusted
-   publisher for a package that does not exist yet, so the bootstrap publish
-   authenticates with a token and later releases do not. See
-   [Trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+1. Own the `@udibo` scope on npm. Nothing else is needed now that the package
+   exists: releases authenticate by OIDC (see **npm trusted publishing** below).
+   A first release into a _new_ scope is the exception — npm cannot configure a
+   trusted publisher for a package that does not exist, so that one publish
+   needs a granular access token in an `NPM_TOKEN` secret, removed afterwards.
 1. Create the `DEPLOY_KEY` semantic-release pushes the release commit and tag
    with. GitHub does not issue one: a deploy key is an SSH keypair you generate,
    whose public half is registered on the repository and whose private half
@@ -77,32 +76,37 @@ proves the Node claims in the README's runtime table.
    are in place, and push permissions are ready.
 1. Merge a `feat:` commit to `main`. From the `0.0.0` baseline, this computes
    `0.1.0`; a `fix:` would compute `0.0.1`.
-1. After that release lands, follow
-   [Switch npm to trusted publishing](#switch-npm-to-trusted-publishing) so the
-   `NPM_TOKEN` secret stops being needed.
+1. For a first release into a new scope only: once it lands, configure the
+   trusted publisher and delete both the secret and any `NPM_TOKEN` line, so no
+   long-lived npm credential outlives the bootstrap.
 
 `scripts/verify-release.ts` rejects any first version other than `0.1.0` before
 release preparation, tags or publication. The workflow prints a semantic-release
 dry run first. Keep the release gate available as an off switch.
 
-## Switch npm to trusted publishing
+## npm trusted publishing
 
-Do this once, immediately after the first release lands on npm. It removes the
-only long-lived publishing credential this repository holds.
+**In effect since 0.1.0.** This repository stores no npm credential: the release
+job mints an OIDC token, `@semantic-release/npm` exchanges it with the registry
+for publish rights, and npm attaches a provenance attestation automatically —
+there is no `--provenance` flag to pass.
 
-1. On npmjs.com, open the `@udibo/oauth2` package settings. Under **Trusted
-   Publisher**, choose GitHub Actions and enter the organization `udibo`, the
-   repository `oauth2`, and the workflow filename `ci-cd.yml`. Leave the
-   environment field empty unless the release job is later moved into a named
-   GitHub environment.
-2. Delete the `NPM_TOKEN` line from the `Run semantic-release` step in
-   `.github/workflows/ci-cd.yml`, and delete the `NPM_TOKEN` repository secret.
-3. Confirm on the next release that the published version carries a provenance
-   attestation. Trusted publishing attaches one automatically — no
-   `--provenance` flag — so its absence means the publish fell back to a token.
+The trust relationship is configured on npmjs.com, under the package's **Trusted
+Publisher** settings: organization `udibo`, repository `oauth2`, workflow
+filename `ci-cd.yml`, environment empty. Moving the release job into a named
+GitHub environment means naming it there too, or the exchange stops matching.
 
-The release job already requests `id-token: write`, which is what lets the
-runner mint the OIDC token npm exchanges for publish rights.
+Two things follow from that, both enforced by
+`smoke-consumer/packaging.test.ts`:
+
+- The job needs `id-token: write`. Without it the runner cannot mint the token
+  and the publish has nothing to fall back on.
+- No `NPM_TOKEN` belongs in the workflow. A stored credential would silently
+  take precedence over the OIDC exchange, reintroducing the long-lived publish
+  secret it exists to remove.
+
+The exchange fails with `404 ... package not found` for a package that does not
+exist yet, which is why a first release into a new scope still needs a token.
 
 ## What the release does
 
