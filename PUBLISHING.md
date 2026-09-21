@@ -45,9 +45,29 @@ proves the Node claims in the README's runtime table.
    publisher for a package that does not exist yet, so the bootstrap publish
    authenticates with a token and later releases do not. See
    [Trusted publishing](https://docs.npmjs.com/trusted-publishers/).
-1. Configure a `DEPLOY_KEY` with push access for semantic-release, as in
-   Juniper. Ensure repository rules allow that identity to push the release
-   commit and version tag. Keep ordinary changes behind pull requests.
+1. Create the `DEPLOY_KEY` semantic-release pushes the release commit and tag
+   with. GitHub does not issue one: a deploy key is an SSH keypair you generate,
+   whose public half is registered on the repository and whose private half
+   becomes a secret.
+
+   ```sh
+   ssh-keygen -t ed25519 -N "" -C "semantic-release@udibo/oauth2" -f ./deploy_key
+   gh repo deploy-key add ./deploy_key.pub --repo udibo/oauth2 \
+     --title semantic-release --allow-write
+   gh secret set DEPLOY_KEY --repo udibo/oauth2 < ./deploy_key
+   shred -u ./deploy_key ./deploy_key.pub
+   ```
+
+   Leave the passphrase empty: `actions/checkout` cannot unlock an encrypted
+   key. Delete the local copies afterwards — the private half lives in the
+   repository secret, and replacing a lost key means generating a new pair.
+
+   The key is what lets the release push to a protected branch. `main`'s ruleset
+   requires a pull request and lists `DeployKey` as an always-bypass actor, so
+   semantic-release pushes as that identity while ordinary changes stay behind
+   pull requests. Without the bypass the release cannot push at all; with a
+   ruleset that requires no pull request, `GITHUB_TOKEN` would do and the key
+   would be redundant.
 1. Tag the initial package import `0.0.0` and push that tag. It is a version
    baseline, not a published package. semantic-release otherwise chooses `1.0.0`
    for a repository with no release tags, ignoring the version in
