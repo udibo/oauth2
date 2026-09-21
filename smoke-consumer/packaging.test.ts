@@ -411,11 +411,29 @@ describe("release configuration", () => {
     }
   });
 
-  it("does not require npm credentials to publish to JSR", () => {
-    assertFalse(
-      plugins.some((plugin) =>
-        Array.isArray(plugin) && plugin[0] === "@semantic-release/npm"
-      ),
+  it("publishes the artifact dnt builds, never the repository root", () => {
+    assertEquals(pluginOptions("@semantic-release/npm").pkgRoot, "npm");
+  });
+
+  it("builds the npm artifact at the released version before publishing it", () => {
+    const buildAt = plugins.findIndex((plugin) =>
+      Array.isArray(plugin) && plugin[0] === "@semantic-release/exec" &&
+      typeof (plugin[1] as { prepareCmd?: string }).prepareCmd === "string" &&
+      (plugin[1] as { prepareCmd: string }).prepareCmd.includes("npm:build")
+    );
+    assert(buildAt !== -1, "nothing builds the npm artifact during a release");
+    const publishAt = plugins.findIndex((plugin) =>
+      Array.isArray(plugin) && plugin[0] === "@semantic-release/npm"
+    );
+    assert(publishAt !== -1, "nothing publishes the npm artifact");
+    assert(
+      buildAt < publishAt,
+      "the build must precede the publish, or npm ships the previous version",
+    );
+    const build = (plugins[buildAt] as [string, { prepareCmd: string }])[1];
+    assert(
+      build.prepareCmd.includes("${nextRelease.version}"),
+      "the npm artifact must be stamped with the version being released",
     );
   });
 });
@@ -467,6 +485,28 @@ describe("release workflow", () => {
     assert(dryRun !== -1, "no dry run step");
     assert(publish !== -1, "no publish step");
     assert(dryRun < publish, "the dry run must come first");
+  });
+
+  it("verifies npm auth before semantic-release can push a tag", () => {
+    const buildAt = release.steps.findIndex((step) =>
+      step.run?.includes("npm:build")
+    );
+    const dryRunAt = release.steps.findIndex((step) =>
+      step.run?.includes("semantic-release --dry-run")
+    );
+    assert(
+      buildAt !== -1,
+      "npm/package.json must exist before semantic-release starts: @semantic-release/npm reads it during verifyConditions, which is what makes a bad credential fail before a release commit or tag is pushed",
+    );
+    assert(dryRunAt !== -1, "no dry run step");
+    assert(buildAt < dryRunAt, "the npm artifact must be built first");
+  });
+
+  it("runs an npm new enough for trusted publishing", () => {
+    assert(
+      release.steps.some((step) => step.run?.includes("npm install -g npm@")),
+      "trusted publishing needs npm 11.5.1 or later, which a Node release does not guarantee to bundle",
+    );
   });
 
   it("pins every npx package to an exact version", () => {

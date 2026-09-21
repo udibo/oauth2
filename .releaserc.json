@@ -80,6 +80,19 @@
       }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "deno task npm:build ${nextRelease.version}"
+      }
+    ],
+    [
+      "@semantic-release/npm",
+      {
+        "pkgRoot": "npm",
+        "tarballDir": false
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "assets": []
