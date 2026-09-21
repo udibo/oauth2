@@ -537,14 +537,27 @@ describe("release workflow", () => {
   it("gives both semantic-release invocations the same credentials", () => {
     const npxSteps = release.steps.filter((step) => step.run?.includes("npx"));
     assertEquals(npxSteps.length, 2);
-    for (const step of npxSteps) {
-      for (const name of ["GITHUB_TOKEN", "NPM_TOKEN"]) {
-        assert(
-          step.env?.[name] !== undefined,
-          `${name} is missing from a semantic-release step: the dry run resolves the same plugins as the real run, so a credential absent from either fails verifyConditions before anything publishes`,
-        );
-      }
-    }
+    const [dryRun, publish] = npxSteps.map((step) =>
+      Object.keys(step.env ?? {}).sort()
+    );
+    assertEquals(
+      dryRun,
+      publish,
+      "the dry run resolves the same plugins as the real run and verifies the same conditions, so a credential given to one and not the other fails verifyConditions before anything publishes",
+    );
+    assert(
+      dryRun.includes("GITHUB_TOKEN"),
+      "semantic-release authenticates to GitHub with GITHUB_TOKEN",
+    );
+  });
+
+  it("authenticates to npm by OIDC rather than a stored credential", () => {
+    const workflowText = readText(".github/workflows/ci-cd.yml");
+    assertFalse(
+      /^\s*NPM_TOKEN:/m.test(workflowText),
+      "@udibo/oauth2 publishes through npm trusted publishing; a stored npm credential here would be a long-lived publish secret the OIDC exchange exists to remove",
+    );
+    assertEquals(release.permissions?.["id-token"], "write");
   });
 
   it("pins every npx package to an exact version", () => {

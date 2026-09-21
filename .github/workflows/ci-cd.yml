@@ -106,14 +106,14 @@ jobs:
         env:
           npm_config_ignore_scripts: "true"
         run: deno task npm:build
-      # The dry run resolves the same plugins as the real run, so it needs the
-      # same credentials: @semantic-release/npm verifies registry auth in
-      # verifyConditions, which runs in both. Omitting it here fails the
-      # release before the publish step is ever reached.
+      # The dry run resolves the same plugins as the real run and verifies the
+      # same conditions, so both invocations need identical credentials.
+      # npm authentication is not among them: @semantic-release/npm exchanges
+      # this job's OIDC token with the registry, which is why no npm secret
+      # appears anywhere in this workflow.
       - name: Compute the next version (dry run, publishes nothing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: >-
           npx
           --package semantic-release@25.0.5
@@ -127,13 +127,6 @@ jobs:
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Bootstrap only. npm cannot configure a trusted publisher for a
-          # package that does not exist yet, so the first release authenticates
-          # with a granular token. Once @udibo/oauth2 is on the registry and the
-          # trusted publisher is configured, delete this line and the secret:
-          # OIDC then authenticates the publish and attaches provenance without
-          # a long-lived credential. PUBLISHING.md carries the cutover steps.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: >-
           npx
           --package semantic-release@25.0.5
