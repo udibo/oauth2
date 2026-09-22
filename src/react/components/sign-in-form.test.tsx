@@ -69,7 +69,7 @@ describe("SignInForm", () => {
     );
   });
 
-  it("disables the submit button while submitting", async () => {
+  it("marks the submit button aria-disabled, never disabled, while submitting", async () => {
     let resolve: (() => void) | undefined;
     const { container } = render(
       <SignInForm
@@ -83,11 +83,13 @@ describe("SignInForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals((button as HTMLButtonElement).disabled, true);
+    assertEquals(button.getAttribute("aria-disabled"), "true");
+    assertFalse(button.hasAttribute("disabled"));
     await act(async () => {
       resolve?.();
     });
-    assertEquals((button as HTMLButtonElement).disabled, false);
+    assertFalse(button.hasAttribute("aria-disabled"));
+    assertFalse(button.hasAttribute("disabled"));
   });
 
   it("renders social buttons from the socialProviders prop", () => {

@@ -1,4 +1,10 @@
-import { type ReactNode, type Ref, useEffect, useRef } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useRef,
+} from "react";
 
 import type { AuthFieldProps, AuthFormState } from "./use-auth-form.ts";
 import type {
@@ -85,7 +91,10 @@ export function AuthFormShell<V extends AuthFormValues>(props: {
   );
 }
 
-/** The actions row and its submit button, disabled while the form is in flight. */
+function ignoreActivation(event: MouseEvent<HTMLButtonElement>): void {
+  event.preventDefault();
+}
+
 export function SubmitButton(props: {
   isSubmitting: boolean;
   label: string;
@@ -97,7 +106,8 @@ export function SubmitButton(props: {
     <div data-oauth2-actions="" className={classNames.actions}>
       <button
         type="submit"
-        disabled={isSubmitting}
+        aria-disabled={isSubmitting ? true : undefined}
+        onClick={isSubmitting ? ignoreActivation : undefined}
         data-oauth2-submit=""
         className={classNames.submit}
       >
@@ -189,8 +199,8 @@ export function ErrorSummary(props: {
 /**
  * Moves keyboard focus to the first field that came back with an error after a
  * failed submit, so a screen-reader / keyboard user lands on the control to fix
- * (its label + error are read via `aria-describedby`) instead of being stranded
- * on the disabled submit button. No-ops on the initial render and when the form
+ * (its label + error are read via `aria-describedby`) instead of being left on
+ * the submit button. No-ops on the initial render and when the form
  * carries a form-level error ({@link ErrorSummary} owns that focus). Call it
  * once, unconditionally, from a form component built on {@link useAuthForm}.
  */

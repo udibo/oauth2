@@ -129,6 +129,7 @@ describe("useAuthForm", () => {
     });
 
     assertEquals(result.current.formError, "boom");
+    assertEquals(result.current.isSubmitting, false);
   });
 
   it("traps a throwing validate as a form error without calling onSubmit", async () => {

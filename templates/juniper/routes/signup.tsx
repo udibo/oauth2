@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Form, useNavigation } from "react-router";
 
 import type { AnyParams, RouteProps } from "@udibo/juniper";
@@ -18,6 +19,10 @@ export default function Signup({
 }: RouteProps<AnyParams, SignupLoaderData, SignupActionData>) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const submitLock = useRef(false);
+  useEffect(() => {
+    if (navigation.state === "idle") submitLock.current = false;
+  }, [navigation.state]);
   const returnTo = actionData?.returnTo ?? loaderData.returnTo;
 
   return (
@@ -27,7 +32,13 @@ export default function Signup({
       {actionData?.error && (
         <p role="alert" style={{ color: "crimson" }}>{actionData.error}</p>
       )}
-      <Form method="post">
+      <Form
+        method="post"
+        onSubmit={(event) => {
+          if (submitLock.current) event.preventDefault();
+          else submitLock.current = true;
+        }}
+      >
         <input type="hidden" name="return_to" value={returnTo} />
         <p>
           <label>
@@ -51,7 +62,7 @@ export default function Signup({
             />
           </label>
         </p>
-        <button type="submit" disabled={isSubmitting}>
+        <button type="submit" aria-disabled={isSubmitting || undefined}>
           {isSubmitting ? "Creating account…" : "Create account"}
         </button>
       </Form>
