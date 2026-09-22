@@ -24,6 +24,12 @@
  *   user / client / scope types. Suitable for tests, examples, and
  *   prototypes — never for production.
  *
+ * - **A fake Udibo tenant.** {@link createFakeTenant} answers a tenant's
+ *   protocol surface and its `/api/check` questions over `fetch`, with the
+ *   claims a real tenant issues — permissions, the organization picked at
+ *   sign-in, and resource grants — so an app built on a Udibo tenant can test
+ *   its own routes without running the identity service.
+ *
  * Nothing in this module is an OAuth2 primitive — only testing support.
  * Production code should never import from here.
  *
@@ -51,3 +57,17 @@ export {
   type MemoryAuthorizationServerHarness,
   type MemoryAuthorizationServerUserSeed,
 } from "./server.ts";
+
+export {
+  createFakeTenant,
+  type FakeTenant,
+  type FakeTenantClient,
+  type FakeTenantGrant,
+  type FakeTenantMembership,
+  type FakeTenantOptions,
+  type FakeTenantOrganization,
+  type FakeTenantSignIn,
+  type FakeTenantSubject,
+  type FakeTenantTokenRequest,
+  type FakeTenantUser,
+} from "./tenant.ts";

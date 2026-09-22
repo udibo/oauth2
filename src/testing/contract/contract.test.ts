@@ -36,6 +36,13 @@ import { runTokenFlowStoreContractTests } from "./token-flow-store.ts";
 import { runOtpStoreContractTests } from "./otp-store.ts";
 import { runRateLimitStoreContractTests } from "./rate-limit-store.ts";
 import { runLockoutStoreContractTests } from "./lockout-store.ts";
+import { runTenantContractTests } from "./tenant.ts";
+import { createFakeTenant } from "../tenant.ts";
+import { encodeBasicAuth } from "../../utils/basic-auth.ts";
+import {
+  generateCodeChallenge,
+  generateCodeVerifier,
+} from "../../utils/pkce.ts";
 
 runUserServiceContractTests<TestUser>({
   describeName: "MemoryUserService satisfies UserServiceInterface contract",
@@ -231,4 +238,82 @@ runRateLimitStoreContractTests({
 runLockoutStoreContractTests({
   describeName: "MemoryLockoutStore satisfies LockoutStore contract",
   makeStore: () => new MemoryLockoutStore(),
+});
+
+runTenantContractTests({
+  describeName: "createFakeTenant satisfies the Udibo tenant contract",
+  setup: async () => {
+    const client = { id: "contract-app", secret: "contract-secret" };
+    const redirectUri = "http://app.localhost/callback";
+    const server = Deno.serve(
+      { hostname: "127.0.0.1", port: 0, onListen() {} },
+      (request) => tenant.fetch(request),
+    );
+    const tenant = await createFakeTenant({
+      issuer: `http://127.0.0.1:${server.addr.port}`,
+    });
+    await tenant.addClient({ ...client, redirectUris: [redirectUri] });
+    return {
+      issuer: tenant.issuer,
+      client,
+      addUser: async (permissions) => {
+        const id = crypto.randomUUID();
+        await tenant.addUser({ id, username: id, permissions });
+        return id;
+      },
+      addOrganization: () => {
+        const id = crypto.randomUUID();
+        tenant.addOrganization({ id, slug: `org-${id}` });
+        return Promise.resolve(id);
+      },
+      addMember: (organizationId, userId, permissions) => {
+        tenant.addMember(organizationId, userId, { permissions });
+        return Promise.resolve();
+      },
+      removeMember: (organizationId, userId) => {
+        tenant.removeMember(organizationId, userId);
+        return Promise.resolve();
+      },
+      grant: (grant) => {
+        tenant.registerResourceType(grant.resource.type);
+        tenant.grant(grant);
+        return Promise.resolve();
+      },
+      signIn: async (userId, organizationId) => {
+        tenant.signInAs(userId, { organizationId });
+        const verifier = generateCodeVerifier();
+        const authorize = new URL("/api/oauth2/authorize", tenant.issuer);
+        authorize.search = new URLSearchParams({
+          response_type: "code",
+          client_id: client.id,
+          redirect_uri: redirectUri,
+          scope: "openid offline_access",
+          state: "contract",
+          code_challenge: await generateCodeChallenge(verifier),
+          code_challenge_method: "S256",
+        }).toString();
+        const redirect = await fetch(authorize, { redirect: "manual" });
+        await redirect.body?.cancel();
+        const code = new URL(redirect.headers.get("location")!).searchParams
+          .get("code")!;
+        const response = await fetch(
+          new URL("/api/oauth2/token", tenant.issuer),
+          {
+            method: "POST",
+            headers: {
+              authorization: encodeBasicAuth(client.id, client.secret),
+            },
+            body: new URLSearchParams({
+              grant_type: "authorization_code",
+              code,
+              redirect_uri: redirectUri,
+              code_verifier: verifier,
+            }),
+          },
+        );
+        return await response.json();
+      },
+      cleanup: () => server.shutdown(),
+    };
+  },
 });

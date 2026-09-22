@@ -17,6 +17,7 @@ client/reader constructor or run the
 | Helper                                                            | Purpose                                                               |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `createMemoryAuthorizationServer` from `/testing`                 | Run the real protocol implementation with isolated in-memory services |
+| `createFakeTenant` from `/testing`                                | Stand in for a Udibo tenant, served on a real socket                  |
 | `createAuthenticatedTestSession` from `/hono/bff/testing`         | Register an access token and create a corresponding BFF session       |
 | `createTestSession` from `/hono/bff/testing`                      | Seed a session for BFF session-endpoint tests                         |
 | `createMockBffClient`, `MockOAuth2Provider` from `/react/testing` | Render React behavior with controlled auth state                      |
@@ -61,6 +62,52 @@ a custom persistent session store, seed through that store's test setup. Also
 cover no session, insufficient scope, and a user trying to access another user's
 record. Keep the CSRF guard enabled in tests that claim to exercise browser
 credential handling.
+
+## An app built on a Udibo tenant
+
+An app that signs in against a Udibo tenant reads more than a token: the
+`permissions` claim, the organization the person picked at sign-in, and the
+tenant's answers to `POST /api/check`. `createFakeTenant` answers all of them
+with the shapes a tenant uses, so the app's own routes can be tested without the
+identity service. Serve it on a loopback port, point the app's issuer at that
+origin, and decide who signs in:
+
+```ts
+import { createFakeTenant } from "@udibo/oauth2/testing";
+
+const server = Deno.serve(
+  { hostname: "127.0.0.1", port: 0, onListen() {} },
+  (request) => tenant.fetch(request),
+);
+const tenant = await createFakeTenant({
+  issuer: `http://127.0.0.1:${server.addr.port}`,
+});
+
+await tenant.addClient({
+  id: "my-app",
+  secret: "test-secret",
+  redirectUris: ["http://localhost:8000/auth/callback"],
+});
+await tenant.addUser({ id: "ada", username: "ada" });
+tenant.addOrganization({ id: "org-acme", slug: "acme" });
+tenant.addMember("org-acme", "ada", { permissions: ["projects:archive"] });
+tenant.signInAs("ada", { organizationId: "org-acme" });
+
+await server.shutdown();
+```
+
+The next authorization request authenticates as whoever `signInAs` named, with
+no hosted page and no consent step; a credential keeps the organization it was
+issued in across refreshes, and stops answering for it once `removeMember` ends
+the membership. Register a resource type and add grants to exercise
+resource-level answers, or register the client with `accessTokenFormat: "jwt"`
+and an `audience` to test a resource server that validates locally against the
+tenant's JWKS. `issueAccessToken` mints a token directly, for an API test that
+does not need the browser flow.
+
+The fake answers what an app asks a tenant for, not everything a tenant does: it
+has no hosted pages, no management API, and no policy — no MFA, no lockout, no
+session limits. Test those against a real tenant.
 
 ## Persistent storage contracts
 
