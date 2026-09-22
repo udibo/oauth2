@@ -129,22 +129,6 @@ describe("createFakeTenant", () => {
     return await response.json();
   }
 
-  async function ask(
-    accessToken: string,
-    path: string,
-    body: unknown,
-  ): Promise<{ status: number; body: Record<string, unknown> }> {
-    const response = await fetch(url(path), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    return { status: response.status, body: await response.json() };
-  }
-
   it("advertises its endpoints on the issuer it was given", async () => {
     const metadata = await (await fetch(
       url("/.well-known/oauth-authorization-server"),
@@ -157,19 +141,6 @@ describe("createFakeTenant", () => {
     assertEquals(metadata.jwks_uri, url("/api/oauth2/jwks"));
   });
 
-  it("signs in the person it was told to, with their tenant-wide permissions", async () => {
-    const { access_token } = await signIn("ada");
-    const claims = await introspect(access_token);
-    assertEquals(claims.active, true);
-    assertEquals(claims.sub, "ada");
-    assertEquals(claims.username, "ada");
-    assertEquals(claims.permissions, ["documents:read"]);
-    assertFalse(
-      "org_id" in claims,
-      "a sign-in with no organization names none",
-    );
-  });
-
   it("adds the organization picked at sign-in, and only that one", async () => {
     const { access_token } = await signIn("ada", "org-acme");
     const claims = await introspect(access_token);
@@ -180,29 +151,6 @@ describe("createFakeTenant", () => {
       "documents:read",
       "notes:write",
     ]);
-  });
-
-  it("keeps a refreshed credential in the organization it was issued for", async () => {
-    const issued = await signIn("ada", "org-globex");
-    tenant.signInAs("ada", { organizationId: "org-acme" });
-    const refreshed = await token({
-      grant_type: "refresh_token",
-      refresh_token: issued.refresh_token!,
-    });
-    assertEquals(
-      (await introspect(refreshed.access_token)).org_id,
-      "org-globex",
-    );
-  });
-
-  it("stops answering for an organization once the membership ends", async () => {
-    await tenant.addUser({ id: "cy", username: "cy" });
-    tenant.addMember("org-acme", "cy", { permissions: ["notes:write"] });
-    const { access_token } = await signIn("cy", "org-acme");
-    tenant.removeMember("org-acme", "cy");
-    const claims = await introspect(access_token);
-    assertFalse("org_id" in claims);
-    assertEquals(claims.permissions, []);
   });
 
   it("issues no code when nobody is signed in", async () => {
@@ -254,114 +202,5 @@ describe("createFakeTenant", () => {
     assertEquals(claims.aud, MCP);
     assertEquals(claims.org_id, "org-acme");
     assertEquals(claims.permissions.sort(), ["documents:read", "notes:write"]);
-  });
-
-  describe("POST /api/check", () => {
-    it("answers the credential's own scope when no resource is named", async () => {
-      const { access_token } = await signIn("ada", "org-acme");
-      const answer = await ask(access_token, "/api/check", {
-        permissions: ["notes:write", "notes:delete"],
-      });
-      assertEquals(answer.status, 200);
-      assertEquals(answer.body, {
-        subject: "ada",
-        resource: { type: "organization", id: "org-acme" },
-        results: { "notes:write": true, "notes:delete": false },
-      });
-    });
-
-    it("answers another organization the caller belongs to when named", async () => {
-      const { access_token } = await signIn("ada", "org-acme");
-      const answer = await ask(access_token, "/api/check", {
-        permissions: "notes:delete",
-        resource: { type: "organization", id: "org-globex" },
-      });
-      assertEquals(answer.body.results, { "notes:delete": true });
-    });
-
-    it("refuses an organization the caller does not belong to as not found", async () => {
-      const { access_token } = await signIn("bob");
-      const answer = await ask(access_token, "/api/check", {
-        permissions: "notes:delete",
-        resource: { type: "organization", id: "org-globex" },
-      });
-      assertEquals(answer.status, 404);
-    });
-
-    it("answers a resource from grants to the person or to an organization they belong to", async () => {
-      const { access_token } = await signIn("bob");
-      const direct = await ask(access_token, "/api/check", {
-        permissions: ["documents:read", "documents:write"],
-        resource: { type: "document", id: "doc-1" },
-      });
-      assertEquals(direct.body.results, {
-        "documents:read": true,
-        "documents:write": false,
-      });
-      const viaOrganization = await ask(access_token, "/api/check", {
-        permissions: ["documents:write"],
-        resource: { type: "document", id: "doc-2" },
-      });
-      assertEquals(viaOrganization.body.results, { "documents:write": true });
-    });
-
-    it("does not add organization permissions to a resource answer", async () => {
-      const { access_token } = await signIn("ada", "org-acme");
-      const answer = await ask(access_token, "/api/check", {
-        permissions: ["notes:write"],
-        resource: { type: "document", id: "doc-1" },
-      });
-      assertEquals(answer.body.results, { "notes:write": false });
-    });
-
-    it("refuses an unregistered resource type rather than guessing", async () => {
-      const { access_token } = await signIn("ada");
-      const answer = await ask(access_token, "/api/check", {
-        permissions: ["documents:read"],
-        resource: { type: "invoice", id: "inv-1" },
-      });
-      assertEquals(answer.status, 400);
-    });
-
-    it("refuses a request with no bearer token", async () => {
-      const response = await fetch(url("/api/check"), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ permissions: ["documents:read"] }),
-      });
-      await response.body?.cancel();
-      assertEquals(response.status, 401);
-    });
-  });
-
-  describe("POST /api/check/batch", () => {
-    it("answers each candidate id as /api/check would", async () => {
-      const { access_token } = await signIn("bob");
-      const answer = await ask(access_token, "/api/check/batch", {
-        permissions: ["documents:read"],
-        resource: { type: "document", ids: ["doc-1", "doc-3"] },
-      });
-      assertEquals(answer.status, 200);
-      assertEquals(answer.body, {
-        subject: "bob",
-        resource: { type: "document" },
-        results: {
-          "doc-1": { "documents:read": true },
-          "doc-3": { "documents:read": false },
-        },
-      });
-    });
-
-    it("refuses more than a hundred candidates", async () => {
-      const { access_token } = await signIn("bob");
-      const answer = await ask(access_token, "/api/check/batch", {
-        permissions: ["documents:read"],
-        resource: {
-          type: "document",
-          ids: Array.from({ length: 101 }, (_, i) => `doc-${i}`),
-        },
-      });
-      assertEquals(answer.status, 400);
-    });
   });
 });

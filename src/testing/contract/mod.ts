@@ -71,3 +71,9 @@ export {
   type LockoutStoreContractOptions,
   runLockoutStoreContractTests,
 } from "./lockout-store.ts";
+export {
+  runTenantContractTests,
+  type TenantContractFixture,
+  type TenantContractOptions,
+  type TenantContractTokens,
+} from "./tenant.ts";

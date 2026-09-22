@@ -239,14 +239,13 @@ function asPermissions(value: unknown): string[] | undefined {
  *
  * @example
  * ```ts
- * import { createFakeTenant, type FakeTenant } from "@udibo/oauth2/testing";
+ * import { createFakeTenant } from "@udibo/oauth2/testing";
  *
- * let tenant: FakeTenant | undefined;
  * const server = Deno.serve(
  *   { hostname: "127.0.0.1", port: 0, onListen() {} },
- *   (request) => tenant!.fetch(request),
+ *   (request) => tenant.fetch(request),
  * );
- * tenant = await createFakeTenant({
+ * const tenant = await createFakeTenant({
  *   issuer: `http://127.0.0.1:${server.addr.port}`,
  * });
  * await tenant.addUser({ id: "user-1", username: "ada" });
