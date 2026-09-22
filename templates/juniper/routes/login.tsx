@@ -27,7 +27,12 @@ export default function Login({
       {actionData?.error && (
         <p role="alert" style={{ color: "crimson" }}>{actionData.error}</p>
       )}
-      <Form method="post">
+      <Form
+        method="post"
+        onSubmit={(event) => {
+          if (isSubmitting) event.preventDefault();
+        }}
+      >
         <input type="hidden" name="return_to" value={returnTo} />
         <p>
           <label>
@@ -45,7 +50,7 @@ export default function Login({
             />
           </label>
         </p>
-        <button type="submit" disabled={isSubmitting}>
+        <button type="submit" aria-disabled={isSubmitting || undefined}>
           {isSubmitting ? "Signing in…" : "Sign in"}
         </button>
       </Form>

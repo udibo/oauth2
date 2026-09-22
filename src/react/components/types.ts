@@ -126,7 +126,10 @@ export interface AuthFormClassNames extends BaseClassNames {
   hint?: string;
   /** The actions row wrapping the submit button (`data-oauth2-actions`). */
   actions?: string;
-  /** The submit `<button>` (`data-oauth2-submit`). */
+  /**
+   * The submit `<button>` (`data-oauth2-submit`). It carries
+   * `aria-disabled="true"` while a submit is in flight.
+   */
   submit?: string;
   /**
    * A secondary action below the submit button (`data-oauth2-secondary`) — the

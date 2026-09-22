@@ -88,7 +88,11 @@ export interface AuthFormState<V extends AuthFormValues> {
   formError: string | null;
   /** Lifecycle status. */
   status: AuthFormStatus;
-  /** `true` while a submit is in flight (`status === "submitting"`). */
+  /**
+   * `true` while a submit is in flight (`status === "submitting"`). Mark the
+   * submit button `aria-disabled` with it, not `disabled`: disabling the
+   * focused button drops keyboard focus to `<body>`.
+   */
   isSubmitting: boolean;
   /** `true` once a submit has completed successfully. */
   succeeded: boolean;
@@ -100,7 +104,10 @@ export interface AuthFormState<V extends AuthFormValues> {
   setValues(next: Partial<V>): void;
   /** Reset values to `initialValues` and clear all errors/status. */
   reset(): void;
-  /** Submit handler for a `<form onSubmit>` (calls `preventDefault`). */
+  /**
+   * Submit handler for a `<form onSubmit>`. It always calls `preventDefault`,
+   * and a submit that arrives while one is in flight is ignored.
+   */
   handleSubmit(event?: { preventDefault(): void }): Promise<void>;
   /** Build the props to spread onto a field's `<input>`. */
   getFieldProps<K extends keyof V & string>(name: K): AuthFieldProps;
@@ -127,7 +134,9 @@ export interface AuthFormState<V extends AuthFormValues> {
  *     <input {...form.getFieldProps("identifier")} />
  *     <input {...form.getFieldProps("password")} type="password" />
  *     {form.formError ? <p role="alert">{form.formError}</p> : null}
- *     <button type="submit" disabled={form.isSubmitting}>Sign in</button>
+ *     <button type="submit" aria-disabled={form.isSubmitting || undefined}>
+ *       Sign in
+ *     </button>
  *   </form>
  * );
  * ```
