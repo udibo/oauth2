@@ -1,3 +1,11 @@
+# [0.2.0](https://github.com/udibo/oauth2/compare/0.1.0...0.2.0) (2026-09-22)
+
+### Features
+
+- **testing:** add a fake Udibo tenant for testing apps built on one
+  ([#26](https://github.com/udibo/oauth2/issues/26))
+  ([4e435c4](https://github.com/udibo/oauth2/commit/4e435c4f8c5038641fd439d677e83144b855bc7d))
+
 # [0.1.0](https://github.com/udibo/oauth2/compare/0.0.0...0.1.0) (2026-09-21)
 
 - feat!: preserve authentication event context
