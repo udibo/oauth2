@@ -1,3 +1,11 @@
+# [0.3.0](https://github.com/udibo/oauth2/compare/0.2.0...0.3.0) (2026-09-22)
+
+### Features
+
+- **testing:** serve the caller's memberships from the fake tenant
+  ([#27](https://github.com/udibo/oauth2/issues/27))
+  ([3932416](https://github.com/udibo/oauth2/commit/393241615bc08e2ea683fd308df8db7e0095d482))
+
 # [0.2.0](https://github.com/udibo/oauth2/compare/0.1.0...0.2.0) (2026-09-22)
 
 ### Features

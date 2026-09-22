@@ -1,6 +1,6 @@
 {
   "name": "@udibo/oauth2",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A flexible OAuth2 toolkit: framework-agnostic authorization & resource servers, a typed client, Hono adapters (including a backend-for-frontend), and React bindings.",
   "license": "MIT",
   "exports": {
