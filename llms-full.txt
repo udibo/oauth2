@@ -2878,11 +2878,11 @@ credential handling.
 ## An app built on a Udibo tenant
 
 An app that signs in against a Udibo tenant reads more than a token: the
-`permissions` claim, the organization the person picked at sign-in, and the
-tenant's answers to `POST /api/check`. `createFakeTenant` answers all of them
-with the shapes a tenant uses, so the app's own routes can be tested without the
-identity service. Serve it on a loopback port, point the app's issuer at that
-origin, and decide who signs in:
+`permissions` claim, the organization the person picked at sign-in, the caller's
+`GET /api/memberships`, and the tenant's answers to `POST /api/check`.
+`createFakeTenant` answers all of them with the shapes a tenant uses, so the
+app's own routes can be tested without the identity service. Serve it on a
+loopback port, point the app's issuer at that origin, and decide who signs in:
 
 ```ts
 import { createFakeTenant } from "@udibo/oauth2/testing";
@@ -2918,8 +2918,9 @@ tenant's JWKS. `issueAccessToken` mints a token directly, for an API test that
 does not need the browser flow.
 
 The fake answers what an app asks a tenant for, not everything a tenant does: it
-has no hosted pages, no management API, and no policy — no MFA, no lockout, no
-session limits. Test those against a real tenant.
+has no hosted pages, no organization or account API, no management API, and no
+policy — no MFA, no lockout, no session limits. Test those against a real
+tenant.
 
 ## Persistent storage contracts
 
