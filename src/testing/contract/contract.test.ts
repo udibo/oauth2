@@ -267,7 +267,10 @@ runTenantContractTests({
         return Promise.resolve(id);
       },
       addMember: (organizationId, userId, permissions) => {
-        tenant.addMember(organizationId, userId, { permissions });
+        tenant.addMember(organizationId, userId, {
+          roles: ["member"],
+          permissions,
+        });
         return Promise.resolve();
       },
       removeMember: (organizationId, userId) => {

@@ -1,7 +1,8 @@
 /**
  * Contract test suite for a Udibo tenant's authorization answers: what
- * introspection reports about a signed-in person, and what `POST /api/check`
- * and `POST /api/check/batch` answer.
+ * introspection reports about a signed-in person, what `GET /api/memberships`
+ * lists for them, and what `POST /api/check` and `POST /api/check/batch`
+ * answer.
  *
  * It runs against `createFakeTenant` from `@udibo/oauth2/testing` and against the
  * real identity service in Udibo's own repository, so the fake an app tests
@@ -54,7 +55,10 @@ export interface TenantContractFixture {
   addUser(permissions: string[]): Promise<string>;
   /** Adds an organization and returns its id. */
   addOrganization(): Promise<string>;
-  /** Makes a person a member holding `permissions` inside that organization. */
+  /**
+   * Makes a person a `member` of an organization, holding `permissions`
+   * inside it.
+   */
   addMember(
     organizationId: string,
     userId: string,
@@ -248,6 +252,42 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const claims = await introspect(access_token);
         assertFalse(claims.org_id);
         assertEquals(sorted(claims.permissions), []);
+      });
+    });
+
+    describe("GET /api/memberships", () => {
+      it("lists the organizations the caller belongs to, and no others", async () => {
+        const { access_token } = await tenant.signIn(people.member);
+        const response = await send(
+          new URL("/api/memberships", tenant.issuer),
+          { headers: { authorization: `Bearer ${access_token}` } },
+        );
+        assertEquals(response.status, 200);
+        const body = await response.json() as {
+          memberships: {
+            org_id: string;
+            org_slug: string;
+            name: string;
+            roles: string[];
+          }[];
+          cursor: string | null;
+        };
+        assertEquals(
+          body.memberships.map((membership) => membership.org_id).sort(),
+          [organizations.home, organizations.other].sort(),
+        );
+        for (const membership of body.memberships) {
+          assertEquals(membership.roles, ["member"]);
+          assert(membership.org_slug, "every membership names its slug");
+          assert(membership.name, "every membership names its organization");
+        }
+        assertEquals(body.cursor, null);
+      });
+
+      it("refuses a caller with no bearer token", async () => {
+        const response = await send(new URL("/api/memberships", tenant.issuer));
+        await response.body?.cancel();
+        assertEquals(response.status, 401);
       });
     });
 

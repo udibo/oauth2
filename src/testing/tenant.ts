@@ -53,11 +53,16 @@ export interface FakeTenantOrganization {
   id: string;
   /** The handle `org_slug` carries. Never an authorization key. */
   slug: string;
+  /** The display name `/api/memberships` reports. Defaults to the slug. */
+  name?: string;
 }
 
 /** A person's place in one organization. */
 export interface FakeTenantMembership {
-  /** The role slugs `org_roles` reports. */
+  /**
+   * The membership's roles, as `org_roles` and `/api/memberships` report
+   * them — `member`, `admin` or `owner` on a real tenant.
+   */
   roles?: string[];
   /** Permissions held inside this organization only. */
   permissions?: string[];
@@ -120,9 +125,10 @@ export interface FakeTenantOptions {
 /**
  * A stand-in for a Udibo tenant, for testing an app that signs in against one
  * without running the identity service. It answers the tenant's protocol
- * surface — discovery, authorize, token, introspection, UserInfo, JWKS — and
- * the two authorization questions, `POST /api/check` and
- * `POST /api/check/batch`, with the same shapes a real tenant uses.
+ * surface — discovery, authorize, token, introspection, UserInfo, JWKS — the
+ * caller's own `GET /api/memberships`, and the two authorization questions,
+ * `POST /api/check` and `POST /api/check/batch`, with the same shapes a real
+ * tenant uses.
  *
  * Nothing here is interactive: {@linkcode signInAs} decides who the next
  * authorization request authenticates, and there is no consent step. Serve
@@ -532,6 +538,22 @@ export async function createFakeTenant(
     return organization.id;
   };
 
+  const memberships = async (request: Request): Promise<Response> => {
+    const caller = await authenticated(request);
+    if (caller instanceof Response) return caller;
+    return Response.json({
+      memberships: [...organizations.values()]
+        .filter((organization) => organization.members.has(caller.user.id))
+        .map((organization) => ({
+          org_id: organization.id,
+          org_slug: organization.slug,
+          name: organization.name ?? organization.slug,
+          roles: organization.members.get(caller.user.id)!.roles ?? [],
+        })),
+      cursor: null,
+    });
+  };
+
   const authorize = async (request: Request): Promise<Response> => {
     const chosen = signedIn;
     const requested = new URL(request.url).searchParams.get("organization");
@@ -594,6 +616,7 @@ export async function createFakeTenant(
     [`GET ${PATHS.userinfo}`]: (r) => server.handleUserInfoRequest(r),
     [`POST ${PATHS.userinfo}`]: (r) => server.handleUserInfoRequest(r),
     [`GET ${PATHS.jwks}`]: (r) => server.handleJwksRequest(r),
+    "GET /api/memberships": memberships,
     "POST /api/check": check,
     "POST /api/check/batch": checkBatch,
   };
