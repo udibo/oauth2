@@ -1,3 +1,16 @@
+# [0.4.0](https://github.com/udibo/oauth2/compare/0.3.1...0.4.0) (2026-09-22)
+
+- fix(react)!: keep focus on pending submit buttons
+  ([#29](https://github.com/udibo/oauth2/issues/29))
+  ([c036820](https://github.com/udibo/oauth2/commit/c036820af059dafdbac228af589cf83826d7bfe2))
+
+### BREAKING CHANGES
+
+- a pending submit button carries aria-disabled="true" instead of disabled and
+  no longer matches :disabled; style [data-oauth2-submit][aria-disabled="true"].
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
 ## [0.3.1](https://github.com/udibo/oauth2/compare/0.3.0...0.3.1) (2026-09-22)
 
 # [0.3.0](https://github.com/udibo/oauth2/compare/0.2.0...0.3.0) (2026-09-22)
