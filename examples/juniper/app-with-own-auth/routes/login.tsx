@@ -14,6 +14,7 @@
  * @module
  */
 
+import { useEffect, useRef } from "react";
 import { Form, useNavigation } from "react-router";
 
 import type { AnyParams, RouteProps } from "@udibo/juniper";
@@ -34,6 +35,10 @@ export default function Login({
 }: RouteProps<AnyParams, LoginLoaderData, LoginActionData>) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const submitLock = useRef(false);
+  useEffect(() => {
+    if (navigation.state === "idle") submitLock.current = false;
+  }, [navigation.state]);
   const returnTo = actionData?.returnTo ?? loaderData.returnTo;
 
   return (
@@ -46,7 +51,8 @@ export default function Login({
       <Form
         method="post"
         onSubmit={(event) => {
-          if (isSubmitting) event.preventDefault();
+          if (submitLock.current) event.preventDefault();
+          else submitLock.current = true;
         }}
       >
         <input type="hidden" name="return_to" value={returnTo} />

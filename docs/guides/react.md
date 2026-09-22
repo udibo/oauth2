@@ -106,7 +106,8 @@ carries `aria-disabled="true"` instead of `disabled`, so it keeps keyboard
 focus; repeat clicks, Enter, and Space are ignored until the submit settles.
 Style the pending state with `[data-oauth2-submit][aria-disabled="true"]`, not
 `:disabled`. Custom markup built on `useAuthForm` gets the same guard from
-`handleSubmit`; mark its button with `aria-disabled={form.isSubmitting}`.
+`handleSubmit`; mark its button with
+`aria-disabled={form.isSubmitting || undefined}`.
 
 For full markup control, use `useAuthForm` or a component's render-prop
 children. Keep labels, error associations, focus behavior, and autocomplete

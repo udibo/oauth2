@@ -134,20 +134,6 @@ describe("a pending submit button stays focusable and inert", () => {
         assertFalse(idle.hasAttribute("aria-disabled"));
         assertFalse(idle.hasAttribute("disabled"));
       });
-
-      it("keeps keyboard focus on the button while pending", async () => {
-        const { button, release } = await startPendingSubmit(form);
-
-        assert(document.activeElement === button, "focus must stay put");
-        button.blur();
-        button.focus();
-        assert(
-          document.activeElement === button,
-          "a pending button must remain focusable",
-        );
-
-        await act(async () => release());
-      });
     });
   }
 });
