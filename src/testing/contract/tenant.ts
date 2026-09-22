@@ -45,6 +45,11 @@ export interface TenantContractFixture {
    * refreshes with. It must be allowed the `refresh_token` grant.
    */
   client: { id: string; secret: string };
+  /**
+   * How the suite reaches the tenant. Defaults to the global `fetch`; supply
+   * one when the tenant's host resolves only through a proxy.
+   */
+  fetch?: typeof fetch;
   /** Adds a person holding `permissions` tenant-wide, and returns their id. */
   addUser(permissions: string[]): Promise<string>;
   /** Adds an organization and returns its id. */
@@ -67,8 +72,9 @@ export interface TenantContractFixture {
     permissions: string[];
   }): Promise<void>;
   /**
-   * Signs the person in through the authorization-code flow, picking the
-   * organization when one is named, and returns the tokens it issued.
+   * Signs the person in through the authorization-code flow and returns the
+   * tokens it issued. With an organization named, the credential is issued in
+   * it; with none, the sign-in picks nothing, leaving the tenant to decide.
    */
   signIn(
     userId: string,
@@ -102,22 +108,26 @@ export function runTenantContractTests(options: TenantContractOptions): void {
   describe(options.describeName ?? "Udibo tenant contract", () => {
     let tenant: TenantContractFixture;
     let metadata: { token_endpoint: string; introspection_endpoint: string };
-    const people: Record<"member" | "outsider" | "leaver", string> = {
+    let send: typeof fetch;
+    const people: Record<"member" | "outsider" | "leaver" | "solo", string> = {
       member: "",
       outsider: "",
       leaver: "",
+      solo: "",
     };
     const organizations = { home: "", other: "", unjoined: "" };
 
     beforeAll(async () => {
       tenant = await options.setup();
-      const response = await fetch(
+      send = tenant.fetch ?? fetch;
+      const response = await send(
         new URL("/.well-known/oauth-authorization-server", tenant.issuer),
       );
       metadata = await response.json();
       people.member = await tenant.addUser(["contract:tenant"]);
       people.outsider = await tenant.addUser([]);
       people.leaver = await tenant.addUser([]);
+      people.solo = await tenant.addUser([]);
       organizations.home = await tenant.addOrganization();
       organizations.other = await tenant.addOrganization();
       organizations.unjoined = await tenant.addOrganization();
@@ -130,6 +140,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       await tenant.addMember(organizations.home, people.outsider, []);
       await tenant.addMember(organizations.home, people.leaver, [
         "contract:home",
+      ]);
+      await tenant.addMember(organizations.other, people.solo, [
+        "contract:other",
       ]);
       await tenant.grant({
         resource: { type: "contract_document", id: "direct" },
@@ -151,7 +164,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       encodeBasicAuth(tenant.client.id, tenant.client.secret);
 
     async function introspect(accessToken: string): Promise<Introspection> {
-      const response = await fetch(metadata.introspection_endpoint, {
+      const response = await send(metadata.introspection_endpoint, {
         method: "POST",
         headers: { authorization: clientAuth() },
         body: new URLSearchParams({ token: accessToken }),
@@ -165,7 +178,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       path: string,
       body: unknown,
     ): Promise<{ status: number; body: Record<string, unknown> }> {
-      const response = await fetch(new URL(path, tenant.issuer), {
+      const response = await send(new URL(path, tenant.issuer), {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -189,6 +202,13 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         assertFalse(claims.org_id, "a sign-in with no organization names none");
       });
 
+      it("picks a person's only organization when the sign-in names none", async () => {
+        const { access_token } = await tenant.signIn(people.solo);
+        const claims = await introspect(access_token);
+        assertEquals(claims.org_id, organizations.other);
+        assertEquals(sorted(claims.permissions), ["contract:other"]);
+      });
+
       it("adds the picked organization and its permissions, and no other's", async () => {
         const { access_token } = await tenant.signIn(
           people.member,
@@ -205,7 +225,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       it("keeps a refreshed credential in the organization it was issued for", async () => {
         const issued = await tenant.signIn(people.member, organizations.other);
         await tenant.signIn(people.member, organizations.home);
-        const response = await fetch(metadata.token_endpoint, {
+        const response = await send(metadata.token_endpoint, {
           method: "POST",
           headers: { authorization: clientAuth() },
           body: new URLSearchParams({
@@ -277,11 +297,24 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         assertEquals(answer.body.results, { "contract:other": true });
       });
 
-      it("answers an organization the caller does not belong to as not found", async () => {
+      it("answers an organization the caller does not belong to from tenant-wide permissions alone", async () => {
         const { access_token } = await tenant.signIn(people.member);
         const answer = await ask(access_token, "/api/check", {
-          permissions: ["contract:other"],
+          permissions: ["contract:other", "contract:tenant"],
           resource: { type: "organization", id: organizations.unjoined },
+        });
+        assertEquals(answer.status, 200);
+        assertEquals(answer.body.results, {
+          "contract:other": false,
+          "contract:tenant": true,
+        });
+      });
+
+      it("answers an organization that does not exist as not found", async () => {
+        const { access_token } = await tenant.signIn(people.member);
+        const answer = await ask(access_token, "/api/check", {
+          permissions: ["contract:tenant"],
+          resource: { type: "organization", id: crypto.randomUUID() },
         });
         assertEquals(answer.status, 404);
       });
@@ -329,7 +362,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       });
 
       it("refuses a caller with no bearer token", async () => {
-        const response = await fetch(new URL("/api/check", tenant.issuer), {
+        const response = await send(new URL("/api/check", tenant.issuer), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ permissions: ["contract:tenant"] }),

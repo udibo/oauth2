@@ -153,6 +153,31 @@ describe("createFakeTenant", () => {
     ]);
   });
 
+  async function authorizeWith(
+    params: Record<string, string>,
+  ): Promise<URL> {
+    const authorize = new URL(url("/api/oauth2/authorize"));
+    authorize.search = new URLSearchParams({
+      response_type: "code",
+      client_id: APP.id,
+      redirect_uri: REDIRECT,
+      state: "s",
+      code_challenge: await generateCodeChallenge(generateCodeVerifier()),
+      code_challenge_method: "S256",
+      ...params,
+    }).toString();
+    const response = await fetch(authorize, { redirect: "manual" });
+    await response.body?.cancel();
+    return new URL(response.headers.get("location")!);
+  }
+
+  it("refuses an organization parameter naming one the person has not joined", async () => {
+    tenant.signInAs("bob");
+    const callback = await authorizeWith({ organization: "globex" });
+    assertEquals(callback.searchParams.get("error"), "invalid_request");
+    assertFalse(callback.searchParams.has("code"));
+  });
+
   it("issues no code when nobody is signed in", async () => {
     tenant.signInAs(null);
     const authorize = new URL(url("/api/oauth2/authorize"));

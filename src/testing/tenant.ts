@@ -9,6 +9,7 @@ import {
   StaticSigningKeyProvider,
 } from "../server/signing-keys.ts";
 import { BasicScope } from "../models/scope.ts";
+import { InvalidRequestError } from "../errors.ts";
 
 import {
   MemoryAuthorizationCodeService,
@@ -82,7 +83,11 @@ export interface FakeTenantSignIn {
   /**
    * The organization the person picks while signing in. Tokens issued from
    * that sign-in carry its `org_id`, `org_slug` and `org_roles`, and its
-   * permissions join theirs. Omit for a sign-in with no organization.
+   * permissions join theirs. Omit it and a person in exactly one organization
+   * gets that one, as on a real tenant; a person in several gets none. An
+   * `organization` parameter on the authorization request, by id or slug,
+   * overrides both for that credential, and is refused with
+   * `invalid_request` when the person is not a member.
    */
   organizationId?: string;
 }
@@ -93,7 +98,10 @@ export interface FakeTenantTokenRequest {
   clientId: string;
   /** The person the token is for. */
   userId: string;
-  /** The organization the token answers for. Omit for none. */
+  /**
+   * The organization the token answers for. Omit it and a person in exactly
+   * one organization gets that one; a person in several gets none.
+   */
   organizationId?: string;
   /** The granted scope. Defaults to `openid`. */
   scope?: string;
@@ -450,7 +458,7 @@ export async function createFakeTenant(
       return problem(400, "resource is invalid");
     }
     if (resource.type === "organization") {
-      if (!membershipOf(resource.id, caller.user.id)) {
+      if (!organizations.has(resource.id)) {
         return problem(404, "Organization not found");
       }
       return Response.json({
@@ -508,18 +516,43 @@ export async function createFakeTenant(
   const signInOfCode = new Map<string, SignIn>();
   const signInOfRefreshToken = new Map<string, SignIn>();
 
+  const soleOrganizationOf = (userId: string) => {
+    const joined = [...organizations.values()].filter((organization) =>
+      organization.members.has(userId)
+    );
+    return joined.length === 1 ? joined[0].id : undefined;
+  };
+
+  const requestedOrganization = (requested: string, userId: string) => {
+    const organization = organizations.get(requested) ??
+      [...organizations.values()].find((o) => o.slug === requested);
+    if (!organization?.members.has(userId)) {
+      throw new InvalidRequestError("organization is not available");
+    }
+    return organization.id;
+  };
+
   const authorize = async (request: Request): Promise<Response> => {
     const chosen = signedIn;
+    const requested = new URL(request.url).searchParams.get("organization");
+    let issued: SignIn | undefined;
     const response = await server.handleAuthorizeRequest(
       request,
       () => {
         const user = chosen ? users.get(chosen.userId) : undefined;
-        return Promise.resolve(user ? { user } : null);
+        if (!user) return Promise.resolve(null);
+        issued = {
+          userId: user.id,
+          organizationId: requested
+            ? requestedOrganization(requested, user.id)
+            : chosen?.organizationId ?? soleOrganizationOf(user.id),
+        };
+        return Promise.resolve({ user });
       },
     );
     const location = response.headers.get("location");
     const code = location ? new URL(location).searchParams.get("code") : null;
-    if (code && chosen) signInOfCode.set(code, chosen);
+    if (code && issued) signInOfCode.set(code, issued);
     return response;
   };
 
@@ -625,7 +658,7 @@ export async function createFakeTenant(
       const scope = new BasicScope(request.scope ?? "openid");
       return await withPendingOrganization(
         user.id,
-        request.organizationId,
+        request.organizationId ?? soleOrganizationOf(user.id),
         async () => {
           const accessToken = await tokenService.generateAccessToken(
             client,
