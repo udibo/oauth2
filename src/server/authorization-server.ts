@@ -1102,9 +1102,10 @@ export class AuthorizationServer<
    * signed by a key since rotated out of signing yields no subject — and its
    * expiry is ignored: by the time anyone logs out the id_token naming their
    * session has usually expired, and it is a hint, not authority. `client_id`,
-   * when sent, names the client ahead of the hint's audience; the two are not
-   * compared. `state` rides along only to a
-   * URI that passed authorization.
+   * when sent, names the client ahead of the hint's audience, and when both
+   * are sent `client_id` must be one of the hint's audiences — a mismatch is
+   * a 400 `invalid_request` (OIDC RP-Initiated Logout 1.0 §2). `state` rides
+   * along only to a URI that passed authorization.
    *
    * Wire the app's session teardown through the `endSession` **constructor
    * option**; this method answers 404 without it, and the discovery document
