@@ -641,7 +641,10 @@ token service's `generateAccessToken`, and resource servers can validate offline
 against your JWKS endpoint — see
 [Protect an API](./protect-an-api.md#strategy-2-local-jwt-validation-against-the-jwks-endpoint).
 The token store still persists the JWT string, so revocation and introspection
-keep working exactly as with opaque tokens.
+keep working exactly as with opaque tokens. The JWT's `exp` is the earlier of
+the generator's `lifetimeSeconds` and the expiry the grant stores for the token
+(the token service's `accessTokenExpiresAt`, clamped to any refresh-family cap),
+so an offline verifier stops accepting the token when the server does.
 
 The generator's `userClaims` option is the same seam the server's `userClaims`
 option gives the id_token, so one claims computation (roles, permissions, an

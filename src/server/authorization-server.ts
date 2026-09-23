@@ -84,9 +84,11 @@ export interface EndSessionContext<Client extends ClientInterface> {
   request: Request;
   /**
    * The relying party the logout names — from `client_id`, else from the first
-   * audience of a signature-valid `id_token_hint`. The two are not checked
-   * against each other. Null when the request named none, or named one this
-   * server does not know.
+   * audience of a signature-valid `id_token_hint`. When the request sends
+   * both, `client_id` must be one of the hint's audiences (OIDC RP-Initiated
+   * Logout 1.0 §2); a mismatch is a 400 `invalid_request` and this callback
+   * never runs. Null when the request named none, or named one this server
+   * does not know.
    */
   client: Client | null;
   /**
@@ -127,7 +129,8 @@ export interface EndSessionResult {
  * request that reaches the endpoint, including ones whose parameters do not
  * check out — refusing to end a session because a *redirect* was unauthorized
  * would leave the person signed in, which is the opposite of what they asked
- * for.
+ * for. The one request that never reaches it is a self-contradictory one: a
+ * `client_id` that is not an audience of the `id_token_hint` it came with.
  */
 export type EndSessionFn<Client extends ClientInterface> = (
   context: EndSessionContext<Client>,
@@ -267,8 +270,8 @@ export interface AuthorizationServerOptions<
    * Extra OIDC claims for the id_token and UserInfo response (e.g. `name`,
    * `email` when the scope allows). Merged under the protocol claims — `sub`
    * (from `subjectOf`) and the id_token's `iss`/`aud`/`iat`/`exp` always win,
-   * as does `nonce` when the authorization request carried one; a `nonce`
-   * returned here survives on an id_token whose request had none.
+   * and `nonce` is the authorization request's own: present exactly when that
+   * request carried one, whatever is returned here.
    * The third argument is this credential's recorded authentication event,
    * including on refresh and UserInfo. Return its fields to emit them; never
    * substitute a user's newer session event. It is absent for legacy records.
@@ -286,9 +289,10 @@ export interface AuthorizationServerOptions<
    * field-level parity. Called with the introspected token. Each RFC 7662
    * protocol field the server sets (`active`, `scope`, `client_id`,
    * `token_type`, `exp`, `iss`, `sub`, `username`) wins over anything it
-   * returns, but one the server leaves unset is not stripped — a `sub`
-   * returned for a token with no user, or a `scope` for an unscoped token,
-   * reaches the response.
+   * returns. One the server leaves unset is not stripped — a `scope` for an
+   * unscoped token reaches the response — except `sub` and `username`, which
+   * are dropped for a token with no user so that their presence keeps meaning
+   * "there is a resource owner" (RFC 9700 §4.15.1).
    */
   introspectionClaims?: (
     token: Token<Client, User, S>,
@@ -699,6 +703,7 @@ export class AuthorizationServer<
       resolve: options.resolve,
       Scope: options.Scope,
       realm: options.realm,
+      clockSkewSeconds: options.clockSkewSeconds,
       errorFormat: options.errorFormat,
       throwOnError: options.throwOnError,
     });
@@ -969,6 +974,7 @@ export class AuthorizationServer<
       exp: now + 3600,
     };
     if (token.nonce) claims.nonce = token.nonce;
+    else delete claims.nonce;
     return await signJwt(key, claims);
   }
 
@@ -1076,7 +1082,11 @@ export class AuthorizationServer<
    * identifying the relying party, authorizing the return trip, and shaping
    * the response. `endSession` is always called, even when nothing else about
    * the client, hint, or redirect checks out, because a logout that refuses to
-   * log anyone out is the worst possible failure mode for this endpoint.
+   * log anyone out is the worst possible failure mode for this endpoint. The
+   * sole exception is a `client_id` that is not among the audiences of a
+   * verified `id_token_hint` sent with it: OIDC RP-Initiated Logout 1.0 §2
+   * requires the two to agree, so that request is a 400 `invalid_request`
+   * and ends no session.
    *
    * **Authorizing `post_logout_redirect_uri` is the whole security surface.**
    * It is matched by **exact string** against the resolved client's
@@ -1092,9 +1102,10 @@ export class AuthorizationServer<
    * signed by a key since rotated out of signing yields no subject — and its
    * expiry is ignored: by the time anyone logs out the id_token naming their
    * session has usually expired, and it is a hint, not authority. `client_id`,
-   * when sent, names the client ahead of the hint's audience; the two are not
-   * compared. `state` rides along only to a
-   * URI that passed authorization.
+   * when sent, names the client ahead of the hint's audience, and when both
+   * are sent `client_id` must be one of the hint's audiences — a mismatch is
+   * a 400 `invalid_request` (OIDC RP-Initiated Logout 1.0 §2). `state` rides
+   * along only to a URI that passed authorization.
    *
    * Wire the app's session teardown through the `endSession` **constructor
    * option**; this method answers 404 without it, and the discovery document
@@ -1146,8 +1157,17 @@ export class AuthorizationServer<
       : url.searchParams;
     const idTokenHint = params.get("id_token_hint");
     const hint = idTokenHint ? await this.#readIdTokenHint(idTokenHint) : null;
+    const clientId = params.get("client_id");
+    if (
+      clientId && hint && hint.audiences.length > 0 &&
+      !hint.audiences.includes(clientId)
+    ) {
+      throw new InvalidRequestError(
+        "client_id does not match the audience of id_token_hint",
+      );
+    }
     return {
-      clientId: params.get("client_id") ?? hint?.audience ?? null,
+      clientId: clientId ?? hint?.audiences[0] ?? null,
       subject: hint?.subject ?? null,
       postLogoutRedirectUri: params.get("post_logout_redirect_uri") ?? null,
       state: params.get("state") ?? null,
@@ -1157,7 +1177,7 @@ export class AuthorizationServer<
 
   async #readIdTokenHint(
     idTokenHint: string,
-  ): Promise<{ subject: string | null; audience: string | null } | null> {
+  ): Promise<{ subject: string | null; audiences: string[] } | null> {
     const key = await this.signingKeys?.getSigningKey();
     if (!key) return null;
     const payload = await verifyJwt(idTokenHint, key.publicJwk, {
@@ -1165,14 +1185,14 @@ export class AuthorizationServer<
     });
     if (!payload) return null;
     const aud = payload.aud;
-    const audience = typeof aud === "string"
-      ? aud
-      : Array.isArray(aud) && typeof aud[0] === "string"
-      ? aud[0]
-      : null;
+    const audiences = typeof aud === "string"
+      ? [aud]
+      : Array.isArray(aud)
+      ? aud.filter((value): value is string => typeof value === "string")
+      : [];
     return {
       subject: typeof payload.sub === "string" ? payload.sub : null,
-      audience,
+      audiences,
     };
   }
 
@@ -1618,11 +1638,12 @@ export class AuthorizationServer<
    * that field describes how an access token is presented, and its `exp` is
    * the refresh token's own expiry.
    *
-   * A token with a user carries `sub` from the user's `id` property (not
-   * `subjectOf`) and `username` when the user has one. A token with no user —
-   * the client acting as its own resource owner, as the client credentials
-   * grant issues — carries neither; `client_id` identifies the machine. `sub`
-   * is optional in RFC 7662, and
+   * A token with a user carries `sub` from `subjectOf` — the same value the
+   * id_token and UserInfo carry — and `username` when the user has one. A
+   * token with no user — the client acting as its own resource owner, as the
+   * client credentials grant issues — carries neither, even when
+   * {@linkcode AuthorizationServerOptions.introspectionClaims} returns them;
+   * `client_id` identifies the machine. `sub` is optional in RFC 7662, and
    * leaving it absent keeps `sub` an unambiguous "there is a resource owner"
    * signal rather than overloading `client_id` into the subject namespace
    * (RFC 9700 §4.15.1).
@@ -1693,19 +1714,20 @@ export class AuthorizationServer<
           response.iss = context.issuer;
         }
 
-        const user = token.user as
-          | { id?: string; username?: string }
-          | undefined;
-        if (user?.id) {
-          response.sub = user.id;
-        }
-        if (user?.username) {
-          response.username = user.username;
+        if (token.user) {
+          response.sub = this.#subjectOf(token.user);
+          const username = (token.user as { username?: unknown }).username;
+          if (typeof username === "string" && username) {
+            response.username = username;
+          }
         }
 
         if (this.#introspectionClaims) {
+          const extensions = await this.#introspectionClaims(token);
+          const { sub: _sub, username: _username, ...machineExtensions } =
+            extensions;
           response = {
-            ...await this.#introspectionClaims(token),
+            ...(token.user ? extensions : machineExtensions),
             ...response,
           };
         }
