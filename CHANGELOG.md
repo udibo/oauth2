@@ -1,3 +1,12 @@
+## [0.4.1](https://github.com/udibo/oauth2/compare/0.4.0...0.4.1) (2026-09-23)
+
+### Bug Fixes
+
+- **server:** refresh the bundled Public Suffix List to 2026-09-22
+  ([#30](https://github.com/udibo/oauth2/issues/30))
+  ([176c1e4](https://github.com/udibo/oauth2/commit/176c1e4ad67f2ea93bacbf3b3a611f26e8466d68)),
+  closes [#3](https://github.com/udibo/oauth2/issues/3)
+
 # [0.4.0](https://github.com/udibo/oauth2/compare/0.3.1...0.4.0) (2026-09-22)
 
 - fix(react)!: keep focus on pending submit buttons
