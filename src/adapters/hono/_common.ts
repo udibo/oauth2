@@ -2,11 +2,8 @@
  * Internal helpers shared by the Hono adapters.
  *
  * Not part of the public API — use {@link HonoResourceServer} or
- * {@link HonoAuthorizationServer} instead. Keeping the `protect` /
- * `authenticate` / `getContext` implementations in one place lets both
- * adapter classes stay as direct subclasses of the server type they
- * specialize (no composition / companion objects) without duplicating the
- * Hono-specific plumbing.
+ * {@link HonoAuthorizationServer} instead. Only {@link OAUTH2_CONTEXT_KEY}
+ * and {@link HonoResourceServerVariables} are re-exported publicly.
  *
  * @module
  */
@@ -64,7 +61,7 @@ export function createProtectMiddleware<
 
 /**
  * Builds a Hono middleware that asserts the **already-authenticated** request
- * (whose context a prior `protect` / `attachToken` set) carries
+ * (whose context a prior adapter or BFF `protect` set) carries
  * `requiredScope`, without re-validating the token. Shared by both adapter
  * classes' `requireScope` so the check and error stay identical to `protect`'s
  * scope enforcement. `adapterName` names the class in the "context missing"
@@ -117,10 +114,9 @@ export function createRequireMiddleware<
 }
 
 /**
- * Resolves a Hono {@link Context} or raw {@link Request} to a Request and
- * calls the base {@link ResourceServer.authenticate} (bypassing any
- * Context-accepting override). This is what both adapter classes'
- * `authenticate` overrides end up calling.
+ * Authenticates a Hono {@link Context} or raw {@link Request} with the base
+ * {@link ResourceServer.authenticate}, bypassing the adapters'
+ * Context-accepting override.
  */
 export function authenticateHonoRequest<
   Client extends ClientInterface,
@@ -135,13 +131,7 @@ export function authenticateHonoRequest<
   return baseAuthenticate(server, request, requiredScope);
 }
 
-/**
- * Invokes the base {@link ResourceServer.authenticate} directly, bypassing
- * any subclass override. Necessary because {@link HonoResourceServer}
- * overrides `authenticate` to accept `Context | Request`; if this module
- * called `server.authenticate(...)` the dispatch would land back on that
- * override and recurse forever.
- */
+// Base method on purpose: the Hono subclasses' override would recurse.
 function baseAuthenticate<
   Client extends ClientInterface,
   User,
@@ -157,9 +147,10 @@ function baseAuthenticate<
 }
 
 /**
- * Reads the authenticated OAuth2 context off the Hono context. Throws if
- * `createProtectMiddleware` has not run first — the error message names the
- * class the user invoked to make the fix obvious.
+ * Reads the authenticated OAuth2 context off the Hono context.
+ *
+ * @throws {Error} If no `protect` (the adapter's or the BFF's) middleware set
+ * it first; the message names `adapterName`.
  */
 export function readContext<
   Client extends ClientInterface,

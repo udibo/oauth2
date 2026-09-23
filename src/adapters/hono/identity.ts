@@ -10,7 +10,7 @@
  * (the `IdentityService` stays usable directly from your own
  * routes/loaders/actions).
  *
- * **Scope — password path only, by design.** The newer flows are intentionally
+ * **Scope — password path only, by design.** The other flows are intentionally
  * *not* mounted here, because their safe wiring carries app-owned policy the
  * factory can't guess. Drive them by calling the service methods from your own
  * handlers, as each guide shows:
@@ -85,8 +85,10 @@ export interface HonoIdentityOptions<User extends IdentityUser> {
    * Cross-site request protection, **on by default**. These routes carry no
    * token of their own, so the guard reads what the browser states about the
    * request: a `Sec-Fetch-Site` of `same-origin`/`none` passes, any other value
-   * is refused, and browsers too old to send it fall back to matching the
-   * `Origin` header's host against the request's. A request with neither header
+   * is refused unless `Origin` is in
+   * {@link HonoIdentityCsrfOptions.allowedOrigins}, and browsers too old to
+   * send it fall back to matching `Origin` against that list or the request's
+   * own host. A request with neither header
    * — curl, a server-side call, a native app — passes, since cross-site request
    * forgery needs a browser.
    *
@@ -111,12 +113,6 @@ export interface HonoIdentityOptions<User extends IdentityUser> {
   paths?: HonoIdentityPaths;
 }
 
-/**
- * Wrap a handler so a thrown {@link IdentityError} (e.g. `identifier_taken` from
- * your user store, or `weak_password` from a policy check) becomes a consistent
- * `{ error: code }` response with the conventional status; other errors
- * propagate untouched.
- */
 function handle(
   fn: (c: Context) => Response | Promise<Response>,
 ): Handler {
@@ -135,12 +131,6 @@ function handle(
 
 const STRING_FIELDS = new Set(["password", "identifier", "email", "token"]);
 
-/**
- * Reads a JSON or form-encoded request body. A JSON body keeps each value's
- * type except for {@link STRING_FIELDS}; a body that is not a JSON object
- * (array, string, `null`) reads as empty. A form-encoded body is all strings by
- * construction.
- */
 async function readBody(c: Context): Promise<Record<string, unknown>> {
   const contentType = c.req.header("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -194,10 +184,6 @@ function isTrustedOrigin(c: Context, allowedOrigins: Set<string>): boolean {
     hostOf(origin) === new URL(c.req.url).host;
 }
 
-/**
- * Refuses an unsafe-method request a browser reports as coming from another
- * site, per {@link HonoIdentityOptions.csrf}.
- */
 function sameOriginGuard(options: HonoIdentityCsrfOptions): MiddlewareHandler {
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
   return async (c, next) => {

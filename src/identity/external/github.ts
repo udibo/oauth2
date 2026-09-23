@@ -28,7 +28,11 @@ export interface GithubProviderOptions {
   clientSecret: string;
   /** Scopes requested by default. Defaults to `["read:user", "user:email"]`. */
   scopes?: string[];
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
 }
 
@@ -41,8 +45,8 @@ interface GithubEmailEntry {
 /**
  * Creates a GitHub connector with id `"github"`.
  *
- * GitHub speaks plain OAuth2 (no discovery, no id_token, no PKCE for OAuth
- * Apps), so the connector uses GitHub's fixed endpoints and builds the
+ * GitHub speaks plain OAuth2 (no discovery, no id_token), so the connector
+ * uses GitHub's fixed endpoints, sends no PKCE challenge, and builds the
  * profile from `GET /user` plus `GET /user/emails`: the primary email is used
  * (falling back to the first verified, then the first listed), and
  * `emailVerified` reflects GitHub's flag for whichever email was chosen. When

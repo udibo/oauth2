@@ -27,7 +27,7 @@ without a hosted account.
 Requires Deno 2 for the development workflow:
 
 ```sh
-deno add jsr:@udibo/oauth2@0.1.0
+deno add jsr:@udibo/oauth2
 ```
 
 Import the part you use; there is no root barrel or default export:
@@ -38,8 +38,8 @@ import { HonoBff } from "@udibo/oauth2/hono/bff";
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
 ```
 
-Version `0.1.0` is a pre-1.0 API. Minor releases may contain breaking changes;
-review the [stability policy](docs/stability.md) before upgrading.
+The package is pre-1.0. Minor releases may contain breaking changes; review the
+[stability policy](docs/stability.md) before upgrading.
 
 ## How the pieces fit
 

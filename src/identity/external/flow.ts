@@ -48,7 +48,9 @@ export interface ExternalAuthStartResult {
   url: string;
   /**
    * Per-attempt state to persist in a cookie/session and hand back to
-   * {@link ExternalAuthFlow.finish}. JSON-serializable; contains no tokens.
+   * {@link ExternalAuthFlow.finish}. JSON-serializable and contains no tokens,
+   * but the PKCE verifier and nonce are secrets — keep it sealed or
+   * server-side.
    */
   transient: ExternalAuthTransient;
 }
@@ -141,11 +143,12 @@ export class ExternalAuthFlow {
   }
 
   /**
-   * Completes a sign-in attempt from the provider callback: enforces the max
-   * transient age, surfaces provider `error` callback params, verifies
-   * `state` with a timing-safe compare, exchanges the code, and (for OIDC
-   * providers) validates the id_token nonce — then returns the normalized
-   * profile.
+   * Completes a sign-in attempt from the provider callback: checks the
+   * transient belongs to this flow's provider, enforces the max transient
+   * age, verifies `state` with a timing-safe compare, and only then surfaces a
+   * provider `error` callback param; finally the provider exchanges the code
+   * and (for nonce-using providers) validates the id_token nonce, and the
+   * normalized profile is returned.
    *
    * @throws {ExternalAuthError} with a code describing the failure — see
    *   {@link ExternalAuthErrorCode} for how app code should respond to each.

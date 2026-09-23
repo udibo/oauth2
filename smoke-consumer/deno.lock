@@ -12,7 +12,7 @@
     "jsr:@std/yaml@^1.0.9": "1.1.2",
     "jsr:@udibo/http-error@~0.11.1": "0.11.1",
     "jsr:@udibo/oauth2@0.1": "0.1.0",
-    "npm:@types/react@^19.2.17": "19.2.17",
+    "npm:@types/react@^19.2.17": "19.3.0",
     "npm:hono@^4.7.0": "4.13.8",
     "npm:react@19": "19.2.8"
   },
@@ -67,8 +67,8 @@
     }
   },
   "npm": {
-    "@types/react@19.2.17": {
-      "integrity": "sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==",
+    "@types/react@19.3.0": {
+      "integrity": "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==",
       "dependencies": [
         "csstype"
       ]
@@ -100,7 +100,7 @@
           "npm:react@^19.2.7"
         ]
       },
-      "jsr:@udibo/oauth2@0.3.0": {
+      "jsr:@udibo/oauth2@0.4.1": {
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/async@^1.4.0",

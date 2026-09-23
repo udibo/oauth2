@@ -33,7 +33,9 @@ export interface ClientInterface {
    * the request when none authorizes it.
    *
    * An ordinary entry is a **literal**, compared by exact string match (RFC
-   * 6749 §3.1.2.3), and an exact match always wins. An entry may instead be a
+   * 6749 §3.1.2.3), and an exact match always wins. A literal on a loopback
+   * IP host (`127.0.0.1` or `[::1]`) also matches the same URI on any port,
+   * for native apps (RFC 8252 §7.3). An entry may instead be a
    * **pattern** — one `*` in the leftmost host label, `https` only, over a
    * single registrable domain (`https://myapp-*.myorg.deno.net/cb`) — so one
    * registration covers the per-deploy hostnames a preview environment
@@ -48,9 +50,10 @@ export interface ClientInterface {
    * **literal** entry, so order the array with that default first. When omitted
    * or empty, no redirect URI is authorized at all.
    *
-   * A legacy literal entry containing a `*` (registrable before patterns
-   * existed) now matches **nothing** — the value reads as a pattern and fails
-   * the rules. That fails closed, but silently: re-register such a client.
+   * Any entry containing a `*` is read as a pattern, so a literal URI that
+   * happens to contain one matches **nothing** unless it also satisfies the
+   * pattern rules. That fails closed, but silently: register such a URI in a
+   * form without `*`.
    */
   redirectUris?: string[];
   /**

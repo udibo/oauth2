@@ -19,7 +19,11 @@ export interface DiscordProviderOptions {
   clientSecret: string;
   /** Scopes requested by default. Defaults to `["identify", "email"]`. */
   scopes?: string[];
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
 }
 

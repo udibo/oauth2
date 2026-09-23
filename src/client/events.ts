@@ -17,11 +17,19 @@ export interface AuthenticatedEvent {
   tokens: TokenBundle;
 }
 
-/** The client has cleared its session and the user is no longer authenticated. */
+/**
+ * The user is signed out, or is about to be: `BffClient.logout` emits it before
+ * the browser has navigated to the BFF's logout route.
+ */
 export interface LoggedOutEvent {
   /** Discriminant tag for this event variant. */
   type: "logged_out";
-  /** Why the session ended. */
+  /**
+   * Why the session ended: `user` when `logout` ran, `invalid_grant` when a
+   * `DirectClient` refresh found the grant dead (local tokens are already
+   * cleared), `session_expired` when a `BffClient.fetch` got a `401`.
+   * `refresh_failed` is never emitted by the shipped clients.
+   */
   reason: "user" | "refresh_failed" | "invalid_grant" | "session_expired";
 }
 
@@ -51,7 +59,7 @@ export type OAuth2ClientEvent =
 /** Subscriber callback. Return values are ignored. */
 export type OAuth2ClientEventListener = (event: OAuth2ClientEvent) => void;
 
-/** Minimal event bus for the client to avoid pulling in a dependency. */
+/** The clients' listener registry; one throwing listener never blocks the rest. */
 export class EventBus {
   #listeners = new Set<OAuth2ClientEventListener>();
 

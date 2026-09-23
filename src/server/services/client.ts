@@ -39,6 +39,10 @@ export interface ClientServiceInterface<
     secret?: string,
   ): Promise<Client | undefined>;
 
-  /** Retrieves a user associated with a client (for client-credentials grant). */
+  /**
+   * Resolves the user a client-credentials token acts for. Resolving
+   * `undefined` is the conformant case and yields a user-less machine token;
+   * see `ClientCredentialsGrant` before mapping a client to a human user.
+   */
   getUser(client: Client | string): Promise<User | undefined>;
 }

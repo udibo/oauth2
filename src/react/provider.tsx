@@ -33,8 +33,9 @@ export interface OAuth2ProviderProps {
    * Optional pre-resolved auth state (typically from a server-side
    * session probe). Populating this skips the on-mount session probe
    * and renders the authenticated tree on the first paint — no
-   * hydration flash. Pass a stable reference (don't construct it inline
-   * in render) so the on-mount effect doesn't re-run.
+   * hydration flash. When a later render passes a different value, the
+   * provider re-seeds its state only if `isAuthenticated` or `user.sub`
+   * changed, so an object built inline in render is fine.
    */
   initialState?: Partial<OAuth2State>;
   /** The app subtree that reads auth state via `useOAuth2()`. */
@@ -53,27 +54,15 @@ const DEFAULT_STATE: OAuth2State = {
 const RENEW_SKEW_SECONDS = 30;
 const MIN_RENEW_MS = 5_000;
 
-/**
- * Fraction of the renew delay given up to jitter, applied one-sided so a renew
- * never lands later than the un-jittered schedule.
- */
 const RENEW_JITTER = 0.1;
 
 const isBrowser = (): boolean => typeof window !== "undefined";
 
-/**
- * Delay before renewing a session that expires in `expiresIn` seconds.
- *
- * Floors at {@link MIN_RENEW_MS}, so `0` — which a `DirectClient` reports for
- * an already-expired token a refresh token can still revive — schedules a
- * near-immediate renew rather than nothing at all.
- */
 function renewDelayMs(expiresIn: number): number {
   const base = Math.max(MIN_RENEW_MS, (expiresIn - RENEW_SKEW_SECONDS) * 1000);
   return base * (1 - RENEW_JITTER * Math.random());
 }
 
-/** Seconds until `tokens` expires, or `null` when the server said nothing. */
 function expiresInFrom(tokens: TokenBundle): number | null {
   if (!tokens.accessTokenExpiresAt) return null;
   return Math.max(
@@ -107,7 +96,6 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     let cancelled = false;
     const handle = (event: OAuth2ClientEvent) => {
       setState((prev) => reduce(prev, event));
-      // The `authenticated` event carries tokens only, so refetch user claims.
       if (event.type === "authenticated") {
         client.getUser().then(
           (user: UserInfoClaims | null) => {

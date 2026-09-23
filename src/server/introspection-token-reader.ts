@@ -54,10 +54,11 @@ export interface IntrospectionTokenReaderOptions<
    * `undefined` when the token doesn't represent a user. Omit entirely if
    * your app never reads user info off the token.
    *
-   * A machine token (client credentials) carries no `sub`, so `data.sub` is
-   * present only when there is a resource owner — `data.sub ? {…} : undefined`
-   * is the whole discriminator, and a client-credentials caller resolves to no
-   * user.
+   * This package's authorization server omits `sub` from the introspection
+   * response of a token with no user, so against it `data.sub` is present
+   * only when there is a resource owner and `data.sub ? {…} : undefined` is
+   * the whole discriminator. Another authorization server may set `sub` to the
+   * client id for a machine token; check how yours answers.
    *
    * May be async — return a promise to enrich from a DB lookup or the
    * authorization server's OIDC UserInfo endpoint, using `data.sub` as
@@ -91,6 +92,11 @@ export interface IntrospectionTokenReaderOptions<
  * and projects the response into the resource server's `Client` / `User`
  * types via the {@linkcode IntrospectionTokenReaderOptions.getClient} and
  * {@linkcode IntrospectionTokenReaderOptions.getUser} mappers.
+ *
+ * The reader does not check `aud` or `iss`: any token the endpoint reports
+ * active with a bearer `token_type` is accepted. When one authorization server
+ * issues tokens for several APIs, check the audience yourself (it is on
+ * {@linkcode Token.claims}) or have the endpoint scope its answers.
  *
  * @example
  * ```ts
@@ -165,9 +171,10 @@ export class IntrospectionTokenReader<
    *   returns a 5xx — a down authorization server must be distinguishable from
    *   a genuinely invalid token (which is `undefined` → `invalid_token`), not
    *   collapsed into it.
-   * @throws {ServerError} If the endpoint returns a 4xx (e.g. the reader's own
-   *   introspection credentials are rejected) — a misconfiguration, not a
-   *   verdict on the caller's token.
+   * @throws {ServerError} If the endpoint returns any other non-2xx status
+   *   (e.g. the reader's own introspection credentials are rejected) or a body
+   *   that is not JSON — a misconfiguration, not a verdict on the caller's
+   *   token.
    *
    * An active response is only accepted when its `token_type` names a bearer
    * token. RFC 7662 answers for refresh tokens too, and a refresh token's

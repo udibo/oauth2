@@ -106,7 +106,11 @@ export interface GrantOptions<
   resolve: (request: Request) => Services | Promise<Services>;
   /** Scope constructor used to parse scope strings. Defaults to {@linkcode BasicScope}. */
   Scope?: ScopeConstructor<Scope>;
-  /** Allow optional refresh token. */
+  /**
+   * Whether to issue a refresh token with tokens that have a user, when the
+   * token service generates one. Defaults to `false`; tokens without a user
+   * never get one.
+   */
   allowRefreshToken?: boolean;
 }
 
@@ -117,8 +121,7 @@ export interface GrantOptions<
  * interface the grant resolves. A subclass implements {@link token}, reaches
  * its services through {@link resolveServices}, and overrides
  * {@link getAuthenticatedClient} only when it authenticates clients by
- * something other than their registered credentials (as the authorization-code
- * grant does for PKCE).
+ * something other than their registered credentials.
  */
 export abstract class AbstractGrant<
   Client extends ClientInterface,
@@ -134,7 +137,7 @@ export abstract class AbstractGrant<
   abstract readonly grantType: string;
   /** Constructor used to parse scope strings into {@linkcode Scope} objects. */
   Scope: ScopeConstructor<Scope>;
-  /** Allow optional refresh token. Defaults to false. */
+  /** Whether tokens with a user are issued a refresh token. */
   allowRefreshToken: boolean;
   #resolve: (request: Request) => Services | Promise<Services>;
 
@@ -308,8 +311,9 @@ export abstract class AbstractGrant<
    * grant's own `clientService`, from the credentials the request presents.
    *
    * Override to apply grant-specific authentication rules — the
-   * authorization-code grant accepts a PKCE `code_verifier` in place of a
-   * client secret for public clients.
+   * authorization-code grant, when configured with
+   * `requireClientAuthentication: false`, looks up a client that presents a
+   * PKCE `code_verifier` by id instead of authenticating it.
    *
    * @throws {InvalidClientError} If authentication fails.
    */

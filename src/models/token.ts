@@ -72,9 +72,8 @@ export interface RefreshToken<
    * service that persists refresh tokens **must** persist and restore it —
    * dropping it on the round trip disables the cap.
    *
-   * A record without an anchor (one stored before the cap existed) rotates
-   * once uncapped; that rotation is issued with a fresh anchor, so the family
-   * is capped from then on.
+   * A record without an anchor rotates once uncapped; that rotation is issued
+   * with a fresh anchor, so the family is capped from then on.
    */
   familyCreatedAt?: Date;
 }

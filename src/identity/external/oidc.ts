@@ -33,9 +33,11 @@ export interface OidcProviderOptions {
   /** Human-readable name for buttons and logs. Defaults to `"OpenID Connect"`. */
   displayName?: string;
   /**
-   * The provider's issuer URL. Endpoints are resolved from
-   * `${issuer}/.well-known/openid-configuration` (with an RFC 8414 fallback)
-   * on first use and cached.
+   * The provider's issuer URL. Endpoints are resolved on first use from
+   * `${issuer}/.well-known/oauth-authorization-server` (RFC 8414), falling
+   * back to `${issuer}/.well-known/openid-configuration`, and cached. Must be
+   * `https` (plain `http` only for `localhost`, `127.0.0.1`, or `[::1]`), as
+   * must every endpoint the discovery document advertises.
    */
   issuer: string;
   /** The client id registered with the provider. */
@@ -55,7 +57,11 @@ export interface OidcProviderOptions {
    * see {@link AzpPolicy}.
    */
   azp?: AzpPolicy;
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
   /**
    * Cache the discovery document is read from and written to, shared with any
@@ -73,18 +79,23 @@ export interface OidcProviderOptions {
  * The exchange reuses the package's `DirectClient` (discovery caching with
  * both well-known paths, Basic client auth, RFC 6749 error mapping) with PKCE
  * always on. The profile is built from the id_token claims, merged with the
- * UserInfo response when the provider advertises a `userinfo_endpoint` (the
- * UserInfo `sub` must match the id_token `sub` per OIDC Core §5.3.2, and a
- * UserInfo failure is non-fatal — the id_token claims already suffice).
+ * UserInfo response when the provider advertises a `userinfo_endpoint`;
+ * UserInfo values override id_token claims of the same name (including
+ * `email_verified`). A UserInfo response whose `sub` differs from the
+ * id_token `sub` (OIDC Core §5.3.2) is discarded, and a UserInfo failure is
+ * non-fatal — the profile then comes from the id_token claims alone.
  *
  * **id_token validation:** the `iss`, `aud`, `azp` (when the token has multiple
  * audiences or an `azp` claim, unless `azp: "ignore"` is configured), `exp`,
  * and `nonce` claims are checked per OpenID Connect Core §3.1.3.7. The
  * signature is deliberately **not** verified: the token arrives directly from
  * the token endpoint over TLS, where §3.1.3.7 permits relying on TLS server
- * validation instead of signature checks (rule 6). Every other rule —
- * including expiry (rule 9) — still applies. Do not feed this connector
- * id_tokens obtained out-of-band.
+ * validation instead of signature checks (rule 6). Only the claim checks
+ * listed above are made — not `iat`, `acr`, or `auth_time`. Do not feed this
+ * connector id_tokens obtained out-of-band.
+ *
+ * @throws {ExternalAuthError} `configuration` when `issuer` is not an absolute
+ *   `https` URL (see {@link OidcProviderOptions.issuer}).
  *
  * @example
  * ```ts

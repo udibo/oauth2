@@ -38,7 +38,7 @@ credentials, request bodies, or raw callback URLs.
 
 ## Defaults that are looser than the specs
 
-Confidential clients authenticate alongside PKCE by default as of 0.1.0.
+Confidential clients authenticate alongside PKCE by default.
 `requireClientAuthentication: false` remains an explicit legacy opt-out and
 should not be enabled for new deployments.
 
@@ -62,10 +62,11 @@ should not be enabled for new deployments.
   credentials) has neither, and its `client_id` identifies the caller — so the
   presence of `sub` is how a resource server tells a user token from a machine
   one. The typed response also declares `iat` / `nbf` / `aud` / `jti`, but the
-  server never populates them today. Practical consequence: a resource server
-  that enforces audience restriction via introspection `aud` cannot do so —
-  issue JWT access tokens (`createJwtAccessTokenGenerator`) and validate them
-  with `JwksTokenReader`, which enforces `aud`, if you need in-token
+  server never populates them itself; only an `introspectionClaims` hook you
+  configure can add them. Practical consequence: without such a hook, a resource
+  server cannot enforce audience restriction via introspection `aud` — issue JWT
+  access tokens (`createJwtAccessTokenGenerator`) and validate them with
+  `JwksTokenReader`, which enforces `aud`, if you need in-token
   audience/issued-at claims.
 - **Introspection authorization is application policy.** By default,
   `/introspect` allows any admitted client to inspect any live token, preserving
@@ -111,8 +112,8 @@ should not be enabled for new deployments.
   `ResourceServerOptions.clockSkewSeconds`, which defaults to **0**. Set both to
   tolerate drift end to end. The resource-server option is the only one that
   reaches an `IntrospectionTokenReader`, which has no notion of skew at all. The
-  `nbf` half is still reader-only — nothing re-checks `nbf` — so a slow-clock
-  issuer is tolerated only by the reader.
+  `nbf` half is reader-only — nothing re-checks `nbf` — so a slow-clock issuer
+  is tolerated only by the reader.
 - **`IntrospectionTokenReader` calls the authorization server on every
   request.** It takes `fetchTimeoutMs` (default 5000, matching
   `JwksTokenReader`), so an endpoint that accepts connections and then stops
@@ -155,7 +156,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 ## OIDC issuance scope
 
 - **Signing is ES256 only** (Web Crypto, zero dependencies). There is no RS256
-  option; verify your relying parties accept ES256 .
+  option; verify your relying parties accept ES256.
 - `id_token` claims are released per scope through the app-provided `userClaims`
   hook; there is no `claims` request-parameter support.
 - `acr` / `amr` are not asserted.
@@ -184,17 +185,16 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `AccountLockoutLike` is the matching seam for lockout policy. Both are
   structural, so a plain object with the right methods is assignable.
 - `MemoryRateLimitStore` sweeps lapsed buckets and is hard-capped at 10,000, so
-  attacker-chosen keys can no longer grow it without bound — but a bounded store
-  must discard something, and at the cap it evicts. It evicts the **coldest**
-  live buckets first (fewest hits, ties broken by soonest reset), never the
-  oldest, so a unique-key flood discards the attacker's own single-hit junk
-  rather than the counter that is throttling them. The residual is that an
-  attacker willing to raise ~10,000 keys above a victim's hit count can still
-  displace that victim's counter — roughly a 10x cost increase over a naive
-  flood, not an impossibility. Bounding memory and resisting eviction are in
-  genuine tension in a single process; this is a dev / single-process store, and
-  production backs the limiter with Redis or a database where neither compromise
-  is forced.
+  attacker-chosen keys cannot grow it without bound — but a bounded store must
+  discard something, and at the cap it evicts. It evicts the **coldest** live
+  buckets first (fewest hits, ties broken by soonest reset), never the oldest,
+  so a unique-key flood discards the attacker's own single-hit junk rather than
+  the counter that is throttling them. The residual is that an attacker willing
+  to raise ~10,000 keys above a victim's hit count can still displace that
+  victim's counter — roughly a 10x cost increase over a naive flood, not an
+  impossibility. Bounding memory and resisting eviction are in genuine tension
+  in a single process; this is a dev / single-process store, and production
+  backs the limiter with Redis or a database where neither compromise is forced.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.
@@ -203,7 +203,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 - The flows are single-app primitives: multi-tenancy, organizations, and SSO
   orchestration are intentionally out of scope for this library.
 - **`resetPassword` voids outstanding passwordless credentials only as far as
-  your stores let it.** It now drops the subject's pending sign-in links
+  your stores let it.** It drops the subject's pending sign-in links
   (`TokenFlowStore.deleteBySubject(TokenPurpose.SignIn, userId)`) and the
   pending sign-in code (`OtpStore.invalidate(email, purpose)`) after the
   password changes. Both calls are best-effort: `deleteBySubject` is
@@ -242,7 +242,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
     rotating `SESSION_SECRET` is a `[new, old]` deploy that keeps existing
     sessions readable rather than a fleet-wide forced sign-out. Drop the old
     secret once the grace window elapses. This mirrors the multi-key JWKS grace
-    window for signing keys. A single secret still behaves as before.
+    window for signing keys. A single secret seals and reads with that one key.
   - **Bounded lifetime, on by default.** `maxAgeMs` stamps each cookie with a
     seal time and rejects any cookie older than the cap on `read`, bounding how
     long a captured cookie stays useful without any server-side state. It
@@ -297,5 +297,8 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   runtime-specific global anywhere on the library path (the `Deno.env.get` you
   see in connector JSDoc is example prose, not code the package runs). The CLI
   is a development tool (`oidc keygen`, `idp dev`); nothing on the library path
-  imports it, so its floor never constrains the rest of the package. The full
-  matrix is in [the stability policy](stability.md#runtime-support).
+  imports it, so its floor never constrains the rest of the package. The generic
+  `/testing` and `/testing/contract` helpers register suites through
+  `@std/testing/bdd` and are verified on Deno only. The full matrix is in
+  [the README](../README.md#runtime-support); the support boundary is in
+  [the stability policy](stability.md#runtime-support).

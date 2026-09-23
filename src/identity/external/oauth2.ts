@@ -90,9 +90,17 @@ export interface OAuth2ProviderOptions {
   scopeSeparator?: string;
   /** Whether to run PKCE (S256). Defaults to `false`. */
   usesPkce?: boolean;
-  /** Extra fixed query params to add to the authorize URL. */
+  /**
+   * Extra fixed query params to add to the authorize URL. They are applied
+   * after `response_type`, `client_id`, `redirect_uri`, `scope`, and `state`,
+   * so a key with one of those names replaces the connector's value.
+   */
   authorizationParams?: Record<string, string>;
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
 }
 

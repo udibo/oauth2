@@ -19,9 +19,8 @@ semantic-release from Conventional Commits (see
   policy below.
 - This is enforced, not just described: `.releaserc.json` maps
   `{ "breaking": true, "release": "minor" }`, so a `feat!:` commit cuts a minor
-  rather than a major, and a packaging test pins that mapping. Do not "correct"
-  it to `major` — moving to 1.0 is a deliberate decision, not a side effect of a
-  breaking commit.
+  rather than a major, and a packaging test pins that mapping. Moving to 1.0 is
+  a deliberate decision, not a side effect of a breaking commit.
 
 ### From 1.0
 

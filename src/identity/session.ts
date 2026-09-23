@@ -2,13 +2,13 @@
  * Session revocation + step-up contracts for the identity layer.
  *
  * Three security primitives the own-auth flows need, kept as **contracts + a
- * pure helper** — storage stays app-owned (the `SessionStore` philosophy, and
- * the Lucia-deprecation lesson: don't ship a DB-adapter zoo):
+ * pure helper** — storage stays app-owned (the `SessionStore` philosophy):
  *
  * - {@link RevocableSessionService} — revoke a user's sessions on a credential
  *   change. After a password reset the app must end the *other* sessions, or a
- *   compromised account's other devices stay logged in. The reset flow calls
- *   this; your app implements it over its session store.
+ *   compromised account's other devices stay logged in.
+ *   `IdentityService.resetPassword` calls its `revokeAllByUser`; your app
+ *   implements it over its session store.
  * - {@link ListableSessionService} — the revocation seam's optional listing
  *   half: a user's live sessions as {@link SessionSummary} display rows, so a
  *   "where you're signed in" screen has one typed shape to render and wire the
@@ -117,6 +117,7 @@ export function supportsSessionListing(
 /**
  * Whether a session authenticated within `maxAgeMs` — a recent-auth ("step-up")
  * check to gate sensitive actions. Re-prompt for credentials when this is false.
+ * An `authenticatedAt` of `0` or less (unknown) is never recent.
  *
  * @param authenticatedAt When the session last actively authenticated (epoch ms).
  * @param maxAgeMs How recent counts as "fresh" (e.g. 5 minutes).

@@ -9,7 +9,7 @@
  * database to share state across instances — e.g. columns on your users table,
  * which also gives admins visibility).
  *
- * `AccountLockout` is a pure state machine: it never decides whether to block.
+ * `AccountLockout` only records state: it never decides whether to block.
  * `IdentityService` consults it and applies its `protectionMode`
  * (enforce vs log-only), so adopters can observe lockout behavior before
  * turning it on.
@@ -134,8 +134,9 @@ const DEFAULT_LOCK_DURATION_MS = 15 * 60 * 1000;
 /**
  * Consecutive-failure lockout with safe defaults (10 failures → 15-minute
  * lock) — the default {@link AccountLockoutLike}. Wire into
- * {@link IdentityService} via its `lockout` option; call {@link reset} from
- * your unlock flow.
+ * {@link IdentityService} via its `lockout` option, which resets it on a
+ * successful sign-in, password reset, or {@link IdentityService.unlockAccount};
+ * call {@link reset} yourself only from an unlock flow of your own.
  */
 export class AccountLockout implements AccountLockoutLike {
   readonly #maxAttempts: number;

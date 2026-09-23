@@ -102,7 +102,6 @@ export interface MockOAuth2Controls {
   setSessionExpiresIn(seconds: number | null): void;
 }
 
-/** The mock behavior each client class delegates to. */
 class MockCore {
   readonly initialState: Pick<OAuth2State, "isAuthenticated" | "user">;
   renewCount = 0;
@@ -285,8 +284,9 @@ export class MockOAuth2Client extends OAuth2ClientBase
 }
 
 /**
- * A real `BffClient` whose four session operations answer from mock state
- * instead of the BFF. `useBffClient()` accepts it.
+ * A real `BffClient` whose session operations, `login`, `logout` and `fetch`
+ * answer from mock state or pass through instead of reaching the BFF.
+ * `useBffClient()` accepts it.
  */
 export class MockBffClient extends BffClient implements MockOAuth2Controls {
   readonly #core: MockCore;

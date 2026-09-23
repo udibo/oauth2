@@ -3,10 +3,7 @@
  *
  * Not part of the public API — reach for a connector from
  * `@udibo/oauth2/identity/external` instead, which re-exports the one type an
- * adopter configures ({@link AzpPolicy}). These live here so the same failure
- * reads the same way whichever connector hit it: one error renderer, one
- * error-body reader, one provider-text sanitizer, and one id_token claim gate
- * rather than a copy per provider. The token exchange itself is
+ * adopter configures ({@link AzpPolicy}). The token exchange is
  * `_token-exchange.ts`.
  *
  * @module
@@ -112,9 +109,10 @@ export interface IdTokenClaimsInput {
 }
 
 /**
- * Enforces the id_token claim rules of OpenID Connect Core §3.1.3.7 that do not
- * depend on the signature: `iss`, `aud`, `azp`, `exp`, and `nonce`, in that
- * order. Callers verify the signature (or establish the token's provenance)
+ * Enforces these OpenID Connect Core §3.1.3.7 claim checks, in order: `iss`,
+ * `aud`, `azp`, `exp` (a missing `exp` fails), and `nonce` (only when
+ * `expectedNonce` is given). `iat`, `acr`, and `auth_time` are not checked.
+ * Callers verify the signature (or establish the token's provenance)
  * themselves before calling this.
  *
  * Throws {@link ExternalAuthError} with code `nonce_mismatch` when the `nonce`

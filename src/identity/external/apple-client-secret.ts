@@ -135,7 +135,7 @@ async function importPrivateKey(
  *
  * @throws {ExternalAuthError} `configuration` naming the offending input when
  *   the team id / key id / client id is empty, the `.p8` is not a valid P-256
- *   key, or the requested TTL exceeds Apple's cap.
+ *   key, or the requested TTL is not between 1 and Apple's cap.
  *
  * @example
  * ```ts
@@ -192,16 +192,20 @@ function encodeSegment(value: unknown): string {
   return base64urlEncode(encoder.encode(JSON.stringify(value)));
 }
 
-/** A cached client-secret source: returns a valid secret, re-signing lazily. */
+/**
+ * Returns the client-secret JWT to present on a token exchange; called once per
+ * exchange. {@link createAppleClientSecretFactory} builds the caching one.
+ */
 export type AppleClientSecretFactory = () => Promise<string>;
 
 /**
  * Build a self-renewing Apple client-secret source. It signs a secret with
  * {@link generateAppleClientSecret} on first call, caches it, and re-signs
- * automatically once the cached secret is within `renewBeforeSeconds` of expiry
- * — so a long-lived {@link appleProvider} never presents an expired assertion.
- * The key material is validated on the first call, surfacing a misconfiguration
- * as a `configuration` {@link ExternalAuthError}.
+ * automatically once the cached secret is within `renewBeforeSeconds` (default
+ * one hour) of expiry — so a long-lived {@link appleProvider} never presents
+ * an expired assertion. The key material is validated on the first call, not
+ * at construction, surfacing a misconfiguration as a `configuration`
+ * {@link ExternalAuthError}; a failed call caches nothing.
  */
 export function createAppleClientSecretFactory(
   options: AppleClientSecretOptions & { renewBeforeSeconds?: number },

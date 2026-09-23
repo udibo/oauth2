@@ -63,7 +63,8 @@ export interface CheckPermissionsOptions {
   resource?: CheckResource;
   /**
    * `fetch` implementation used to call the endpoint. Defaults to the global
-   * `fetch`; inject to add timeouts or stub the network in tests.
+   * `fetch`, with no deadline and redirects followed; inject one to add a
+   * timeout or to stub the network in tests.
    */
   fetch?: typeof fetch;
 }
@@ -97,7 +98,8 @@ export interface CheckPermissionsResult {
  * tenant no longer resolves is a 404 and lands there too. Echoing an `org_id`
  * off a signed claim is how you meet it, because the organization can be
  * deleted after the signature, so catch it on that path rather than reading a
- * throw as a bug in your own setup.
+ * throw as a bug in your own setup. A `2xx` whose body is not JSON rejects with
+ * the parser's `SyntaxError`; the body's shape is not validated.
  *
  * @example
  * ```ts

@@ -7,9 +7,11 @@
  */
 
 /**
- * Stable, machine-readable identity error codes. Most are raised by your store
- * or the service; `forbidden_origin` is raised by the Hono route factory's
- * same-origin guard before a handler runs.
+ * Stable, machine-readable identity error codes. The package raises
+ * `rate_limited`, `weak_password`, and the `mfa_*` codes, and the Hono route
+ * factory's same-origin guard answers `forbidden_origin` before a handler runs;
+ * the rest are for your store and routes to throw (e.g. `identifier_taken` on
+ * a duplicate sign-up, `captcha_failed` after `verifyCaptcha`).
  */
 export type IdentityErrorCode =
   | "invalid_credentials"
@@ -54,7 +56,10 @@ export class IdentityError extends Error {
   }
 }
 
-/** Type guard for {@link IdentityError}. */
+/**
+ * Type guard for {@link IdentityError}. An `instanceof` check, so an error from
+ * another realm or a second copy of the package fails it; compare `name` there.
+ */
 export function isIdentityError(value: unknown): value is IdentityError {
   return value instanceof IdentityError;
 }

@@ -94,10 +94,10 @@ and a 4xx throws `ServerError` (your introspection credentials are
 misconfigured).
 
 **Audience caveat:** the introspection response this package's authorization
-server emits omits `aud`, `iat`, `nbf`, and `jti`, so a resource server cannot
-enforce audience restriction through introspection. If you need in-token
-audience claims, use JWT access tokens (strategy 2). See
-[Known Limitations](../known-limitations.md).
+server emits omits `aud`, `iat`, `nbf`, and `jti` unless its
+`introspectionClaims` hook adds them, and `IntrospectionTokenReader` does not
+check an audience. If you need audience restriction, use JWT access tokens
+(strategy 2). See [Known Limitations](../known-limitations.md).
 
 **The call is bounded; it is not cached.** This reader takes `fetchTimeoutMs`
 (default 5000), the same option, default, and semantics as `JwksTokenReader`, so
@@ -120,13 +120,13 @@ honest answer — the issuer is down, the caller's token is not necessarily bad.
 
 **This package's introspection endpoint answers for refresh tokens too**, with
 `active: true` and no `token_type` (an access token carries
-`token_type: "Bearer"`). The shipped reader does not currently check
-`token_type`, so if your resource server introspects against an issuer that
-reports refresh tokens as active, a refresh token presented as
-`Authorization: Bearer …` validates. That widens what a leaked refresh token is
-good for and bypasses rotation and reuse detection; verify `token_type` in your
-`getClient` mapper (throw or return a client your authorization checks reject)
-if refresh tokens circulate anywhere near your API surface.
+`token_type: "Bearer"`). `IntrospectionTokenReader` accepts an active response
+only when its `token_type` names a bearer token, so a refresh token presented as
+`Authorization: Bearer …` resolves to `undefined` (`invalid_token`) rather than
+bypassing rotation and reuse detection. The consequence is that this reader
+cannot read an authorization server that omits `token_type` from active
+responses. A custom `TokenReaderInterface` over introspection needs the same
+check.
 
 ## Strategy 2: Local JWT validation against the JWKS endpoint
 
@@ -256,7 +256,7 @@ example uses this in-process shape.
 ## A minimal protected API
 
 With a token reader in hand, construct the Hono resource server and mount its
-middleware. The `resolve` option supplies the services for each request; for a
+middleware. The `resolve` option supplies the services for each request; for an
 application API it's a constant function returning the same reader every time.
 
 ```ts
@@ -520,7 +520,7 @@ on a name collision, and a caller-set `Authorization` header is left alone. A
 on the post-refresh retry rather than arriving empty. The same rules hold for
 `BffClient.fetch`, which additionally adds the `x-csrf` header only when the
 request does not already carry one. A retry that fails at the transport level
-now rejects; only a failed _refresh_ falls back to reporting the original `401`.
+rejects; only a failed _refresh_ falls back to reporting the original `401`.
 
 `DirectClient` also re-resolves discovery metadata as it ages. Constructed with
 an `issuer` and no `discoveryCache`, it re-discovers after
@@ -652,5 +652,5 @@ runs both topologies side by side: in-process `/api/*` and proxied
   authorization server these tokens come from.
 - [Known Limitations](../known-limitations.md) — the honest list, including the
   introspection field subset and ES256-only signing.
-- The package [README](testing.md) covers testing protected routes without a
-  live identity provider.
+- The [testing guide](testing.md) covers testing protected routes without a live
+  identity provider.

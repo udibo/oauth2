@@ -9,9 +9,9 @@
  * component renders its `fallback` with a clear error rather than pretend
  * otherwise.
  *
- * Idempotent against React 18 strict-mode double-mounts because the
- * client itself dedupes by `code` — the second invocation returns the
- * first call's promise.
+ * Idempotent against React strict-mode double-mounts because the client
+ * dedupes by `code`: a second call while the first exchange is still in
+ * flight returns the first call's promise.
  *
  * @module
  */

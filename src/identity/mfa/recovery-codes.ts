@@ -118,7 +118,8 @@ export type RecoveryCodeVerification =
      * The index of the matching hash. Burn it with an atomic delete-by-value
      * (a conditional `DELETE` on the hash, never read-filter-write) so the
      * code cannot be redeemed again — the library does not do this for you at
-     * this level ({@link MfaService} does, atomically).
+     * this level ({@link MfaService} does, through its store's
+     * `consumeRecoveryHash`).
      */
     index: number;
   };

@@ -21,9 +21,9 @@ export interface OAuth2State {
   /** Whether a user is currently authenticated. */
   isAuthenticated: boolean;
   /**
-   * `true` during the initial session probe and during a token refresh
-   * with no currently valid access token. Settles to `false` once
-   * authentication state is known.
+   * `true` while the provider's initial session probe is in flight; `false`
+   * once it settles, and from the start when the provider is given
+   * `initialState`. A later token refresh does not set it.
    */
   isLoading: boolean;
   /**

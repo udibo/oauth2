@@ -46,7 +46,7 @@ export interface PasswordGrantOptions<
   S extends AbstractScope,
 > extends
   GrantOptions<Client, User, S, PasswordGrantServices<Client, User, S>> {
-  /** Allow optional refresh token. Defaults to true. */
+  /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
 }
 

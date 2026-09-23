@@ -40,16 +40,16 @@ export interface DeviceAuthorizationServiceInterface<
   Scope extends AbstractScope,
 > {
   /**
-   * Lifetime of device codes in seconds.
-   * RFC 8628 does not specify a default, but 15-30 minutes is common.
-   * @default 1800 (30 minutes)
+   * Lifetime of device codes in seconds. RFC 8628 sets no default; 15–30
+   * minutes is common.
    */
   lifetime: number;
 
   /**
-   * Minimum polling interval in seconds.
-   * Clients should not poll more frequently than this.
-   * @default 5
+   * Minimum polling interval in seconds, copied onto each new authorization
+   * and returned to the device as `interval`. The grant answers a faster poll
+   * with `slow_down` and adds 5 seconds to that authorization's interval
+   * (RFC 8628 §3.5).
    */
   interval: number;
 

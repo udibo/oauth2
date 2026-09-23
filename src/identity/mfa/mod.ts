@@ -12,7 +12,8 @@
  *   {@link verifyRecoveryCode} — readable single-use fallback codes, hashed at
  *   rest.
  * - {@link MfaService} over an app-implemented {@link MfaStore} — enrollment
- *   (pending → confirmed), verification with atomic replay and burn handling,
+ *   (pending → confirmed), verification with replay rejection and
+ *   recovery-code burning through the store's atomic methods,
  *   regeneration, disable, plus the layer's usual seams (`rateLimiter`,
  *   `onEvent` for `mfa.*` audit events). {@link MemoryMfaStore} ships for
  *   dev/tests.

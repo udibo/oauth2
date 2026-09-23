@@ -3,11 +3,8 @@
  * through — {@link githubProvider}, {@link oauth2Provider} (and its
  * {@link discordProvider} preset), and {@link appleProvider}.
  * {@link oidcProvider}, and {@link googleProvider} on top of it, exchange via
- * `OAuth2Client` instead and do not reach this module.
- *
- * Not part of the public API. Split out of `_shared.ts` so the ladder — the one
- * place a provider's bytes become an error message or a token — sits next to
- * the tests that pin it.
+ * `DirectClient` instead and do not reach this module. Not part of the public
+ * API.
  *
  * @module
  */
@@ -41,7 +38,7 @@ export interface TokenExchangeInput {
    * `RequestInit`** — `redirect` and `signal` in particular. They are the only
    * channel the redirect refusal and the deadline reach the transport, so a
    * wrapper that rebuilds `init` from scratch silently reopens the credential
-   * replay hole. `createGuardedFetch` forwards both.
+   * replay hole.
    */
   fetch: typeof fetch;
   /** Guidance appended when a failure carries no OAuth2 error code. */

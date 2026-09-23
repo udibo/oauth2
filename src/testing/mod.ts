@@ -1,7 +1,7 @@
 /**
  * Testing helpers for apps that use `@udibo/oauth2`.
  *
- * Two layers ship:
+ * Three layers ship:
  *
  * - **Testing surface for the OAuth2 protocol.** The recommended pattern
  *   for testing apps that use the resource server is to expose your
@@ -20,7 +20,9 @@
  * - **In-memory service implementations.** `MemoryUserService`,
  *   `MemoryClientService`, `MemoryTokenService`,
  *   `MemoryAuthorizationCodeService`, and `MemoryDeviceAuthorizationService`
- *   satisfy every server-side service contract, generic over the consumer's
+ *   implement the authorization server's user, client, token,
+ *   authorization-code and device-authorization service interfaces, generic
+ *   over the consumer's
  *   user / client / scope types. Suitable for tests, examples, and
  *   prototypes — never for production.
  *

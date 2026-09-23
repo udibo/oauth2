@@ -66,8 +66,8 @@ export function safeReturnTo(
 export interface LoginContinuationOptions {
   /**
    * The authorization endpoint (absolute URL or path). When `returnTo` points at
-   * it, the flow is **resumed** (the in-flight authorize request already has a
-   * PKCE `state`). Omit it and every `returnTo` starts a fresh login.
+   * it, the flow is **resumed** (the in-flight authorize request already carries
+   * its `state`). Omit it and every `returnTo` starts a fresh login.
    */
   authorizeEndpoint?: string;
   /** The login path to start a fresh login. Defaults to `"/auth/login"`. */
@@ -98,8 +98,6 @@ export function loginContinuation(
 ): string {
   const safe = safeReturnTo(returnTo, options.defaultReturnTo ?? "/");
   if (options.authorizeEndpoint) {
-    // Compare path only so the in-flight authorize query (client_id, state, …)
-    // is preserved; the base lets absolute and relative inputs both resolve.
     const base = "http://login.continuation.local";
     const authorizePath = new URL(options.authorizeEndpoint, base).pathname;
     if (new URL(safe, base).pathname === authorizePath) return safe;

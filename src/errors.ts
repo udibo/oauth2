@@ -35,10 +35,9 @@ export interface OAuth2ProblemDetailsExtensions {
 }
 
 /**
- * Constructor type for OAuth2 error classes produced by
- * `createHttpErrorClass`. Declared explicitly so the exported error classes
- * have a JSR-fast public type (the inferred type spans multiple constructor
- * overloads and trips the `no-slow-types` rule).
+ * Constructor type shared by every OAuth2 error class in this module: each
+ * takes an optional status, message, and `HttpErrorOptions` (whose
+ * `extensions` carry the OAuth2 fields) and builds an {@linkcode OAuth2Error}.
  */
 export type OAuth2ErrorClass<
   Extensions extends OAuth2ProblemDetailsExtensions =
@@ -86,7 +85,10 @@ export const OAuth2Error: OAuth2ErrorClass = createHttpErrorClass<
   },
 );
 
-/** Type guard for OAuth2 errors. */
+/**
+ * Type guard for OAuth2 errors: true for any `HttpError` whose
+ * `extensions.error` is set, whichever class constructed it.
+ */
 export function isOAuth2Error(value: unknown): value is OAuth2Error {
   return value instanceof HttpError && value.extensions.error !== undefined;
 }
@@ -94,14 +96,15 @@ export function isOAuth2Error(value: unknown): value is OAuth2Error {
 /**
  * Converts an arbitrary error into an {@link OAuth2Error}.
  *
- * If the input is already an OAuth2Error it is returned as-is; otherwise it is
- * wrapped in a {@link ServerError} with the original error attached as `cause`.
+ * An input that is already an OAuth2Error is returned as the same object;
+ * anything else is wrapped in a {@link ServerError} with the original error
+ * attached as `cause`.
  *
- * The returned error also has its `type` and `extensions.error_uri` synced so
- * that if one is set the other is too. This lets both the standard OAuth2
- * error format (which emits `error_uri`) and the RFC 9457 Problem Details
- * format (which emits `type`) carry the same URI without the handler having to
- * set both fields.
+ * Either way, `type` and `extensions.error_uri` are synced so that if one is
+ * set the other is too — **mutating an OAuth2Error input in place**. This lets
+ * both the standard OAuth2 error format (which emits `error_uri`) and the
+ * RFC 9457 Problem Details format (which emits `type`) carry the same URI
+ * without the handler having to set both fields.
  */
 export function toOAuth2Error(error: unknown): OAuth2Error {
   const oauth2Error = isOAuth2Error(error)

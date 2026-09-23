@@ -3,19 +3,18 @@
  * tokens, so none of this applies to it.
  *
  * The client keeps three pieces of mutable state across calls:
- * - the current token bundle (access + refresh + expiry + id token),
- * - the refresh token specifically (may be split into a harder-to-exfiltrate
- *   store than the access token — e.g. IndexedDB or a Web Worker),
+ * - the current token bundle (access token, expiry, scope, id token),
+ * - the refresh token, in its own store so it can persist somewhere the
+ *   access token does not,
  * - a short-lived auth-request map (`state` → `{ codeVerifier, returnTo, … }`)
  *   used to correlate an authorize redirect with its callback.
  *
- * The defaults here are all in-memory and live only for the process / tab
- * lifetime. Browser applications that need persistence across reloads should
- * plug in the appropriate implementation — most commonly:
- * - `MemoryTokenStorage` for access tokens (always),
- * - an `IndexedDB`-backed `RefreshTokenStorage` for refresh tokens (so they
- *   are not readable via `document.cookie` or `localStorage`),
- * - `sessionStorage`-backed `AuthRequestStorage` for the redirect state map.
+ * The implementations here are in-memory and live only for the process / tab
+ * lifetime. `DirectClient` uses them by default, except that in a browser
+ * document its auth-request storage defaults to `sessionStorage`. A browser
+ * app that must stay signed in across reloads passes
+ * `IndexedDBRefreshTokenStorage` for the refresh token and keeps the access
+ * token in memory.
  *
  * @module
  */
@@ -45,10 +44,9 @@ export interface TokenStorage {
 }
 
 /**
- * Persists the refresh token independently from the access token. Kept
- * separate so applications can harden refresh-token storage (IndexedDB,
- * Web Worker, or a server-side session cookie) without changing where
- * short-lived access tokens live.
+ * Persists the refresh token independently from the access token, so it can
+ * outlive a reload (IndexedDB, a Web Worker, a server-side session) while the
+ * short-lived access token stays wherever {@link TokenStorage} keeps it.
  */
 export interface RefreshTokenStorage {
   /** Returns the stored refresh token, or `null` when none has been persisted. */
@@ -79,8 +77,10 @@ export interface AuthRequestRecord {
  */
 export interface AuthRequestStorage {
   /**
-   * Returns the record for {@linkcode state}, or `null` if absent or expired.
-   * Implementations may prune the entry when returning `null` for an expired one.
+   * Returns the record for {@linkcode state}, or `null` if absent. An
+   * implementation may also return `null` for, and prune, a record it deems
+   * expired; `DirectClient` separately rejects one older than its
+   * `authRequestTtlMs`.
    */
   get(
     state: string,
@@ -90,9 +90,9 @@ export interface AuthRequestStorage {
     state: string,
     value: AuthRequestRecord,
   ): Promise<void> | void;
-  /** Removes one entry (called after successful callback consumption). */
+  /** Removes one entry — after a successful code exchange, or a stale one. */
   delete(state: string): Promise<void> | void;
-  /** Removes every entry. Called on logout. */
+  /** Removes every entry. Called when the client clears its session. */
   clear(): Promise<void> | void;
 }
 
@@ -134,10 +134,10 @@ export class MemoryRefreshTokenStorage implements RefreshTokenStorage {
 }
 
 /**
- * Default in-memory {@link AuthRequestStorage}. Data is lost when the
- * process exits — fine for server-side / CLI usage. Browser apps should
- * plug in a `sessionStorage`-backed implementation so the record survives
- * the authorize-redirect round-trip.
+ * In-memory {@link AuthRequestStorage}, `DirectClient`'s default outside a
+ * browser document. Data is lost when the process exits, and records are never
+ * expired by the store itself — a long-running server accumulates one per
+ * login that never returns to the callback, until `clear()` runs.
  */
 export class MemoryAuthRequestStorage implements AuthRequestStorage {
   #records = new Map<string, AuthRequestRecord>();

@@ -481,9 +481,9 @@ export class JwksTokenReader<
    *   available — a down issuer must be distinguishable from a genuinely
    *   invalid token, not collapsed into it. Once keys are cached, a failed
    *   refresh is absorbed and the cached keys keep serving.
-   * @throws {ServerError} If the JWKS endpoint returns a 4xx or a body that
-   *   is not a JWKS, or discovery reports no `jwks_uri` — a
-   *   misconfiguration, not a verdict on the caller's token.
+   * @throws {ServerError} If, with no keys cached, the JWKS endpoint returns
+   *   a 4xx or a body that is not a JWKS, or discovery reports no `jwks_uri`
+   *   — a misconfiguration, not a verdict on the caller's token.
    */
   async getToken(
     accessToken: string,

@@ -93,9 +93,9 @@ export function findLegacyVerifier(
 /**
  * Verify `password` against a stored foreign hash `phc` using the first matching
  * verifier in `verifiers`. Resolves `false` when no verifier recognizes `phc` or
- * the matched verifier rejects the password. Useful for a bulk-import
- * dry-run/validation pass; {@link IdentityService.signIn} uses the same
- * selection internally for upgrade-on-login.
+ * the matched verifier rejects the password or throws. Useful for a
+ * bulk-import dry-run/validation pass; {@link IdentityService.signIn} uses the
+ * same selection for upgrade-on-login.
  */
 export async function verifyLegacyPassword(
   verifiers: readonly LegacyPasswordVerifier[],
@@ -135,8 +135,8 @@ function decodeB64(segment: string): Uint8Array {
 
 /**
  * Parse a PHC / modular-crypt string (`$id[$v=n][$k=v,...]$salt$hash`) into its
- * parts. Returns `null` for anything that isn't a `$`-led PHC string. Salt and
- * hash are decoded as base64 (padding optional). This is the parsing helper for
+ * parts. Returns `null` for anything that isn't a `$`-led PHC string, or whose
+ * salt or hash segment is not valid base64 (padding optional). This is the parsing helper for
  * writing a bring-your-own argon2/scrypt {@link LegacyPasswordVerifier}: parse
  * the stored string, feed `params`/`salt`/`hash` to your KDF dependency, and
  * constant-time compare.
@@ -204,11 +204,7 @@ interface Pbkdf2Parsed {
 
 const encoder = new TextEncoder();
 
-/**
- * Reject an imported hash whose derived-key segment is implausibly short: a
- * 0-byte checksum would make `deriveBits(0)` compare empty-to-empty and turn
- * any password into a match on a runtime where that returns an empty buffer.
- */
+// A 0-byte checksum would compare empty-to-empty and match any password.
 const MIN_HASH_BYTES = 16;
 const MAX_PBKDF2_ITERATIONS = 1_000_000;
 
@@ -264,8 +260,9 @@ function parsePbkdf2(phc: string): Pbkdf2Parsed | null {
  * - **Django** — `pbkdf2_<digest>$<iterations>$<salt>$<base64 hash>`, where the
  *   salt is used as raw UTF-8 bytes and the hash is standard base64. This is
  *   Django's `PBKDF2PasswordHasher` output.
- * - **PHC** — `$pbkdf2-<digest>$i=<iterations>$<base64 salt>$<base64 hash>`,
- *   with base64 (padding optional) salt and hash.
+ * - **PHC** — `$pbkdf2-<digest>$i=<iterations>$<base64 salt>$<base64 hash>`
+ *   (`rounds=` is accepted in place of `i=`), with base64 (padding optional)
+ *   salt and hash.
  *
  * `<digest>` is one of `sha1`, `sha256`, `sha512`. The derived-key length is
  * taken from the stored hash. Comparison is constant-time. On a match,

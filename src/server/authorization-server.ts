@@ -70,7 +70,6 @@ import {
 } from "./signing-keys.ts";
 import { validateCodeChallenge } from "../utils/pkce.ts";
 
-/** The logout request's parameters, after `id_token_hint` has been read. */
 interface EndSessionParameters {
   clientId: string | null;
   subject: string | null;
@@ -84,14 +83,16 @@ export interface EndSessionContext<Client extends ClientInterface> {
   /** The logout request itself. */
   request: Request;
   /**
-   * The relying party the logout names — from a signature-valid
-   * `id_token_hint`'s audience, or from `client_id`. Null when the request
-   * named none, or named one this server does not know.
+   * The relying party the logout names — from `client_id`, else from the first
+   * audience of a signature-valid `id_token_hint`. The two are not checked
+   * against each other. Null when the request named none, or named one this
+   * server does not know.
    */
   client: Client | null;
   /**
-   * The `sub` of a signature-valid `id_token_hint`. Null when the request sent
-   * no hint, or one that did not verify — so a session lookup keyed on it must
+   * The `sub` of an `id_token_hint` that verifies against the current signing
+   * key. Null when the request sent no hint, or one that did not verify
+   * (including one signed by a key since rotated out of signing) — so a session lookup keyed on it must
    * handle "no subject", which is the ordinary case for a client that never
    * requested `openid`.
    */
@@ -231,7 +232,7 @@ export interface AuthorizationServerOptions<
    * the token endpoint mints an `id_token` for user-bound grants with the
    * `openid` scope, and the JWKS/UserInfo endpoints and
    * `openid-configuration` metadata go live. In multi-instance deploys load
-   * one persisted key on every instance (see `signing-keys.ts`).
+   * one persisted key on every instance (see `importSigningKeyJwk`).
    */
   signingKeys?: SigningKeyProvider;
   /**
@@ -265,8 +266,9 @@ export interface AuthorizationServerOptions<
   /**
    * Extra OIDC claims for the id_token and UserInfo response (e.g. `name`,
    * `email` when the scope allows). Merged under the protocol claims — `sub`
-   * (from `subjectOf`) and the id_token's `iss`/`aud`/`iat`/`exp`/`nonce`
-   * always win.
+   * (from `subjectOf`) and the id_token's `iss`/`aud`/`iat`/`exp` always win,
+   * as does `nonce` when the authorization request carried one; a `nonce`
+   * returned here survives on an id_token whose request had none.
    * The third argument is this credential's recorded authentication event,
    * including on refresh and UserInfo. Return its fields to emit them; never
    * substitute a user's newer session event. It is absent for legacy records.
@@ -281,9 +283,12 @@ export interface AuthorizationServerOptions<
    * permits them), so a resource server validating by introspection sees the
    * same authorization claims a JWT access token carries — feed it the same
    * computation `userClaims` uses and the two validation strategies stay in
-   * field-level parity. Called with the introspected token; the RFC 7662
-   * protocol fields (`active`, `scope`, `client_id`, `token_type`, `exp`,
-   * `iss`, `sub`, `username`) always win over anything it returns.
+   * field-level parity. Called with the introspected token. Each RFC 7662
+   * protocol field the server sets (`active`, `scope`, `client_id`,
+   * `token_type`, `exp`, `iss`, `sub`, `username`) wins over anything it
+   * returns, but one the server leaves unset is not stripped — a `sub`
+   * returned for a token with no user, or a `scope` for an unscoped token,
+   * reaches the response.
    */
   introspectionClaims?: (
     token: Token<Client, User, S>,
@@ -332,8 +337,9 @@ export interface AuthorizationServerOptions<
  *
  * - `{ user, authorizedScope?, authenticationContext? }` — user is authenticated; the authorize flow
  *   continues. `authorizedScope` declares scopes the user has already
- *   pre-authorized for this client; anything in the requested scope not
- *   covered by it triggers consent. **Omitting `authorizedScope` means
+ *   pre-authorized for this client; consent is needed unless it covers the
+ *   whole accepted scope (the requested scope after the token service's
+ *   `acceptedScope`). **Omitting `authorizedScope` means
  *   "nothing pre-authorized"** — so any requested scope needs consent: the
  *   framework calls `handleConsent` when one is configured, and otherwise
  *   treats the request as consented and grants the accepted scope. To
@@ -365,8 +371,9 @@ export type AuthenticateUserFn<User> = (
  * Called when the requested scope is not already covered by the user's
  * pre-authorized scope. Return one of:
  *
- * - `{ approved: true, scope? }` — consent granted. `scope` optionally
- *   narrows the granted scope (RFC 6749 §3.3 allows partial grants).
+ * - `{ approved: true, scope? }` — consent granted. `scope`, when set,
+ *   replaces the granted scope (RFC 6749 §3.3 allows partial grants). The
+ *   server does not check it against the requested scope, so return a subset.
  * - `{ approved: false }` — consent denied. The framework redirects to
  *   `redirect_uri` with `error=access_denied`.
  * - A `Response` — short-circuits the rest of the authorize flow and is
@@ -492,8 +499,8 @@ const ENDPOINTS = {
   & Record<DiscoveryEndpointKey, EndpointDefinition>;
 
 /**
- * Every endpoint the authorization server serves, by name — the seven it
- * advertises in its metadata (the {@link ResolvedEndpoints} keys) plus
+ * Every endpoint the authorization server serves, by name — the eight it can
+ * advertise in its metadata (the {@link ResolvedEndpoints} keys) plus
  * `metadata` and `oidcMetadata`, the two discovery documents that are served
  * but never advertised. Index {@link ENDPOINT_PATHS} and
  * {@link ENDPOINT_METHODS} with it to enumerate the whole surface.
@@ -541,7 +548,7 @@ const AUTHORIZATION_CODE_GRANT_TYPE = "authorization_code";
  * these paths — as the Hono adapter's `routes()` does — to match what the
  * server advertises in its RFC 8414 metadata.
  *
- * Covers the whole served surface: the seven endpoints the server advertises,
+ * Covers the whole served surface: the eight endpoints the server can advertise,
  * plus the two discovery documents (`metadata` for RFC 8414,
  * `oidcMetadata` for OIDC Discovery) that are served but never advertised.
  * Pair it with {@link ENDPOINT_METHODS} to enumerate path *and* verbs.
@@ -561,7 +568,7 @@ export const ENDPOINT_PATHS: Readonly<Record<EndpointKey, string>> = Object
 /**
  * The HTTP methods each endpoint in {@link ENDPOINT_PATHS} answers — `POST` for
  * the token-style endpoints, `GET` for authorize/JWKS/discovery, both for
- * UserInfo. Read it instead of re-deriving verbs per endpoint, so a hand-rolled
+ * UserInfo and end-session. Read it instead of re-deriving verbs per endpoint, so a hand-rolled
  * mount answers exactly what the built-in `routes()` does.
  *
  * @example
@@ -575,12 +582,10 @@ export const ENDPOINT_METHODS: Readonly<
   ENDPOINT_ENTRIES.map(([key, { methods }]) => [key, methods]),
 ) as Record<EndpointKey, string[]>;
 
-/** Where an authorize failure is reported once a redirect URI is verified. */
 interface AuthorizeRedirectTarget {
   url: URL | null;
 }
 
-/** A token value resolved to its record and the kind it was found as. */
 interface ResolvedToken<
   Client extends ClientInterface,
   User,
@@ -620,6 +625,7 @@ function isDeviceAuthorizationGrant<
  * - Introspection endpoint (POST /introspect) - RFC 7662
  * - Device authorization endpoint (POST /device_authorization) - RFC 8628
  * - Metadata endpoint (GET /.well-known/oauth-authorization-server) - RFC 8414
+ * - OIDC discovery, JWKS, UserInfo, and end-session endpoints, when configured
  *
  * Framework-agnostic: each `handle*Request` method takes a web `Request` and
  * returns a `Response`, so an adapter routes its endpoints to them. Extends
@@ -675,7 +681,6 @@ export class AuthorizationServer<
     User,
     S
   >["canIntrospectToken"];
-  /** Resolves the per-request {@link AuthorizationServerContext}. */
   #resolve: (
     request: Request,
   ) =>
@@ -751,7 +756,6 @@ export class AuthorizationServer<
     return await this.#resolve(request);
   }
 
-  /** Resolves the endpoint URLs for a request (issuer-derived unless set). */
   #resolvedEndpoints(
     context: AuthorizationServerContext<Client, User, S>,
   ): ResolvedEndpoints {
@@ -826,23 +830,16 @@ export class AuthorizationServer<
     });
   }
 
-  /**
-   * Applies `Cache-Control: no-store` and `Pragma: no-cache` headers to an
-   * error per RFC 6749 Section 5.2. The headers land on both the rethrown
-   * error (when {@link throwOnError} is true) and the generated response.
-   */
+  /** Sets the RFC 6749 §5.2 `no-store` cache headers on an error. */
   private addCacheHeaders(error: OAuth2Error): void {
     error.headers.set("Cache-Control", "no-store");
     error.headers.set("Pragma", "no-cache");
   }
 
   /**
-   * Error-prepare callback for the endpoints that authenticate the client
-   * (token, revocation, introspection, device authorization). Attaches the
-   * RFC 6749 Section 5.2 cache headers, and — when client authentication was
-   * attempted via the `Authorization` header and failed with a 401 — the
-   * matching `WWW-Authenticate: Basic` challenge that RFC 6749 Section 5.2
-   * requires.
+   * Error-prepare callback for client-authenticated endpoints: cache headers,
+   * plus the RFC 6749 §5.2 `WWW-Authenticate: Basic` challenge on a 401 when
+   * the request sent an `Authorization` header.
    */
   private prepareClientAuthError(
     request: Request,
@@ -855,10 +852,6 @@ export class AuthorizationServer<
     };
   }
 
-  /**
-   * Rejects a client that is not registered for a grant type
-   * (RFC 6749 Section 5.2 `unauthorized_client`).
-   */
   #assertGrantAuthorized(client: Client, grantType: string): void {
     if (!client.grants?.includes(grantType)) {
       throw new UnauthorizedClientError(
@@ -867,7 +860,6 @@ export class AuthorizationServer<
     }
   }
 
-  /** The grant a token request's `grant_type` dispatches to. */
   #grantFromBody(body: FormData): DispatchableGrant<Client, User, S> {
     const grantType = body.get("grant_type");
     if (typeof grantType !== "string") {
@@ -929,8 +921,10 @@ export class AuthorizationServer<
    * Supports multiple grant types based on the configured grants.
    *
    * A malformed request — wrong method, a content-type other than
-   * `application/x-www-form-urlencoded`, or an unsupported grant — is a 400
-   * `invalid_request`.
+   * `application/x-www-form-urlencoded`, or no `grant_type` — is a 400
+   * `invalid_request`. A `grant_type` with no registered grant is
+   * `unsupported_grant_type`, checked before client authentication; a client
+   * not registered for the grant is `unauthorized_client`.
    */
   async handleTokenRequest(request: Request): Promise<Response> {
     try {
@@ -951,6 +945,8 @@ export class AuthorizationServer<
    * Mint an OIDC id_token for a user-bound token whose scope includes
    * `openid`, or `undefined` when the OIDC surface is off (no signing keys),
    * the token has no user, the scope lacks `openid`, or no issuer resolved.
+   * The id_token's `aud` is the client id and it expires one hour after
+   * issue.
    */
   async mintIdToken(
     token: Token<Client, User, S>,
@@ -976,7 +972,6 @@ export class AuthorizationServer<
     return await signJwt(key, claims);
   }
 
-  /** OIDC claims released for a user: `userClaims` under the winning `sub`. */
   async #oidcClaims(
     user: User,
     scope?: S | null,
@@ -1080,8 +1075,8 @@ export class AuthorizationServer<
    * `endSession` does the ending and this method does the protocol around it:
    * identifying the relying party, authorizing the return trip, and shaping
    * the response. `endSession` is always called, even when nothing else about
-   * the request checks out, because a logout that refuses to log anyone out is
-   * the worst possible failure mode for this endpoint.
+   * the client, hint, or redirect checks out, because a logout that refuses to
+   * log anyone out is the worst possible failure mode for this endpoint.
    *
    * **Authorizing `post_logout_redirect_uri` is the whole security surface.**
    * It is matched by **exact string** against the resolved client's
@@ -1093,10 +1088,12 @@ export class AuthorizationServer<
    * registered, the browser is **not** sent there — it goes to `fallback` if
    * the app supplied one, or gets a bare 204.
    *
-   * `id_token_hint` is verified against the signing keys but its expiry is
-   * ignored: by the time anyone logs out the id_token naming their session has
-   * usually expired, and it is a hint, not authority. `client_id` is accepted
-   * as the fallback identifier the spec allows. `state` rides along only to a
+   * `id_token_hint` is verified against the current signing key only — a hint
+   * signed by a key since rotated out of signing yields no subject — and its
+   * expiry is ignored: by the time anyone logs out the id_token naming their
+   * session has usually expired, and it is a hint, not authority. `client_id`,
+   * when sent, names the client ahead of the hint's audience; the two are not
+   * compared. `state` rides along only to a
    * URI that passed authorization.
    *
    * Wire the app's session teardown through the `endSession` **constructor
@@ -1141,12 +1138,7 @@ export class AuthorizationServer<
     }
   }
 
-  /**
-   * The logout parameters, from the query string on GET and the form body on
-   * POST — RP-Initiated Logout §2 permits both. A verified `id_token_hint`
-   * contributes the subject and the audience; an unverifiable one contributes
-   * nothing rather than refusing the logout.
-   */
+  // RP-Initiated Logout §2: parameters come from the GET query or POST body.
   async #endSessionParameters(request: Request): Promise<EndSessionParameters> {
     const url = new URL(request.url);
     const params = request.method === "POST"
@@ -1163,7 +1155,6 @@ export class AuthorizationServer<
     };
   }
 
-  /** The subject and audience of a signature-valid `id_token_hint`, if any. */
   async #readIdTokenHint(
     idTokenHint: string,
   ): Promise<{ subject: string | null; audience: string | null } | null> {
@@ -1185,7 +1176,6 @@ export class AuthorizationServer<
     };
   }
 
-  /** The client the logout names, or null when it named none we can find. */
   async #resolveEndSessionClient(
     request: Request,
     params: EndSessionParameters,
@@ -1199,11 +1189,6 @@ export class AuthorizationServer<
     }
   }
 
-  /**
-   * The `post_logout_redirect_uri` to honor, with `state` appended — or
-   * undefined when the request named none, named no resolvable client, or
-   * named a URI that client did not register.
-   */
   #postLogoutRedirect(
     client: Client | null,
     params: EndSessionParameters,
@@ -1221,8 +1206,8 @@ export class AuthorizationServer<
   /**
    * Parses authorization request parameters from the query string.
    *
-   * The authorization endpoint is GET-only (RFC 6749 Section 3.1 requires GET
-   * and only permits POST), so parameters are read from `url.searchParams`.
+   * Reads only `url.searchParams`: RFC 6749 Section 3.1 requires GET support
+   * and leaves POST optional, and this server serves the endpoint on GET.
    */
   parseAuthorizeParameters(request: Request): AuthorizeParameters {
     const url = new URL(request.url);
@@ -1247,10 +1232,12 @@ export class AuthorizationServer<
    * Handles an authorization request (GET /authorize).
    * Used for the authorization code flow.
    *
-   * Once the request has named a redirect URI the client registered, failures
-   * are reported to that URI as an RFC 6749 Section 4.1.2.1 error redirect;
-   * before that they are error responses from this endpoint, since there is no
-   * verified place to send the user back to.
+   * Once a redirect target is verified — the requested `redirect_uri` matched
+   * a registration, or the request omitted it and the client has a literal
+   * registration, whose first entry is used — failures are reported to it as
+   * an RFC 6749 Section 4.1.2.1 error redirect; before that they are error
+   * responses from this endpoint, since there is no verified place to send the
+   * user back to.
    *
    * Requires a grant extending {@linkcode AuthorizationCodeGrant} registered
    * under `authorization_code`; without one the endpoint answers 500
@@ -1279,11 +1266,6 @@ export class AuthorizationServer<
     }
   }
 
-  /**
-   * The authorize flow proper, recording the redirect target on `target` as
-   * soon as one is verified so {@link handleAuthorizeRequest} can report later
-   * failures to the client.
-   */
   async #authorize(
     request: Request,
     target: AuthorizeRedirectTarget,
@@ -1353,10 +1335,6 @@ export class AuthorizationServer<
     return Response.redirect(redirectUrl.toString(), 302);
   }
 
-  /**
-   * Reports an authorize failure: an RFC 6749 Section 4.1.2.1 error redirect
-   * once a verified `redirectUrl` exists, otherwise a plain error response.
-   */
   #authorizeErrorResponse(error: unknown, redirectUrl: URL | null): Response {
     if (!redirectUrl || !(error instanceof Error) || !isOAuth2Error(error)) {
       return this.handleError(error);
@@ -1407,10 +1385,6 @@ export class AuthorizationServer<
     return grant;
   }
 
-  /**
-   * The client the authorize request names, once it is registered for the
-   * authorization code grant.
-   */
   async #resolveAuthorizeClient(
     grant: AuthorizationCodeGrant<Client, User, S>,
     clientId: string | undefined,
@@ -1424,11 +1398,6 @@ export class AuthorizationServer<
     return client;
   }
 
-  /**
-   * The URL the browser is sent back to: the requested `redirect_uri` once it
-   * matches a registration, or the client's first literal registration when the
-   * request omitted one.
-   */
   #resolveRedirectTarget(client: Client, redirectUri?: string): URL {
     if (!client.redirectUris?.length) {
       throw new UnauthorizedClientError("no authorized redirect_uri");
@@ -1452,7 +1421,6 @@ export class AuthorizationServer<
     return new URL(redirectUri ?? defaultRedirectUri!);
   }
 
-  /** Rejects any `response_type` other than the `code` this endpoint issues. */
   #validateResponseType(responseType?: string): void {
     if (!responseType) {
       throw new InvalidRequestError("response_type required");
@@ -1463,10 +1431,6 @@ export class AuthorizationServer<
     }
   }
 
-  /**
-   * Rejects PKCE parameters the grant cannot honor (RFC 7636 Section 4.3), and
-   * a `code_challenge` malformed for a method whose shape Section 4.2 fixes.
-   */
   #validateChallenge(
     grant: AuthorizationCodeGrant<Client, User, S>,
     params: AuthorizeParameters,
@@ -1487,11 +1451,6 @@ export class AuthorizationServer<
     }
   }
 
-  /**
-   * The scope the authorization code will carry: the requested scope narrowed
-   * by the token service, then by consent when the user has not already
-   * pre-authorized it. A `Response` short-circuits the flow (a consent page).
-   */
   async #resolveScopeAndConsent(options: {
     grant: AuthorizationCodeGrant<Client, User, S>;
     client: Client;
@@ -1659,9 +1618,11 @@ export class AuthorizationServer<
    * that field describes how an access token is presented, and its `exp` is
    * the refresh token's own expiry.
    *
-   * A token with no user — the client acting as its own resource owner, as
-   * the client credentials grant issues — carries no `sub` and no `username`;
-   * `client_id` identifies the machine. `sub` is optional in RFC 7662, and
+   * A token with a user carries `sub` from the user's `id` property (not
+   * `subjectOf`) and `username` when the user has one. A token with no user —
+   * the client acting as its own resource owner, as the client credentials
+   * grant issues — carries neither; `client_id` identifies the machine. `sub`
+   * is optional in RFC 7662, and
    * leaving it absent keeps `sub` an unambiguous "there is a resource owner"
    * signal rather than overloading `client_id` into the subject namespace
    * (RFC 9700 §4.15.1).
@@ -1847,7 +1808,6 @@ export class AuthorizationServer<
     );
   }
 
-  /** Publishes the resolved URLs of the OIDC (or plain OAuth2) endpoints. */
   #advertiseEndpoints(
     metadata: AuthorizationServerMetadata,
     endpoints: ResolvedEndpoints,
@@ -1969,13 +1929,18 @@ export class AuthorizationServer<
  * - `POST {revocationEndpoint}` → `handleRevocationRequest`
  * - `POST {introspectionEndpoint}` → `handleIntrospectionRequest`
  * - `POST {deviceAuthorizationEndpoint}` → `handleDeviceAuthorizationRequest`
- * - `GET  /.well-known/oauth-authorization-server` → `handleMetadataRequest`
+ * - `GET {jwksEndpoint}` → `handleJwksRequest`
+ * - `GET`/`POST {userinfoEndpoint}` → `handleUserInfoRequest`
+ * - `GET /.well-known/oauth-authorization-server` → `handleMetadataRequest`
+ * - `GET /.well-known/openid-configuration` → `handleOidcMetadataRequest`
  *
- * The authorization endpoint is deliberately **not** routed: `/authorize`
- * needs an `authenticateUser` (and optional `handleConsent`) callback this
- * transport has no access to, and in real flows it's a browser navigation,
- * never a call through the client's `fetch`. A request to it throws an
- * actionable error pointing at `handleAuthorizeRequest`. Any other path also
+ * The two discovery paths are matched literally, not against the issuer.
+ *
+ * The authorization and end-session endpoints are deliberately **not**
+ * routed: in real flows both are browser navigations, never calls through the
+ * client's `fetch`, and `/authorize` needs an `authenticateUser` (and optional
+ * `handleConsent`) callback this transport has no access to. A request to
+ * either throws an error naming the handler to drive directly. Any other path also
  * throws — the helper intentionally does not proxy arbitrary paths; if a call
  * lands here unexpectedly, that's a wiring bug worth surfacing rather than
  * silently forwarding.

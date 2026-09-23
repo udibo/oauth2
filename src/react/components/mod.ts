@@ -27,9 +27,12 @@
  * ## Server-rendered pages
  *
  * Pass `action` + `method` and the rendered `<form>` carries them, so a
- * server-rendered page still posts when JavaScript never arrives — every field
- * carries its `name`, so the native post sends the same keys `onSubmit`
- * receives. Once React is running, `onSubmit` handles the submit and the
+ * server-rendered page still posts when JavaScript never arrives — every
+ * rendered field carries its `name`, so the native post sends those fields
+ * under the keys `onSubmit` receives. Values a form holds without rendering a
+ * field for them are absent from a native post: `ResetPasswordForm`'s
+ * `token`, `MfaChallengeForm`'s `method`, and any `SignUpForm` field left
+ * hidden. Once React is running, `onSubmit` handles the submit and the
  * native post is suppressed. `formRef` hands you the same `<form>` element, for
  * example to trigger a native `submit()` yourself.
  *
@@ -56,8 +59,7 @@
  * - One-time-code fields use `autocomplete="one-time-code"` and **never block
  *   paste** (WCAG 2.2 §3.3.8 Accessible Authentication).
  * - Section titles carry heading semantics; the components ship unstyled, so
- *   **contrast and visible focus are yours to satisfy** with your own theme —
- *   the ratios and focus rules Udibo uses are in its `DESIGN.md`.
+ *   **contrast and visible focus are yours to satisfy** with your own theme.
  *
  * @example Plain React Router v7
  * ```tsx

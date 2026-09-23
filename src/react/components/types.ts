@@ -120,7 +120,7 @@ export interface AuthFormClassNames extends BaseClassNames {
   /** Each inline field error (`data-oauth2-error`). */
   error?: string;
   /**
-   * Inline content rendered under a field — today the sign-in form's "Forgot
+   * Inline content rendered under a field — the sign-in form's "Forgot
    * password?" link (`data-oauth2-forgot-password`).
    */
   hint?: string;
@@ -200,17 +200,19 @@ export interface BaseAuthFormProps<V extends AuthFormValues> {
   /**
    * `action` for the rendered `<form>`. Set it (with {@link method}) on a
    * server-rendered page so the form still posts when JavaScript never
-   * arrives; every field carries its `name`, so a native post sends the same
-   * keys `onSubmit` receives. Once React is running, `onSubmit` handles the
-   * submit and the native post is suppressed.
+   * arrives; every rendered field carries its `name`, so a native post sends
+   * those fields under the keys `onSubmit` receives. A value the form holds
+   * without a rendered field (such as `ResetPasswordForm`'s `token`) is not
+   * posted, so the server's handler must obtain it another way. Once React is
+   * running, `onSubmit` handles the submit and the native post is suppressed.
    *
    * Ignored in render-prop mode — you own the `<form>` there.
    */
   action?: string;
   /**
    * `method` for the rendered `<form>`. Defaults to `"post"` whenever
-   * {@link action} is set, because the fields these forms render — passwords,
-   * one-time codes, reset tokens — must never reach a URL, where a `get` form
+   * {@link action} is set, because the fields these forms render — passwords
+   * and one-time codes — must never reach a URL, where a `get` form
    * would put them: browser history, the `Referer` sent to every third-party
    * asset on the destination page, and the server's access log.
    */

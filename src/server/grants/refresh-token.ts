@@ -59,7 +59,9 @@ export interface RefreshTokenGrantOptions<
   > {
   /**
    * Called when reuse detection catches a rotated-out refresh token being
-   * replayed (after the family was revoked) — record it as a security event.
+   * replayed by the client it was issued to (after the family was revoked) —
+   * record it as a security event. Reuse detection runs only when the token
+   * service implements both `getRevokedRefreshToken` and `revokeFamily`.
    *
    * Trigger point `token-reuse` (see `docs/trigger-points.md`).
    * Fire-and-forget: it is awaited, but a throw is caught and logged, never
@@ -119,8 +121,9 @@ export class RefreshTokenGrant<
    * authorization.
    *
    * @throws {InvalidRequestError} If `refresh_token` is missing.
-   * @throws {InvalidGrantError} If the refresh token is unknown or expired, or
-   * its family has outlived the absolute cap.
+   * @throws {InvalidGrantError} If the refresh token is unknown or expired, its
+   * family has outlived the absolute cap, or a concurrent exchange already
+   * claimed it.
    * @throws {InvalidClientError} If the token was issued to another client.
    * @throws {InvalidScopeError} If the requested scope exceeds the original grant.
    */

@@ -17,8 +17,9 @@
  *
  * A raw "token in cookie" store is deliberately **not** shipped: a leaked
  * log line containing the cookie would yield a working bearer token. The
- * AES-GCM encryption in the stateless store is what makes that pattern
- * safe.
+ * AES-GCM encryption in the stateless store keeps the tokens unreadable, but
+ * a leaked encrypted cookie still works as a session cookie against the BFF
+ * until it expires.
  *
  * @module
  */
@@ -35,8 +36,8 @@ export interface SessionData {
   refreshToken?: string;
   /**
    * Cached user claims surfaced by `GET /auth/session` without exposing
-   * tokens to the browser. Populated from the id_token or the userinfo
-   * endpoint at callback time.
+   * tokens to the browser. Populated at callback time from the id_token's
+   * claims, as replaced by `HonoBffOptions.resolveUser` when configured.
    */
   user?: UserInfoClaims | null;
   /**
@@ -214,8 +215,8 @@ export interface EncryptedCookieSessionStoreOptions {
    * older secret keeps unsealing. Rotate by deploying `[newSecret, oldSecret]`,
    * then drop `oldSecret` once the grace window (at least {@linkcode maxAgeMs},
    * or your longest session lifetime) has elapsed. This is the session-store
-   * analog of a multi-key JWKS grace window. A single secret behaves exactly as
-   * before — a fleet-wide forced sign-out on rotation.
+   * analog of a multi-key JWKS grace window. With a single secret, rotating it
+   * signs everyone out.
    */
   secret: string | Uint8Array | Array<string | Uint8Array>;
   /**
@@ -235,9 +236,8 @@ export interface EncryptedCookieSessionStoreOptions {
    * milliseconds.
    *
    * The store stamps each cookie with a seal time at `create`/`update`; a
-   * pre-rotation cookie sealed before this field existed has no stamp and falls
-   * back to its own `updatedAt`, so old cookies are bounded too rather than
-   * grandfathered as unbounded.
+   * cookie without that stamp is aged from its `updatedAt` instead, so it is
+   * bounded too.
    */
   maxAgeMs?: number;
 }

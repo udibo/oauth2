@@ -374,9 +374,9 @@ development and test dependency, deliberately.
 
 To build the real thing, see
 [Become an OAuth provider](become-an-oauth-provider.md). To wire an application
-to any provider — this one included — see
-[Add login to an existing app](add-login.md) and
-[Local, preview, and production for a relying party](deploy-across-environments.md).
+to any provider — this one included — see the BFF wiring in
+[Use Udibo's identity service](use-udibo.md#put-the-bff-on-your-apps-origin) and
+[Configure local, preview, and production environments](deploy-across-environments.md).
 
 ## Checklist
 

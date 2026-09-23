@@ -4,7 +4,7 @@
  * Wraps a {@link DirectClient} configured with a client secret
  * and exposes the session endpoints a browser SPA talks to:
  *
- * - `POST /auth/login` — redirects the browser to the authorize endpoint,
+ * - `GET|POST /auth/login` — redirects the browser to the authorize endpoint,
  *   persisting a per-request state/verifier record and binding its `state` to
  *   this browser with a short-lived cookie.
  * - `GET  /auth/callback` — requires the browser to present that binding
@@ -15,7 +15,8 @@
  *   the refresh token upstream. Registered for both methods because the
  *   shipped React client navigates the browser here (a GET).
  * - `GET  /auth/session` — returns `{ isAuthenticated, user }` from the
- *   session. **Never** exposes tokens to the browser.
+ *   session, plus `sessionExpiresIn` and `logoutUrl` when signed in.
+ *   **Never** exposes tokens to the browser.
  * - `POST /auth/backchannel` — OIDC Back-Channel Logout receiver, mounted only
  *   when `backchannelLogout` is configured. A server-to-server call from the OP
  *   that ends the matching server-side session(s).
@@ -103,12 +104,12 @@ import {
  *
  * Accepted in two shapes so both deployment topologies stay symmetric:
  *
- * - **Own-issuer** (the Udibo case): pass a {@link HonoAuthorizationServer}.
+ * - **Own-issuer**: pass a {@link HonoAuthorizationServer}.
  *   `protect()` validates against the same in-process token service the
  *   issuer uses — no introspection round-trip.
  * - **Third-party-issuer**: pass a {@link HonoResourceServer} configured
- *   with `IntrospectionTokenReader`. `protect()` validates via RFC 7662
- *   against the upstream.
+ *   with `IntrospectionTokenReader` (RFC 7662 against the upstream) or
+ *   `JwksTokenReader` (signed JWT access tokens, verified locally).
  */
 export type HonoBffResourceServer<
   // deno-lint-ignore no-explicit-any
@@ -172,9 +173,11 @@ export interface HonoBffCookieOptions {
    */
   domain?: string;
   /**
-   * `Max-Age` in seconds, for the **cookie only**. Defaults to
+   * `Max-Age` in seconds, for the **cookie only**. In the default
+   * `sessionMode: "own"` it defaults to
    * {@linkcode HonoBffOptions.sessionMaxAgeMs}, so the browser keeps the
-   * cookie exactly as long as the session behind it is honored.
+   * cookie exactly as long as the session behind it is honored; in
+   * `sessionMode: "shared"` it has no default and is not cross-checked.
    *
    * Set it to lengthen the cookie past the session (harmless: the session ends
    * first and the stale cookie is cleared). Setting it **shorter** than the
@@ -194,8 +197,7 @@ export interface HonoBffCookieOptions {
  *
  * The BFF's session cookie is an ambient credential the browser attaches
  * automatically, so a cross-site page can trigger credentialed requests
- * (classic CSRF). The defense (as used by Duende.BFF's `X-CSRF` and Curity's
- * `token-handler-version` headers) requires a **custom request header** on the
+ * (classic CSRF). The defense requires a **custom request header** on the
  * fetch-driven surface: a custom header makes the request "non-simple", forcing
  * a CORS preflight that an untrusted origin cannot satisfy, so the browser never
  * attaches the cookie. The shipped `BffClient` (and therefore the React
@@ -329,12 +331,13 @@ export interface BffCallbackError {
    * OAuth2-style error code: the IDP's `error` (e.g. `access_denied`),
    * `invalid_request` (missing `code`/`state`, or a `state` this browser never
    * started — see {@link HonoBffOptions.loginStateTtlMs}), or `invalid_grant`
-   * (the code exchange failed — expired/replayed code, unknown `state`).
+   * (the code exchange failed — expired/replayed code, unknown `state` — or
+   * a later step threw: `resolveUser` or the session store).
    */
   error: string;
   /** Human-readable description; never contains secrets. */
   error_description: string;
-  /** The thrown cause for the `invalid_grant` (exchange) case; otherwise `undefined`. */
+  /** The thrown cause for the `invalid_grant` case; otherwise `undefined`. */
   cause?: unknown;
 }
 
@@ -455,7 +458,7 @@ export interface HonoBffOptions {
    * an end-session endpoint (`endpoints.endSession`, or via discovery),
    * `/auth/logout` — after destroying the local session — additionally
    * redirects the browser to the OP's `end_session_endpoint` with
-   * `id_token_hint` (the session's id_token, if any) and a
+   * `id_token_hint` (the session's id_token, if any), `client_id`, and a
    * `post_logout_redirect_uri` built from the resolved origin + the
    * open-redirect-guarded `return_to`. This ends the upstream IDP SSO session,
    * not just the local BFF session.
@@ -624,7 +627,8 @@ export interface HonoBffOptions {
    * Pass a {@link HonoAuthorizationServer} for own-issuer co-located
    * deployments (validation happens against the in-process token service)
    * or a {@link HonoResourceServer} for third-party-issuer deployments
-   * (validation goes through `IntrospectionTokenReader`).
+   * (validation goes through its token reader, such as
+   * `IntrospectionTokenReader` or `JwksTokenReader`).
    */
   resourceServer?: HonoBffResourceServer;
   /**
@@ -649,46 +653,28 @@ export interface HonoBffOptions {
   deriveRedirectUri?: boolean;
 }
 
-/** A session read from the store, paired with the cookie value it lives under. */
 interface SessionEntry {
   cookieValue: string;
   data: SessionData;
 }
 
-/**
- * What resolving the session cookie produced. `unavailable` is kept apart from
- * `anonymous` so a refresh the authorization server never answered reports a
- * transient failure instead of signing the user out.
- */
 type SessionResolution =
   | { status: "active"; entry: SessionEntry }
   | { status: "anonymous" }
   | { status: "unavailable" };
 
-/**
- * What a refresh attempt did to the session.
- *
- * `revoked` and `unavailable` are deliberately distinct: the authorization
- * server saying the grant is dead is the only reason to end a user's session.
- * A network blip, a 5xx, or a 429 must not, or one bad minute at the IdP signs
- * out every user at once.
- */
+// Only `revoked` ends a session: a network blip, 5xx, or 429 must not.
 type RefreshOutcome =
   | { status: "refreshed"; entry: SessionEntry }
   | { status: "revoked" }
   | { status: "unavailable" };
 
-/**
- * Whether the authorization server definitively rejected the grant, as opposed
- * to failing to answer. Only these end the session.
- */
 function isRevokedGrant(error: unknown): boolean {
   if (!isOAuth2Error(error)) return false;
   const code = error.extensions.error;
   return code === "invalid_grant" || code === "invalid_token";
 }
 
-/** Fully-resolved paths with defaults applied. */
 interface ResolvedPaths {
   basePath: string;
   login: string;
@@ -747,7 +733,6 @@ function sessionCookieName(opts: HonoBffCookieOptions | undefined): string {
   });
 }
 
-/** Resolved CSRF config, or `null` when disabled. */
 interface ResolvedCsrf {
   headerName: string;
   headerValue?: string;
@@ -778,7 +763,6 @@ const RESERVED_AUTHORIZE_PARAMS = [
 
 const RESERVED_AUTHORIZE_PARAM_SET = new Set(RESERVED_AUTHORIZE_PARAMS);
 
-/** The extra authorize parameters one BFF may send, split by who chooses them. */
 interface ResolvedExtraAuthorizeParams {
   fixed: Record<string, string>;
   forwarded: readonly string[];
@@ -856,10 +840,6 @@ function resolveExtraAuthorizeParams(
   return { fixed, forwarded };
 }
 
-/**
- * What one login request sends beyond the protocol parameters, with the two
- * the login call takes as their own options split out from the rest.
- */
 interface RequestAuthorizeParams {
   scope?: string;
   prompt?: string;
@@ -1005,7 +985,8 @@ export class HonoBff {
    * {@linkcode HonoBffPaths} entry falls outside a non-empty
    * {@linkcode HonoBffPaths.basePath}, when the session cookie would die
    * before the session behind it (see
-   * {@linkcode HonoBffOptions.sessionMaxAgeMs}), or when
+   * {@linkcode HonoBffOptions.sessionMaxAgeMs}), when `sessionMaxAgeMs` or a
+   * numeric `cookie.maxAge` is not positive or exceeds 400 days, or when
    * {@linkcode HonoBffOptions.extraParams} or
    * {@linkcode HonoBffOptions.forwardedParams} names a reserved authorize
    * parameter, gives one a name that is empty or not equal to its trimmed
@@ -1521,7 +1502,11 @@ export class HonoBff {
     );
   }
 
-  /** Session probe — returns `{ isAuthenticated, user }` without tokens. */
+  /**
+   * Session probe — returns `{ isAuthenticated, user }`, plus
+   * `sessionExpiresIn` (seconds until the access token expires, or `null`) and
+   * `logoutUrl` when signed in. Never returns tokens.
+   */
   sessionHandler(): Handler {
     return async (c) => {
       this.#noStore(c);
@@ -1909,9 +1894,11 @@ export class HonoBff {
    * - **Headers.** Only {@link DEFAULT_PROXY_FORWARD_HEADERS} (or your
    *   `forwardHeaders`) travel upstream; the session cookie, inbound
    *   `Authorization`, and hop-by-hop headers never do. Coming back, upstream
-   *   `Set-Cookie` and hop-by-hop headers are dropped and everything else —
-   *   including problem-details error bodies and their status — is passed
-   *   through verbatim.
+   *   `Set-Cookie` and hop-by-hop headers are dropped; the status, body
+   *   (problem-details errors included), and remaining headers pass through,
+   *   with `Location`/`Content-Location` rewritten into the mount, and the
+   *   response marked `Cache-Control: private`, `Vary: Cookie`, and
+   *   `X-Content-Type-Options: nosniff`.
    * - **Bodies stream** in both directions; nothing is buffered. Upstream
    *   redirects are returned to the browser rather than followed, so the token
    *   is never replayed to a `Location` the BFF did not vet.

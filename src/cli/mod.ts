@@ -69,8 +69,8 @@ function matchCommand(
 
 /**
  * Runs one CLI invocation and resolves with the exit code the process should
- * use: `0` when the command succeeded or help was requested, `1` for an
- * unknown command, a bad argument, or a command failure.
+ * use: `0` when the command succeeded or help was requested, `1` for no
+ * command, an unknown command, a bad argument, or a command failure.
  *
  * Command output goes to stdout; usage text and errors go to stderr, so
  * piping stdout to a secret store never picks up prose.

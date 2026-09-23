@@ -130,8 +130,10 @@ export interface OtpauthUriOptions {
  * `issuer` query parameter, so apps that read either convention group the
  * entry correctly.
  *
- * @throws {TypeError} if the secret is not base32 or `digits`/`periodSeconds`
- * are not positive integers, so a corrupted value cannot inject URI parameters.
+ * @throws {TypeError} if the secret contains characters outside the base32
+ * alphabet (after stripping whitespace and `=`) or `digits`/`periodSeconds`
+ * are not positive integers, so a corrupted value cannot inject URI
+ * parameters. The secret's length is not checked.
  */
 export function buildOtpauthUri(options: OtpauthUriOptions): string {
   validateTotpParams(options);

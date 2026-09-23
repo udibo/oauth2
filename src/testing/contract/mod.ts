@@ -19,9 +19,9 @@
  * sequential case and fails the concurrent one, which is the whole
  * reason the suites exist.
  *
- * Each runner takes a factory + seed-helpers because `add` / `register`
- * methods aren't part of the public service interface — the consumer
- * tells the runner how to populate test data.
+ * The service runners take a factory plus seed helpers because `add` /
+ * `register` methods aren't part of the public service interfaces — the
+ * consumer tells the runner how to populate test data.
  *
  * @module
  */
