@@ -82,28 +82,9 @@ export interface RedirectUriPatternViolation {
  */
 export type IsPublicSuffix = (domain: string) => boolean;
 
-/**
- * A label used to ask whether the *children* of a parent domain are public
- * suffixes, which is a different question from whether the parent is one.
- *
- * `r.appspot.com` is a registrable domain by the list's reckoning, but the rule
- * `*.r.appspot.com` makes every one of its subdomains a public suffix belonging
- * to a different registrant — so a wildcard over it hands codes to strangers
- * even though the parent itself passes. Probing with a label no registry has
- * ever issued answers that in one lookup.
- */
+// A label no registry issues; a PSL hit on it catches `*.r.appspot.com` rules.
 const CHILD_PROBE_LABEL = "udibo-public-suffix-probe";
 
-/**
- * Split a hostname into labels, or `null` when it is not usable for matching.
- *
- * A single trailing dot is the DNS root and is dropped, so `example.com.` and
- * `example.com` are the same host — without this, the extra empty label would
- * shift every label the public-suffix check looks at and let `*.deno.net.`
- * through. Any *other* empty label (`a..b`, a leading `.`) is refused outright
- * rather than normalized: it cannot resolve, and an empty leftmost label would
- * otherwise satisfy any prefix/suffix test.
- */
 function hostLabels(hostname: string): string[] | null {
   const normalized = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname;
   if (normalized.length === 0) return null;
@@ -260,12 +241,7 @@ export function checkRedirectUriPattern(
   return null;
 }
 
-/**
- * The loopback IP literals RFC 8252 §7.3 covers, in the form
- * `URL.hostname` normalizes them to. `localhost` is deliberately absent: RFC
- * 8252 §8.3 advises against it because its resolution depends on a host file
- * the authorization server does not control.
- */
+// RFC 8252 §7.3 IP literals only; `localhost` is excluded per RFC 8252 §8.3.
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "[::1]"]);
 
 function matchesLoopback(registration: string, redirectUri: string): boolean {
@@ -359,15 +335,12 @@ function matchesPattern(
  * - A host label may never be empty, and a single trailing dot is treated as
  *   the same host, so `example.com.` cannot smuggle an extra label past the
  *   parent-domain rule.
- * - A requested URI containing `*` never matches anything, checked both on the
- *   raw string and on the percent-decoded host, so a pattern can never be
- *   replayed back as a literal redirect target.
+ * - A requested URI containing a literal `*` never matches any registration,
+ *   so a pattern can never be replayed back as a redirect target. A requested
+ *   host that percent-decodes to one containing `*` never matches a pattern.
  *
- * That last rule is a deliberate tightening: `*` is a legal host character, so
- * a registration containing one that was previously matched by exact string
- * comparison no longer matches at all. Such a registration cannot be created
- * any more — a `*` now makes the value a pattern, which must satisfy the rules
- * above — so this only affects rows written before patterns existed.
+ * Any registration containing `*` is a pattern, so a stored literal URI with a
+ * `*` in its host matches only if it also satisfies the pattern rules.
  *
  * @param registered The client's registered redirect URIs.
  * @param redirectUri The `redirect_uri` from the authorization request.

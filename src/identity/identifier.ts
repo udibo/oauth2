@@ -15,8 +15,8 @@ export type IdentifierKind = "email" | "username" | "phone";
  * Classify a sign-in identifier as an email, phone number, or username.
  *
  * Heuristic: an `@` → `email`; otherwise a value made only of phone characters
- * (`+`, digits, spaces, `-`, `()`, `.`) with at least 7 digits → `phone`;
- * everything else → `username`. The value is trimmed first.
+ * (an optional leading `+`, then digits, spaces, `-`, `()`, `.`) with at least
+ * 7 digits → `phone`; everything else → `username`. The value is trimmed first.
  */
 export function classifyIdentifier(identifier: string): IdentifierKind {
   const value = identifier.trim();
@@ -38,9 +38,10 @@ export interface IdentifierLookups<User> {
 
 /**
  * Build a resolver that classifies an identifier ({@link classifyIdentifier})
- * and dispatches to the matching app-supplied lookup. Returns `undefined` when
- * no lookup is configured for the classified kind, or the user isn't found —
- * callers should treat both as "invalid credentials" without revealing which.
+ * and dispatches the trimmed value to the matching app-supplied lookup. Returns
+ * `undefined` when no lookup is configured for the classified kind, or the
+ * user isn't found — callers should treat both as "invalid credentials"
+ * without revealing which.
  *
  * @example
  * ```ts

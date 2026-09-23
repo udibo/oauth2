@@ -400,10 +400,12 @@ export class ResourceServer<
    *
    * The token's expiry is compared against now with {@linkcode
    * clockSkewSeconds} of leeway, so the same tolerance applies whichever
-   * token reader produced the token.
+   * token reader produced the token. A token without `accessTokenExpiresAt`
+   * is never refused as expired here. Revocation is the reader's to report,
+   * by resolving no token.
    *
-   * @throws {InvalidTokenError} If the token is invalid, expired beyond the
-   *   configured leeway, or revoked
+   * @throws {InvalidTokenError} If the reader resolves no token, or the token
+   *   has expired beyond the configured leeway
    * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3.1
    */
   async getToken(

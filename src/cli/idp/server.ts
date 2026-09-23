@@ -74,7 +74,6 @@ export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(hostname) || hostname.startsWith("127.");
 }
 
-/** A seeded user, as the memory services and the OIDC claim mapper see it. */
 interface DevIdpUser {
   id: string;
   username: string;

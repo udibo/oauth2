@@ -62,12 +62,9 @@ export interface BaseOptions {
 }
 
 /**
- * The `login` options every client understands.
- *
- * Named apart from {@link LoginOptions} — which keeps the richer
- * `DirectClient` shape it has always had — so that a consumer importing
- * `LoginOptions` and passing `scope` still compiles. Reach for this one only
- * when writing against {@link OAuth2ClientBase}.
+ * The `login` options every client understands. Use it when writing against
+ * {@link OAuth2ClientBase}; `DirectClient.login` accepts the richer
+ * {@link LoginOptions}.
  */
 export interface BaseLoginOptions {
   /** Path or URL to return to after a successful login. */

@@ -66,8 +66,9 @@ export class HonoResourceServer<
    *
    * On success, sets the authenticated context at `c.get("@udibo/oauth2")`
    * (typed via {@link HonoResourceServerVariables}) and calls `next()`. On
-   * failure, returns an RFC 6749 error response with a `WWW-Authenticate`
-   * header per RFC 6750 Section 3.
+   * failure, returns an error response, with a `WWW-Authenticate` challenge
+   * (RFC 6750 Section 3) on a 401 or 403, or rethrows when `throwOnError` is
+   * set.
    */
   protect(requiredScope?: S | string): MiddlewareHandler {
     return createProtectMiddleware(this, requiredScope);

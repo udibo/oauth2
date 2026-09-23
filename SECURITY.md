@@ -4,10 +4,6 @@
 OpenID Connect protocol surface and password-based identity flows. We take
 reports seriously and value the time of security researchers.
 
-> **Status note:** the package is not yet published to a public registry. Until
-> it is, the disclosure channel below is drafted and monitored, but the package
-> has no external users; the process activates fully at publish.
-
 ## Supported versions
 
 | Version        | Supported                        |

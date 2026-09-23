@@ -26,7 +26,7 @@ import { OAuth2Context, type OAuth2ContextValue } from "./context.ts";
 export interface UseOAuth2Result {
   /** True iff a user is authenticated. */
   isAuthenticated: boolean;
-  /** True during the initial probe / a refresh in progress. */
+  /** True while the provider's initial session probe is in flight. */
   isLoading: boolean;
   /** Current user claims, or `null`. */
   user: UserInfoClaims | null;

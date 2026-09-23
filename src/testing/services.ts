@@ -1,5 +1,5 @@
 /**
- * In-memory implementations of every OAuth2 service interface.
+ * In-memory implementations of the authorization server's service interfaces.
  *
  * The `Memory*Service` family is the public, generic version of the fixtures
  * the library uses for its own tests. They satisfy the

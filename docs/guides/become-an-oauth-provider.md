@@ -29,6 +29,7 @@ interface ClientInterface {
   id: string;
   grants?: string[];
   redirectUris?: string[];
+  postLogoutRedirectUris?: string[];
 }
 ```
 
@@ -36,8 +37,9 @@ interface ClientInterface {
 this list is rejected), and `redirectUris` is the allowlist for the
 authorization-code flow: entries are matched exactly, unless an entry is a
 wildcard pattern (`https://myapp-*.myorg.deno.net/cb`), which needs the
-`isPublicSuffix` seam wired or it stays inert. Add whatever else your app needs
-— name, secret hash, owner — the framework never sees those fields.
+`isPublicSuffix` seam wired or it stays inert. `postLogoutRedirectUris` is the
+exact-match allowlist for RP-initiated logout redirects. Add whatever else your
+app needs — name, secret hash, owner — the framework never sees those fields.
 
 Three services back the server:
 
@@ -63,7 +65,7 @@ Three services back the server:
 
 In-memory implementations of all of these ship in `@udibo/oauth2/testing`
 (`MemoryClientService`, `MemoryTokenService`, `MemoryAuthorizationCodeService`,
-`MemoryUserService`) — use them to get running today, then swap in DB-backed
+`MemoryUserService`) — use them to get running, then swap in DB-backed
 implementations and prove them with the contract test runners in
 `@udibo/oauth2/testing/contract`.
 
@@ -141,8 +143,10 @@ explicit URLs above exist because this guide mounts everything under `/oauth2`.
 `routes()` returns a Hono app with every standard endpoint at its conventional
 path: `POST /token`, `GET /authorize`, `POST /revoke`, `POST /introspect`,
 `POST /device_authorization`, `GET /.well-known/oauth-authorization-server`,
-`GET /.well-known/openid-configuration`, `GET /jwks`, and `/userinfo` (GET and
-POST). The last three go live when OIDC issuance is configured.
+`GET /.well-known/openid-configuration`, `GET /jwks`, `/userinfo` (GET and
+POST), and `/end_session` (GET and POST). OIDC discovery, JWKS, and UserInfo go
+live when OIDC issuance is configured; `/end_session` goes live when the
+`endSession` option is configured.
 
 The one thing `routes()` cannot decide for you is who the user is. The authorize
 endpoint asks your `authenticateUser` callback, which receives the Hono
@@ -212,7 +216,7 @@ with its `code_verifier`.
 
 ## Security defaults
 
-Two protections are on by default, deliberately stricter than RFC 6749:
+These protections are on by default, deliberately stricter than RFC 6749:
 
 - **`state` is required** at the authorize endpoint. Requests without it are
   rejected with `invalid_request` rather than degrading CSRF protection to
@@ -505,7 +509,7 @@ surface switches on with one option: `signingKeys`.
 ### Generate and persist a signing key
 
 Keys are ES256 (see [Known Limitations](../known-limitations.md) — there is no
-RS256 option; every mainstream client library accepts ES256). Generate a key
+RS256 option; confirm your relying parties accept ES256). Generate a key
 **once**, export the private JWK, and store it as a secret; every instance of a
 multi-instance deploy must load the same key, because an ephemeral per-instance
 key would fail verification across instances — see
@@ -541,11 +545,12 @@ const signingKey = await importSigningKeyJwk(
 const signingKeys = new StaticSigningKeyProvider(signingKey);
 ```
 
-`StaticSigningKeyProvider` covers the single-key case. For rotation, implement
-the two-method `SigningKeyProvider` interface yourself: `getSigningKey()`
-returns the key new tokens sign with, and `getPublicJwks()` returns every public
-key a verifier may still need (current plus not-yet-expired old keys). What that
-costs if you don't, and what the package does not yet ship, is spelled out in
+`StaticSigningKeyProvider` covers the single-key case. For rotation, use
+`RotatingSigningKeyProvider`, which signs with the current key and publishes
+previous public keys, or implement the two-method `SigningKeyProvider` interface
+yourself: `getSigningKey()` returns the key new tokens sign with, and
+`getPublicJwks()` returns every public key a verifier may still need (current
+plus not-yet-expired old keys). See
 [Signing keys and rotation](production-deployment.md#signing-keys-and-rotation).
 
 ### Configure claims
@@ -690,8 +695,9 @@ const introspectionClaims = (
 Set `AuthorizationServer.userClaims` to `oidcClaims` for ID tokens and UserInfo,
 `createJwtAccessTokenGenerator.userClaims` to `accessTokenClaims` for JWT access
 tokens, and `AuthorizationServer.introspectionClaims` to `introspectionClaims`.
-Custom `generateAccessToken` wrappers must forward the new fourth argument to
-the JWT generator. Tokens without a resource owner receive no event context.
+Custom `generateAccessToken` wrappers must forward the fourth
+(`authenticationContext`) argument to the JWT generator. Tokens without a
+resource owner receive no event context.
 
 `parseAuthorizeParameters` exposes `acrValues`, `maxAge`, and `prompt` as raw
 strings, including invalid values. Your application must validate and enforce
@@ -708,14 +714,12 @@ because browser-chosen values could weaken the server's requirements.
   now issue. The same `HonoAuthorizationServer` instance also exposes
   `protect()` / `requireScope()`, so one process can issue tokens and guard its
   own API routes.
-- [Deploy and Operate in Production](production-deployment.md) — configuration
-  inventory, the stores you provision and their retention, TLS and proxy
-  assumptions, security headers, and the
-  [hardening checklist](hardening-checklist.md).
+- [Deploy your application](production-deployment.md) — configuration inventory,
+  the stores you provision and their retention, TLS and proxy assumptions,
+  security headers, and the [hardening checklist](hardening-checklist.md).
 - [Known Limitations](../known-limitations.md) — ES256-only signing, the
   introspection field subset, no dynamic client registration, no provider-side
-  OIDC logout (`end_session_endpoint`), and the other honest walls.
-- The [README](../../README.md) covers error-format configuration
-  (`errorFormat: "problem-details"`), the `resolve` hook for
-  application-specific and proxy deployments, and testing with
-  `createMemoryAuthorizationServer`.
+  logout-token emission, and the other honest walls.
+- [Protect an API](./protect-an-api.md#what-failures-look-like-on-the-wire)
+  covers error-format configuration (`errorFormat: "problem-details"`), and
+  [testing](testing.md) covers `createMemoryAuthorizationServer`.

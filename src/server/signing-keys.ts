@@ -187,7 +187,11 @@ export async function exportSigningKeyJwk(
   return { ...jwk, kid: key.kid, alg: key.alg };
 }
 
-/** Import a signing key previously exported with {@link exportSigningKeyJwk}. */
+/**
+ * Import a signing key previously exported with {@link exportSigningKeyJwk}.
+ * A JWK without a `kid` is given a random one, so every instance importing it
+ * would publish and stamp a different `kid` — persist the exported `kid`.
+ */
 export async function importSigningKeyJwk(
   jwk: JsonWebKey & { kid?: string },
 ): Promise<SigningKey> {
@@ -243,10 +247,12 @@ export interface VerifyJwtOptions {
 
 /**
  * Verify a compact JWS against a public JWK and return its payload, or
- * `undefined` when the signature (or shape) is invalid or the payload's `exp`
- * is in the past. Exported for tests and lightweight in-process verification;
- * production resource servers should verify against the JWKS endpoint with
- * their JOSE library of choice.
+ * `undefined` when the signature (or shape) is invalid or a numeric `exp` is
+ * not in the future. It verifies ES256 regardless of the header's `alg` and
+ * checks nothing else: a payload with no `exp` passes, and `iss`, `aud`, and
+ * `nbf` are the caller's to check. Exported for tests and lightweight
+ * in-process verification; production resource servers should verify against
+ * the JWKS endpoint with their JOSE library of choice.
  */
 export async function verifyJwt(
   jwt: string,
@@ -300,8 +306,10 @@ export async function verifyJwt(
  * }
  * ```
  *
- * The token store still persists the (hashed) JWT string, so revocation and
- * introspection keep working exactly as with opaque tokens.
+ * Your token store persists the JWT string like any access token, so
+ * revocation and introspection work as with opaque tokens for readers that
+ * consult the store. A resource server that verifies the JWT offline against
+ * JWKS does not see a revocation and accepts the token until its `exp`.
  */
 export function createJwtAccessTokenGenerator(options: {
   /** Keys the tokens are signed with (also served from JWKS). */
@@ -314,7 +322,12 @@ export function createJwtAccessTokenGenerator(options: {
    * the client id, which single-resource validators must then accept.
    */
   audience?: string;
-  /** Token lifetime in seconds for the `exp` claim. Defaults to 3600. */
+  /**
+   * Token lifetime in seconds for the `exp` claim. Defaults to 3600. Set
+   * independently of the token service's `accessTokenExpiresAt` and of any
+   * refresh-family cap, which shorten only the stored expiry — an offline
+   * verifier honors this `exp`, so keep it no longer than those.
+   */
   lifetimeSeconds?: number;
   /** Maps a user to the `sub` claim. Defaults to the user's `id` property. */
   subjectOf?: (user: unknown) => string;

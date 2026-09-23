@@ -136,7 +136,9 @@ export interface MfaServiceOptions {
    * Throttles {@link verify} per user id (a 6-digit code is brute-forceable
    * without one). When the limit is hit the service emits
    * `mfa.verify.rate_limited` and — under `protectionMode: "enforce"` —
-   * throws an `IdentityError` with code `rate_limited`. A successful
+   * throws an `IdentityError` with code `rate_limited`; a limiter whose
+   * `check` throws is treated as limited under `"enforce"` and allowed under
+   * `"log-only"`. A successful
    * verification resets the user's window, so legitimate sign-ins never
    * accumulate toward a lockout.
    */
@@ -276,7 +278,8 @@ export class MfaService {
    * Builds the service around an app-owned {@link MfaStore}.
    *
    * @throws {TypeError} on unusable configuration — non-positive-integer
-   * `digits`/`periodSeconds`/`recoveryCodeCount` or negative `windows` — so a
+   * `digits`/`periodSeconds`/`recoveryCodeCount` or a negative or non-integer
+   * `windows` — so a
    * miswired deploy fails at construction instead of silently rejecting every
    * code an enrolled user submits.
    */
@@ -329,10 +332,11 @@ export class MfaService {
    * and stored, and the plaintext codes are returned for one-time display.
    * Returns `{ confirmed: false }` when the code is wrong, no enrollment is
    * pending, or the pending secret changed under a concurrent enrollment. If
-   * storing the recovery codes fails after activation, the just-activated
-   * credential is rolled back and the error rethrown — a failure leaves the
-   * user *not* enrolled (free to retry), never enrolled without the recovery
-   * codes they were promised.
+   * storing the recovery codes fails after activation, the service calls
+   * `clearTotp` to roll the credential back and rethrows the original error,
+   * leaving the user *not* enrolled and free to retry. If `clearTotp` also
+   * fails, its error is thrown instead and the credential stays active
+   * without recovery codes.
    *
    * @throws {IdentityError} `mfa_already_enrolled` when an active credential
    * exists (see {@link startEnrollment}).
@@ -374,9 +378,12 @@ export class MfaService {
    * Verify a second-factor code: first as TOTP against the *active* secret
    * (pending secrets are ignored — they need {@link confirmEnrollment}), then
    * as a recovery code (restrict with {@link MfaVerifyOptions.method}). An
-   * accepted TOTP code atomically advances the stored last step, so the same
-   * code is rejected on replay even under concurrent submission; an accepted
-   * recovery code is atomically burned, so it is single-use. Without an
+   * accepted TOTP code advances the stored last step through
+   * {@link MfaStore.advanceLastStep}, so the same code is rejected on replay;
+   * an accepted recovery code is burned through
+   * {@link MfaStore.consumeRecoveryHash}, so it is single-use. Both hold under
+   * concurrent submission only if the store implements those methods
+   * atomically. Without an
    * active credential every code is rejected — recovery codes are a fallback
    * *for* the enrolled factor, so stale hashes can never authenticate a user
    * whose MFA was disabled. A successful verification resets the per-user
@@ -386,7 +393,8 @@ export class MfaService {
    * from a wrong one without subscribing to `onEvent`.
    *
    * @throws {IdentityError} `rate_limited` when a `rateLimiter` is configured,
-   * the per-user limit is hit, and `protectionMode` is `"enforce"`.
+   * `protectionMode` is `"enforce"`, and the per-user limit is hit or the
+   * limiter's `check` throws (it fails closed).
    */
   async verify(
     userId: string,

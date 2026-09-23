@@ -70,7 +70,10 @@ export interface CreateTestSessionOptions {
  * const cookie = await createTestSession(bff, {
  *   user: { sub: "u1", name: "Alice" },
  * });
- * const res = await app.request("/auth/session", { headers: { cookie } });
+ * // With CSRF on (the default), a request carrying the cookie needs the header.
+ * const res = await app.request("/auth/session", {
+ *   headers: { cookie, "x-csrf": "1" },
+ * });
  * ```
  */
 export async function createTestSession(
@@ -142,7 +145,9 @@ export interface CreateAuthenticatedTestSessionOptions<
  *   scope: new BasicScope("read write"),
  *   claims: { sub: "u1", name: "Alice" },
  * });
- * const res = await app.request("/api/me", { headers: { cookie } });
+ * const res = await app.request("/api/me", {
+ *   headers: { cookie, "x-csrf": "1" },
+ * });
  * ```
  */
 export async function createAuthenticatedTestSession<
@@ -272,7 +277,13 @@ export interface SessionStoreContractOptions {
 
 const BOUND_MS = 1000;
 
-/** Contract test suite for {@link SessionStore} implementations. */
+/**
+ * Contract test suite for {@link SessionStore} implementations. Registers
+ * `describe`/`it` blocks from `@std/testing/bdd`, so call it at a test
+ * module's top level. It does not check that a stateful store's `update`
+ * rejects a missing or destroyed session, which {@link SessionStore.update}
+ * requires — test that yourself.
+ */
 export function runSessionStoreContractTests(
   options: SessionStoreContractOptions,
 ): void {

@@ -95,7 +95,8 @@ export function randomToken(bytes = 32): string {
  * secret is persisted (e.g. as a lookup key) — use {@link deriveSealKey} so the
  * sealing key is independent of that stored hash.
  *
- * @throws if the secret has fewer than 16 bytes of entropy (32+ recommended).
+ * @throws {Error} if the secret is shorter than 16 bytes. Length is all that is
+ * checked; supply 32+ bytes of real entropy.
  */
 export async function deriveAesKey(
   secret: string | Uint8Array,

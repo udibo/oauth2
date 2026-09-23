@@ -145,13 +145,21 @@ export interface FakeTenant {
   addUser(user: FakeTenantUser): Promise<void>;
   /** Adds an organization. Throws on a duplicate id. */
   addOrganization(organization: FakeTenantOrganization): void;
-  /** Makes a person a member of an organization, replacing any earlier membership. */
+  /**
+   * Makes a person a member of an organization, replacing any earlier
+   * membership. Throws when the organization does not exist.
+   */
   addMember(
     organizationId: string,
     userId: string,
     membership?: FakeTenantMembership,
   ): void;
-  /** Ends a membership. Credentials issued in that organization stop answering for it. */
+  /**
+   * Ends a membership. From then on introspection and `/api/check` stop
+   * answering for that organization on credentials issued in it, and UserInfo
+   * drops its `org_*` claims; a JWT access token or id_token already minted
+   * keeps its claims until it expires.
+   */
   removeMember(organizationId: string, userId: string): void;
   /** Registers a resource type, so `/api/check` accepts it. */
   registerResourceType(type: string): void;
@@ -159,12 +167,13 @@ export interface FakeTenant {
   grant(grant: FakeTenantGrant): void;
   /**
    * Chooses who the next authorization requests authenticate as, until
-   * called again. With nobody chosen, authorize answers `login_required`.
+   * called again. With nobody chosen, authorize answers `access_denied`.
    */
   signInAs(userId: string | null, signIn?: FakeTenantSignIn): void;
   /**
    * Mints an access token without the browser flow, for testing an API
-   * directly. JWT or opaque as the client is registered.
+   * directly. JWT or opaque as the client is registered. Throws when the
+   * client or user does not exist.
    */
   issueAccessToken(request: FakeTenantTokenRequest): Promise<string>;
 }

@@ -9,8 +9,8 @@
  * - {@link IdentityService} — orchestrates the primitives below into sign-up,
  *   sign-in, password-reset, and email-verification flows you call from your
  *   own routes (storage stays an app-owned {@link IdentityUserStore}).
- * - {@link PasswordIdentityService} — PBKDF2 password hashing + constant-time
- *   verify (no more hand-rolled crypto); implement {@link PasswordHasherLike}
+ * - {@link PasswordIdentityService} — PBKDF2 password hashing with a
+ *   constant-time digest comparison; implement {@link PasswordHasherLike}
  *   instead to plug in argon2 or scrypt.
  * - {@link TokenFlowService} — single-use, hashed-at-rest verify/reset/sign-in
  *   tokens over an app-owned {@link TokenFlowStore} (magic links reuse it via

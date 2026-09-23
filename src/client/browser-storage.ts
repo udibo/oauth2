@@ -2,14 +2,10 @@
  * Browser-storage implementations of {@link RefreshTokenStorage} and
  * {@link AuthRequestStorage}.
  *
- * Both ship from the `@udibo/oauth2/client` subpath alongside the
- * `Memory*` defaults so non-React browser consumers (vanilla JS,
- * Vue, Svelte, …) can use them too.
- *
- * Both implementations are **SSR-safe**: if `window` / `indexedDB` /
- * `sessionStorage` is undefined at construction, the storage degrades
- * to a no-op (`get` returns `null`, `set`/`clear` do nothing). The
- * client constructs the real backing on first use in the browser.
+ * Both are **SSR-safe**: construction touches no browser API, and each method
+ * checks for `indexedDB` / `sessionStorage` when it runs. Where the API is
+ * missing the call is a no-op (`get` returns `null`, `set`/`clear` do
+ * nothing), so the same instance works once the code runs in a browser.
  *
  * @module
  */
@@ -39,17 +35,12 @@ export interface IndexedDBRefreshTokenStorageOptions {
 /**
  * Refresh token storage backed by IndexedDB.
  *
- * IndexedDB is preferred over `localStorage` because the latter is
- * synchronously readable from any script that runs in the document
- * (including injected XSS payloads). IndexedDB's same-origin guarantees
- * are similar but its async API and per-database isolation make
- * exfiltration somewhat harder. Combined with refresh-token rotation +
- * reuse detection on the authorization server, it's the recommended
- * default for a browser `DirectClient`.
- *
- * No `localStorage`-backed variant is shipped: it is synchronously
- * readable by any in-document script (including injected XSS), which
- * defeats the protection above.
+ * Keeps the refresh token across reloads without putting it in a cookie
+ * (sent with every request) or `localStorage`. It is stored in plain text and
+ * **is not a defense against XSS**: any script running on the origin can open
+ * the same database and read it. Pair it with refresh-token rotation and
+ * reuse detection on the authorization server, which limit how long a stolen
+ * token stays useful.
  *
  * Every instance needs a
  * {@link IndexedDBRefreshTokenStorageOptions.clientId} — the token is stored
@@ -117,8 +108,9 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
   }
 
   /**
-   * Persists {@linkcode value} as the refresh token. A no-op when `indexedDB`
-   * is unavailable (SSR / non-browser).
+   * Persists {@linkcode value} as the refresh token. A silent no-op when
+   * `indexedDB` is unavailable (SSR / non-browser) or another tab is blocking
+   * the store's creation.
    *
    * @throws {DOMException} when IndexedDB rejects the write.
    */
@@ -137,8 +129,9 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
   }
 
   /**
-   * Discards the stored refresh token. A no-op when `indexedDB` is unavailable
-   * (SSR / non-browser).
+   * Discards the stored refresh token. A silent no-op when `indexedDB` is
+   * unavailable (SSR / non-browser) or another tab is blocking the store's
+   * creation.
    *
    * @throws {DOMException} when IndexedDB rejects the delete.
    */
@@ -188,11 +181,10 @@ export interface SessionStorageAuthRequestStorageOptions {
   /** sessionStorage key prefix. Defaults to `"oauth2:auth-req:"`. */
   keyPrefix?: string;
   /**
-   * Maximum age of an auth request before it's treated as expired
-   * (epoch-ms). Reads of older entries return `null` and the entry is
-   * removed. Defaults to 10 minutes — long enough for a slow
-   * authorize-redirect round-trip, short enough that stale state from a
-   * previous abandoned login doesn't accumulate.
+   * Maximum age of an auth request before it's treated as expired, in ms.
+   * Reading an older entry returns `null` and removes it; an entry that is
+   * never read again stays until {@link SessionStorageAuthRequestStorage.clear}
+   * or the tab closes. Defaults to 10 minutes.
    */
   ttlMs?: number;
 }

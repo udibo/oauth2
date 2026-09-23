@@ -36,15 +36,18 @@ export interface DevIdpClientConfig {
   id: string;
   /** Omit for a public (PKCE-only) client; set for a confidential one. */
   secret?: string;
-  /** Redirect URIs, matched exactly — list every one your app sends. */
+  /**
+   * Redirect URIs, matched exactly — list every one your app sends. An entry
+   * on `127.0.0.1` or `[::1]` also matches the same URI on any port.
+   */
   redirectUris: string[];
   /** Grant types this client may use. */
   grants: string[];
   /**
    * User the client-credentials grant puts on the token. Omit it — the
-   * default — for a machine token with no user, whose subject is the client
-   * itself (RFC 9068 §2.2). Set it only to model a dedicated service-account
-   * user, never a human owner.
+   * default — for a machine token with no user, which introspection reports
+   * with a `client_id` and no `sub`. Set it only to model a dedicated
+   * service-account user, never a human owner.
    */
   ownerUserId?: string;
 }
@@ -55,9 +58,10 @@ export interface DevIdpClientConfig {
  */
 export interface DevIdpConfig {
   /**
-   * Issuer identifier stamped into tokens and discovery. When omitted the
-   * issuer follows each request's own origin, so the same process answers
-   * correctly on `localhost`, `127.0.0.1`, and a CI service hostname.
+   * Issuer identifier stamped into tokens and discovery. When omitted it is
+   * pinned at startup to the bound address (`localhost` for a wildcard bind
+   * such as `0.0.0.0`); set it when clients reach the server under another
+   * name, such as a CI service hostname.
    */
   issuer?: string;
   /** Interface to bind. */

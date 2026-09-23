@@ -7,7 +7,11 @@
 
 import type { AuthorizationServerMetadata } from "../models/responses.ts";
 
-/** Default entry lifetime for {@link MemoryDiscoveryCache}: one hour. */
+/**
+ * Default discovery-document lifetime, one hour: the TTL of a
+ * {@link MemoryDiscoveryCache}, and how long a `DirectClient` without a
+ * `discoveryCache` keeps its own copy.
+ */
 export const DEFAULT_DISCOVERY_TTL_MS = 60 * 60 * 1000;
 
 /** Default entry ceiling for {@link MemoryDiscoveryCache}. */
@@ -97,7 +101,7 @@ export interface MemoryDiscoveryCacheOptions {
   /**
    * Maximum number of issuers held. Defaults to
    * {@link DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES}. Expired entries are dropped
-   * first, then the least recently stored, so a multi-tenant server with an
+   * first, then the least recently used, so a multi-tenant server with an
    * unbounded issuer list cannot grow without limit.
    */
   maxEntries?: number;
@@ -105,8 +109,8 @@ export interface MemoryDiscoveryCacheOptions {
 
 /**
  * In-memory {@link DiscoveryCache}: TTL entries plus in-flight de-duplication,
- * so a burst of requests against a cold issuer triggers exactly one discovery
- * fetch. Failures are never cached.
+ * so a burst of requests against a cold issuer triggers one `load`. Failures
+ * are never cached.
  *
  * Construct one per process (or per trust boundary) and hand it to every
  * client that should share it.
@@ -182,7 +186,10 @@ export class MemoryDiscoveryCache implements DiscoveryCache {
     this.#entries.delete(normalizeIssuer(issuer));
   }
 
-  /** Drops every entry. In-flight loads still settle for their callers. */
+  /**
+   * Drops every entry. A load already in flight still settles for its callers
+   * and stores its result.
+   */
   clear(): void {
     this.#entries.clear();
   }

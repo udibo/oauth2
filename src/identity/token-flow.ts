@@ -1,12 +1,11 @@
 /**
  * One token-flow primitive for the single-use, expiring links an identity layer
- * needs — **email verification** and **password reset** are the same mechanics:
- * mint a high-entropy token, store only its hash, hand the raw token to the app
- * to deliver, then validate / single-use-consume it later.
+ * needs — email verification, password reset, account unlock, and sign-in
+ * links share the same mechanics: mint a 32-byte random token, store only its
+ * SHA-256 hash, hand the raw token to the app to deliver, then validate /
+ * single-use-consume it later.
  *
- * The app reimplements this once per flow today (random bytes → sha256 → store
- * with expiry → consume). This collapses it into one tested, enumeration-safe
- * building block. Storage is an app-owned {@link TokenFlowStore} (a
+ * Storage is an app-owned {@link TokenFlowStore} (a
  * {@link MemoryTokenFlowStore} ships for dev/tests); the package owns the
  * lifecycle, not the database.
  *
@@ -98,8 +97,9 @@ export interface CreateTokenOptions {
   /** Lifetime in milliseconds. */
   ttlMs: number;
   /**
-   * Invalidate any existing pending tokens for this `(purpose, subject)` first
-   * (requires {@link TokenFlowStore.deleteBySubject}). Defaults to `false`.
+   * Invalidate any existing pending tokens for this `(purpose, subject)` first.
+   * Silently skipped when the store lacks
+   * {@link TokenFlowStore.deleteBySubject}. Defaults to `false`.
    */
   invalidateExisting?: boolean;
 }

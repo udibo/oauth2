@@ -1,5 +1,5 @@
 /**
- * Internal constant-time matching shared by the MFA and BFF code paths.
+ * Internal timing-safe matching for secret candidates.
  *
  * @module
  */
@@ -7,11 +7,13 @@
 import { timingSafeEqualString } from "./crypto.ts";
 
 /**
- * Constant-time scan for `target` among `candidates`: every candidate is
- * compared (no early exit), so timing reveals neither whether nor where a
- * match occurred. Returns the index of the *last* matching candidate, or
- * `undefined` when none match — order candidates least- to most-preferred so
- * a duplicate resolves to the preferred entry.
+ * Compares `target` against every candidate with no early exit, so the scan's
+ * duration does not reveal where a match occurred. Each comparison is
+ * {@link timingSafeEqualString}, which returns early on a byte-length mismatch,
+ * so candidates of a different length than `target` are distinguishable by
+ * timing. Returns the index of the *last* matching candidate, or `undefined`
+ * when none match — order candidates least- to most-preferred so a duplicate
+ * resolves to the preferred entry.
  */
 export function timingSafeMatchIndex(
   candidates: string[],

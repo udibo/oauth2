@@ -3,7 +3,7 @@
 Add a TOTP second factor with recovery codes to an app already running
 `IdentityService`. By the end you have enrollment behind a confirmation code, a
 challenge step every sign-in path passes through, single-use recovery codes for
-the lost-phone case, and a throttle that makes a six-digit code un-guessable.
+the lost-phone case, and a throttle that limits guessing of a six-digit code.
 The library owns the TOTP math, the replay guard, and the code-burning rules;
 your app keeps owning the rows, the routes, and the **policy** — whether MFA is
 optional or required, and where in your sign-in flow the challenge happens.
@@ -379,7 +379,7 @@ export function Challenge() {
 Both ship unstyled with per-slot `className` hooks and a render-prop escape
 hatch; see the
 [prebuilt components section](react.md#forms-for-an-app-that-hosts-its-own-login)
-of the README for theming and the headless `useAuthForm` path.
+of the React guide for theming and the headless `useAuthForm` path.
 
 ## Security checklist
 

@@ -80,10 +80,11 @@ interface ResolvedBffEndpoints {
  * OAuth2 client for a browser app whose sessions live in a
  * Backend-for-Frontend.
  *
- * Every method here is a same-origin call to the BFF with `credentials:
- * "include"`, never a call to the authorization server. There is no token
- * storage, no PKCE, and no access token to read — if you need one, the app
- * wants a {@link DirectClient} instead.
+ * Nothing here calls the authorization server: the session probe and
+ * {@link BffClient.fetch} send `credentials: "include"` requests, and the login
+ * and logout methods only build BFF URLs. There is no token storage, no PKCE,
+ * and no access token to read — if you need one, the app wants a
+ * {@link DirectClient} instead.
  *
  * @example Same-origin BFF
  * ```ts
@@ -204,8 +205,8 @@ export class BffClient extends OAuth2ClientBase {
    * (an HTML error page from a misrouted path is the common one) all read as
    * signed out. A failure that was not simply "nobody is signed in" — anything
    * other than a `401` — also emits an `error` event so a UI can tell the two
-   * apart. The read is bounded and deadlined like every other call this
-   * package makes.
+   * apart. The probe is refused if the BFF answers with a redirect, and is
+   * bounded in size and time.
    *
    * Only `isAuthenticated: true` carries `user` / `sessionExpiresIn` /
    * `logoutUrl` through; an anonymous payload always reports them as `null`,

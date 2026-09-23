@@ -61,7 +61,7 @@ export interface AuthorizationCodeGrantOptions<
     S,
     AuthorizationCodeGrantServices<Client, User, S>
   > {
-  /** Allow optional refresh token. Defaults to true. */
+  /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
   /** Custom PKCE challenge methods. Defaults to S256 only. */
   challengeMethods?: ChallengeMethods;
@@ -336,8 +336,12 @@ export class AuthorizationCodeGrant<
    * Exchanges an authorization code for an access token. If PKCE was used
    * during authorization, the code_verifier must be provided.
    *
-   * The code is claimed by revoking it: only the caller whose revoke wins
-   * receives a token, so concurrent exchanges of one code cannot both succeed.
+   * The code is claimed by revoking it before the client-match, verifier, and
+   * `redirect_uri` checks, so a failed exchange still consumes the code. Only
+   * the caller whose revoke wins receives a token, given an atomic
+   * `authorizationCodeService.revoke`. Presenting a code that already minted
+   * tokens asks `tokenService.revokeCode` to revoke those tokens and fails with
+   * `invalid_grant` (RFC 6819 §4.4.1.1).
    *
    * @throws {InvalidRequestError} When `code` is missing, a required `code_verifier` is absent, or the verifier is malformed.
    * @throws {InvalidGrantError} When the code is unknown, expired, already claimed, or its verifier or `redirect_uri` does not match.

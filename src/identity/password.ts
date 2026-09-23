@@ -1,13 +1,11 @@
 /**
  * Password hashing primitive for the identity self-service layer.
  *
- * Promotes the package's internal PBKDF2 helpers (previously reachable only via
- * a relative import) to a public, documented service so apps stop hand-rolling
- * password crypto — the single riskiest thing to reinvent. The built-in
- * algorithm is PBKDF2-SHA-256 at {@link DEFAULT_PBKDF2_ITERATIONS} iterations
- * with a constant-time verify. Want argon2 or scrypt instead? Implement
- * {@link PasswordHasherLike} with your own dependency and pass it wherever a
- * hasher is accepted — nothing in the package requires the concrete class.
+ * The built-in algorithm is PBKDF2-SHA-256 at {@link DEFAULT_PBKDF2_ITERATIONS}
+ * iterations, with a constant-time comparison of the derived digest. Want
+ * argon2 or scrypt instead? Implement {@link PasswordHasherLike} with your own
+ * dependency and pass it wherever a hasher is accepted — nothing in the package
+ * requires the concrete class.
  *
  * **Storage is yours.** Persist the whole {@link PasswordCredential} — including
  * its `params` — on your user record and pass it back to
@@ -44,10 +42,9 @@ export const DEFAULT_PBKDF2_ITERATIONS = 600_000;
 
 /**
  * The iteration count a {@link PasswordCredential} with no `params` is assumed
- * to have been hashed at — the package's original default. Credentials minted
- * before `params` existed keep verifying against this, and
+ * to have been hashed at. Such credentials keep verifying against this, and
  * {@link PasswordIdentityService.needsRehash} reports them as due for an
- * upgrade.
+ * upgrade whenever the service mints at a higher count.
  */
 export const LEGACY_PBKDF2_ITERATIONS = 100_000;
 
@@ -66,8 +63,8 @@ export interface PasswordHashParams {
 }
 
 /**
- * A stored password credential: the hash, the salt it used, and (for
- * credentials minted since `params` existed) the work factor behind it.
+ * A stored password credential: the hash, the salt it used, and the work
+ * factor behind it.
  *
  * Persist all three fields. A credential with no `params` is interpreted as
  * PBKDF2-SHA-256 at {@link LEGACY_PBKDF2_ITERATIONS}.
@@ -89,12 +86,16 @@ export interface PasswordCredential {
  *
  * Implement the optional `needsRehash` to get rehash-on-successful-sign-in: the
  * identity flows call it after a password verifies and, when it returns `true`,
- * re-hash the just-verified password and persist the result.
+ * re-hash the just-verified password and persist the result — provided the
+ * user store implements `replaceCredential`.
  */
 export interface PasswordHasherLike {
   /** Hashes a new password into a credential to store. */
   hash(password: string): Promise<PasswordCredential>;
-  /** Constant-time verify of a password against a stored credential. */
+  /**
+   * Whether `password` matches the stored credential. Compare in constant time;
+   * resolve `false` rather than throw for a credential you cannot verify.
+   */
   verify(password: string, credential: PasswordCredential): Promise<boolean>;
   /**
    * Whether a stored credential is weaker than what this hasher mints today.
@@ -142,7 +143,8 @@ export async function hashPassword(
 }
 
 /**
- * Verifies a password against a stored hash in constant time.
+ * Verifies a password against a stored hash, comparing the digests in constant
+ * time.
  *
  * @param password The password to verify
  * @param salt The salt used for the hash
@@ -173,8 +175,8 @@ export interface PasswordIdentityServiceOptions {
 }
 
 /**
- * Hashes and verifies passwords (PBKDF2-SHA-256, constant-time verify).
- * Construct once and reuse.
+ * Hashes and verifies passwords (PBKDF2-SHA-256, constant-time digest
+ * comparison). Construct once and reuse.
  *
  * Verification reads the work factor off the credential, so credentials minted
  * under an older default keep verifying; {@link needsRehash} tells you when one
@@ -225,9 +227,10 @@ export class PasswordIdentityService implements PasswordHasherLike {
   }
 
   /**
-   * Constant-time verify of a password against a stored credential, using the
-   * credential's own recorded work factor. Resolves `false` for a credential
-   * recorded under an algorithm this service does not implement.
+   * Verifies a password against a stored credential at the credential's own
+   * recorded work factor, comparing digests in constant time. Resolves `false`
+   * for a credential recorded under an algorithm this service does not
+   * implement.
    */
   verify(password: string, credential: PasswordCredential): Promise<boolean> {
     const params = credential.params;

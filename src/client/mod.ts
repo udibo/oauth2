@@ -15,9 +15,11 @@
  * care — the React adapter's `<OAuth2Provider>`, a shared UI helper — should
  * accept.
  *
- * Storage interfaces (token / refresh-token / auth-request) default to
- * in-memory implementations suitable for servers and tests; browser
- * applications should substitute the appropriate persistent variants.
+ * A {@link DirectClient} keeps its token bundle and refresh token in memory
+ * by default, so they are lost on reload; a browser app that must survive one
+ * passes {@link IndexedDBRefreshTokenStorage}. The pending auth request
+ * defaults to {@link SessionStorageAuthRequestStorage} in a browser document
+ * and to memory everywhere else.
  *
  * @module
  */

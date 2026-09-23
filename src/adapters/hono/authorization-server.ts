@@ -93,8 +93,9 @@ export type HonoAuthenticateUserFn<User> = (
  * Receives the Hono {@link Context} so the callback can render a consent
  * page, read form input, etc. Return one of:
  *
- * - `{ approved: true, scope? }` — consent granted (optionally narrowing the
- *   scope per RFC 6749 §3.3).
+ * - `{ approved: true, scope? }` — consent granted. `scope`, when set,
+ *   replaces the granted scope (RFC 6749 §3.3) and is not checked against the
+ *   request, so return a subset.
  * - `{ approved: false }` — consent denied; the framework redirects to
  *   `redirect_uri` with `error=access_denied`.
  * - A `Response` (typically `c.html(...)` rendering a consent page) —
@@ -133,8 +134,9 @@ export type HonoAuthorizeHandlerOptions<
 
 /**
  * Hono-specific wrapper around {@link AuthorizationServer}. Adds endpoint
- * handler factories and the three resource-server-shaped helpers
- * (`protect`, `authenticate`, `getContext`) against this same instance.
+ * handler factories and the resource-server-shaped helpers (`protect`,
+ * `requireScope`, `require`, `authenticate`, `getContext`) against this same
+ * instance.
  *
  * Resource-server behavior (realm, errorFormat, throwOnError, token lookup)
  * reads directly off the auth-server instance, so mutating those fields
@@ -154,8 +156,9 @@ export class HonoAuthorizationServer<
   /**
    * Returns a Hono middleware that validates the bearer token against this
    * server's token service. On success, sets the authenticated context at
-   * `c.get("@udibo/oauth2")`; on failure returns an RFC 6749 error response
-   * with a `WWW-Authenticate` header per RFC 6750 Section 3.
+   * `c.get("@udibo/oauth2")`; on failure returns an error response, with a
+   * `WWW-Authenticate` challenge (RFC 6750 Section 3) on a 401 or 403, or
+   * rethrows when `throwOnError` is set.
    */
   protect(requiredScope?: S | string): MiddlewareHandler {
     return createProtectMiddleware(this, requiredScope);
@@ -311,14 +314,17 @@ export class HonoAuthorizationServer<
    * - `GET /.well-known/openid-configuration`
    * - `GET /jwks` and `GET`/`POST /userinfo` (live when OIDC issuance is
    *   configured via `signingKeys`)
+   * - `GET`/`POST /end_session` (live when the server has an `endSession`
+   *   callback)
    *
    * Mount with `app.route("/oauth2", server.routes({...}))`.
    *
    * Every path and verb above comes from
-   * {@link ENDPOINT_PATHS}/{@link ENDPOINT_METHODS}, so the mounted surface and
-   * the URLs the server advertises can never drift apart. Users who want custom
-   * paths or only a subset of endpoints should mount the individual handler
-   * factories instead.
+   * {@link ENDPOINT_PATHS}/{@link ENDPOINT_METHODS}, the same paths the server
+   * derives from an `issuer` alone. The advertised URLs match the mount only
+   * when the issuer (or each explicit `*Endpoint` in the resolved context)
+   * points at where you mounted it. Users who want custom paths or only a
+   * subset of endpoints should mount the individual handler factories instead.
    */
   routes(options: HonoRoutesOptions<Client, User, S>): Hono {
     const handlers: Record<keyof typeof ENDPOINT_PATHS, Handler> = {

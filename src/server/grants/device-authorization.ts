@@ -60,7 +60,7 @@ export interface DeviceAuthorizationGrantOptions<
     S,
     DeviceAuthorizationGrantServices<Client, User, S>
   > {
-  /** Allow optional refresh token. Defaults to true. */
+  /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
 }
 

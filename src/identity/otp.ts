@@ -4,17 +4,16 @@
  *
  * A short numeric code has a different threat model than a URL token: it is
  * **guessable online** (a 6-digit code is one in a million), so unlike
- * {@link TokenFlowService} tokens every code carries an attempt budget — wrong
- * tries are counted and the code is invalidated (`locked`) when the budget is
- * spent. Codes are stored **hashed** (SHA-256, domain-bound to the email +
- * purpose) and verified with a constant-time compare; the raw code exists only
- * in the delivery callback.
+ * {@link TokenFlowService} tokens every code carries an attempt budget — each
+ * verification attempt is counted and the code is invalidated (`locked`) when
+ * the budget is spent. Codes are stored **hashed** (SHA-256, domain-bound to
+ * the email + purpose) and the hashes are compared in constant time; the raw
+ * code exists only in the delivery callback.
  *
  * Storage is an app-owned {@link OtpStore} (a {@link MemoryOtpStore} ships for
  * dev/tests) and delivery is a caller-supplied callback — the package owns the
  * lifecycle, never your tables or your mailer. `purpose` is a free string, so
- * the same service covers sign-in codes today and step-up / verification codes
- * later.
+ * one service can issue sign-in, step-up, and verification codes.
  *
  * @module
  */
@@ -57,9 +56,15 @@ export interface OtpRecord {
   codeHash: string;
   /** Expiry, epoch ms. */
   expiresAt: number;
-  /** Wrong verification attempts so far. */
+  /**
+   * Verification attempts recorded so far — every checked attempt, counted
+   * before the code is compared, not only the wrong ones.
+   */
   attempts: number;
-  /** Attempt budget; reaching it invalidates the code. */
+  /**
+   * Attempt budget; a wrong code on the attempt that reaches it invalidates
+   * the code.
+   */
   maxAttempts: number;
   /** Created, epoch ms. */
   createdAt: number;
@@ -179,8 +184,8 @@ export interface VerifyOtpOptions {
 /**
  * The outcome of {@link EmailOtpService.verify}. `invalid` covers both a wrong
  * code and no active code — indistinguishable on purpose. `locked` is reported
- * once, on the attempt that spends the budget; afterwards the code is gone and
- * further tries report `invalid`.
+ * on the attempt that spends the budget (and on any concurrent attempt past
+ * it); afterwards the code is gone and further tries report `invalid`.
  */
 export type VerifyOtpResult =
   | { status: "success" }
@@ -216,8 +221,8 @@ const DEFAULT_MAX_ATTEMPTS = 5;
 
 /**
  * Issues and verifies short-lived numeric one-time codes over an app-owned
- * {@link OtpStore}. Purpose-generic: `"signin"` today, step-up or verification
- * codes tomorrow — one instance can serve them all.
+ * {@link OtpStore}. Purpose-generic: one instance can serve sign-in, step-up,
+ * and verification codes.
  *
  * @example
  * ```ts
@@ -315,9 +320,11 @@ export class EmailOtpService {
 
   /**
    * Check a submitted code against the active record for `(email, purpose)`.
-   * The hash compare is constant-time and runs even when no active record
-   * exists, so a missing account or code is not distinguishable by timing. The
-   * attempt is reserved atomically — via the store's `recordAttempt` return
+   * The submitted code is hashed and a constant-time compare runs even when no
+   * active record exists. Timing is not fully uniform, though: an expired
+   * record returns before any attempt is recorded, and a live record adds the
+   * `recordAttempt` store write the no-record path skips. The attempt is
+   * reserved atomically — via the store's `recordAttempt` return
    * value — **before** the compare, so concurrent verifies of one live code
    * can't each test a guess against a stale pre-increment count: at most
    * `maxAttempts` guesses ever reach the comparison. Spending the budget

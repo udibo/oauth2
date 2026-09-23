@@ -48,7 +48,7 @@ sections apply only when you host those flows.
 - [ ] Consent and scope policy match the clients you allow.
 - [ ] Persisted signing keys survive deployment; rotation and JWT revocation
       limits are understood.
-- [ ] Deprecated password/implicit grants are not enabled for new integrations.
+- [ ] The deprecated password grant is not enabled for new integrations.
 
 ## If your app hosts login
 

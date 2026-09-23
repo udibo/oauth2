@@ -45,9 +45,8 @@ export interface BasicAuth {
  * trip. A segment that is not valid percent-encoding is taken verbatim, so a
  * client that sends such characters un-encoded still authenticates.
  *
- * @param authorization The Authorization header value
- * @returns The parsed credentials
- * @throws {InvalidClientError} If the header is missing or malformed
+ * @throws {InvalidClientError} If the header is missing, not `Basic`, not
+ * valid base64, or does not decode to `name:pass` with a non-empty name.
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1
  */
 export function parseBasicAuth(authorization: string | null): BasicAuth {
@@ -85,9 +84,7 @@ export function parseBasicAuth(authorization: string | null): BasicAuth {
  * only of `A-Z`, `a-z`, `0-9`, `-`, `_`, `.` and `*` encode byte-identically to
  * their raw form; every other character, `~` included, is percent-encoded.
  *
- * @param clientId The client ID
- * @param clientSecret The client secret
- * @returns The encoded Authorization header value
+ * @returns The `Basic …` Authorization header value.
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1
  */
 export function encodeBasicAuth(
@@ -100,12 +97,8 @@ export function encodeBasicAuth(
 }
 
 /**
- * Tries to parse basic authentication credentials from an Authorization header.
- * Returns undefined if the header is missing or not Basic auth. Decodes both
- * segments the same way {@link parseBasicAuth} does.
- *
- * @param authorization The Authorization header value
- * @returns The parsed credentials or undefined
+ * Non-throwing {@link parseBasicAuth}: returns `undefined` wherever that would
+ * throw — a missing, non-`Basic`, badly encoded or malformed header.
  */
 export function tryParseBasicAuth(
   authorization: string | null,

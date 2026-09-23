@@ -19,17 +19,10 @@ import {
 } from "./class-names.tsx";
 
 /**
- * The single exit every default form component returns through — it owns both
- * outcomes, so a form has one `return` and cannot leave a subtree unscoped.
- *
- * With no `render`, it lays out the markup the forms share: the root wrapper
- * carrying `data-oauth2-form={name}`, then the `<form>` with its error summary
- * and the caller's fields. Use `aboveForm` for content that belongs inside the
- * root but outside the form (social buttons, an enrollment secret), and
- * `succeeded` for a terminal state that replaces the form entirely. With a
- * `render` — the form's render-prop `children` — that markup is skipped for the
- * caller's own. Either way the already-resolved `classNames` is published to
- * what renders, so the elements inside take their classes from the tree.
+ * What every default form component returns: the shared root, `<form>` and
+ * error summary, or the caller's `render` output instead, with the resolved
+ * `classNames` published to either. `aboveForm` sits inside the root but
+ * outside the form; `succeeded` replaces the form.
  */
 export function AuthFormShell<V extends AuthFormValues>(props: {
   name: string;
@@ -197,12 +190,9 @@ export function ErrorSummary(props: {
 }
 
 /**
- * Moves keyboard focus to the first field that came back with an error after a
- * failed submit, so a screen-reader / keyboard user lands on the control to fix
- * (its label + error are read via `aria-describedby`) instead of being left on
- * the submit button. No-ops on the initial render and when the form
- * carries a form-level error ({@link ErrorSummary} owns that focus). Call it
- * once, unconditionally, from a form component built on {@link useAuthForm}.
+ * After a failed submit, focuses the first field with an error; does nothing
+ * when there is a form-level error, which {@link ErrorSummary} focuses. Call
+ * once, unconditionally, from a form built on {@link useAuthForm}.
  */
 export function useFocusFirstError<V extends AuthFormValues>(
   form: AuthFormState<V>,

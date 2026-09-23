@@ -190,12 +190,11 @@ Two details in that store are load-bearing.
 **`markEmailVerified` takes the address the link was minted for.** The service
 passes the email carried on the verification token, and the update above only
 marks the account verified when that address is _still_ the account's email. A
-one-argument implementation compiles and behaves exactly as before — which means
-it is still vulnerable: a user can request a link for `a@example.com`, change
-their address to `b@example.com`, then click the old link and have
-`b@example.com` marked verified without ever proving control of it. A verified
-address gates account recovery and account linking, so that is a takeover
-primitive. Predicate on the address.
+one-argument implementation compiles, and it is vulnerable: a user can request a
+link for `a@example.com`, change their address to `b@example.com`, then click
+the old link and have `b@example.com` marked verified without ever proving
+control of it. A verified address gates account recovery and account linking, so
+that is a takeover primitive. Predicate on the address.
 
 **Persist `credential.params`.** A credential is self-describing: it records the
 algorithm and work factor it was minted with, which is what lets the work factor
@@ -282,7 +281,7 @@ import type { TokenFlowRecord } from "@udibo/oauth2/identity";
 interface TokenFlowStore {
   save(record: TokenFlowRecord): Promise<void>;
   get(tokenHash: string): Promise<TokenFlowRecord | null>;
-  markConsumed(tokenHash: string, consumedAt: number): Promise<void>;
+  markConsumed(tokenHash: string, consumedAt: number): Promise<boolean>;
   deleteBySubject?(purpose: string, subject: string): Promise<void>;
 }
 ```
@@ -290,9 +289,14 @@ interface TokenFlowStore {
 One table backs it — `tokenHash` (primary key), `purpose`, `subject`, `data`
 (jsonb), `expiresAt`, `consumedAt`, `createdAt` — mapping one-to-one onto
 `TokenFlowRecord`. Because only hashes are stored, a leaked table or log line
-can't be replayed as a working link. Implement the optional `deleteBySubject`:
-the service uses it (via `invalidateExisting`) to void a user's outstanding
-reset links whenever a new one is issued, so only the latest emailed link works.
+can't be replayed as a working link. `get` returns a record whatever its state,
+expired and consumed included. `markConsumed` must be a conditional write
+(`UPDATE … WHERE token_hash = $1 AND consumed_at IS NULL`, checking the row
+count) that returns `true` only for the caller that claimed the record — that is
+what keeps a link single-use under concurrent redemption. Implement the optional
+`deleteBySubject`: the service uses it (via `invalidateExisting`) to void a
+user's outstanding reset links whenever a new one is issued, so only the latest
+emailed link works.
 
 ```ts
 import { TokenFlowService } from "@udibo/oauth2/identity";
@@ -716,11 +720,12 @@ endpoints — `/signup`, `/signin`, `/password/reset-request`, `/password/reset`
 (`invalid_credentials` 401, `invalid_token` 400, `rate_limited` 429,
 `weak_password` 422, `identifier_taken` 409, `forbidden_origin` 403); your
 `onAuthenticated` hook creates the session. Those routes carry a same-origin
-guard on unsafe methods by default — see the [quickstart](../quickstart.md) for
-the `csrf` option. In any other framework — or when you want your own request
-shapes — call the service methods directly from your handlers, as the flows are
-plain async methods. The [quickstart](../quickstart.md) shows the mounted
-version; the
+guard on unsafe methods by default — see
+[known limitations](../known-limitations.md) for the `csrf` option. In any other
+framework — or when you want your own request shapes — call the service methods
+directly from your handlers, as the flows are plain async methods. The
+[React Router template](../../templates/react-router/README.md) mounts the
+routes; the
 [Hono](https://github.com/udibo/oauth2/tree/main/examples/hono/app-with-own-auth)
 and
 [Juniper](https://github.com/udibo/oauth2/tree/main/examples/juniper/app-with-own-auth)
@@ -735,13 +740,10 @@ enumeration-safe response shape, transient `state`/PKCE custody, account linking
 
 ## Before going live
 
-The security checklist that used to live here is now the "if your app runs its
-own login" section of the
-[hardening checklist](hardening-checklist.md#if-your-app-hosts-login) — same
-items, alongside everything else a deployment has to answer for (configuration,
-stores, TLS, cookies, headers, backups, observability), each linked to the
-section of [Deploy and Operate in Production](production-deployment.md) that
-explains it.
+The security checklist for this guide is the "if your app hosts login" section
+of the [hardening checklist](hardening-checklist.md#if-your-app-hosts-login),
+alongside the rest of the deployment checklist. The
+[application deployment guide](production-deployment.md) explains each item.
 
 One thing that page makes explicit and this guide's snippets can obscure:
 `rateLimiter` and `lockout` are **opt-in**. Construct both, or the flows run

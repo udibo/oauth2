@@ -105,8 +105,7 @@ const DEFAULT_LIMIT = 10;
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 
 /**
- * Fixed-window limiter — the default {@link RateLimiterLike}, deliberately
- * feature-frozen as a floor rather than a product. Swap in your own
+ * Fixed-window limiter — the default {@link RateLimiterLike}. Swap in your own
  * `RateLimiterLike` for anything the fixed window cannot express.
  *
  * @example
@@ -151,11 +150,6 @@ export class RateLimiter implements RateLimiterLike {
   }
 }
 
-/**
- * How a throttled flow reports hitting its limit. Both halves travel together
- * or neither does — supplying one without the other would type-check into a
- * silently dropped audit event.
- */
 type RateLimitReport =
   | {
     /** The flow's `*.rate_limited` event, minus the fields filled in here. */

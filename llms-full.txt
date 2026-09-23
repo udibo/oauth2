@@ -83,7 +83,7 @@ without a hosted account.
 Requires Deno 2 for the development workflow:
 
 ```sh
-deno add jsr:@udibo/oauth2@0.1.0
+deno add jsr:@udibo/oauth2
 ```
 
 Import the part you use; there is no root barrel or default export:
@@ -94,8 +94,8 @@ import { HonoBff } from "@udibo/oauth2/hono/bff";
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
 ```
 
-Version `0.1.0` is a pre-1.0 API. Minor releases may contain breaking changes;
-review the [stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md) before upgrading.
+The package is pre-1.0. Minor releases may contain breaking changes; review the
+[stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md) before upgrading.
 
 ## How the pieces fit
 
@@ -583,6 +583,7 @@ interface ClientInterface {
   id: string;
   grants?: string[];
   redirectUris?: string[];
+  postLogoutRedirectUris?: string[];
 }
 ```
 
@@ -590,8 +591,9 @@ interface ClientInterface {
 this list is rejected), and `redirectUris` is the allowlist for the
 authorization-code flow: entries are matched exactly, unless an entry is a
 wildcard pattern (`https://myapp-*.myorg.deno.net/cb`), which needs the
-`isPublicSuffix` seam wired or it stays inert. Add whatever else your app needs
-— name, secret hash, owner — the framework never sees those fields.
+`isPublicSuffix` seam wired or it stays inert. `postLogoutRedirectUris` is the
+exact-match allowlist for RP-initiated logout redirects. Add whatever else your
+app needs — name, secret hash, owner — the framework never sees those fields.
 
 Three services back the server:
 
@@ -617,7 +619,7 @@ Three services back the server:
 
 In-memory implementations of all of these ship in `@udibo/oauth2/testing`
 (`MemoryClientService`, `MemoryTokenService`, `MemoryAuthorizationCodeService`,
-`MemoryUserService`) — use them to get running today, then swap in DB-backed
+`MemoryUserService`) — use them to get running, then swap in DB-backed
 implementations and prove them with the contract test runners in
 `@udibo/oauth2/testing/contract`.
 
@@ -695,8 +697,10 @@ explicit URLs above exist because this guide mounts everything under `/oauth2`.
 `routes()` returns a Hono app with every standard endpoint at its conventional
 path: `POST /token`, `GET /authorize`, `POST /revoke`, `POST /introspect`,
 `POST /device_authorization`, `GET /.well-known/oauth-authorization-server`,
-`GET /.well-known/openid-configuration`, `GET /jwks`, and `/userinfo` (GET and
-POST). The last three go live when OIDC issuance is configured.
+`GET /.well-known/openid-configuration`, `GET /jwks`, `/userinfo` (GET and
+POST), and `/end_session` (GET and POST). OIDC discovery, JWKS, and UserInfo go
+live when OIDC issuance is configured; `/end_session` goes live when the
+`endSession` option is configured.
 
 The one thing `routes()` cannot decide for you is who the user is. The authorize
 endpoint asks your `authenticateUser` callback, which receives the Hono
@@ -766,7 +770,7 @@ with its `code_verifier`.
 
 ## Security defaults
 
-Two protections are on by default, deliberately stricter than RFC 6749:
+These protections are on by default, deliberately stricter than RFC 6749:
 
 - **`state` is required** at the authorize endpoint. Requests without it are
   rejected with `invalid_request` rather than degrading CSRF protection to
@@ -1059,7 +1063,7 @@ surface switches on with one option: `signingKeys`.
 ### Generate and persist a signing key
 
 Keys are ES256 (see [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) — there is no
-RS256 option; every mainstream client library accepts ES256). Generate a key
+RS256 option; confirm your relying parties accept ES256). Generate a key
 **once**, export the private JWK, and store it as a secret; every instance of a
 multi-instance deploy must load the same key, because an ephemeral per-instance
 key would fail verification across instances — see
@@ -1095,11 +1099,12 @@ const signingKey = await importSigningKeyJwk(
 const signingKeys = new StaticSigningKeyProvider(signingKey);
 ```
 
-`StaticSigningKeyProvider` covers the single-key case. For rotation, implement
-the two-method `SigningKeyProvider` interface yourself: `getSigningKey()`
-returns the key new tokens sign with, and `getPublicJwks()` returns every public
-key a verifier may still need (current plus not-yet-expired old keys). What that
-costs if you don't, and what the package does not yet ship, is spelled out in
+`StaticSigningKeyProvider` covers the single-key case. For rotation, use
+`RotatingSigningKeyProvider`, which signs with the current key and publishes
+previous public keys, or implement the two-method `SigningKeyProvider` interface
+yourself: `getSigningKey()` returns the key new tokens sign with, and
+`getPublicJwks()` returns every public key a verifier may still need (current
+plus not-yet-expired old keys). See
 [Signing keys and rotation](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#signing-keys-and-rotation).
 
 ### Configure claims
@@ -1244,8 +1249,9 @@ const introspectionClaims = (
 Set `AuthorizationServer.userClaims` to `oidcClaims` for ID tokens and UserInfo,
 `createJwtAccessTokenGenerator.userClaims` to `accessTokenClaims` for JWT access
 tokens, and `AuthorizationServer.introspectionClaims` to `introspectionClaims`.
-Custom `generateAccessToken` wrappers must forward the new fourth argument to
-the JWT generator. Tokens without a resource owner receive no event context.
+Custom `generateAccessToken` wrappers must forward the fourth
+(`authenticationContext`) argument to the JWT generator. Tokens without a
+resource owner receive no event context.
 
 `parseAuthorizeParameters` exposes `acrValues`, `maxAge`, and `prompt` as raw
 strings, including invalid values. Your application must validate and enforce
@@ -1262,17 +1268,15 @@ because browser-chosen values could weaken the server's requirements.
   now issue. The same `HonoAuthorizationServer` instance also exposes
   `protect()` / `requireScope()`, so one process can issue tokens and guard its
   own API routes.
-- [Deploy and Operate in Production](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) — configuration
-  inventory, the stores you provision and their retention, TLS and proxy
-  assumptions, security headers, and the
-  [hardening checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md).
+- [Deploy your application](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) — configuration inventory,
+  the stores you provision and their retention, TLS and proxy assumptions,
+  security headers, and the [hardening checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md).
 - [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) — ES256-only signing, the
   introspection field subset, no dynamic client registration, no provider-side
-  OIDC logout (`end_session_endpoint`), and the other honest walls.
-- The [README](https://github.com/udibo/oauth2/blob/main/README.md) covers error-format configuration
-  (`errorFormat: "problem-details"`), the `resolve` hook for
-  application-specific and proxy deployments, and testing with
-  `createMemoryAuthorizationServer`.
+  logout-token emission, and the other honest walls.
+- [Protect an API](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md#what-failures-look-like-on-the-wire)
+  covers error-format configuration (`errorFormat: "problem-details"`), and
+  [testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md) covers `createMemoryAuthorizationServer`.
 
 ---
 
@@ -1470,12 +1474,11 @@ Two details in that store are load-bearing.
 **`markEmailVerified` takes the address the link was minted for.** The service
 passes the email carried on the verification token, and the update above only
 marks the account verified when that address is _still_ the account's email. A
-one-argument implementation compiles and behaves exactly as before — which means
-it is still vulnerable: a user can request a link for `a@example.com`, change
-their address to `b@example.com`, then click the old link and have
-`b@example.com` marked verified without ever proving control of it. A verified
-address gates account recovery and account linking, so that is a takeover
-primitive. Predicate on the address.
+one-argument implementation compiles, and it is vulnerable: a user can request a
+link for `a@example.com`, change their address to `b@example.com`, then click
+the old link and have `b@example.com` marked verified without ever proving
+control of it. A verified address gates account recovery and account linking, so
+that is a takeover primitive. Predicate on the address.
 
 **Persist `credential.params`.** A credential is self-describing: it records the
 algorithm and work factor it was minted with, which is what lets the work factor
@@ -1562,7 +1565,7 @@ import type { TokenFlowRecord } from "@udibo/oauth2/identity";
 interface TokenFlowStore {
   save(record: TokenFlowRecord): Promise<void>;
   get(tokenHash: string): Promise<TokenFlowRecord | null>;
-  markConsumed(tokenHash: string, consumedAt: number): Promise<void>;
+  markConsumed(tokenHash: string, consumedAt: number): Promise<boolean>;
   deleteBySubject?(purpose: string, subject: string): Promise<void>;
 }
 ```
@@ -1570,9 +1573,14 @@ interface TokenFlowStore {
 One table backs it — `tokenHash` (primary key), `purpose`, `subject`, `data`
 (jsonb), `expiresAt`, `consumedAt`, `createdAt` — mapping one-to-one onto
 `TokenFlowRecord`. Because only hashes are stored, a leaked table or log line
-can't be replayed as a working link. Implement the optional `deleteBySubject`:
-the service uses it (via `invalidateExisting`) to void a user's outstanding
-reset links whenever a new one is issued, so only the latest emailed link works.
+can't be replayed as a working link. `get` returns a record whatever its state,
+expired and consumed included. `markConsumed` must be a conditional write
+(`UPDATE … WHERE token_hash = $1 AND consumed_at IS NULL`, checking the row
+count) that returns `true` only for the caller that claimed the record — that is
+what keeps a link single-use under concurrent redemption. Implement the optional
+`deleteBySubject`: the service uses it (via `invalidateExisting`) to void a
+user's outstanding reset links whenever a new one is issued, so only the latest
+emailed link works.
 
 ```ts
 import { TokenFlowService } from "@udibo/oauth2/identity";
@@ -1996,11 +2004,12 @@ endpoints — `/signup`, `/signin`, `/password/reset-request`, `/password/reset`
 (`invalid_credentials` 401, `invalid_token` 400, `rate_limited` 429,
 `weak_password` 422, `identifier_taken` 409, `forbidden_origin` 403); your
 `onAuthenticated` hook creates the session. Those routes carry a same-origin
-guard on unsafe methods by default — see the [quickstart](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md) for
-the `csrf` option. In any other framework — or when you want your own request
-shapes — call the service methods directly from your handlers, as the flows are
-plain async methods. The [quickstart](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md) shows the mounted
-version; the
+guard on unsafe methods by default — see
+[known limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) for the `csrf` option. In any other
+framework — or when you want your own request shapes — call the service methods
+directly from your handlers, as the flows are plain async methods. The
+[React Router template](https://github.com/udibo/oauth2/blob/main/templates/react-router/README.md) mounts the
+routes; the
 [Hono](https://github.com/udibo/oauth2/tree/main/examples/hono/app-with-own-auth)
 and
 [Juniper](https://github.com/udibo/oauth2/tree/main/examples/juniper/app-with-own-auth)
@@ -2015,13 +2024,10 @@ enumeration-safe response shape, transient `state`/PKCE custody, account linking
 
 ## Before going live
 
-The security checklist that used to live here is now the "if your app runs its
-own login" section of the
-[hardening checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md#if-your-app-hosts-login) — same
-items, alongside everything else a deployment has to answer for (configuration,
-stores, TLS, cookies, headers, backups, observability), each linked to the
-section of [Deploy and Operate in Production](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) that
-explains it.
+The security checklist for this guide is the "if your app hosts login" section
+of the [hardening checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md#if-your-app-hosts-login),
+alongside the rest of the deployment checklist. The
+[application deployment guide](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) explains each item.
 
 One thing that page makes explicit and this guide's snippets can obscure:
 `rateLimiter` and `lockout` are **opt-in**. Construct both, or the flows run
@@ -2128,10 +2134,10 @@ and a 4xx throws `ServerError` (your introspection credentials are
 misconfigured).
 
 **Audience caveat:** the introspection response this package's authorization
-server emits omits `aud`, `iat`, `nbf`, and `jti`, so a resource server cannot
-enforce audience restriction through introspection. If you need in-token
-audience claims, use JWT access tokens (strategy 2). See
-[Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md).
+server emits omits `aud`, `iat`, `nbf`, and `jti` unless its
+`introspectionClaims` hook adds them, and `IntrospectionTokenReader` does not
+check an audience. If you need audience restriction, use JWT access tokens
+(strategy 2). See [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md).
 
 **The call is bounded; it is not cached.** This reader takes `fetchTimeoutMs`
 (default 5000), the same option, default, and semantics as `JwksTokenReader`, so
@@ -2154,13 +2160,13 @@ honest answer — the issuer is down, the caller's token is not necessarily bad.
 
 **This package's introspection endpoint answers for refresh tokens too**, with
 `active: true` and no `token_type` (an access token carries
-`token_type: "Bearer"`). The shipped reader does not currently check
-`token_type`, so if your resource server introspects against an issuer that
-reports refresh tokens as active, a refresh token presented as
-`Authorization: Bearer …` validates. That widens what a leaked refresh token is
-good for and bypasses rotation and reuse detection; verify `token_type` in your
-`getClient` mapper (throw or return a client your authorization checks reject)
-if refresh tokens circulate anywhere near your API surface.
+`token_type: "Bearer"`). `IntrospectionTokenReader` accepts an active response
+only when its `token_type` names a bearer token, so a refresh token presented as
+`Authorization: Bearer …` resolves to `undefined` (`invalid_token`) rather than
+bypassing rotation and reuse detection. The consequence is that this reader
+cannot read an authorization server that omits `token_type` from active
+responses. A custom `TokenReaderInterface` over introspection needs the same
+check.
 
 ## Strategy 2: Local JWT validation against the JWKS endpoint
 
@@ -2290,7 +2296,7 @@ example uses this in-process shape.
 ## A minimal protected API
 
 With a token reader in hand, construct the Hono resource server and mount its
-middleware. The `resolve` option supplies the services for each request; for a
+middleware. The `resolve` option supplies the services for each request; for an
 application API it's a constant function returning the same reader every time.
 
 ```ts
@@ -2554,7 +2560,7 @@ on a name collision, and a caller-set `Authorization` header is left alone. A
 on the post-refresh retry rather than arriving empty. The same rules hold for
 `BffClient.fetch`, which additionally adds the `x-csrf` header only when the
 request does not already carry one. A retry that fails at the transport level
-now rejects; only a failed _refresh_ falls back to reporting the original `401`.
+rejects; only a failed _refresh_ falls back to reporting the original `401`.
 
 `DirectClient` also re-resolves discovery metadata as it ages. Constructed with
 an `issuer` and no `discoveryCache`, it re-discovers after
@@ -2686,8 +2692,8 @@ runs both topologies side by side: in-process `/api/*` and proxied
   authorization server these tokens come from.
 - [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) — the honest list, including the
   introspection field subset and ES256-only signing.
-- The package [README](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md) covers testing protected routes without a
-  live identity provider.
+- The [testing guide](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md) covers testing protected routes without a live
+  identity provider.
 
 ---
 
@@ -2976,16 +2982,8 @@ hosted account.
 
 ## Package contributor checks
 
-From the repository root:
-
-```sh
-deno task check
-deno task test:all
-```
-
-`check` validates types, lint, formatting, API docs, snippets, links, generated
-agent docs, the JSR payload, and an external consumer. `test:all` runs the
-package, script, example, and template suites. These tasks publish nothing.
+To change this package itself, follow [CONTRIBUTING.md](https://github.com/udibo/oauth2/blob/main/CONTRIBUTING.md)
+for its checks and test suites.
 
 ---
 
@@ -2996,7 +2994,7 @@ package, script, example, and template suites. These tasks publish nothing.
 Add a TOTP second factor with recovery codes to an app already running
 `IdentityService`. By the end you have enrollment behind a confirmation code, a
 challenge step every sign-in path passes through, single-use recovery codes for
-the lost-phone case, and a throttle that makes a six-digit code un-guessable.
+the lost-phone case, and a throttle that limits guessing of a six-digit code.
 The library owns the TOTP math, the replay guard, and the code-burning rules;
 your app keeps owning the rows, the routes, and the **policy** — whether MFA is
 optional or required, and where in your sign-in flow the challenge happens.
@@ -3372,7 +3370,7 @@ export function Challenge() {
 Both ship unstyled with per-slot `className` hooks and a render-prop escape
 hatch; see the
 [prebuilt components section](https://github.com/udibo/oauth2/blob/main/docs/guides/react.md#forms-for-an-app-that-hosts-its-own-login)
-of the README for theming and the headless `useAuthForm` path.
+of the React guide for theming and the headless `useAuthForm` path.
 
 ## Security checklist
 
@@ -4930,7 +4928,7 @@ sections apply only when you host those flows.
 - [ ] Consent and scope policy match the clients you allow.
 - [ ] Persisted signing keys survive deployment; rotation and JWT revocation
       limits are understood.
-- [ ] Deprecated password/implicit grants are not enabled for new integrations.
+- [ ] The deprecated password grant is not enabled for new integrations.
 
 ## If your app hosts login
 
@@ -5348,9 +5346,9 @@ development and test dependency, deliberately.
 
 To build the real thing, see
 [Become an OAuth provider](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md). To wire an application
-to any provider — this one included — see
-[Add login to an existing app](https://github.com/udibo/oauth2/blob/main/docs/guides/add-login.md) and
-[Local, preview, and production for a relying party](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md).
+to any provider — this one included — see the BFF wiring in
+[Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md#put-the-bff-on-your-apps-origin) and
+[Configure local, preview, and production environments](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md).
 
 ## Checklist
 
@@ -5455,7 +5453,7 @@ unless the row says otherwise.
 
 | Trigger point      | Symbol                                                    | Fires                                                                                | Required                                  | Control                  | On throw                                                                                                                                                                                                                                                                                                                                 |
 | ------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| user-store         | `IdentityUserStore<User>` (`users`)                       | Every flow (`create` in `signUp`, `findByIdentifier`/`getCredential` in `signIn`, …) | yes                                       | blocks                   | Propagates and aborts the flow. **Throwing from `create` is today's only pre-registration veto** (see Gaps). `markEmailVerified` runs _before_ the token is consumed, so a throw leaves the verification link retryable                                                                                                                  |
+| user-store         | `IdentityUserStore<User>` (`users`)                       | Every flow (`create` in `signUp`, `findByIdentifier`/`getCredential` in `signIn`, …) | yes                                       | blocks                   | Propagates and aborts the flow. **Throwing from `create` is the only pre-registration veto** (see Known gaps). `markEmailVerified` runs _before_ the token is consumed, so a throw leaves the verification link retryable                                                                                                                |
 | credential-import  | `LegacyPasswordVerifier` (`legacyVerifiers`)              | `signIn`, when a user has an imported hash but no native credential                  | no                                        | blocks                   | **Fail-closed:** `canVerify`/`verify` throws are caught → verifier skipped / returns `false`; never authenticates, never aborts                                                                                                                                                                                                          |
 | delivery           | `DeliveryHooks` (`delivery`)                              | After a verify/reset/unlock/sign-in token or code is minted                          | no (omit a hook → that message disabled)  | blocks (side-effect)     | A throw is caught for every hook, code included: the minted token or code is invalidated (that exact one) and the flow still resolves with its uniform result — no orphaned credential, no mailer-outage enumeration oracle. Emits `delivery.failed`; `invalidated: false` means the cleanup failed too and the credential is still live |
 | event              | `IdentityEventHook` (`onEvent`)                           | After every flow outcome                                                             | no                                        | fire-and-forget          | Caught and logged, never rethrown — cannot break the flow (deliberate)                                                                                                                                                                                                                                                                   |
@@ -5480,12 +5478,12 @@ its own: `finish()` returns a verified `ExternalProfile` and your app does
 find-or-create-user, session start, and rejection _outside_ the flow, in its own
 `try`/`catch`. The seams below live on the provider connectors.
 
-| Trigger point     | Symbol                                      | Fires                                                                  | Required                              | Control | On throw                                                                                                         |
-| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| external-provider | `ExternalProvider` (`provider`)             | External start (`buildAuthorizationUrl`) and callback (`fetchProfile`) | yes                                   | blocks  | Propagates and aborts start/callback; built-ins throw `ExternalAuthError`                                        |
-| profile-mapper    | `OAuth2ProfileMapper` (`mapProfile`)        | External callback, mapping the raw profile                             | with `oauth2Provider`                 | blocks  | A missing/empty `subject` in the _return_ → `provider_error`; a mapper that _throws_ surfaces raw (see Findings) |
-| client-secret     | `AppleClientSecretFactory` (`clientSecret`) | Apple callback, signing a fresh client-secret JWT                      | no (defaults to the built-in factory) | blocks  | Not wrapped — a custom factory's throw propagates raw; the default throws `configuration`                        |
-| provider-fetch    | `fetch` (every connector config)            | Discovery, token exchange, UserInfo, JWKS                              | no (defaults to `globalThis.fetch`)   | blocks  | Wrapped → `provider_error`; OIDC UserInfo failure is non-fatal (swallowed → `null`)                              |
+| Trigger point     | Symbol                                      | Fires                                                                  | Required                              | Control | On throw                                                                                          |
+| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- | ------- | ------------------------------------------------------------------------------------------------- |
+| external-provider | `ExternalProvider` (`provider`)             | External start (`buildAuthorizationUrl`) and callback (`fetchProfile`) | yes                                   | blocks  | Propagates and aborts start/callback; built-ins throw `ExternalAuthError`                         |
+| profile-mapper    | `OAuth2ProfileMapper` (`mapProfile`)        | External callback, mapping the raw profile                             | with `oauth2Provider`                 | blocks  | A missing/empty `subject` in the _return_ → `provider_error`; a mapper that _throws_ surfaces raw |
+| client-secret     | `AppleClientSecretFactory` (`clientSecret`) | Apple callback, signing a fresh client-secret JWT                      | no (defaults to the built-in factory) | blocks  | Not wrapped — a custom factory's throw propagates raw; the default throws `configuration`         |
+| provider-fetch    | `fetch` (every connector config)            | Discovery, token exchange, UserInfo, JWKS                              | no (defaults to `globalThis.fetch`)   | blocks  | Wrapped → `provider_error`; OIDC UserInfo failure is non-fatal (swallowed → `null`)               |
 
 ## MFA — `@udibo/oauth2/identity/mfa`
 
@@ -5503,16 +5501,16 @@ seams.
 
 ## Hono BFF — `@udibo/oauth2/hono/bff`
 
-| Trigger point            | Symbol                                        | Fires                                             | Required                 | Control | On throw                                                                                                 |
-| ------------------------ | --------------------------------------------- | ------------------------------------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------------------------- |
-| session-store            | `SessionStore` (`sessionStore`)               | Callback, refresh, session read, logout           | no (defaults to memory)  | blocks  | In `/auth/callback` → `invalid_grant`; in refresh/logout/session paths → propagates to Hono              |
-| backchannel-logout-store | `destroyByLogout` (`SessionStore` capability) | `POST /auth/backchannel`                          | with `backchannelLogout` | blocks  | Propagates to Hono (500)                                                                                 |
-| resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Findings) |
-| callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Findings)                        |
-| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"        |
-| auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | no                       | blocks  | Login → propagates; callback → `invalid_grant`                                                           |
-| logout-token-verifier    | `verifyLogoutToken` (`backchannelLogout`)     | `POST /auth/backchannel`, verifying the JWT       | with `backchannelLogout` | blocks  | Throw or `null` → `400 invalid_request` (deliberate "throw-or-null to reject" contract)                  |
-| proxy-fetch              | `fetch` (`HonoBffProxyOptions`)               | The upstream call in `bff.proxy`                  | no                       | blocks  | Wrapped → `502` `temporarily_unavailable`                                                                |
+| Trigger point            | Symbol                                        | Fires                                             | Required                 | Control | On throw                                                                                                         |
+| ------------------------ | --------------------------------------------- | ------------------------------------------------- | ------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| session-store            | `SessionStore` (`sessionStore`)               | Callback, refresh, session read, logout           | no (defaults to memory)  | blocks  | In `/auth/callback` → `invalid_grant`; in refresh/logout/session paths → propagates to Hono                      |
+| backchannel-logout-store | `destroyByLogout` (`SessionStore` capability) | `POST /auth/backchannel`                          | with `backchannelLogout` | blocks  | Propagates to Hono (500)                                                                                         |
+| resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Failure behavior) |
+| callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Failure behavior)                        |
+| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"                |
+| auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | no                       | blocks  | Login → propagates; callback → `invalid_grant`                                                                   |
+| logout-token-verifier    | `verifyLogoutToken` (`backchannelLogout`)     | `POST /auth/backchannel`, verifying the JWT       | with `backchannelLogout` | blocks  | Throw or `null` → `400 invalid_request` (deliberate "throw-or-null to reject" contract)                          |
+| proxy-fetch              | `fetch` (`HonoBffProxyOptions`)               | The upstream call in `bff.proxy`                  | no                       | blocks  | Wrapped → `502` `temporarily_unavailable`                                                                        |
 
 ## Hono adapters — authorization server & identity
 
@@ -5622,7 +5620,7 @@ credentials, request bodies, or raw callback URLs.
 
 ## Defaults that are looser than the specs
 
-Confidential clients authenticate alongside PKCE by default as of 0.1.0.
+Confidential clients authenticate alongside PKCE by default.
 `requireClientAuthentication: false` remains an explicit legacy opt-out and
 should not be enabled for new deployments.
 
@@ -5646,10 +5644,11 @@ should not be enabled for new deployments.
   credentials) has neither, and its `client_id` identifies the caller — so the
   presence of `sub` is how a resource server tells a user token from a machine
   one. The typed response also declares `iat` / `nbf` / `aud` / `jti`, but the
-  server never populates them today. Practical consequence: a resource server
-  that enforces audience restriction via introspection `aud` cannot do so —
-  issue JWT access tokens (`createJwtAccessTokenGenerator`) and validate them
-  with `JwksTokenReader`, which enforces `aud`, if you need in-token
+  server never populates them itself; only an `introspectionClaims` hook you
+  configure can add them. Practical consequence: without such a hook, a resource
+  server cannot enforce audience restriction via introspection `aud` — issue JWT
+  access tokens (`createJwtAccessTokenGenerator`) and validate them with
+  `JwksTokenReader`, which enforces `aud`, if you need in-token
   audience/issued-at claims.
 - **Introspection authorization is application policy.** By default,
   `/introspect` allows any admitted client to inspect any live token, preserving
@@ -5695,8 +5694,8 @@ should not be enabled for new deployments.
   `ResourceServerOptions.clockSkewSeconds`, which defaults to **0**. Set both to
   tolerate drift end to end. The resource-server option is the only one that
   reaches an `IntrospectionTokenReader`, which has no notion of skew at all. The
-  `nbf` half is still reader-only — nothing re-checks `nbf` — so a slow-clock
-  issuer is tolerated only by the reader.
+  `nbf` half is reader-only — nothing re-checks `nbf` — so a slow-clock issuer
+  is tolerated only by the reader.
 - **`IntrospectionTokenReader` calls the authorization server on every
   request.** It takes `fetchTimeoutMs` (default 5000, matching
   `JwksTokenReader`), so an endpoint that accepts connections and then stops
@@ -5739,7 +5738,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 ## OIDC issuance scope
 
 - **Signing is ES256 only** (Web Crypto, zero dependencies). There is no RS256
-  option; verify your relying parties accept ES256 .
+  option; verify your relying parties accept ES256.
 - `id_token` claims are released per scope through the app-provided `userClaims`
   hook; there is no `claims` request-parameter support.
 - `acr` / `amr` are not asserted.
@@ -5768,17 +5767,16 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `AccountLockoutLike` is the matching seam for lockout policy. Both are
   structural, so a plain object with the right methods is assignable.
 - `MemoryRateLimitStore` sweeps lapsed buckets and is hard-capped at 10,000, so
-  attacker-chosen keys can no longer grow it without bound — but a bounded store
-  must discard something, and at the cap it evicts. It evicts the **coldest**
-  live buckets first (fewest hits, ties broken by soonest reset), never the
-  oldest, so a unique-key flood discards the attacker's own single-hit junk
-  rather than the counter that is throttling them. The residual is that an
-  attacker willing to raise ~10,000 keys above a victim's hit count can still
-  displace that victim's counter — roughly a 10x cost increase over a naive
-  flood, not an impossibility. Bounding memory and resisting eviction are in
-  genuine tension in a single process; this is a dev / single-process store, and
-  production backs the limiter with Redis or a database where neither compromise
-  is forced.
+  attacker-chosen keys cannot grow it without bound — but a bounded store must
+  discard something, and at the cap it evicts. It evicts the **coldest** live
+  buckets first (fewest hits, ties broken by soonest reset), never the oldest,
+  so a unique-key flood discards the attacker's own single-hit junk rather than
+  the counter that is throttling them. The residual is that an attacker willing
+  to raise ~10,000 keys above a victim's hit count can still displace that
+  victim's counter — roughly a 10x cost increase over a naive flood, not an
+  impossibility. Bounding memory and resisting eviction are in genuine tension
+  in a single process; this is a dev / single-process store, and production
+  backs the limiter with Redis or a database where neither compromise is forced.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.
@@ -5787,7 +5785,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 - The flows are single-app primitives: multi-tenancy, organizations, and SSO
   orchestration are intentionally out of scope for this library.
 - **`resetPassword` voids outstanding passwordless credentials only as far as
-  your stores let it.** It now drops the subject's pending sign-in links
+  your stores let it.** It drops the subject's pending sign-in links
   (`TokenFlowStore.deleteBySubject(TokenPurpose.SignIn, userId)`) and the
   pending sign-in code (`OtpStore.invalidate(email, purpose)`) after the
   password changes. Both calls are best-effort: `deleteBySubject` is
@@ -5826,7 +5824,7 @@ fetch redirects. A trusted provider configuration is part of that boundary.
     rotating `SESSION_SECRET` is a `[new, old]` deploy that keeps existing
     sessions readable rather than a fleet-wide forced sign-out. Drop the old
     secret once the grace window elapses. This mirrors the multi-key JWKS grace
-    window for signing keys. A single secret still behaves as before.
+    window for signing keys. A single secret seals and reads with that one key.
   - **Bounded lifetime, on by default.** `maxAgeMs` stamps each cookie with a
     seal time and rejects any cookie older than the cap on `read`, bounding how
     long a captured cookie stays useful without any server-side state. It
@@ -5881,8 +5879,11 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   runtime-specific global anywhere on the library path (the `Deno.env.get` you
   see in connector JSDoc is example prose, not code the package runs). The CLI
   is a development tool (`oidc keygen`, `idp dev`); nothing on the library path
-  imports it, so its floor never constrains the rest of the package. The full
-  matrix is in [the stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md#runtime-support).
+  imports it, so its floor never constrains the rest of the package. The generic
+  `/testing` and `/testing/contract` helpers register suites through
+  `@std/testing/bdd` and are verified on Deno only. The full matrix is in
+  [the README](https://github.com/udibo/oauth2/blob/main/README.md#runtime-support); the support boundary is in
+  [the stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md#runtime-support).
 
 ---
 
@@ -5909,9 +5910,8 @@ semantic-release from Conventional Commits (see
   policy below.
 - This is enforced, not just described: `.releaserc.json` maps
   `{ "breaking": true, "release": "minor" }`, so a `feat!:` commit cuts a minor
-  rather than a major, and a packaging test pins that mapping. Do not "correct"
-  it to `major` — moving to 1.0 is a deliberate decision, not a side effect of a
-  breaking commit.
+  rather than a major, and a packaging test pins that mapping. Moving to 1.0 is
+  a deliberate decision, not a side effect of a breaking commit.
 
 ### From 1.0
 
@@ -5973,9 +5973,8 @@ a major.
 
 # Issue Triage Process
 
-How incoming issues are handled once the package has a public tracker. Until
-then the same process runs on the internal tracker, so opening up is a switch
-flip, not a scramble.
+How incoming issues on the
+[GitHub tracker](https://github.com/udibo/oauth2/issues) are handled.
 
 ## Intake
 
@@ -6033,10 +6032,6 @@ the underlying need (the need may have an in-scope answer).
 `@udibo/oauth2` is security-critical software: it implements the OAuth 2.0 /
 OpenID Connect protocol surface and password-based identity flows. We take
 reports seriously and value the time of security researchers.
-
-> **Status note:** the package is not yet published to a public registry. Until
-> it is, the disclosure channel below is drafted and monitored, but the package
-> has no external users; the process activates fully at publish.
 
 ## Supported versions
 

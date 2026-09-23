@@ -7,9 +7,6 @@
  * `returnTo` set to the current path, and renders a configurable
  * `fallback` while the redirect is in flight.
  *
- * Avoids the `withAuthenticationRequired` re-mount footgun (the HOC
- * isn't created in render; this component just gates its children).
- *
  * @module
  */
 

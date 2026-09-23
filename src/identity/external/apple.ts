@@ -3,9 +3,9 @@
  * {@link oidcProvider}: its client secret is a signed ES256 JWT rather than a
  * static string (see {@link generateAppleClientSecret}), it authenticates the
  * client in the token body (`client_secret_post`), and it requires
- * `response_mode=form_post` whenever profile scopes are requested. This is a
- * dedicated {@link ExternalProvider} that exchanges the code, then verifies the
- * `id_token` signature against Apple's JWKS.
+ * `response_mode=form_post` when the `name` or `email` scope is requested.
+ * This is a dedicated {@link ExternalProvider} that exchanges the code, then
+ * verifies the `id_token` signature against Apple's JWKS.
  *
  * The user's name is returned by Apple **only** on the first authorization, in
  * the `form_post` body's `user` field — never in the `id_token`. This connector
@@ -64,7 +64,11 @@ export interface AppleProviderOptions
    * `.p8` key material. Defaults to a cached factory over the key material.
    */
   clientSecret?: AppleClientSecretFactory;
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
 }
 
@@ -75,14 +79,17 @@ interface JwkWithKid extends JsonWebKey {
 /**
  * Creates a Sign in with Apple connector with id `"apple"`.
  *
- * The flow requests `response_mode=form_post` (Apple's requirement when `name`
- * or `email` scope is present), exchanges the code at Apple's token endpoint
- * with a freshly-signed client-secret JWT, and verifies the returned
+ * The flow requests `response_mode=form_post` whenever any scope is requested
+ * (Apple requires it for `name` or `email`), exchanges the code at Apple's
+ * token endpoint with the client-secret JWT from the factory (by default
+ * cached and re-signed an hour before it expires), and verifies the returned
  * `id_token`'s RS256 signature against Apple's published keys before trusting
  * its claims (`iss`, `aud`, `azp`, `exp`, and the `nonce` when one was sent,
- * checked exactly as {@link oidcProvider} checks them). Apple's
- * private-relay addresses (`@privaterelay.appleid.com`) are ordinary verified
- * emails and are returned as-is. The raw `id_token` claims — including
+ * checked as {@link oidcProvider} checks them, with the default `azp` policy).
+ * `emailVerified` is `true` when Apple's `email_verified` claim is `true` or
+ * the string `"true"`; private-relay addresses
+ * (`@privaterelay.appleid.com`) are returned as-is. The raw `id_token`
+ * claims — including
  * `is_private_email` — stay on {@link ExternalProfile.raw}.
  *
  * @example

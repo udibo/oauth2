@@ -156,13 +156,5 @@ hosted account.
 
 ## Package contributor checks
 
-From the repository root:
-
-```sh
-deno task check
-deno task test:all
-```
-
-`check` validates types, lint, formatting, API docs, snippets, links, generated
-agent docs, the JSR payload, and an external consumer. `test:all` runs the
-package, script, example, and template suites. These tasks publish nothing.
+To change this package itself, follow [CONTRIBUTING.md](../../CONTRIBUTING.md)
+for its checks and test suites.

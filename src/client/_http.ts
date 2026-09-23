@@ -1,11 +1,8 @@
 /**
- * The response ladder every {@link DirectClient} network call climbs: bounded
- * read, deadline, redirect refusal, JSON validation, RFC 6749 §5.2 error
- * mapping.
- *
- * Not part of the public API. The authorization server's bytes become either a
- * typed {@link OAuth2Error} or a validated JSON object here and nowhere else,
- * so the guards sit next to the tests that pin them.
+ * Not part of the public API. The guarded request/response path the clients'
+ * calls to the authorization server (and `BffClient`'s session probe) share:
+ * deadline, redirect refusal, bounded read, JSON validation, and RFC 6749 §5.2
+ * error mapping to a typed {@link OAuth2Error}.
  *
  * @module
  */
@@ -39,11 +36,6 @@ export const MAX_RESPONSE_BYTES = 64 * 1024;
 /** Wall-clock budget for one call, covering the connect and the body read. */
 export const REQUEST_TIMEOUT_MS = 10_000;
 
-/**
- * Maps an OAuth2 error code to the specific error class so callers can
- * `catch (e) { if (e instanceof InvalidGrantError) … }` instead of
- * inspecting `e.extensions.error` at every call site.
- */
 const ERROR_CLASS_BY_CODE: Record<string, OAuth2ErrorClassType> = {
   access_denied: AccessDeniedError,
   authorization_pending: AuthorizationPendingError,
@@ -236,22 +228,11 @@ export function assertField(
   }
 }
 
-/** As much of a body as the cap allows, and whether the cap cut it short. */
 interface BoundedBody {
   text: string;
   truncated: boolean;
 }
 
-/**
- * Reads up to {@link MAX_RESPONSE_BYTES} and reports whether more was coming.
- *
- * Never throws for being too large: on a **failed** response the bytes are the
- * only place the OAuth2 error code lives, and refusing to look would turn a
- * `invalid_grant` that happens to arrive oversized into a generic transport
- * error — which reads as "retry later" instead of "this grant is dead", so the
- * client would keep presenting a revoked refresh token forever. Truncation is
- * reported instead, and the success path refuses it.
- */
 async function readBounded(res: Response): Promise<BoundedBody> {
   if (!res.body) return { text: "", truncated: false };
   const reader = res.body.getReader();
@@ -313,11 +294,6 @@ function reportedError(value: unknown): ReportedError | null {
   };
 }
 
-/**
- * `status` is passed through only when it is a real error status: a server
- * that reports `error` inside a `200` still needs a throwable, and `HttpError`
- * refuses to carry a 2xx.
- */
 function buildError(reported: ReportedError, status?: number): OAuth2Error {
   const ErrorClass = ERROR_CLASS_BY_CODE[reported.error] ?? OAuth2ErrorClass;
   return new ErrorClass(reported.description ?? reported.error, {
@@ -330,16 +306,6 @@ function buildError(reported: ReportedError, status?: number): OAuth2Error {
   });
 }
 
-/**
- * Recovers the `error` code from a body that did not parse.
- *
- * The realistic reason a failed token response is unparseable here is that the
- * cap cut it mid-string — a server padding `error_description`, or a proxy
- * appending a page of HTML. The code itself is short and near the front, and
- * losing it costs the caller the difference between "this grant is dead" and
- * "something went wrong", so it is worth one bounded scan. Restricted to the
- * lowercase-underscore shape RFC 6749 §5.2 defines, so nothing else matches.
- */
 function scanErrorCode(text: string): ReportedError | null {
   const match = /"error"\s*:\s*"([a-z_]{1,64})"/.exec(text);
   return match ? { error: match[1] } : null;

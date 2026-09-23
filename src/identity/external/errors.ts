@@ -1,7 +1,7 @@
 /**
  * The error contract for external-provider (social login) flows.
  *
- * Every failure in the external connector layer is thrown as an
+ * Failures the external connectors detect are thrown as an
  * {@link ExternalAuthError} whose message names the provider, what failed, and
  * the likely fix — misconfiguration is meant to be diagnosable from the
  * message alone. The {@link ExternalAuthErrorCode} tells app code how to
@@ -63,7 +63,11 @@ export class ExternalAuthError extends Error {
   }
 }
 
-/** Type guard for {@link ExternalAuthError}. */
+/**
+ * Type guard for {@link ExternalAuthError}. Uses `instanceof`, so an error from
+ * another realm or a second copy of the package fails it — check
+ * `name === "ExternalAuthError"` there.
+ */
 export function isExternalAuthError(
   value: unknown,
 ): value is ExternalAuthError {

@@ -48,10 +48,7 @@ export interface HonoBffProxyOptions {
   fetch?: (input: URL, init: RequestInit) => Promise<Response>;
 }
 
-/**
- * Hop-by-hop headers (RFC 9110 §7.6.1). They describe a single transport
- * connection, so a proxy must not pass them through in either direction.
- */
+// RFC 9110 §7.6.1: connection-specific, never proxied in either direction.
 const HOP_BY_HOP_HEADERS: readonly string[] = [
   "connection",
   "keep-alive",
@@ -86,14 +83,7 @@ export const DEFAULT_PROXY_FORWARD_HEADERS: readonly string[] = [
   "x-request-id",
 ];
 
-/**
- * Never forwarded upstream, even when named in
- * {@link HonoBffProxyOptions.forwardHeaders}. `cookie` and `authorization` are
- * the security-critical entries: the browser's session cookie is the BFF's
- * credential (not the API's), and an inbound `Authorization` must never be able
- * to override the token the BFF attaches. `accept-encoding` and `content-length`
- * are dropped because `fetch` owns content coding and body framing.
- */
+// The session cookie is the BFF's credential; the BFF's bearer token must win.
 const NEVER_FORWARDED_REQUEST_HEADERS: readonly string[] = [
   ...HOP_BY_HOP_HEADERS,
   "accept-encoding",
@@ -104,28 +94,18 @@ const NEVER_FORWARDED_REQUEST_HEADERS: readonly string[] = [
   "host",
 ];
 
-/**
- * Never returned to the browser. `set-cookie` is dropped so an upstream API
- * cannot plant cookies on the BFF's origin, where they would ride along with
- * the session cookie.
- */
+// An upstream Set-Cookie would plant cookies on the BFF's origin.
 const NEVER_RETURNED_RESPONSE_HEADERS: readonly string[] = [
   ...HOP_BY_HOP_HEADERS,
   "set-cookie",
 ];
 
-/**
- * Dropped only when a body is actually streamed back: `fetch` has already
- * decoded it, so the upstream's content coding and length no longer describe
- * what the browser receives. A body-less response (`HEAD`, `204`, `304`) was
- * never decoded, and there `Content-Length` *is* the answer.
- */
+// fetch decodes a streamed body; a body-less response keeps its Content-Length.
 const DECODED_BODY_RESPONSE_HEADERS: readonly string[] = [
   "content-encoding",
   "content-length",
 ];
 
-/** Case-insensitive header name set. */
 function headerSet(names: readonly string[]): Set<string> {
   return new Set(names.map((name) => name.toLowerCase()));
 }
@@ -165,11 +145,7 @@ export function buildUpstreamHeaders(
   return headers;
 }
 
-/**
- * The header names an upstream `Connection` field lists. RFC 9110 §7.6.1 makes
- * those connection-specific too, so a proxy must drop them alongside the
- * well-known hop-by-hop set.
- */
+// RFC 9110 §7.6.1: headers named in `Connection` are hop-by-hop too.
 function connectionNamedHeaders(headers: Headers): string[] {
   return (headers.get("connection") ?? "")
     .split(",")
@@ -177,19 +153,11 @@ function connectionNamedHeaders(headers: Headers): string[] {
     .filter((name) => name.length > 0);
 }
 
-/** Headers whose value is a URL into the upstream's namespace. */
 const URL_VALUED_RESPONSE_HEADERS: readonly string[] = [
   "location",
   "content-location",
 ];
 
-/**
- * Rewrites an upstream URL into the mount's namespace, so a `Location` naming
- * the resource server neither leaks internal topology to the browser nor points
- * it at a host it cannot reach. A relative value resolves against the upstream
- * request first. Anything outside the configured base is left alone — it is a
- * genuinely external destination, not part of what this mount proxies.
- */
 function rewriteUpstreamUrl(
   value: string,
   upstreamUrl: URL,
@@ -216,7 +184,6 @@ function rewriteUpstreamUrl(
   return `${mountPrefix}${suffix}${resolved.search}${resolved.hash}`;
 }
 
-/** Adds `name` to `Vary` without disturbing what the upstream already varies on. */
 function appendVary(headers: Headers, name: string): void {
   const existing = headers.get("vary");
   if (!existing) {
@@ -230,11 +197,7 @@ function appendVary(headers: Headers, name: string): void {
   if (!present) headers.set("vary", `${existing}, ${name}`);
 }
 
-/**
- * Forces the response private. Upstream sees an `Authorization`-protected
- * request, which RFC 9111 §3.5 already keeps out of shared caches; downstream
- * the same response is authenticated by a cookie, which carries no such rule.
- */
+// RFC 9111 §3.5 covers the upstream Authorization, not the downstream cookie.
 function forcePrivateCache(headers: Headers): void {
   const existing = headers.get("cache-control");
   if (!existing) {
@@ -300,18 +263,7 @@ export function buildDownstreamHeaders(
   return headers;
 }
 
-/**
- * Rejects a path segment that would become a dot segment once decoded.
- *
- * Fails closed on a malformed escape: `decodeURIComponent` throws on overlong
- * or invalid UTF-8 (`%C0%AF`, the classic `/` smuggle), and a lenient upstream
- * decoder may still reconstruct the separator, so the segment cannot be
- * forwarded unexamined. Encoded separators themselves are allowed through —
- * `a%2Fb` is a legitimate resource id — it is only `..` between them that is
- * refused.
- *
- * @throws {TypeError} If the segment has a malformed escape or hides `..`.
- */
+// A lenient upstream decoder can rebuild `/` from `%C0%AF`: fail closed.
 function assertSafeSegment(segment: string): void {
   let decoded: string;
   try {

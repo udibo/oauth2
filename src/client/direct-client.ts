@@ -117,9 +117,9 @@ export interface DirectClientOptions extends BaseOptions {
   /** Default scope string to request when none is passed explicitly. */
   scope?: string;
   /**
-   * Issuer URL. If provided, endpoints are fetched from
-   * `${issuer}/.well-known/oauth-authorization-server` on first use.
-   * Mutually exclusive with an explicit `endpoints` record below.
+   * Issuer URL. If provided, endpoints come from the issuer's discovery
+   * document, fetched on first use and re-fetched once it expires (see
+   * {@link DirectClient.discover}). Mutually exclusive with `endpoints`.
    */
   issuer?: string;
   /** Explicit endpoint URLs, bypassing discovery. */
@@ -154,8 +154,10 @@ export interface DirectClientOptions extends BaseOptions {
   /**
    * Max age of a pending auth-request (`state`) record before
    * {@link DirectClient.exchangeAuthorizationCode} rejects it as stale, in ms.
-   * Bounds the callback replay window and unbounded growth of the in-memory
-   * store. Defaults to 10 minutes; set `Infinity` to disable the check.
+   * Bounds the callback replay window. A stale record is deleted only when its
+   * `state` comes back; records for logins that never return stay in the store
+   * until it is cleared. Defaults to 10 minutes; set `Infinity` to disable the
+   * check.
    */
   authRequestTtlMs?: number;
 }
@@ -247,7 +249,7 @@ export interface ExchangeOptions {
 export interface ExchangeResult {
   /** The token bundle, not persisted to this client's storage. */
   tokens: TokenBundle;
-  /** The rotated refresh token, when the server issued one. */
+  /** The refresh token the server issued with this response, if any. */
   refreshToken?: string;
   /** `returnTo` recorded at authorize time, for the code exchange. */
   returnTo?: string;
@@ -377,8 +379,8 @@ export class DirectClient extends OAuth2ClientBase {
    * this works against any compliant server. **Lazy + cached**: it only runs
    * on the first endpoint use of an `issuer`-configured client (never at
    * construction), so there is no startup cost and no per-request fetch.
-   * Concurrent calls share one in-flight request; a failure clears the cache
-   * so a later call can retry.
+   * Concurrent calls share one in-flight request; a failure is not cached, so
+   * a later call retries.
    *
    * **Re-resolution contract.** The document this client holds is never
    * permanent: every endpoint use re-resolves once the copy in hand is past
@@ -398,7 +400,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @returns The server's metadata document.
    * @throws {Error} when the client was configured with explicit `endpoints`
    * rather than an `issuer` — there is nothing to discover.
-   * @throws {ServerError} when both well-known paths fail.
+   * @throws {OAuth2Error} the last attempt's error when both well-known paths
+   * fail: the server is unreachable, answers non-OK or with something other
+   * than a JSON object, or reports an `issuer` other than the configured one.
    *
    * @example
    * ```ts
@@ -633,9 +637,10 @@ export class DirectClient extends OAuth2ClientBase {
    * URL, exchanges the code at the token endpoint, persists the token bundle,
    * and emits `authenticated`.
    *
-   * Idempotent on duplicate calls with the same `code` — React strict-mode
-   * double-mounts would otherwise double-redeem a single-use code and fail the
-   * second call, so the first in-flight promise is returned again.
+   * A duplicate call with the same `code` while the first is still in flight
+   * (a React strict-mode double mount) returns the first call's promise rather
+   * than redeeming the single-use code twice. A call after it settles redeems
+   * again, and fails.
    *
    * @param input The callback URL, its query string, or the parsed params.
    * @returns The persisted tokens and the `returnTo` recorded at login.
@@ -992,7 +997,9 @@ export class DirectClient extends OAuth2ClientBase {
    * minimum interval and deadline, and `signal` to cancel.
    * @returns The persisted token bundle.
    * @throws {AccessDeniedError} when `signal` aborts, or the user declines.
-   * @throws {InvalidGrantError} when the device code expires before approval.
+   * @throws {InvalidGrantError} when `expiresAt` passes before approval. A
+   * server that reports the code expired first throws `ExpiredTokenError`
+   * instead.
    * @throws {OAuth2Error} on any other terminal error from the server.
    */
   async pollDeviceToken(
@@ -1115,8 +1122,9 @@ export class DirectClient extends OAuth2ClientBase {
    *
    * @returns The claims the server returns.
    * @throws {Error} when no userinfo endpoint is configured or discoverable.
-   * @throws {AccessDeniedError} when no token is stored and none can be
-   * refreshed.
+   * @throws {InvalidGrantError} when no usable token is stored and there is no
+   * refresh token to mint one.
+   * @throws {OAuth2Error} when the refresh or the userinfo endpoint fails.
    */
   async getUserInfo(): Promise<UserInfoClaims> {
     return await this.#fetchUserInfo(false);
@@ -1142,11 +1150,11 @@ export class DirectClient extends OAuth2ClientBase {
   /**
    * Base64url-decodes an OIDC `id_token` payload and returns the claims.
    *
-   * **Does not verify the signature** — the token arrives from the token
-   * endpoint over TLS, so verification would only defend against a compromised
-   * TLS chain and is not a normal client concern. If you need verification
-   * (e.g. the token was obtained out-of-band), use a dedicated JWT library
-   * with your server's JWKS.
+   * **Validates nothing** — not the signature, `iss`, `aud`, `exp`, or
+   * `nonce`. Use it only on an `id_token` this client received from its own
+   * token endpoint (which is what {@link getUser} does); the client does not
+   * require that endpoint to be `https`. For a token obtained any other way,
+   * verify it with a JWT library against the server's JWKS.
    *
    * @param idToken A compact-serialized JWS.
    * @returns The decoded payload claims.
@@ -1169,6 +1177,11 @@ export class DirectClient extends OAuth2ClientBase {
    *
    * A `401` without that challenge is returned as-is — it means "not allowed",
    * not "token stale", and re-minting would not help.
+   *
+   * The stored access token is sent as-is, even when it has expired; recovery
+   * depends on the resource server answering with that challenge. It is
+   * attached to whatever URL you pass, so send only requests meant for the
+   * APIs this token is for.
    *
    * @param input Request target, as for `fetch`. A `Request` keeps the headers
    * and body it was built with; it is cloned up front so the retry has an
@@ -1294,7 +1307,8 @@ export class DirectClient extends OAuth2ClientBase {
 
   /**
    * The session as this client sees it, derived from stored tokens — no
-   * network call unless the claims come from a userinfo endpoint.
+   * network call unless the claims come from a userinfo endpoint, which may
+   * refresh the access token first.
    *
    * `isAuthenticated` requires a usable access token: a stored bundle whose
    * `accessToken` is non-empty and not past its expiry. A holder of a valid
@@ -1380,9 +1394,11 @@ export class DirectClient extends OAuth2ClientBase {
    * For ordinary HTTP calls prefer {@link fetch}, which attaches the token and
    * handles the 401/refresh dance for you.
    *
-   * @returns A non-expired access token.
-   * @throws {InvalidGrantError} when nothing is stored and no refresh token is
-   * available.
+   * @returns The stored access token when it has no recorded expiry or more
+   * than 30 seconds left, otherwise a freshly refreshed one.
+   * @throws {InvalidGrantError} when a refresh is needed and no refresh token
+   * is stored, or the stored one is dead.
+   * @throws {OAuth2Error} when a needed refresh fails for another reason.
    */
   async getAccessToken(): Promise<string> {
     return await this.#accessTokenFor(false);
@@ -1404,11 +1420,6 @@ export class DirectClient extends OAuth2ClientBase {
     return encodeBasicAuth(this.#clientId, this.#clientSecret!);
   }
 
-  /**
-   * Applies exactly one client authentication method (RFC 6749 §2.3.1):
-   * HTTP Basic for a confidential client — dropping any body `client_id` so
-   * credentials aren't sent twice — or a body `client_id` for a public one.
-   */
   #applyClientAuth(
     headers: Record<string, string>,
     body: URLSearchParams,
@@ -1437,10 +1448,6 @@ export class DirectClient extends OAuth2ClientBase {
     return response as unknown as TokenResponse;
   }
 
-  /**
-   * POSTs a form to a credentialed endpoint and returns its JSON object.
-   * Refuses a redirect rather than replaying the credentials in `body`.
-   */
   async #postForm(
     endpoint: string,
     headers: Record<string, string>,
@@ -1502,11 +1509,6 @@ export class DirectClient extends OAuth2ClientBase {
   }
 }
 
-/**
- * Returns `urlStr` with its origin (scheme + host) replaced by `origin`'s,
- * preserving the path/query. Resolving against the new origin replaces
- * scheme/host/port cleanly; setting `.host` alone would keep a stale port.
- */
 function withOrigin(urlStr: string, origin: string): string {
   const url = new URL(urlStr);
   return new URL(`${url.pathname}${url.search}${url.hash}`, origin).toString();
@@ -1584,12 +1586,6 @@ function assertUsableSecret(secret: string | undefined): void {
   }
 }
 
-/**
- * RFC 8414 §3.3 / OIDC Discovery §4.3: the `issuer` a metadata document
- * reports must be the issuer it was fetched from. Without this a document
- * served (or redirected to) from elsewhere could name another provider's
- * endpoints, which is the mix-up attack the requirement exists to stop.
- */
 function assertIssuer(meta: Record<string, unknown>, issuer: string): void {
   const reported = meta.issuer;
   if (typeof reported !== "string" || reported.length === 0) {
@@ -1615,13 +1611,6 @@ function isOAuth2ErrorCode(error: unknown, code: string): boolean {
   return isOAuth2Error(error) && error.extensions.error === code;
 }
 
-/**
- * Sleeps `ms`, or rejects with {@link AccessDeniedError} if `signal` aborts —
- * so cancelling a device-flow poll mid-wait surfaces as `access_denied`, the
- * same as the loop-top abort guard in {@link DirectClient.pollDeviceToken}.
- * The timer/abort plumbing is `@std/async/delay`; only the OAuth2 error
- * mapping is ours (`delay` rejects solely on abort).
- */
 function pollDelay(ms: number, signal?: AbortSignal): Promise<void> {
   return delay(ms, { signal }).catch(() => {
     throw new AccessDeniedError("aborted");

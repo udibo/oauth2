@@ -35,9 +35,9 @@ export interface PasswordPolicyResult {
 /**
  * Check a password against a policy, collecting all issues.
  *
- * Fails closed on a non-string `password` — an untyped value off a JSON body
- * has no `length`, so the length checks would silently pass it through to a
- * hash function that then `String`-coerces it.
+ * A non-string `password` (an untyped value off a JSON body) fails with a
+ * single issue. A validator that throws rejects this call; use
+ * {@link assertPasswordPolicy} to have that surface as `weak_password`.
  */
 export async function checkPasswordPolicy(
   password: string,

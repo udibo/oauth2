@@ -53,8 +53,7 @@ function slotKey(classNames: AuthFormClassNames): string {
  * {@link AuthFormClassNamesProvider}'s map with `overrides` applied slot by
  * slot. An absent or `undefined` slot in `overrides` keeps the inherited value,
  * and with no provider above the map is empty (every slot `undefined`), so the
- * hook is safe to call anywhere. This is the only place the precedence rule is
- * implemented.
+ * hook is safe to call anywhere.
  *
  * The result is cached on the slot values, so passing a fresh `overrides`
  * literal every render returns the identical map.
@@ -101,10 +100,8 @@ export function useAuthFormClassNames(
 }
 
 /**
- * Publishes an already-resolved map verbatim, without merging. A form and
- * `AuthFormShell` resolve once through {@link useAuthFormClassNames} and
- * publish through this, so the precedence rule keeps exactly one
- * implementation. App code wants {@link AuthFormClassNamesProvider}.
+ * Publishes an already-resolved map (from {@link useAuthFormClassNames})
+ * verbatim, without merging. App code wants {@link AuthFormClassNamesProvider}.
  */
 export function AuthFormClassNamesScope(props: {
   classNames: Readonly<AuthFormClassNames>;

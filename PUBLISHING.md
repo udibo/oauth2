@@ -1,13 +1,16 @@
 # Publishing @udibo/oauth2
 
-The package is prepared for its first release, **0.1.0**, published to both JSR
-and npm from the same semantic-release run. Repository layout and releases
-follow Juniper: a root Deno workspace, the published package in `src/`, examples
-and templates alongside it, Conventional Commits, and semantic-release on
-`main`.
+The package is published to both [JSR](https://jsr.io/@udibo/oauth2) and
+[npm](https://www.npmjs.com/package/@udibo/oauth2) from the same
+semantic-release run; the first release was **0.1.0**. Repository layout and
+releases follow Juniper: a root Deno workspace, the published package in `src/`,
+examples and templates alongside it, Conventional Commits, and semantic-release
+on `main`.
 
-Publishing is disabled until `OAUTH2_RELEASE_ENABLED` is set to `true` in the
-standalone repository. Nothing in the preparation tasks publishes a package.
+Every push to `main` whose commits call for a release publishes one, as long as
+the repository variable `OAUTH2_RELEASE_ENABLED` is `true`. Setting it to
+anything else is the off switch. Nothing in the preparation tasks publishes a
+package.
 
 ## Validate a release
 
@@ -33,21 +36,20 @@ keeps the published npm build honest: `deno task npm:build` then
 `deno task npm:smoke` installs the packed tarball into `npm-smoke-consumer/` and
 proves the Node claims in the README's runtime table.
 
-## Configure the first release
+## Release configuration
 
-1. Create the `oauth2` package in JSR's `@udibo` scope and link it to
-   `udibo/oauth2` in the package settings. The release job uses GitHub OIDC; no
-   JSR token is stored. See
-   [JSR publishing](https://jsr.io/docs/publishing-packages).
-1. Own the `@udibo` scope on npm. Nothing else is needed now that the package
-   exists: releases authenticate by OIDC (see **npm trusted publishing** below).
-   A first release into a _new_ scope is the exception — npm cannot configure a
-   trusted publisher for a package that does not exist, so that one publish
-   needs a granular access token in an `NPM_TOKEN` secret, removed afterwards.
-1. Create the `DEPLOY_KEY` semantic-release pushes the release commit and tag
-   with. GitHub does not issue one: a deploy key is an SSH keypair you generate,
-   whose public half is registered on the repository and whose private half
-   becomes a secret.
+The release job depends on these, all in place:
+
+1. The `oauth2` package in JSR's `@udibo` scope, linked to `udibo/oauth2` in the
+   package settings. The release job uses GitHub OIDC; no JSR token is stored.
+   See [JSR publishing](https://jsr.io/docs/publishing-packages).
+1. The `@udibo/oauth2` package on npm, with this repository configured as its
+   trusted publisher (see **npm trusted publishing** below). No npm token is
+   stored.
+1. The `DEPLOY_KEY` semantic-release pushes the release commit and tag with.
+   GitHub does not issue one: a deploy key is an SSH keypair you generate, whose
+   public half is registered on the repository and whose private half becomes a
+   secret. To replace it:
 
    ```sh
    ssh-keygen -t ed25519 -N "" -C "semantic-release@udibo/oauth2" -f ./deploy_key
@@ -67,29 +69,22 @@ proves the Node claims in the README's runtime table.
    pull requests. Without the bypass the release cannot push at all; with a
    ruleset that requires no pull request, `GITHUB_TOKEN` would do and the key
    would be redundant.
-1. Tag the initial package import `0.0.0` and push that tag. It is a version
-   baseline, not a published package. semantic-release otherwise chooses `1.0.0`
-   for a repository with no release tags, ignoring the version in
-   `src/deno.json`.
-1. Enable the repository variable `OAUTH2_RELEASE_ENABLED=true` only after the
-   standalone CI passes, JSR linking is complete, the npm scope and `NPM_TOKEN`
-   are in place, and push permissions are ready.
-1. Merge a `feat:` commit to `main`. From the `0.0.0` baseline, this computes
-   `0.1.0`; a `fix:` would compute `0.0.1`.
-1. For a first release into a new scope only: once it lands, configure the
-   trusted publisher and delete both the secret and any `NPM_TOKEN` line, so no
-   long-lived npm credential outlives the bootstrap.
+1. The repository variable `OAUTH2_RELEASE_ENABLED=true`.
 
-`scripts/verify-release.ts` rejects any first version other than `0.1.0` before
-release preparation, tags or publication. The workflow prints a semantic-release
-dry run first. Keep the release gate available as an off switch.
+The `0.0.0` tag on the initial package import is a version baseline, not a
+published package; without it semantic-release would have chosen `1.0.0` for a
+repository with no release tags. `scripts/verify-release.ts` rejects any first
+version other than `0.1.0`, so it passes every release now that the `0.1.0` tag
+exists. The workflow prints a semantic-release dry run before the real run.
 
 ## npm trusted publishing
 
-**In effect since 0.1.0.** This repository stores no npm credential: the release
-job mints an OIDC token, `@semantic-release/npm` exchanges it with the registry
-for publish rights, and npm attaches a provenance attestation automatically —
-there is no `--provenance` flag to pass.
+**In effect since 0.2.0.** 0.1.0 predates it and carries no provenance
+attestation: npm cannot configure a trusted publisher for a package that does
+not exist yet. This repository stores no npm credential: the release job mints
+an OIDC token, `@semantic-release/npm` exchanges it with the registry for
+publish rights, and npm attaches a provenance attestation automatically — there
+is no `--provenance` flag to pass.
 
 The trust relationship is configured on npmjs.com, under the package's **Trusted
 Publisher** settings: organization `udibo`, repository `oauth2`, workflow
@@ -106,11 +101,11 @@ Two things follow from that, both enforced by
   secret it exists to remove.
 
 The exchange fails with `404 ... package not found` for a package that does not
-exist yet, which is why a first release into a new scope still needs a token.
+exist yet, which is why 0.1.0 could not use it.
 
 ## What the release does
 
-- Validates the proposed first version.
+- Checks the proposed version against the first-release rule above.
 - Generates `CHANGELOG.md` and stamps `src/deno.json` and every example/template
   dependency pin with the release version.
 - Stages the complete documentation payload using the same task exercised by the
@@ -139,18 +134,19 @@ major-version mapping intentionally.
 
 ## Verify the published version
 
-In a fresh directory outside either repository:
+In a fresh directory outside this repository:
 
 ```sh
 deno init
-deno add jsr:@udibo/oauth2@0.1.0
+deno add jsr:@udibo/oauth2@<version>
 ```
 
 Use `smoke-consumer/mod.tsx` and its compiler options as a consumer fixture, but
-**omit its `links` field** so it resolves the registry package. Check every
-subpath with `deno check`, inspect the JSR README and license, and confirm that
-test source is absent from the file listing. Then copy a template from the
-public repository, install its dependencies, and run its test task.
+**omit its `links` field** and point its `@udibo/oauth2` import at the version
+you are verifying, so it resolves the registry package. Check every subpath with
+`deno check`, inspect the JSR README and license, and confirm that test source
+is absent from the file listing. Then copy a template from the public
+repository, install its dependencies, and run its test task.
 
 JSR's [package rules](https://jsr.io/docs/publishing-packages#jsr-package-rules)
 and [immutable-version policy](https://jsr.io/docs/immutability) apply to the

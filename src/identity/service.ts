@@ -13,7 +13,7 @@
  * Storage-agnostic by design: every flow addresses users by opaque id and the
  * {@link IdentityUserStore} is yours — back it with whatever database, ORM, and
  * schema your app already uses. The library composes the flows; it never owns
- * your tables. It stays below the turnkey-identity-service line.
+ * your tables.
  *
  * @module
  */
@@ -173,7 +173,10 @@ export interface IdentityRateLimiters {
 export interface IdentityServiceOptions<User extends IdentityUser> {
   /** App-owned user storage. */
   users: IdentityUserStore<User>;
-  /** Token flow for verify/reset links. Required for those flows. */
+  /**
+   * Token flow for the emailed links (verification, reset, unlock, sign-in).
+   * The methods that mint or consume them throw an `Error` without it.
+   */
   tokens?: TokenFlowService;
   /**
    * Password hasher. Defaults to a new {@link PasswordIdentityService}
@@ -189,10 +192,14 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * When set, {@link IdentityService.signIn} — for a user with no native
    * credential yet — reads the imported hash via
    * {@link IdentityUserStore.getLegacyCredential} and verifies it with the first
-   * verifier whose `canVerify` accepts it. On a match it rehashes the password
-   * into the native format ({@link IdentityUserStore.replaceCredential}), clears the
-   * imported hash ({@link IdentityUserStore.clearLegacyCredential}), emits a
-   * `password.upgraded` event, and signs the user in. The package ships
+   * verifier whose `canVerify` accepts it. On a match it signs the user in.
+   * When the store implements {@link IdentityUserStore.replaceCredential}, it
+   * first rehashes the password into the native format; on success it clears
+   * the imported hash ({@link IdentityUserStore.clearLegacyCredential}) and
+   * emits a `password.upgraded` event. If that write reports the credential
+   * already replaced, the password must verify against the new credential or
+   * sign-in fails; if the write throws, the user is signed in without the
+   * upgrade. The package ships
    * {@link pbkdf2Verifier} built-in; bcrypt/argon2/scrypt are bring-your-own via
    * the {@link LegacyPasswordVerifier} seam (no dep-free implementation exists).
    */
@@ -201,8 +208,9 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * Minimum wall-clock duration of a **failed** {@link IdentityService.signIn},
    * in ms. Defaults to `250`. Every rejection — unknown identifier, locked
    * account, no password set, wrong native password, wrong imported password —
-   * is held to the same deadline measured from the call's first statement, so
-   * the response time reveals nothing about which branch ran.
+   * is held to the same minimum duration, measured from the call's first
+   * statement, so branches that finish under it are indistinguishable by
+   * response time.
    *
    * Set it above the cost of your slowest configured
    * {@link IdentityServiceOptions.legacyVerifiers} plus one password hash —
@@ -221,7 +229,7 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
   failedSignInFloorMs?: number;
   /** Session revocation, called on a successful password reset. Optional. */
   sessions?: RevocableSessionService;
-  /** Delivery transports for verify/reset links. Optional. */
+  /** Delivery transports for the emailed links and sign-in codes. Optional. */
   delivery?: DeliveryHooks;
   /**
    * Base URL (origin, or origin + prefix) used to build the action links
@@ -230,10 +238,11 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
   baseUrl?: string;
   /**
    * Token lifetimes in ms. Defaults: password reset 1h, email verification 24h,
-   * account unlock 1h, sign-in link 15m. A per-call `ttlMs` — currently only
-   * {@link IdentityService.requestSignInLink} takes one — overrides the
-   * configured default for that request. One-time sign-in **codes** are not
-   * tokens; their lifetime is {@link IdentityServiceOptions.otp}'s `ttlMs`.
+   * account unlock 1h, sign-in link 15m.
+   * {@link IdentityService.requestSignInLink} also takes a per-call `ttlMs`
+   * that overrides the sign-in link default for that request. One-time sign-in
+   * **codes** are not tokens; their lifetime is
+   * {@link IdentityServiceOptions.otp}'s `ttlMs`.
    */
   ttl?: {
     passwordReset?: number;
@@ -298,9 +307,9 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
   /**
    * Per-flow limiter overrides. Set one when a single threshold cannot serve
    * every flow — a limit tuned as a sign-in floor is usually far too permissive
-   * for the four flows that make the server **send an email to a
+   * for the five flows that make the server **send an email to a
    * caller-supplied address** (`passwordReset`, `emailVerification`,
-   * `accountUnlock`, `signInLink`, plus `signInCode`), which typically want a
+   * `accountUnlock`, `signInLink`, and `signInCode`), which typically want a
    * handful of requests per hour rather than per 15 minutes.
    *
    * Each entry is a whole {@link RateLimiterLike} — build one
@@ -376,21 +385,6 @@ function foldEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/**
- * The rate-limit key for each throttled flow, one entry per
- * {@link IdentityRateLimiters} key. Every check and every reset derives its key
- * here, so the window a flow fills is always the window its reset clears.
- *
- * Case-folding is a decision per key type. Email-addressed keys fold, so casing
- * variants of one mailbox share a window instead of each earning a fresh send
- * budget (`signInCode` folds inside {@link otpRateKey}, so the window it fills
- * is the one a standalone {@link EmailOtpService} would). Opaque user ids pass
- * through untouched — only the app knows whether they are case-sensitive.
- * `signin:` is trimmed but not folded: an identifier
- * may be a username or phone whose equality only the app's `findByIdentifier`
- * defines, and folding would merge two distinct accounts (`Bob`, `bob`) into
- * one window, letting failures against either deny sign-in to the other.
- */
 const RATE_KEYS: Record<
   keyof IdentityRateLimiters,
   (value: string) => string
@@ -543,8 +537,9 @@ export class IdentityService<User extends IdentityUser> {
   }
 
   /**
-   * Verify credentials; returns the user, or `null` for an unknown identifier or
-   * wrong password (don't reveal which). Establishing a session is your app's
+   * Verify credentials; returns the user, or `null` for an unknown identifier,
+   * an account with no password, a wrong password, or (under `"enforce"`) a
+   * locked account — don't reveal which. Establishing a session is your app's
    * job — do it on a non-null result.
    *
    * The throttle window is keyed on the identifier as submitted (trimmed, not
@@ -553,12 +548,13 @@ export class IdentityService<User extends IdentityUser> {
    * the identifiers you later hand {@link IdentityService.resetSignInThrottle}
    * won't match the ones that filled it.
    *
-   * Every rejection is held to
+   * Every rejection is held to at least
    * {@link IdentityServiceOptions.failedSignInFloorMs} (250 ms by default),
    * measured from entry, so an unknown identifier, a locked account, a wrong
-   * native password, and a wrong password against an imported hash all take the
-   * same time — the branch that runs a foreign KDF is not visible from
-   * outside. A success returns as soon as it is done.
+   * native password, and a wrong password against an imported hash take the
+   * same time as long as each finishes under the floor — a branch that runs
+   * longer (typically a foreign KDF) stays visible by its excess. A success
+   * returns as soon as it is done.
    *
    * @throws {IdentityError} `rate_limited` (with `retryAfterMs`) when a
    * `rateLimiter` is configured, the identifier's limit is hit, and
@@ -625,11 +621,15 @@ export class IdentityService<User extends IdentityUser> {
   }
 
   /**
-   * Enumeration-safe: always resolves or throws identically whether or not the
-   * email maps to a user. If it does, mints a single-use reset token and calls
-   * `delivery.sendPasswordReset`. With a `rateLimiter`, requests throttle per
-   * target email, case-folded so casing variants share one window — the check
-   * runs before the lookup, so a 429 reveals nothing —
+   * Resolves with the same `void` whether or not the email maps to a user. If
+   * it does, mints a single-use reset token (voiding outstanding ones when the
+   * token store implements `deleteBySubject`) and calls
+   * `delivery.sendPasswordReset`. Only that branch awaits minting and delivery,
+   * so it is not timing-uniform, and a throwing token store surfaces only
+   * there — send from a background queue and throttle by IP at the route, as
+   * for {@link IdentityService.requestSignInLink}. With a `rateLimiter`,
+   * requests throttle per target email, case-folded so casing variants share
+   * one window — the check runs before the lookup, so a 429 reveals nothing —
    * and throw {@link IdentityError} `rate_limited` when exceeded; catch it and
    * return your uniform success response. Give it a tighter threshold than
    * sign-in via `rateLimiters.passwordReset`.
@@ -667,10 +667,10 @@ export class IdentityService<User extends IdentityUser> {
 
   /**
    * Consume a reset token, set the new password, and (if a `sessions` service
-   * was configured) revoke the user's other sessions. Clears any failed-attempt
-   * lockout — the emailed token proves the same account ownership the unlock
-   * flow does. Returns `{ userId }`, or `null` for an invalid/expired/used
-   * token.
+   * was configured) revoke **all** of the user's sessions via
+   * `revokeAllByUser`. Clears any failed-attempt lockout — the emailed token
+   * proves the same account ownership the unlock flow does. Returns
+   * `{ userId }`, or `null` for an invalid/expired/used token.
    *
    * A reset is the user's "lock everyone else out" action, so the outstanding
    * passwordless credentials for the same account are voided too: sign-in links
@@ -684,7 +684,9 @@ export class IdentityService<User extends IdentityUser> {
    * throws, the reset is reported failed — a `password_reset.failed`
    * (`session_revocation_failed`) event fires, no `password_reset.completed`
    * fires, and the error rethrows — rather than silently returning success with
-   * the user's old sessions still live. Retry the reset to clear them.
+   * the user's old sessions still live. The reset token is already spent and
+   * the new password already set, so clear them by calling
+   * `revokeAllByUser` again yourself or by completing a fresh reset link.
    *
    * @throws {IdentityError} `weak_password` when `password` fails the password
    * policy — including the 8–256 character defaults that apply when
@@ -902,9 +904,10 @@ export class IdentityService<User extends IdentityUser> {
 
   /**
    * Passwordless request: always resolves with the same `void` result. If the
-   * email maps to a user, mints a single-use sign-in token (invalidating any
-   * outstanding one) and calls `delivery.sendSignInLink`; an unknown email does
-   * neither, so the **return value** never reveals whether an account exists.
+   * email maps to a user, mints a single-use sign-in token (voiding outstanding
+   * ones when the token store implements `deleteBySubject`) and calls
+   * `delivery.sendSignInLink`; an unknown email does neither, so the **return
+   * value** never reveals whether an account exists.
    * The synchronous path is not fully timing-uniform, though — only the
    * known-email branch awaits token minting and delivery — so send email from a
    * background queue and apply IP-level throttling at the route to close the
@@ -1015,11 +1018,12 @@ export class IdentityService<User extends IdentityUser> {
   /**
    * Verify a one-time sign-in code. An unknown email performs the same hash
    * work as a known one and reports plain `invalid` — the result is not an
-   * enumeration oracle. Wrong tries spend the code's attempt budget (`locked`
-   * once it runs out); success consumes the code (single-use), resets the
-   * flow's throttle window, and carries the `userId` to sign in — session
-   * creation and your MFA gate stay your app's job, as does treating a
-   * since-deleted/disabled user as a failed sign-in.
+   * enumeration oracle. Wrong tries spend the code's attempt budget and the
+   * code is invalidated once it runs out — the result still reads `invalid`;
+   * the `signin_code.failed` event carries `locked`. Success consumes the code
+   * (single-use), resets the flow's throttle window, and carries the `userId`
+   * to sign in — session creation and your MFA gate stay your app's job, as
+   * does treating a since-deleted/disabled user as a failed sign-in.
    */
   async verifySignInCode(
     input: { email: string; code: string },

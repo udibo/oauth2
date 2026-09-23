@@ -24,7 +24,11 @@ export interface GoogleProviderOptions {
    * `aud` is this one. See {@link AzpPolicy}.
    */
   azp?: AzpPolicy;
-  /** Fetch implementation for all provider traffic. Defaults to `globalThis.fetch`. */
+  /**
+   * Fetch implementation for all provider traffic. Defaults to
+   * `globalThis.fetch`. A wrapper must pass `init` through intact: its
+   * `redirect` and `signal` carry the connector's redirect refusal and timeout.
+   */
   fetch?: typeof fetch;
   /**
    * Cache Google's discovery document is read from and written to, shared with

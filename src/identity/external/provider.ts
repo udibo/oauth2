@@ -28,7 +28,8 @@ export interface ExternalProfile {
   email?: string;
   /**
    * `true` only when the provider positively asserted the email is verified
-   * (OIDC `email_verified: true`, GitHub verified primary email). Defaults to
+   * (OIDC `email_verified: true`, GitHub's `verified` flag on the email the
+   * connector chose). Defaults to
    * `false` — treat unverified emails as attacker-controllable input and do
    * not auto-link accounts on them.
    */
@@ -105,7 +106,8 @@ export interface ExternalProfileInput {
  * verification, transient expiry, callback error surfacing); the provider
  * owns the wire protocol (authorize URL shape, code exchange, id_token nonce
  * validation, profile normalization). Implement this only for providers the
- * built-in {@link oidcProvider} / {@link githubProvider} cannot cover.
+ * built-in connectors, including the generic {@link oidcProvider} and
+ * {@link oauth2Provider}, cannot cover.
  */
 export interface ExternalProvider {
   /** Stable id used in {@link ExternalProfile.provider} and error messages. */

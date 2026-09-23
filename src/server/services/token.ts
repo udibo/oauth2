@@ -32,9 +32,10 @@ export interface TokenReaderInterface<
  * its grant types.
  *
  * **A token need not have a user.** The client credentials grant (RFC 6749
- * §4.4) has no resource owner, so it calls `acceptedScope`,
- * `generateAccessToken`, and `accessTokenExpiresAt` with `user: undefined` and
- * saves a {@linkcode Token} whose `user` is unset. An implementation that
+ * §4.4) has no resource owner, so when `ClientServiceInterface.getUser`
+ * resolves none it calls `acceptedScope`, `generateAccessToken`, and
+ * `accessTokenExpiresAt` with `user: undefined` and saves a {@linkcode Token}
+ * whose `user` is unset. An implementation that
  * dereferences `user` without checking will throw on those requests, and a
  * store with a non-nullable user column cannot persist the result — decide
  * scope and lifetime from the client alone when it is absent.
@@ -111,7 +112,8 @@ export interface TokenServiceInterface<
    *
    * **This method is the whole cap.** The grants clamp a rotation's access and
    * refresh expiries to the date it returns and answer `invalid_grant` once
-   * that date has passed. Return `undefined` — or leave the method off
+   * that date has passed; a refresh-token record without `familyCreatedAt` is
+   * never capped. Return `undefined` — or leave the method off
    * entirely, which is the default — and the family is never capped, however
    * the service is otherwise configured. Implement it to cap per client (see
    * {@linkcode AbstractTokenService.refreshTokenMaxLifetime} for the
@@ -225,8 +227,8 @@ export interface AbstractTokenServiceOptions<
   /**
    * Absolute lifetime of a refresh-token family in seconds, read by this
    * class's {@linkcode AbstractTokenService.refreshTokenFamilyExpiresAt}. Omit
-   * for the historical behavior, an uncapped sliding window. Must be at least
-   * `refreshTokenLifetime`.
+   * to leave families uncapped, so rotation extends a family indefinitely.
+   * Must be at least `refreshTokenLifetime`.
    */
   refreshTokenMaxLifetime?: number;
   /** Client service for hydrating tokens. */

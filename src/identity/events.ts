@@ -32,8 +32,9 @@ export type SignInFailureReason =
   | "wrong_password";
 
 /**
- * Why a sign-in code verification failed. `unknown_email` is internal-only
- * detail — the caller-facing result reports it as `invalid`.
+ * Why a sign-in code verification failed. Internal detail — never shown to the
+ * user: `IdentityService.verifySignInCode` reports every one of these as
+ * `invalid`.
  */
 export type SignInCodeFailureReason =
   | "invalid"
@@ -121,7 +122,8 @@ export type IdentityEvent =
      * `"session_revocation_failed"` — the new password was set but the
      * configured {@link RevocableSessionService} threw before the user's other
      * sessions could be revoked, so the reset is reported failed (and rethrown)
-     * rather than trusted; retry it so the still-live sessions are cleared.
+     * rather than trusted. The reset token is already spent, so clear the
+     * still-live sessions by revoking them again or with a fresh reset link.
      */
     reason: "invalid_token" | "session_revocation_failed";
   }

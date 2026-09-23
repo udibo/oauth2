@@ -5,8 +5,7 @@
  * The library owns the **token lifecycle** ({@link TokenFlowService}); your app
  * owns **transport** — SMTP, SES, Resend, Twilio, etc. So delivery is a set of
  * app-supplied async hooks, and the package ships URL builders so apps stop
- * hand-assembling `${protocol}://${host}/verify-email?token=…` strings. This is
- * the Better Auth model (`sendVerificationEmail` / `sendResetPassword`).
+ * hand-assembling `${protocol}://${host}/verify-email?token=…` strings.
  *
  * @module
  */
@@ -16,9 +15,10 @@ export interface DeliveryMessage {
   /** Recipient — an email address or phone number. */
   to: string;
   /**
-   * The ready-to-use action link (already carrying the token), when the caller
-   * built one via {@link buildVerificationUrl} / {@link buildResetUrl}. Absent
-   * if you'd rather build the message body from `token` yourself.
+   * The ready-to-use action link (already carrying the token).
+   * `IdentityService` sets it only when configured with a `baseUrl`, building
+   * it with the matching `build*Url` helper at its default path; otherwise it
+   * is absent and you build the link from `token` yourself.
    */
   url?: string;
   /** The raw token, for apps that compose their own URL or message. */
@@ -54,8 +54,8 @@ export type CodeDeliveryHook = (
 ) => Promise<void> | void;
 
 /**
- * App-supplied delivery transports. Omit a hook to disable that message type.
- * The package calls the relevant hook after minting the token; you send it.
+ * App-supplied delivery transports. Omit a hook and that message is never sent
+ * (the flow still mints and stores the token or code).
  *
  * Trigger point `delivery` (see `docs/trigger-points.md`). The package calls a
  * hook after minting the credential; a **throw** (e.g. a mailer outage) is

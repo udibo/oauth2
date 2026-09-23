@@ -1,8 +1,7 @@
 # Issue Triage Process
 
-How incoming issues are handled once the package has a public tracker. Until
-then the same process runs on the internal tracker, so opening up is a switch
-flip, not a scramble.
+How incoming issues on the
+[GitHub tracker](https://github.com/udibo/oauth2/issues) are handled.
 
 ## Intake
 
