@@ -54,10 +54,11 @@ export interface IntrospectionTokenReaderOptions<
    * `undefined` when the token doesn't represent a user. Omit entirely if
    * your app never reads user info off the token.
    *
-   * This package's authorization server omits `sub` from the introspection
-   * response of a token with no user, so against it `data.sub` is present
-   * only when there is a resource owner and `data.sub ? {…} : undefined` is
-   * the whole discriminator. Another authorization server may set `sub` to the
+   * This package's authorization server sets `sub` from the user's `id` and
+   * omits it for a token with no user, so — provided your users carry an `id`
+   * and your `introspectionClaims` hook does not return `sub` — `data.sub` is
+   * present only when there is a resource owner and
+   * `data.sub ? {…} : undefined` is the whole discriminator. Another authorization server may set `sub` to the
    * client id for a machine token; check how yours answers.
    *
    * May be async — return a promise to enrich from a DB lookup or the

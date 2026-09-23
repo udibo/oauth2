@@ -9,8 +9,9 @@
 /**
  * Stable, machine-readable identity error codes. The package raises
  * `rate_limited`, `weak_password`, and the `mfa_*` codes, and the Hono route
- * factory's same-origin guard answers `forbidden_origin` before a handler runs;
- * the rest are for your store and routes to throw (e.g. `identifier_taken` on
+ * factory answers `forbidden_origin` (its same-origin guard, before a handler
+ * runs) and `invalid_credentials` / `invalid_token` (a failed sign-in or token
+ * check); the rest are for your store and routes to throw (e.g. `identifier_taken` on
  * a duplicate sign-up, `captcha_failed` after `verifyCaptcha`).
  */
 export type IdentityErrorCode =

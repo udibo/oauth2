@@ -192,12 +192,14 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * When set, {@link IdentityService.signIn} — for a user with no native
    * credential yet — reads the imported hash via
    * {@link IdentityUserStore.getLegacyCredential} and verifies it with the first
-   * verifier whose `canVerify` accepts it. On a match it signs the user in
-   * and — when the store implements
-   * {@link IdentityUserStore.replaceCredential} and that write succeeds —
-   * rehashes the password into the native format, clears the imported hash
-   * ({@link IdentityUserStore.clearLegacyCredential}), and emits a
-   * `password.upgraded` event. The package ships
+   * verifier whose `canVerify` accepts it. On a match it signs the user in.
+   * When the store implements {@link IdentityUserStore.replaceCredential}, it
+   * first rehashes the password into the native format; on success it clears
+   * the imported hash ({@link IdentityUserStore.clearLegacyCredential}) and
+   * emits a `password.upgraded` event. If that write reports the credential
+   * already replaced, the password must verify against the new credential or
+   * sign-in fails; if the write throws, the user is signed in without the
+   * upgrade. The package ships
    * {@link pbkdf2Verifier} built-in; bcrypt/argon2/scrypt are bring-your-own via
    * the {@link LegacyPasswordVerifier} seam (no dep-free implementation exists).
    */
