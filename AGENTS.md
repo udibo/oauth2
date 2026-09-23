@@ -7,6 +7,8 @@ examples and templates alongside it.
 - Run `deno task test --parallel --reporter=dot` from the repository root for
   package tests. Paths passed to that task are relative to `src/`.
 - Run `deno task test:all` for package, script, example and template suites.
+- Run `deno task test:browser` after changing `src/react/components`: it drives
+  the drop-in forms in headless Chromium and skips without one.
 - Run `deno task check` for types, lint, formatting, documentation and
   packaging. Run `deno fmt` from the repository root to format changes.
 - Use explicit exported return types, `@std/assert` assertions and

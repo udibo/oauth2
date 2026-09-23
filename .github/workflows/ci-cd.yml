@@ -55,6 +55,29 @@ jobs:
           npm_config_ignore_scripts: "true"
         run: deno task npm:smoke
 
+  react-browser:
+    # jsdom never moves focus off a disabled element, so only a real engine
+    # can show that a pending submit keeps keyboard focus (issue #31).
+    name: React browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The runner image ships Google Chrome here. Naming it makes a missing
+      # browser fail the job instead of skipping the suite.
+      CHROMIUM_PATH: /usr/bin/google-chrome
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Setup Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        with:
+          deno-version: v2.x
+          cache: false
+      - name: Install dependencies
+        run: deno ci
+      - name: Run React browser tests
+        run: deno task test:browser
+
   release-oauth2-package:
     name: Release @udibo/oauth2 to JSR and npm
     needs: [oauth2-package]
