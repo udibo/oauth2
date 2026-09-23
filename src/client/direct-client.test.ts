@@ -36,6 +36,8 @@ import { base64urlEncode } from "../utils/crypto.ts";
 
 import { DirectClient } from "./direct-client.ts";
 import {
+  type AuthRequestRecord,
+  type AuthRequestStorage,
   MemoryAuthRequestStorage,
   MemoryRefreshTokenStorage,
   MemoryTokenStorage,
@@ -649,6 +651,151 @@ describe("DirectClient", () => {
         "authorization request expired",
       );
       assertEquals(await storage.get("state-1"), null);
+    });
+  });
+
+  describe("exchangeAuthorizationCode (configured auth-request TTL)", () => {
+    it("keeps a pending login past 10 minutes in the default memory store when authRequestTtlMs allows it", async () => {
+      using time = new FakeTime();
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestTtlMs: 30 * 60_000,
+        fetch: respondingWith(() =>
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+        ).fetch,
+      });
+      const { url } = await client.login();
+      const state = new URL(url).searchParams.get("state")!;
+
+      time.tick(11 * 60_000);
+      await client.login();
+
+      const result = await client.exchangeAuthorizationCode("code-1", state);
+      assertEquals(result.tokens.accessToken, "at-1");
+    });
+
+    it("keeps a pending login past 10 minutes in the default browser store when authRequestTtlMs allows it", async () => {
+      using time = new FakeTime();
+      using _browser = simulateBrowser(fakeSessionStorage().storage);
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestTtlMs: 30 * 60_000,
+        fetch: respondingWith(() =>
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+        ).fetch,
+      });
+      const { url } = await client.login();
+      const state = new URL(url).searchParams.get("state")!;
+
+      time.tick(11 * 60_000);
+
+      const result = await client.exchangeAuthorizationCode("code-1", state);
+      assertEquals(result.tokens.accessToken, "at-1");
+    });
+  });
+
+  describe("exchangeAuthorizationCode (single-use state)", () => {
+    it("redeems a pending auth request once when two callbacks race on one state", async () => {
+      const storage = new MemoryAuthRequestStorage();
+      await storage.set("state-1", {
+        codeVerifier: "v".repeat(43),
+        createdAt: Date.now(),
+      });
+      const sink = respondingWith(() =>
+        jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+      );
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestStorage: storage,
+        fetch: sink.fetch,
+      });
+
+      const outcomes = await Promise.allSettled([
+        client.exchangeAuthorizationCode("code-1", "state-1"),
+        client.exchangeAuthorizationCode("code-2", "state-1"),
+      ]);
+
+      assertEquals(
+        sink.calls,
+        [TOKEN_URL],
+        "a state must reach the token endpoint at most once",
+      );
+      assertEquals(outcomes.map((outcome) => outcome.status).sort(), [
+        "fulfilled",
+        "rejected",
+      ]);
+      const rejected = outcomes.find((outcome) =>
+        outcome.status === "rejected"
+      ) as PromiseRejectedResult;
+      assert(rejected.reason instanceof InvalidGrantError);
+    });
+
+    it("consumes the pending auth request even when the token call fails", async () => {
+      const storage = new MemoryAuthRequestStorage();
+      await storage.set("state-1", {
+        codeVerifier: "v".repeat(43),
+        createdAt: Date.now(),
+      });
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestStorage: storage,
+        fetch: respondingWith(() =>
+          jsonResponse({ error: "invalid_grant" }, 400)
+        ).fetch,
+      });
+
+      await assertRejects(
+        () => client.exchangeAuthorizationCode("code-1", "state-1"),
+        InvalidGrantError,
+      );
+      assertEquals(await storage.get("state-1"), null);
+    });
+
+    it("removes the record before the token call from a store that has no take", async () => {
+      const records = new Map<string, AuthRequestRecord>();
+      const log: string[] = [];
+      const storage: AuthRequestStorage = {
+        get: (state) => {
+          log.push("get");
+          return records.get(state) ?? null;
+        },
+        set: (state, value) => {
+          records.set(state, value);
+        },
+        delete: (state) => {
+          log.push("delete");
+          records.delete(state);
+        },
+        clear: () => records.clear(),
+      };
+      records.set("state-1", {
+        codeVerifier: "v".repeat(43),
+        createdAt: Date.now(),
+      });
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestStorage: storage,
+        fetch: ((input: RequestInfo | URL) => {
+          log.push(`fetch ${urlOf(input)}`);
+          return Promise.resolve(
+            jsonResponse({ access_token: "at-1", token_type: "Bearer" }),
+          );
+        }) as typeof fetch,
+      });
+
+      await client.exchangeAuthorizationCode("code-1", "state-1");
+
+      assertEquals(log, ["get", "delete", `fetch ${TOKEN_URL}`]);
     });
   });
 
@@ -1763,6 +1910,47 @@ describe("DirectClient logout", () => {
       events.some((event) => event.type === "logged_out"),
       true,
     );
+  });
+
+  it("signs out locally even when the token store cannot be read", async () => {
+    const refresh = seededRefreshStore();
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: TOKEN_URL, revocation: REVOKE_URL },
+      tokenStorage: {
+        get: () => Promise.reject(new Error("token store unavailable")),
+        set: () => {},
+        clear: () => {},
+      },
+      refreshTokenStorage: refresh,
+      fetch: (() =>
+        Promise.resolve(new Response(null, { status: 200 }))) as typeof fetch,
+    });
+    const events: OAuth2ClientEvent[] = [];
+    client.subscribe((event) => events.push(event));
+
+    assertEquals(await client.logout(), {});
+    assertStrictEquals(await refresh.get(), null);
+    assertEquals(events.map((event) => event.type), ["logged_out"]);
+  });
+
+  it("signs out locally even when the token store throws synchronously", async () => {
+    const refresh = seededRefreshStore();
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: TOKEN_URL },
+      tokenStorage: {
+        get: () => {
+          throw new Error("token store unavailable");
+        },
+        set: () => {},
+        clear: () => {},
+      },
+      refreshTokenStorage: refresh,
+    });
+
+    assertEquals(await client.logout(), {});
+    assertStrictEquals(await refresh.get(), null);
   });
 
   it("returns the end-session URL with id_token_hint when one is configured", async () => {

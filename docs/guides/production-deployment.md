@@ -26,17 +26,17 @@ local example can keep it in memory; a deployment with replicas, serverless
 isolates, or restarts needs shared persistence or an appropriate encrypted
 cookie.
 
-| State                        | Public contract                                    | Requirement                                                                                  |
-| ---------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| BFF session                  | `SessionStore`                                     | Enforce expiry and revocation; stateful `update` must never recreate a missing session       |
-| Pending browser login        | `AuthRequestStorage` / `AuthRequestStorageFactory` | Preserve state and PKCE verifier across redirects; bind completion to the initiating browser |
-| Authorization codes          | `AuthorizationCodeServiceInterface`                | Atomic single-use consumption, expiry, client and redirect binding                           |
-| Tokens                       | `TokenServiceInterface`                            | Protect stored token material; atomic revocation/rotation claims                             |
-| App credentials              | `IdentityUserStore`                                | Persist the complete credential, including `params`; unique identifiers                      |
-| Reset and verification links | `TokenFlowStore`                                   | Expiring, single-use records; implement invalidation capabilities your app needs             |
-| Email codes                  | `OtpStore`                                         | Atomic attempt increments and boolean `consume`; protect low-entropy code hashes             |
-| MFA                          | `MfaStore`                                         | Protect TOTP secrets; atomically consume recovery codes                                      |
-| Rate limits and lockout      | `RateLimitStore` / `LockoutStore`                  | Shared counters and expiry across instances                                                  |
+| State                        | Public contract                                    | Requirement                                                                                                                               |
+| ---------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| BFF session                  | `SessionStore`                                     | Enforce expiry and revocation; stateful `update` must never recreate a missing session                                                    |
+| Pending browser login        | `AuthRequestStorage` / `AuthRequestStorageFactory` | Preserve state and PKCE verifier across redirects; bind completion to the initiating browser; atomic single-use `take` of a shared record |
+| Authorization codes          | `AuthorizationCodeServiceInterface`                | Atomic single-use consumption, expiry, client and redirect binding                                                                        |
+| Tokens                       | `TokenServiceInterface`                            | Protect stored token material; atomic revocation/rotation claims                                                                          |
+| App credentials              | `IdentityUserStore`                                | Persist the complete credential, including `params`; unique identifiers                                                                   |
+| Reset and verification links | `TokenFlowStore`                                   | Expiring, single-use records; implement invalidation capabilities your app needs                                                          |
+| Email codes                  | `OtpStore`                                         | Atomic attempt increments and boolean `consume`; protect low-entropy code hashes                                                          |
+| MFA                          | `MfaStore`                                         | Protect TOTP secrets; atomically consume recovery codes                                                                                   |
+| Rate limits and lockout      | `RateLimitStore` / `LockoutStore`                  | Shared counters and expiry across instances                                                                                               |
 
 Run the appropriate contract suite from `@udibo/oauth2/testing/contract` or
 `@udibo/oauth2/hono/bff/testing` against your actual adapter. Test concurrent
