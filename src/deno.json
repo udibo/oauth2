@@ -33,6 +33,10 @@
       "description": "Runs the tests.",
       "command": "deno test -P=test"
     },
+    "test:browser": {
+      "description": "Runs the React browser tests in headless Chromium. Skips when no Chromium is found.",
+      "command": "deno test -P=test react/components/pending-submit.e2e.ts"
+    },
     "test-update": {
       "description": "Runs the tests and updates the snapshots.",
       "command": "deno task test -- --update"
@@ -57,8 +61,8 @@
     "exclude": [
       "**/*.test.ts",
       "**/*.test.tsx",
-      "**/_test_fixtures.ts",
-      "**/_test_setup.ts"
+      "**/*.e2e.ts",
+      "**/_test_*"
     ],
     "include": [
       "**/*.ts",

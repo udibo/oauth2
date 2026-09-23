@@ -43,6 +43,10 @@
       "description": "Runs the OAuth2 package tests only. Use `test:all` before pushing — the examples and templates have their own suites.",
       "command": "deno task --cwd=src test"
     },
+    "test:browser": {
+      "description": "Runs the React browser tests in headless Chromium: the drop-in forms keep focus on a pending submit. Needs a Chromium binary (CHROMIUM_PATH, else Playwright's cache or a system install); without one it skips. Not part of `test:all` — CI runs it as its own job.",
+      "command": "deno task --cwd=src test:browser"
+    },
     "test:scripts": {
       "description": "Runs the tests for the repository scripts.",
       "command": "deno test --allow-read --allow-write --allow-run --allow-env scripts/*.test.ts"

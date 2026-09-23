@@ -32,6 +32,7 @@ constructive, and professional in your communications.
 deno install          # install dependencies
 deno task test        # run the package tests
 deno task test:all    # package + scripts + examples + templates
+deno task test:browser # React form behavior in headless Chromium
 deno task check       # type check, lint, and format check
 ```
 
@@ -86,6 +87,11 @@ copies them in at publish time.
    (part of `check`) type-checks the fenced snippets in the markdown **and**
    every JSDoc `@example` in the API reference — mark a fence `` ```ts ignore ``
    when a snippet is deliberately not compilable.
+7. **Run `deno task test:browser` after changing the React form components.** It
+   drives the drop-in forms in headless Chromium for behavior jsdom cannot show,
+   such as where focus goes while a submit is pending. It finds Chromium through
+   `CHROMIUM_PATH`, Playwright's cache, or a system install, and skips when
+   there is none. CI runs it as its own job.
 
 ### Design invariants
 
