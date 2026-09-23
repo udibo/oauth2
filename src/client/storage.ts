@@ -183,11 +183,14 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
     return record;
   }
   /**
-   * Stores {@linkcode value} under {@linkcode state}, first pruning every
-   * record past the TTL.
+   * Stores {@linkcode value} under {@linkcode state}, first pruning records
+   * past the TTL. Pruning walks records oldest-write-first and stops at the
+   * first one inside the TTL, so it assumes each `createdAt` is the time of
+   * its write, as `DirectClient.login` sets it.
    */
   set(state: string, value: AuthRequestRecord): void {
     this.#pruneExpired();
+    this.#records.delete(state);
     this.#records.set(state, value);
   }
   /** Removes the record for {@linkcode state}. */
@@ -203,7 +206,8 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
     if (this.#ttlMs === Infinity) return;
     const cutoff = Date.now() - this.#ttlMs;
     for (const [state, record] of this.#records) {
-      if (record.createdAt < cutoff) this.#records.delete(state);
+      if (record.createdAt >= cutoff) return;
+      this.#records.delete(state);
     }
   }
 }

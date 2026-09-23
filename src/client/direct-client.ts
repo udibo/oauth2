@@ -155,9 +155,9 @@ export interface DirectClientOptions extends BaseOptions {
   /**
    * Max age of a pending auth-request (`state`) record before
    * {@link DirectClient.exchangeAuthorizationCode} rejects it as stale, in ms.
-   * Bounds the callback replay window. The default in-memory storage also
-   * prunes records older than this; any other storage expires records by its
-   * own rules. Defaults to 10 minutes; set `Infinity` to disable the check.
+   * Bounds the callback replay window. Both default storages also expire
+   * records older than this; a storage you pass expires records by its own
+   * rules. Defaults to 10 minutes; set `Infinity` to disable the check.
    */
   authRequestTtlMs?: number;
 }
@@ -1567,7 +1567,7 @@ function defaultAuthRequestStorage(ttlMs: number): AuthRequestStorage {
   const inBrowserDocument = typeof document !== "undefined" &&
     typeof sessionStorage !== "undefined";
   return inBrowserDocument
-    ? new SessionStorageAuthRequestStorage()
+    ? new SessionStorageAuthRequestStorage({ ttlMs })
     : new MemoryAuthRequestStorage({ ttlMs });
 }
 

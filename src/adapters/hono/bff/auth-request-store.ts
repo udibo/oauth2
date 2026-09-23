@@ -161,6 +161,10 @@ export interface AuthRequestStorageFactory {
  * `unknown state parameter`. The AES key is derived on first use and shared by
  * every later request.
  *
+ * It has no `take`: the record travels with the browser and cannot be claimed
+ * atomically, so a replayed callback is bounded by the authorization server's
+ * single-use code and PKCE.
+ *
  * @example
  * ```ts
  * const bff = new HonoBff({

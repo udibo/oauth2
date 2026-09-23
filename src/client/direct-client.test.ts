@@ -654,6 +654,50 @@ describe("DirectClient", () => {
     });
   });
 
+  describe("exchangeAuthorizationCode (configured auth-request TTL)", () => {
+    it("keeps a pending login past 10 minutes in the default memory store when authRequestTtlMs allows it", async () => {
+      using time = new FakeTime();
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestTtlMs: 30 * 60_000,
+        fetch: respondingWith(() =>
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+        ).fetch,
+      });
+      const { url } = await client.login();
+      const state = new URL(url).searchParams.get("state")!;
+
+      time.tick(11 * 60_000);
+      await client.login();
+
+      const result = await client.exchangeAuthorizationCode("code-1", state);
+      assertEquals(result.tokens.accessToken, "at-1");
+    });
+
+    it("keeps a pending login past 10 minutes in the default browser store when authRequestTtlMs allows it", async () => {
+      using time = new FakeTime();
+      using _browser = simulateBrowser(fakeSessionStorage().storage);
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        authRequestTtlMs: 30 * 60_000,
+        fetch: respondingWith(() =>
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+        ).fetch,
+      });
+      const { url } = await client.login();
+      const state = new URL(url).searchParams.get("state")!;
+
+      time.tick(11 * 60_000);
+
+      const result = await client.exchangeAuthorizationCode("code-1", state);
+      assertEquals(result.tokens.accessToken, "at-1");
+    });
+  });
+
   describe("exchangeAuthorizationCode (single-use state)", () => {
     it("redeems a pending auth request once when two callbacks race on one state", async () => {
       const storage = new MemoryAuthRequestStorage();
