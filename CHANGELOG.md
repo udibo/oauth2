@@ -1,3 +1,11 @@
+## [0.5.1](https://github.com/udibo/oauth2/compare/0.5.0...0.5.1) (2026-09-23)
+
+### Bug Fixes
+
+- **testing:** name the fake tenant by its product
+  ([#38](https://github.com/udibo/oauth2/issues/38))
+  ([980346c](https://github.com/udibo/oauth2/commit/980346ce7e2b2aa6b1dbfe31ab3c42ceed9fa465))
+
 # [0.5.0](https://github.com/udibo/oauth2/compare/0.4.1...0.5.0) (2026-09-23)
 
 ### Bug Fixes
