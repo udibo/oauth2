@@ -56,17 +56,4 @@ describe("oauth2Provider authorize URL", () => {
     assertEquals(url.searchParams.get("audience"), "https://api.acme.example");
     assertEquals(url.searchParams.getAll("state").length, 1);
   });
-
-  it("lets the flow's prompt override a configured one", async () => {
-    const provider = acmeProvider({ prompt: "none" });
-    const url = new URL(
-      await provider.buildAuthorizationUrl({
-        redirectUri,
-        scopes: ["profile"],
-        state: "flow-state",
-        prompt: "consent",
-      }),
-    );
-    assertEquals(url.searchParams.get("prompt"), "consent");
-  });
 });

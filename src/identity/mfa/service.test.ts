@@ -604,6 +604,11 @@ describe("MfaService", () => {
 
     assertEquals((await mfa.verify("u1", "000000")).valid, false);
     assertEquals((await mfa.verify("u1", "000001")).valid, false);
+    const error = await assertRejects(
+      () => mfa.verify("u1", "000002"),
+      IdentityError,
+    );
+    assertEquals(error.code, "rate_limited");
   });
 
   for (const method of ["totp", "recovery"] as const) {

@@ -329,11 +329,13 @@ resets the password. `revokeOthers` powers "sign out everywhere else" on your
 own settings page: it keeps the session the user is sitting in and ends the
 rest, which is what someone who has just changed their password expects.
 
-The reset token is consumed only after `revokeAllByUser` returns. If it throws,
-`resetPassword` emits `password_reset.failed` (`session_revocation_failed`) and
-rethrows with the link still unspent, so the user finishes the reset by
-submitting the same link again once your session store is back — the password is
-already set, and `setCredential` is simply called again with the same value.
+The reset token is consumed before the password is written, so two concurrent
+submissions of one link resolve to exactly one success and only that password is
+set. `revokeAllByUser` runs after the write; if it throws, `resetPassword` emits
+`password_reset.failed` (`session_revocation_failed`) and rethrows. The link is
+spent and the new password is in effect by then, so handle that event: call
+`revokeAllByUser` again yourself once the session store is back, or have the
+user complete a fresh link.
 
 `resetPassword` also voids the subject's outstanding **passwordless**
 credentials — a pending sign-in link and a pending sign-in code — so a magic

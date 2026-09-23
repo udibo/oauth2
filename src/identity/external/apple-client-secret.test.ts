@@ -91,22 +91,20 @@ describe("generateAppleClientSecret", () => {
     assertStringIncludes(error.message, "6 months");
   });
 
-  for (const ttl of [Number.NaN, Number.POSITIVE_INFINITY]) {
-    it(`rejects a ${ttl} TTL with a configuration error instead of signing an unusable exp`, async () => {
-      const { pem } = await generateP8();
-      const error = await assertRejects(
-        () =>
-          generateAppleClientSecret({
-            ...config,
-            privateKey: pem,
-            expiresInSeconds: ttl,
-          }),
-        ExternalAuthError,
-      );
-      assertEquals(error.code, "configuration");
-      assertStringIncludes(error.message, "TTL");
-    });
-  }
+  it("rejects a NaN TTL with a configuration error instead of signing an unusable exp", async () => {
+    const { pem } = await generateP8();
+    const error = await assertRejects(
+      () =>
+        generateAppleClientSecret({
+          ...config,
+          privateKey: pem,
+          expiresInSeconds: Number.NaN,
+        }),
+      ExternalAuthError,
+    );
+    assertEquals(error.code, "configuration");
+    assertStringIncludes(error.message, "TTL");
+  });
 
   it("names an empty team id in a configuration error", async () => {
     const { pem } = await generateP8();

@@ -124,8 +124,9 @@ export type IdentityEvent =
      * `"session_revocation_failed"` — the new password was set but the
      * configured {@link RevocableSessionService} threw before the user's other
      * sessions could be revoked, so the reset is reported failed (and rethrown)
-     * rather than trusted. The reset link is left unspent, so the user can
-     * submit it again to finish the reset once the session store recovers.
+     * rather than trusted. The reset token is already spent, so clear the
+     * still-live sessions by calling `revokeAllByUser` again from this event,
+     * or have the user complete a fresh reset link.
      */
     reason: "invalid_token" | "session_revocation_failed";
   }

@@ -688,14 +688,17 @@ export class IdentityService<User extends IdentityUser> {
    * logged and the reset still completes, since the password has already
    * changed by then.
    *
-   * The token is consumed **last** — after the password is set and the
-   * sessions are revoked. If revocation throws, the reset is reported failed —
-   * a `password_reset.failed` (`session_revocation_failed`) event fires, no
-   * `password_reset.completed` fires, and the error rethrows — rather than
-   * silently returning success with the user's old sessions still live. The
-   * new password is already set by then, but the link is still unspent, so
-   * the user finishes the reset by submitting the same link again once the
-   * session store is back.
+   * The token is consumed **first**, before the password is written, so two
+   * concurrent submissions of one link resolve to exactly one `{ userId }` and
+   * only that call's password is set — the loser gets `null` and writes
+   * nothing. Sessions are revoked **after** the password is changed. If that
+   * revocation throws, the reset is reported failed — a `password_reset.failed`
+   * (`session_revocation_failed`) event fires, no `password_reset.completed`
+   * fires, and the error rethrows — rather than silently returning success
+   * with the user's old sessions still live. The token is already spent and
+   * the new password already set by then, so the operator clears the still-live
+   * sessions by calling `revokeAllByUser` again (subscribe to the event), or
+   * the user completes a fresh reset link.
    *
    * @throws {IdentityError} `weak_password` when `password` fails the password
    * policy — including the 8–256 character defaults that apply when
@@ -717,11 +720,37 @@ export class IdentityService<User extends IdentityUser> {
         type: "password_reset.failed",
         reason: "invalid_token",
       }),
-      beforeConsume: (subject, data) =>
-        this.#applyPasswordReset(tokens, subject, data, input.password),
     });
     if (consumed.status !== "success") return null;
     const { resolved } = consumed;
+    await this.#users.setCredential(
+      resolved.subject,
+      await this.#passwords.hash(input.password),
+    );
+    try {
+      await this.#users.clearLegacyCredential?.(resolved.subject);
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] resetPassword legacy-credential clear failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    await this.#voidPasswordlessCredentials(
+      tokens,
+      resolved.subject,
+      emailFromData(resolved.data),
+    );
+    if (this.#sessions) {
+      try {
+        await this.#sessions.revokeAllByUser(resolved.subject);
+      } catch (error) {
+        await this.#emit({
+          type: "password_reset.failed",
+          reason: "session_revocation_failed",
+        });
+        throw error;
+      }
+    }
     await this.#lockout?.reset(resolved.subject);
     await this.#emit({
       type: "password_reset.completed",
@@ -1214,41 +1243,6 @@ export class IdentityService<User extends IdentityUser> {
       lockedUntil: result.lockedUntil,
       enforced: this.#enforce,
     });
-  }
-
-  async #applyPasswordReset(
-    tokens: TokenFlowService,
-    subject: string,
-    data: Record<string, unknown> | undefined,
-    password: string,
-  ): Promise<void> {
-    await this.#users.setCredential(
-      subject,
-      await this.#passwords.hash(password),
-    );
-    try {
-      await this.#users.clearLegacyCredential?.(subject);
-    } catch (error) {
-      console.error(
-        "[@udibo/oauth2] resetPassword legacy-credential clear failed:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-    await this.#voidPasswordlessCredentials(
-      tokens,
-      subject,
-      emailFromData(data),
-    );
-    if (!this.#sessions) return;
-    try {
-      await this.#sessions.revokeAllByUser(subject);
-    } catch (error) {
-      await this.#emit({
-        type: "password_reset.failed",
-        reason: "session_revocation_failed",
-      });
-      throw error;
-    }
   }
 
   async #voidPasswordlessCredentials(

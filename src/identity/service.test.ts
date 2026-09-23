@@ -620,19 +620,27 @@ describe("IdentityService", () => {
     );
   });
 
-  it("resetPassword leaves the link redeemable when session revocation fails, so a retry finishes the reset", async () => {
-    const revoked: string[] = [];
-    let sessionsDown = true;
-    const { service, events, minted } = makeEventService({
-      sessions: {
-        revokeAllByUser(userId) {
-          if (sessionsDown) {
-            return Promise.reject(new Error("session store down"));
-          }
-          revoked.push(userId);
-          return Promise.resolve(1);
+  it("resetPassword lets exactly one of two concurrent submissions of a link set the password", async () => {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    let resetToken = "";
+    let credentialWrites = 0;
+    const service = serviceWithoutSignInFloor({
+      users: {
+        ...store,
+        async setCredential(userId, credential) {
+          if (credentialWrites++ === 0) await delay(200);
+          await store.setCredential(userId, credential);
         },
-        revokeOthers: () => Promise.resolve(0),
+      },
+      tokens: new TokenFlowService(new MemoryTokenFlowStore()),
+      delivery: {
+        sendPasswordReset: (msg) => {
+          resetToken = msg.token;
+        },
+      },
+      onEvent: (event) => {
+        events.push(event);
       },
     });
     const user = await service.signUp({
@@ -640,24 +648,34 @@ describe("IdentityService", () => {
       profile: { email: "a@b.co" },
     });
     await service.requestPasswordReset("a@b.co");
-    const token = minted.passwordReset[0];
+    const passwords = ["firstpassword1", "secondpassword2"];
 
-    await assertRejects(
-      () => service.resetPassword({ token, password: "newpassword1" }),
-      Error,
-      "session store down",
+    const results = await Promise.all(
+      passwords.map((password) =>
+        service.resetPassword({ token: resetToken, password })
+      ),
     );
-    assertEquals(revoked, []);
 
-    sessionsDown = false;
+    const winners = results.flatMap((result, i) => result ? [i] : []);
+    assertEquals(winners.length, 1);
+    const [winner] = winners;
+    assertEquals(results[winner], { userId: user.id });
+    assertEquals(credentialWrites, 1);
     assertEquals(
-      await service.resetPassword({ token, password: "newpassword1" }),
-      { userId: user.id },
+      (await service.signIn({
+        identifier: "a@b.co",
+        password: passwords[winner],
+      }))?.id,
+      user.id,
     );
-    assertEquals(revoked, [user.id]);
-    assertEquals(eventsOfType(events, "password_reset.completed"), [
-      { type: "password_reset.completed", userId: user.id },
-    ]);
+    assertEquals(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: passwords[1 - winner],
+      }),
+      null,
+    );
+    assertEquals(eventsOfType(events, "password_reset.completed").length, 1);
   });
 
   it("enforces the password policy on signUp and resetPassword", async () => {
