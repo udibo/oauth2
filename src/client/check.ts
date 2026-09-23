@@ -28,6 +28,9 @@
  */
 
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
+import { receiveJson, sendGuarded } from "./_http.ts";
+
+const CHECK_ENDPOINT = "check endpoint";
 
 /** A resource a permission check is scoped to. */
 export interface CheckResource {
@@ -62,9 +65,11 @@ export interface CheckPermissionsOptions {
    */
   resource?: CheckResource;
   /**
-   * `fetch` implementation used to call the endpoint. Defaults to the global
-   * `fetch`, with no deadline and redirects followed; inject one to add a
-   * timeout or to stub the network in tests.
+   * `fetch` implementation used to call the endpoint, e.g. to stub the network
+   * in tests. Defaults to the global `fetch`. Whichever is used, the call runs
+   * under this package's deadline and response-size cap, and a redirect is
+   * refused rather than followed so the bearer token never reaches the host
+   * it names.
    */
   fetch?: typeof fetch;
 }
@@ -98,8 +103,11 @@ export interface CheckPermissionsResult {
  * tenant no longer resolves is a 404 and lands there too. Echoing an `org_id`
  * off a signed claim is how you meet it, because the organization can be
  * deleted after the signature, so catch it on that path rather than reading a
- * throw as a bug in your own setup. A `2xx` whose body is not JSON rejects with
- * the parser's `SyntaxError`; the body's shape is not validated.
+ * throw as a bug in your own setup. A redirect, or a `2xx` whose body is not a
+ * JSON object or exceeds the response-size cap, also throws
+ * {@linkcode ServerError}, and a request that outlives the deadline throws
+ * {@linkcode TemporarilyUnavailableError}. The body's shape is not validated
+ * beyond being a JSON object.
  *
  * @example
  * ```ts
@@ -123,31 +131,54 @@ export async function checkPermissions(
   options: CheckPermissionsOptions,
 ): Promise<CheckPermissionsResult> {
   const fetchImpl = options.fetch ?? fetch;
+  const reportUnreachable: typeof fetch = async (input, init) => {
+    try {
+      return await fetchImpl(input, init);
+    } catch (cause) {
+      throw new TemporarilyUnavailableError("check endpoint unreachable", {
+        cause,
+      });
+    }
+  };
   let response: Response;
   try {
-    response = await fetchImpl(options.endpoint, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${options.accessToken}`,
-        "content-type": "application/json",
+    response = await sendGuarded(
+      reportUnreachable,
+      options.endpoint,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${options.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          permissions: options.permissions,
+          ...(options.resource ? { resource: options.resource } : {}),
+        }),
       },
-      body: JSON.stringify({
-        permissions: options.permissions,
-        ...(options.resource ? { resource: options.resource } : {}),
-      }),
-    });
-  } catch (cause) {
-    throw new TemporarilyUnavailableError("check endpoint unreachable", {
-      cause,
-    });
+      CHECK_ENDPOINT,
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.cause instanceof TemporarilyUnavailableError
+    ) {
+      throw error.cause;
+    }
+    throw error;
   }
   if (response.status >= 500) {
+    await response.body?.cancel();
     throw new TemporarilyUnavailableError(
       `check endpoint answered ${response.status}`,
     );
   }
   if (!response.ok) {
+    await response.body?.cancel();
     throw new ServerError(`check request refused: ${response.status}`);
   }
-  return await response.json() as CheckPermissionsResult;
+  return await receiveJson(
+    response,
+    CHECK_ENDPOINT,
+  ) as unknown as CheckPermissionsResult;
 }

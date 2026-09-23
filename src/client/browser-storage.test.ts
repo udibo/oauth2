@@ -1,4 +1,11 @@
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import { delay } from "@std/async/delay";
 import { describe, it } from "@std/testing/bdd";
 
 import {
@@ -30,6 +37,7 @@ interface FakeTransaction {
 interface DatabaseRecord {
   version: number;
   stores: Map<string, Map<string, unknown>>;
+  openHandles: number;
 }
 
 function newRequest(): FakeRequest {
@@ -67,7 +75,9 @@ function fakeDatabase(record: DatabaseRecord): IDBDatabase {
     createObjectStore(name: string): void {
       record.stores.set(name, new Map());
     },
-    close(): void {},
+    close(): void {
+      record.openHandles--;
+    },
     transaction(storeName: string): FakeTransaction {
       if (!record.stores.has(storeName)) {
         throw new DOMException(
@@ -96,15 +106,21 @@ function fakeDatabase(record: DatabaseRecord): IDBDatabase {
   return database as unknown as IDBDatabase;
 }
 
-function installFakeIndexedDB(): Disposable {
+interface FakeIndexedDB extends Disposable {
+  openHandles(name: string): number;
+}
+
+function installFakeIndexedDB(
+  options: { blockVersionChangesUntil?: Promise<void> } = {},
+): FakeIndexedDB {
   const databases = new Map<string, DatabaseRecord>();
   const factory = {
     open(name: string, version?: number): FakeRequest {
       const request = newRequest();
-      queueMicrotask(() => {
+      queueMicrotask(async () => {
         let record = databases.get(name);
         if (!record) {
-          record = { version: 0, stores: new Map() };
+          record = { version: 0, stores: new Map(), openHandles: 0 };
           databases.set(name, record);
         }
         const target = version ?? Math.max(record.version, 1);
@@ -113,7 +129,15 @@ function installFakeIndexedDB(): Disposable {
           request.onerror?.();
           return;
         }
+        if (
+          target > record.version && record.version > 0 &&
+          options.blockVersionChangesUntil
+        ) {
+          request.onblocked?.();
+          await options.blockVersionChangesUntil;
+        }
         request.result = fakeDatabase(record);
+        record.openHandles++;
         if (target > record.version) {
           record.version = target;
           request.onupgradeneeded?.();
@@ -126,6 +150,7 @@ function installFakeIndexedDB(): Disposable {
   (globalThis as unknown as { indexedDB: IDBFactory }).indexedDB =
     factory as unknown as IDBFactory;
   return {
+    openHandles: (name) => databases.get(name)?.openHandles ?? 0,
     [Symbol.dispose]: () => {
       delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
     },
@@ -195,6 +220,52 @@ describe("IndexedDBRefreshTokenStorage", () => {
     );
   });
 
+  it("rejects a write while another connection blocks the store's creation", async () => {
+    const unblock = Promise.withResolvers<void>();
+    using _indexedDB = installFakeIndexedDB({
+      blockVersionChangesUntil: unblock.promise,
+    });
+    await new IndexedDBRefreshTokenStorage({
+      clientId: "app-a",
+      storeName: "existing",
+    }).set("token-existing");
+    const storage = new IndexedDBRefreshTokenStorage({ clientId: "app-a" });
+
+    const write = storage.set("token-rotated").then(
+      () => "resolved",
+      (error: unknown) => error,
+    );
+    await delay(0);
+    unblock.resolve();
+    const outcome = await write;
+
+    assert(
+      outcome instanceof DOMException,
+      "a write that could not reach the store must not resolve as if it had",
+    );
+    assertStringIncludes(outcome.message, "blocked");
+  });
+
+  it("closes the connection that opens after a blocked upgrade", async () => {
+    const unblock = Promise.withResolvers<void>();
+    using indexedDB = installFakeIndexedDB({
+      blockVersionChangesUntil: unblock.promise,
+    });
+    await new IndexedDBRefreshTokenStorage({
+      clientId: "app-a",
+      storeName: "existing",
+    }).set("token-existing");
+    const storage = new IndexedDBRefreshTokenStorage({ clientId: "app-a" });
+
+    await storage.set("token-rotated").catch(() => {});
+    unblock.resolve();
+    await delay(0);
+
+    assertStrictEquals(indexedDB.openHandles("@udibo/oauth2"), 0);
+    await storage.set("token-rotated");
+    assertStrictEquals(await storage.get(), "token-rotated");
+  });
+
   it("round-trips through a database that did not exist yet", async () => {
     using _indexedDB = installFakeIndexedDB();
     const storage = new IndexedDBRefreshTokenStorage({
@@ -257,6 +328,11 @@ describe("SessionStorageAuthRequestStorage", () => {
 
       sStore.delete("state-1");
       assertStrictEquals(sStore.get("state-1"), null);
+
+      sStore.set("state-2", record);
+      assertEquals(sStore.take("state-2")?.codeVerifier, "v");
+      assertStrictEquals(sStore.take("state-2"), null);
+      assertStrictEquals(backing.has("oauth2:auth-req:state-2"), false);
     } finally {
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     }

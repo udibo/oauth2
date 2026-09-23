@@ -60,6 +60,7 @@ import {
   type DiscoveryCache,
 } from "./discovery-cache.ts";
 import {
+  type AuthRequestRecord,
   type AuthRequestStorage,
   MemoryAuthRequestStorage,
   MemoryRefreshTokenStorage,
@@ -154,10 +155,9 @@ export interface DirectClientOptions extends BaseOptions {
   /**
    * Max age of a pending auth-request (`state`) record before
    * {@link DirectClient.exchangeAuthorizationCode} rejects it as stale, in ms.
-   * Bounds the callback replay window. A stale record is deleted only when its
-   * `state` comes back; records for logins that never return stay in the store
-   * until it is cleared. Defaults to 10 minutes; set `Infinity` to disable the
-   * check.
+   * Bounds the callback replay window. The default in-memory storage also
+   * prunes records older than this; any other storage expires records by its
+   * own rules. Defaults to 10 minutes; set `Infinity` to disable the check.
    */
   authRequestTtlMs?: number;
 }
@@ -360,9 +360,9 @@ export class DirectClient extends OAuth2ClientBase {
     this.#tokenStorage = options.tokenStorage ?? new MemoryTokenStorage();
     this.#refreshTokenStorage = options.refreshTokenStorage ??
       new MemoryRefreshTokenStorage();
-    this.#authRequestStorage = options.authRequestStorage ??
-      defaultAuthRequestStorage();
     this.#authRequestTtlMs = options.authRequestTtlMs ?? 10 * 60 * 1000;
+    this.#authRequestStorage = options.authRequestStorage ??
+      defaultAuthRequestStorage(this.#authRequestTtlMs);
   }
 
   /** True when the client was given a secret and authenticates via Basic. */
@@ -725,8 +725,12 @@ export class DirectClient extends OAuth2ClientBase {
    * token state across this client's storage and the caller's external store,
    * so refresh, revocation, and logout all stop working as expected.
    *
-   * The verifier and `returnTo` are looked up under `state`; on success the
-   * record is consumed. Emits nothing — the caller owns session semantics.
+   * The verifier and `returnTo` are claimed under `state` before the token
+   * call, so the record is consumed whether or not the exchange succeeds and
+   * two callbacks racing on one `state` reach the token endpoint at most once
+   * (atomically so for a storage that implements
+   * {@link AuthRequestStorage.take}). Emits nothing — the caller owns session
+   * semantics.
    *
    * @param code The authorization code from the callback.
    * @param state The `state` the callback echoed back.
@@ -744,13 +748,12 @@ export class DirectClient extends OAuth2ClientBase {
   ): Promise<ExchangeResult> {
     const authRequestStorage = options.authRequestStorage ??
       this.#authRequestStorage;
-    const record = await authRequestStorage.get(state);
+    const record = await claimAuthRequest(authRequestStorage, state);
     if (!record) throw new InvalidGrantError("unknown state parameter");
     if (
       this.#authRequestTtlMs !== Infinity &&
       Date.now() - record.createdAt > this.#authRequestTtlMs
     ) {
-      await authRequestStorage.delete(state);
       throw new InvalidGrantError("authorization request expired");
     }
 
@@ -763,7 +766,6 @@ export class DirectClient extends OAuth2ClientBase {
     if (redirectUri) body.set("redirect_uri", redirectUri);
 
     const raw = await this.#postToken(body);
-    await authRequestStorage.delete(state);
     return {
       tokens: responseToBundle(raw),
       refreshToken: raw.refresh_token,
@@ -1238,9 +1240,10 @@ export class DirectClient extends OAuth2ClientBase {
    * state, emits `logged_out`, and returns the OIDC end-session URL when the
    * server advertises one.
    *
-   * Best effort covers the read too: a refresh-token store that cannot be read
-   * skips the revocation rather than failing the sign-out, because a client
-   * that stays signed in locally because its store broke is the worse outcome.
+   * Best effort covers the reads too: a refresh-token store that cannot be
+   * read skips the revocation, and a token store that cannot be read omits
+   * `id_token_hint`, rather than failing the sign-out, because a client that
+   * stays signed in locally because its store broke is the worse outcome.
    *
    * @param options `returnTo` becomes `post_logout_redirect_uri` on the
    * end-session URL.
@@ -1260,7 +1263,9 @@ export class DirectClient extends OAuth2ClientBase {
   async logout(options: LogoutOptions = {}): Promise<LogoutRedirect> {
     const version = ++this.#sessionVersion;
     const refreshToken = await this.#readRefreshToken(false).catch(() => null);
-    const idToken = (await this.#tokenStorage.get())?.idToken;
+    const idToken = await Promise.resolve()
+      .then(() => this.#tokenStorage.get())
+      .then((tokens) => tokens?.idToken, () => undefined);
     if (version !== this.#sessionVersion) return {};
     await this.#clearSession();
     this.emit({ type: "logged_out", reason: "user" });
@@ -1558,12 +1563,22 @@ function toSearchParams(
   }
 }
 
-function defaultAuthRequestStorage(): AuthRequestStorage {
+function defaultAuthRequestStorage(ttlMs: number): AuthRequestStorage {
   const inBrowserDocument = typeof document !== "undefined" &&
     typeof sessionStorage !== "undefined";
   return inBrowserDocument
     ? new SessionStorageAuthRequestStorage()
-    : new MemoryAuthRequestStorage();
+    : new MemoryAuthRequestStorage({ ttlMs });
+}
+
+async function claimAuthRequest(
+  storage: AuthRequestStorage,
+  state: string,
+): Promise<AuthRequestRecord | null> {
+  if (storage.take) return await storage.take(state);
+  const record = await storage.get(state);
+  if (record) await storage.delete(state);
+  return record;
 }
 
 function assertUsableSecret(secret: string | undefined): void {

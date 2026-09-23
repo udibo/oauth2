@@ -90,7 +90,21 @@ export interface AuthRequestStorage {
     state: string,
     value: AuthRequestRecord,
   ): Promise<void> | void;
-  /** Removes one entry — after a successful code exchange, or a stale one. */
+  /**
+   * Returns the record for {@linkcode state} and removes it in one atomic
+   * step, or `null` if absent. `DirectClient` claims the record this way
+   * before it calls the token endpoint, so of two callbacks racing on one
+   * `state` only one reaches it. Optional for compatibility: without it the
+   * client falls back to `get` then `delete`, which still consumes the record
+   * before the token call but lets concurrent callers that both read it
+   * before either deletes it redeem it twice. Implement it with the backing
+   * store's own atomic primitive (`GETDEL`, `DELETE … RETURNING`) whenever
+   * the store is shared between processes or requests.
+   */
+  take?(
+    state: string,
+  ): Promise<AuthRequestRecord | null> | AuthRequestRecord | null;
+  /** Removes one entry — a claimed or stale one. */
   delete(state: string): Promise<void> | void;
   /** Removes every entry. Called when the client clears its session. */
   clear(): Promise<void> | void;
@@ -133,20 +147,47 @@ export class MemoryRefreshTokenStorage implements RefreshTokenStorage {
   }
 }
 
+/** Options for {@link MemoryAuthRequestStorage}. */
+export interface MemoryAuthRequestStorageOptions {
+  /**
+   * Age past which a record is pruned the next time any record is written,
+   * in ms. Defaults to 10 minutes; `Infinity` never prunes.
+   */
+  ttlMs?: number;
+}
+
 /**
  * In-memory {@link AuthRequestStorage}, `DirectClient`'s default outside a
- * browser document. Data is lost when the process exits, and records are never
- * expired by the store itself — a long-running server accumulates one per
- * login that never returns to the callback, until `clear()` runs.
+ * browser document. Data is lost when the process exits. Every write prunes
+ * records older than {@link MemoryAuthRequestStorageOptions.ttlMs}, so logins
+ * that never return to the callback do not accumulate in a long-running
+ * server.
  */
 export class MemoryAuthRequestStorage implements AuthRequestStorage {
   #records = new Map<string, AuthRequestRecord>();
+  readonly #ttlMs: number;
+
+  /** Configures the pruning TTL, 10 minutes by default. */
+  constructor(options: MemoryAuthRequestStorageOptions = {}) {
+    this.#ttlMs = options.ttlMs ?? 10 * 60 * 1000;
+  }
+
   /** Returns the record for {@linkcode state}, or `null` if none is stored. */
   get(state: string): AuthRequestRecord | null {
     return this.#records.get(state) ?? null;
   }
-  /** Stores {@linkcode value} under {@linkcode state}. */
+  /** Returns and removes the record for {@linkcode state} in one step. */
+  take(state: string): AuthRequestRecord | null {
+    const record = this.#records.get(state) ?? null;
+    this.#records.delete(state);
+    return record;
+  }
+  /**
+   * Stores {@linkcode value} under {@linkcode state}, first pruning every
+   * record past the TTL.
+   */
   set(state: string, value: AuthRequestRecord): void {
+    this.#pruneExpired();
     this.#records.set(state, value);
   }
   /** Removes the record for {@linkcode state}. */
@@ -156,5 +197,13 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
   /** Removes every stored record. */
   clear(): void {
     this.#records.clear();
+  }
+
+  #pruneExpired(): void {
+    if (this.#ttlMs === Infinity) return;
+    const cutoff = Date.now() - this.#ttlMs;
+    for (const [state, record] of this.#records) {
+      if (record.createdAt < cutoff) this.#records.delete(state);
+    }
   }
 }

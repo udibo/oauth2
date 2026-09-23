@@ -89,11 +89,11 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
   }
 
   /**
-   * Returns the stored refresh token, or `null` when none is stored, when
-   * `indexedDB` is unavailable (SSR / non-browser), or when another tab is
-   * blocking the store's creation.
+   * Returns the stored refresh token, or `null` when none is stored or
+   * `indexedDB` is unavailable (SSR / non-browser).
    *
-   * @throws {DOMException} when IndexedDB rejects the read.
+   * @throws {DOMException} when IndexedDB rejects the read, or when another
+   * open connection (another tab) blocks the store's creation.
    */
   async get(): Promise<string | null> {
     const db = await this.#openDb();
@@ -109,10 +109,11 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
 
   /**
    * Persists {@linkcode value} as the refresh token. A silent no-op when
-   * `indexedDB` is unavailable (SSR / non-browser) or another tab is blocking
-   * the store's creation.
+   * `indexedDB` is unavailable (SSR / non-browser).
    *
-   * @throws {DOMException} when IndexedDB rejects the write.
+   * @throws {DOMException} when IndexedDB rejects the write, or when another
+   * open connection (another tab) blocks the store's creation — the token was
+   * not persisted.
    */
   async set(value: string): Promise<void> {
     const db = await this.#openDb();
@@ -130,10 +131,10 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
 
   /**
    * Discards the stored refresh token. A silent no-op when `indexedDB` is
-   * unavailable (SSR / non-browser) or another tab is blocking the store's
-   * creation.
+   * unavailable (SSR / non-browser).
    *
-   * @throws {DOMException} when IndexedDB rejects the delete.
+   * @throws {DOMException} when IndexedDB rejects the delete, or when another
+   * open connection (another tab) blocks the store's creation.
    */
   async clear(): Promise<void> {
     const db = await this.#openDb();
@@ -152,14 +153,14 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
   async #openDb(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === "undefined") return null;
     const db = await this.#open();
-    if (!db || db.objectStoreNames.contains(this.#storeName)) return db;
+    if (db.objectStoreNames.contains(this.#storeName)) return db;
     const nextVersion = db.version + 1;
     db.close();
     return await this.#open(nextVersion);
   }
 
-  #open(version?: number): Promise<IDBDatabase | null> {
-    return new Promise<IDBDatabase | null>((resolve, reject) => {
+  #open(version?: number): Promise<IDBDatabase> {
+    return new Promise<IDBDatabase>((resolve, reject) => {
       const req = version === undefined
         ? indexedDB.open(this.#databaseName)
         : indexedDB.open(this.#databaseName, version);
@@ -169,9 +170,23 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
           db.createObjectStore(this.#storeName);
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      let blocked = false;
+      req.onsuccess = () => {
+        if (blocked) req.result.close();
+        else resolve(req.result);
+      };
       req.onerror = () => reject(req.error);
-      req.onblocked = () => resolve(null);
+      req.onblocked = () => {
+        blocked = true;
+        reject(
+          new DOMException(
+            `opening IndexedDB "${this.#databaseName}" to create its ` +
+              `"${this.#storeName}" store was blocked by another open ` +
+              `connection, such as another tab`,
+            "InvalidStateError",
+          ),
+        );
+      };
     });
   }
 }
@@ -231,6 +246,17 @@ export class SessionStorageAuthRequestStorage implements AuthRequestStorage {
       storage.removeItem(this.#keyPrefix + state);
       return null;
     }
+  }
+
+  /**
+   * Returns the record for {@linkcode state} and removes it, under the same
+   * rules as {@link get}. `sessionStorage` is synchronous and confined to one
+   * tab, so the read and the removal cannot interleave with another caller.
+   */
+  take(state: string): AuthRequestRecord | null {
+    const record = this.get(state);
+    this.delete(state);
+    return record;
   }
 
   /**
