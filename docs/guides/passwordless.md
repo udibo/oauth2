@@ -169,7 +169,10 @@ sent a code" — for both branches.
 
 The **return value** is uniform; the timing is not quite. Only the known-email
 branch awaits token minting and delivery, so an attacker measuring response
-latency has a residual oracle. Two mitigations, both at your route:
+latency has a residual oracle. (The _error_ is uniform too: a token or OTP store
+that throws while minting is trapped like a throwing delivery hook — the call
+still resolves `void`, nothing is sent, and `credential_mint.failed` is the only
+signal.) Two mitigations, both at your route:
 
 - **Enqueue the mail, don't await your provider.** A queue hand-off is
   microseconds; an SMTP round-trip is hundreds of milliseconds of signal.

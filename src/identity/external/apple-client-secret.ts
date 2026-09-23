@@ -48,8 +48,8 @@ export interface AppleClientSecretOptions {
   privateKey: string;
   /**
    * Lifetime of the generated secret in seconds. Defaults to
-   * {@link DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS}; must not exceed
-   * {@link APPLE_CLIENT_SECRET_MAX_TTL_SECONDS}.
+   * {@link DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS}; must be a finite number
+   * that does not exceed {@link APPLE_CLIENT_SECRET_MAX_TTL_SECONDS}.
    */
   expiresInSeconds?: number;
   /** Provider id used in error messages. Defaults to `"apple"`. */
@@ -135,7 +135,8 @@ async function importPrivateKey(
  *
  * @throws {ExternalAuthError} `configuration` naming the offending input when
  *   the team id / key id / client id is empty, the `.p8` is not a valid P-256
- *   key, or the requested TTL is not between 1 and Apple's cap.
+ *   key, or the requested TTL is not a finite number between 1 and Apple's
+ *   cap (`NaN` and `Infinity` are rejected, never signed into `exp`).
  *
  * @example
  * ```ts
@@ -160,7 +161,10 @@ export async function generateAppleClientSecret(
   );
   const ttl = options.expiresInSeconds ??
     DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS;
-  if (ttl <= 0 || ttl > APPLE_CLIENT_SECRET_MAX_TTL_SECONDS) {
+  if (
+    !Number.isFinite(ttl) || ttl <= 0 ||
+    ttl > APPLE_CLIENT_SECRET_MAX_TTL_SECONDS
+  ) {
     throw configError(
       providerId,
       `Apple client secret TTL must be between 1 and ` +
