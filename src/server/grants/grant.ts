@@ -240,7 +240,10 @@ export abstract class AbstractGrant<
    * owner whose authorization a rotation could carry forward.
    * `authenticationContext` is verified event evidence, snapshotted before
    * generation and carried to storage. Omit it when unknown; it is discarded
-   * for tokens with no user.
+   * for tokens with no user. `familyExpiresAt` is the ceiling of an existing
+   * rotation family the token joins (the refresh grant passes it); the
+   * expiries are clamped to it before the access token string is generated,
+   * so a signed token's `exp` matches the stored expiry.
    */
   async generateToken(
     client: Client,
@@ -248,19 +251,12 @@ export abstract class AbstractGrant<
     scope: Scope | null | undefined,
     tokenService: TokenServiceInterface<Client, User, Scope>,
     authenticationContext?: AuthenticationContext,
+    familyExpiresAt?: Date,
   ): Promise<Token<Client, User, Scope>> {
     const event = user === undefined
       ? undefined
       : snapshotAuthenticationContext(authenticationContext);
-    const token: Token<Client, User, Scope> = {
-      accessToken: await tokenService.generateAccessToken(
-        client,
-        user,
-        scope,
-        event,
-      ),
-      client,
-    };
+    const token: Token<Client, User, Scope> = { accessToken: "", client };
 
     if (event) token.authenticationContext = event;
 
@@ -274,6 +270,10 @@ export abstract class AbstractGrant<
     );
     if (accessTokenExpiresAt) token.accessTokenExpiresAt = accessTokenExpiresAt;
 
+    let result: Token<Client, User, Scope> | RefreshToken<Client, User, Scope> =
+      token;
+    let ceiling = familyExpiresAt;
+
     if (this.allowRefreshToken && user !== undefined) {
       const refreshToken = await tokenService.generateRefreshToken(
         client,
@@ -282,7 +282,7 @@ export abstract class AbstractGrant<
       );
       if (refreshToken) {
         const familyCreatedAt = new Date();
-        const result: RefreshToken<Client, User, Scope> = {
+        const withRefresh: RefreshToken<Client, User, Scope> = {
           ...token,
           refreshToken,
           familyId: crypto.randomUUID(),
@@ -294,16 +294,30 @@ export abstract class AbstractGrant<
           scope,
         );
         if (refreshTokenExpiresAt) {
-          result.refreshTokenExpiresAt = refreshTokenExpiresAt;
+          withRefresh.refreshTokenExpiresAt = refreshTokenExpiresAt;
         }
-        const familyExpiresAt = await tokenService
+        const newFamilyExpiresAt = await tokenService
           .refreshTokenFamilyExpiresAt?.(client, user, familyCreatedAt, scope);
-        if (familyExpiresAt) this.capAtFamilyExpiry(result, familyExpiresAt);
-        return result;
+        if (newFamilyExpiresAt) {
+          ceiling = ceiling && ceiling < newFamilyExpiresAt
+            ? ceiling
+            : newFamilyExpiresAt;
+        }
+        result = withRefresh;
       }
     }
 
-    return token;
+    if (ceiling) this.capAtFamilyExpiry(result, ceiling);
+
+    result.accessToken = await tokenService.generateAccessToken(
+      client,
+      user,
+      scope,
+      event,
+      result.accessTokenExpiresAt,
+    );
+
+    return result;
   }
 
   /**

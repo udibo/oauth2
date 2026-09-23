@@ -73,12 +73,18 @@ export interface TokenServiceInterface<
    * generator names the client as the subject then, per RFC 9068 §2.2.
    * Forward `authenticationContext` to a signed-token generator so it uses
    * the credential's event, including the original event on refresh.
+   * `expiresAt` is the expiry the grant will store for this token — already
+   * clamped to the refresh family's cap when one applies. Forward it too, so
+   * a signed token's `exp` never outlives what the server itself honors; the
+   * grants always pass it, and a wrapper that drops it leaves offline
+   * verifiers accepting the token past its stored expiry.
    */
   generateAccessToken(
     client: Client,
     user: User | undefined,
     scope?: Scope | null,
     authenticationContext?: AuthenticationContext,
+    expiresAt?: Date,
   ): Promise<string>;
 
   /** Generates a refresh token string. */
@@ -311,6 +317,7 @@ export abstract class AbstractTokenService<
     _user: User | undefined,
     _scope?: Scope | null,
     _authenticationContext?: AuthenticationContext,
+    _expiresAt?: Date,
   ): Promise<string> {
     return Promise.resolve(crypto.randomUUID());
   }

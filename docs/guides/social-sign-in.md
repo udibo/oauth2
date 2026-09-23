@@ -231,7 +231,11 @@ export const twitch = new ExternalAuthFlow({
 in what you **return** surfaces as `provider_error`, but a mapper that
 **throws** surfaces raw. Return, don't throw. `usesPkce` defaults to `false`
 because many plain-OAuth2 providers reject the parameters — turn it on when the
-provider supports S256, as Twitch does.
+provider supports S256, as Twitch does. `authorizationParams` adds fixed extras
+to the authorize URL (an `audience`, a tenant hint); the protocol params —
+`state`, `redirect_uri`, `client_id`, `scope`, `response_type`, and the PKCE
+pair — are written after it, so a same-named key in config can never replace the
+flow's CSRF `state` or downgrade PKCE.
 
 **Validation depends on the connector.** Apple verifies the ID-token signature
 against its JWKS and validates the claims. Generic `oidcProvider` and Google

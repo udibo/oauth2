@@ -7,6 +7,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { FakeTime } from "@std/testing/time";
 
 import { IdentityError } from "../errors.ts";
@@ -556,6 +557,96 @@ describe("MfaService", () => {
     assertEquals((await mfa.verify("u1", recoveryCodes[0])).valid, true);
     assertEquals(store.consumeCalls, 1);
   });
+
+  it("rate limits confirmEnrollment per user and throws rate_limited when enforcing", async () => {
+    using _time = new FakeTime(START);
+    const events: IdentityEvent[] = [];
+    const mfa = new MfaService({
+      store: new MemoryMfaStore(),
+      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const { base32 } = await mfa.startEnrollment("u1", {
+      issuer: "Udibo",
+      accountName: "u1@example.com",
+    });
+
+    assertEquals(await mfa.confirmEnrollment("u1", "000000"), {
+      confirmed: false,
+    });
+    const validCode = await generateTotpCode({ secret: base32 });
+    const error = await assertRejects(
+      () => mfa.confirmEnrollment("u1", validCode),
+      IdentityError,
+    );
+    assertEquals(error.code, "rate_limited");
+    assertEquals(await mfa.isEnrolled("u1"), false);
+    assert(events.some((e) => e.type === "mfa.verify.rate_limited"));
+  });
+
+  it("shares the verify window with confirmEnrollment and resets it on a confirmed enrollment", async () => {
+    using _time = new FakeTime(START);
+    const mfa = new MfaService({
+      store: new MemoryMfaStore(),
+      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+    });
+    const { base32 } = await mfa.startEnrollment("u1", {
+      issuer: "Udibo",
+      accountName: "u1@example.com",
+    });
+    assertEquals(await mfa.confirmEnrollment("u1", "000000"), {
+      confirmed: false,
+    });
+    const code = await generateTotpCode({ secret: base32 });
+    assert((await mfa.confirmEnrollment("u1", code)).confirmed);
+
+    assertEquals((await mfa.verify("u1", "000000")).valid, false);
+    assertEquals((await mfa.verify("u1", "000001")).valid, false);
+    const error = await assertRejects(
+      () => mfa.verify("u1", "000002"),
+      IdentityError,
+    );
+    assertEquals(error.code, "rate_limited");
+  });
+
+  for (const method of ["totp", "recovery"] as const) {
+    it(`completes a ${method} verification when the limiter's reset throws, so the spent code still signs the user in`, async () => {
+      using consoleError = stub(console, "error");
+      using time = new FakeTime(START);
+      const limiter = new RateLimiter({ limit: 5, windowMs: 60_000 });
+      let resetBroken = false;
+      const mfa = new MfaService({
+        store: new MemoryMfaStore(),
+        rateLimiter: {
+          check: (key) => limiter.check(key),
+          reset: (key) =>
+            resetBroken
+              ? Promise.reject(new Error("limiter down"))
+              : limiter.reset(key),
+        },
+      });
+      const { base32, recoveryCodes } = await enroll(mfa, "u1");
+      time.tick(PERIOD_MS);
+      resetBroken = true;
+      const code = method === "totp"
+        ? await generateTotpCode({ secret: base32 })
+        : recoveryCodes[0];
+
+      const outcome = await mfa.verify("u1", code, { method }).catch((
+        error,
+      ) => ({ threw: error.message }));
+
+      assertEquals(
+        outcome,
+        method === "totp"
+          ? { valid: true, method: "totp" }
+          : { valid: true, method: "recovery", remainingRecoveryCodes: 9 },
+      );
+      assertEquals(consoleError.calls.length, 1);
+    });
+  }
 
   it("rolls back activation when storing recovery codes fails, so enrollment can be retried", async () => {
     using time = new FakeTime(START);

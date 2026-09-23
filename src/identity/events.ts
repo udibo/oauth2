@@ -13,8 +13,10 @@
  * Some outcomes are *only* visible here, because the flow that produced them
  * resolves uniformly by design: `delivery.failed` is the sole in-band signal
  * that a message never went out (and, when `invalidated` is `false`, that a
- * live credential the user never received is still outstanding). Treat this
- * hook as a monitored surface, not just an audit log.
+ * live credential the user never received is still outstanding), and
+ * `credential_mint.failed` the sole signal that a token or code store outage
+ * kept one from being minted at all. Treat this hook as a monitored surface,
+ * not just an audit log.
  *
  * Events describe internal outcomes (including whether an identifier resolved
  * to an account), so they are for server-side capture only — never surface
@@ -123,9 +125,22 @@ export type IdentityEvent =
      * configured {@link RevocableSessionService} threw before the user's other
      * sessions could be revoked, so the reset is reported failed (and rethrown)
      * rather than trusted. The reset token is already spent, so clear the
-     * still-live sessions by revoking them again or with a fresh reset link.
+     * still-live sessions by calling `revokeAllByUser` again from this event,
+     * or have the user complete a fresh reset link.
      */
     reason: "invalid_token" | "session_revocation_failed";
+  }
+  | {
+    type: "credential_mint.failed";
+    /**
+     * Which enumeration-safe request flow could not mint its credential
+     * because the token or code store threw. The call still resolved `void`,
+     * exactly as it does for an unknown email, so this event is the only
+     * signal that the user was never sent anything.
+     */
+    flow: "password_reset" | "signin_link" | "signin_code";
+    /** The store's failure message. */
+    error: string;
   }
   | { type: "email_verification.requested"; userId: string; email: string }
   | {

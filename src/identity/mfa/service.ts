@@ -338,14 +338,23 @@ export class MfaService {
    * fails, its error is thrown instead and the credential stays active
    * without recovery codes.
    *
+   * Guesses against the pending secret count toward the same per-user window
+   * {@link verify} uses (`mfa:verify:<userId>`), and a confirmed enrollment
+   * resets it — an unthrottled confirm would otherwise be a brute-force path
+   * to a secret the user is about to rely on.
+   *
    * @throws {IdentityError} `mfa_already_enrolled` when an active credential
    * exists (see {@link startEnrollment}).
+   * @throws {IdentityError} `rate_limited` when a `rateLimiter` is configured,
+   * `protectionMode` is `"enforce"`, and the per-user limit is hit or the
+   * limiter's `check` throws (it fails closed).
    */
   async confirmEnrollment(
     userId: string,
     code: string,
     options?: Pick<MfaVerifyOptions, "timestamp">,
   ): Promise<MfaEnrollmentConfirmation> {
+    await this.#throttle(userId);
     const record = await this.#store.getTotp(userId);
     this.#assertNotEnrolled(record);
     const pending = record?.pendingSecretBase32;
@@ -370,6 +379,7 @@ export class MfaService {
       await this.#store.clearTotp(userId);
       throw error;
     }
+    await this.#resetThrottle(userId);
     await this.#emit({ type: "mfa.enrollment.confirmed", userId });
     return { confirmed: true, recoveryCodes };
   }
@@ -387,7 +397,9 @@ export class MfaService {
    * active credential every code is rejected — recovery codes are a fallback
    * *for* the enrolled factor, so stale hashes can never authenticate a user
    * whose MFA was disabled. A successful verification resets the per-user
-   * rate-limit window. On failure the result carries a
+   * rate-limit window; a `reset` that throws is logged and does not fail the
+   * verification, since the code is already spent by then — the window just
+   * stays filled until it lapses. On failure the result carries a
    * {@link MfaVerifyFailureReason} — `"replayed"` for a valid-but-spent TOTP
    * code, `"invalid"` otherwise — so a caller can distinguish a reused code
    * from a wrong one without subscribing to `onEvent`.
@@ -551,7 +563,15 @@ export class MfaService {
   }
 
   async #resetThrottle(userId: string): Promise<void> {
-    await this.#rateLimiter?.reset(this.#rateKey(userId));
+    try {
+      await this.#rateLimiter?.reset(this.#rateKey(userId));
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] MFA rate-limit reset failed; the window stays " +
+          "filled until it lapses:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   async #verifyFailed(

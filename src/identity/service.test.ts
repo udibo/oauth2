@@ -620,6 +620,64 @@ describe("IdentityService", () => {
     );
   });
 
+  it("resetPassword lets exactly one of two concurrent submissions of a link set the password", async () => {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    let resetToken = "";
+    let credentialWrites = 0;
+    const service = serviceWithoutSignInFloor({
+      users: {
+        ...store,
+        async setCredential(userId, credential) {
+          if (credentialWrites++ === 0) await delay(200);
+          await store.setCredential(userId, credential);
+        },
+      },
+      tokens: new TokenFlowService(new MemoryTokenFlowStore()),
+      delivery: {
+        sendPasswordReset: (msg) => {
+          resetToken = msg.token;
+        },
+      },
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const user = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestPasswordReset("a@b.co");
+    const passwords = ["firstpassword1", "secondpassword2"];
+
+    const results = await Promise.all(
+      passwords.map((password) =>
+        service.resetPassword({ token: resetToken, password })
+      ),
+    );
+
+    const winners = results.flatMap((result, i) => result ? [i] : []);
+    assertEquals(winners.length, 1);
+    const [winner] = winners;
+    assertEquals(results[winner], { userId: user.id });
+    assertEquals(credentialWrites, 1);
+    assertEquals(
+      (await service.signIn({
+        identifier: "a@b.co",
+        password: passwords[winner],
+      }))?.id,
+      user.id,
+    );
+    assertEquals(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: passwords[1 - winner],
+      }),
+      null,
+    );
+    assertEquals(eventsOfType(events, "password_reset.completed").length, 1);
+  });
+
   it("enforces the password policy on signUp and resetPassword", async () => {
     const { store } = makeStore();
     const tokens = new TokenFlowService(new MemoryTokenFlowStore());
@@ -2996,6 +3054,75 @@ describe("IdentityService passwordless", () => {
     assertEquals(known.codes.length, 1);
     assertEquals(unknown.codes.length, 0);
   });
+
+  function makeStoreOutageService() {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    const tokenBacking = new MemoryTokenFlowStore();
+    const otpBacking = new MemoryOtpStore();
+    let down = false;
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      tokens: new TokenFlowService({
+        save: (record) =>
+          down
+            ? Promise.reject(new Error("token store down"))
+            : tokenBacking.save(record),
+        get: (hash) => tokenBacking.get(hash),
+        markConsumed: (hash, at) => tokenBacking.markConsumed(hash, at),
+      }),
+      otp: {
+        store: {
+          create: (record) =>
+            down
+              ? Promise.reject(new Error("otp store down"))
+              : otpBacking.create(record),
+          findActive: (email, purpose) => otpBacking.findActive(email, purpose),
+          recordAttempt: (id) => otpBacking.recordAttempt(id),
+          consume: (id) => otpBacking.consume(id),
+          invalidate: (email, purpose) => otpBacking.invalidate(email, purpose),
+          invalidateById: (id) => otpBacking.invalidateById(id),
+        },
+      },
+      delivery: {
+        sendPasswordReset: () => {},
+        sendSignInLink: () => {},
+        sendSignInCode: () => {},
+      },
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const signUp = () =>
+      service.signUp({
+        password: "hunter2hunter2",
+        profile: { email: "a@b.co" },
+      });
+    return { service, events, signUp, takeDown: () => (down = true) };
+  }
+
+  for (
+    const [method, flow] of [
+      ["requestPasswordReset", "password_reset"],
+      ["requestSignInLink", "signin_link"],
+      ["requestSignInCode", "signin_code"],
+    ] as const
+  ) {
+    it(`${method} resolves for a known email when its store throws, as it does for an unknown one`, async () => {
+      using consoleError = stub(console, "error");
+      const { service, events, signUp, takeDown } = makeStoreOutageService();
+      await signUp();
+      takeDown();
+
+      assertEquals(await service[method]("ghost@b.co"), undefined);
+      assertEquals(await service[method]("a@b.co"), undefined);
+
+      const failed = eventsOfType(events, "credential_mint.failed");
+      assertEquals(failed.length, 1);
+      assertEquals(failed[0].flow, flow);
+      assertEquals(consoleError.calls.length, 1);
+    });
+  }
 
   it("requires the tokens/otp options for the flows that need them", async () => {
     const { store } = makeStore();

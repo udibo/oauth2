@@ -1,3 +1,20 @@
+# [0.5.0](https://github.com/udibo/oauth2/compare/0.4.1...0.5.0) (2026-09-23)
+
+### Bug Fixes
+
+- **server:** close five audit findings in the authorization server
+  ([#37](https://github.com/udibo/oauth2/issues/37))
+  ([692706f](https://github.com/udibo/oauth2/commit/692706f3c26c48141b6981e67ee8eda067010a15))
+
+### Features
+
+- **client:** claim auth requests atomically and harden client storage and check
+  calls ([#35](https://github.com/udibo/oauth2/issues/35))
+  ([91e216d](https://github.com/udibo/oauth2/commit/91e216daffd56d20768a47cbf5a47890d9374989))
+- **identity:** close identity hardening gaps
+  ([#36](https://github.com/udibo/oauth2/issues/36))
+  ([1f2a58a](https://github.com/udibo/oauth2/commit/1f2a58af05988438e90c51ca1beb2a3ecc6bcddb))
+
 ## [0.4.1](https://github.com/udibo/oauth2/compare/0.4.0...0.4.1) (2026-09-23)
 
 ### Bug Fixes

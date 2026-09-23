@@ -73,6 +73,7 @@ export {
   type AuthRequestRecord,
   type AuthRequestStorage,
   MemoryAuthRequestStorage,
+  type MemoryAuthRequestStorageOptions,
   MemoryRefreshTokenStorage,
   MemoryTokenStorage,
   type RefreshTokenStorage,

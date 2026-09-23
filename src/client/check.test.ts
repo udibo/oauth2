@@ -1,7 +1,13 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
+import { MAX_RESPONSE_BYTES } from "./_http.ts";
 import { checkPermissions } from "./check.ts";
 
 function fetchAnswering(
@@ -93,5 +99,127 @@ describe("checkPermissions", () => {
         }),
       ServerError,
     );
+  });
+
+  it("refuses to follow a redirect while carrying the bearer token", async () => {
+    const calls: string[] = [];
+    const error = await assertRejects(
+      () =>
+        checkPermissions({
+          endpoint: "https://tenant.example.com/api/check",
+          accessToken: "token-1",
+          permissions: "posts:write",
+          fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+            const request = new Request(input, init);
+            calls.push(request.url);
+            if (request.redirect === "follow") {
+              calls.push("https://attacker.example/check");
+              return Promise.resolve(Response.json(RESULT));
+            }
+            return Promise.resolve(
+              new Response(null, {
+                status: 307,
+                headers: { location: "https://attacker.example/check" },
+              }),
+            );
+          }) as typeof fetch,
+        }),
+      ServerError,
+    );
+    assertStringIncludes(error.message, "refuses to follow");
+    assertEquals(calls, ["https://tenant.example.com/api/check"]);
+  });
+
+  it("sends the request with a deadline", async () => {
+    let signal: AbortSignal | null | undefined;
+    await checkPermissions({
+      endpoint: "https://tenant.example.com/api/check",
+      accessToken: "token-1",
+      permissions: "posts:write",
+      fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal;
+        return Promise.resolve(Response.json(RESULT));
+      }) as typeof fetch,
+    });
+    assert(signal instanceof AbortSignal, "the check call needs a deadline");
+  });
+
+  it("reports a timed-out request as temporarily unavailable", async () => {
+    await assertRejects(
+      () =>
+        checkPermissions({
+          endpoint: "https://tenant.example.com/api/check",
+          accessToken: "token-1",
+          permissions: "posts:write",
+          fetch: (() =>
+            Promise.reject(
+              new DOMException("signal timed out", "TimeoutError"),
+            )) as typeof fetch,
+        }),
+      TemporarilyUnavailableError,
+    );
+  });
+
+  it("reports a 2xx that is not JSON as a server error", async () => {
+    const error = await assertRejects(
+      () =>
+        checkPermissions({
+          endpoint: "https://tenant.example.com/api/check",
+          accessToken: "token-1",
+          permissions: "posts:write",
+          fetch: fetchAnswering(() =>
+            new Response("<!doctype html>", {
+              headers: { "content-type": "text/html" },
+            })
+          ),
+        }),
+    );
+    assert(
+      error instanceof ServerError,
+      `expected a ServerError, got ${error}`,
+    );
+    assertStringIncludes(error.message, "not valid JSON");
+  });
+
+  it("refuses a 2xx body larger than the response cap", async () => {
+    const error = await assertRejects(
+      () =>
+        checkPermissions({
+          endpoint: "https://tenant.example.com/api/check",
+          accessToken: "token-1",
+          permissions: "posts:write",
+          fetch: fetchAnswering(() =>
+            Response.json({
+              ...RESULT,
+              padding: "x".repeat(MAX_RESPONSE_BYTES),
+            })
+          ),
+        }),
+      ServerError,
+    );
+    assertStringIncludes(error.message, "exceeded");
+  });
+
+  it("cancels the body of a refused response", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("denied"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await assertRejects(
+      () =>
+        checkPermissions({
+          endpoint: "https://tenant.example.com/api/check",
+          accessToken: "token-1",
+          permissions: "posts:write",
+          fetch: fetchAnswering(() => new Response(body, { status: 403 })),
+        }),
+      ServerError,
+    );
+    assert(cancelled, "a refused response's body must be released");
   });
 });

@@ -117,6 +117,7 @@ function createTestServer(
     introspectionClaims?: (
       token: Token<TestClient, TestUser, BasicScope>,
     ) => Record<string, unknown>;
+    subjectOf?: (user: TestUser) => string;
   } = { isPublicSuffix },
 ) {
   const services = createTestServices();
@@ -161,6 +162,7 @@ function createTestServer(
     isPublicSuffix: options.isPublicSuffix,
     introspectionClaims: options.introspectionClaims,
     canIntrospectToken: options.canIntrospectToken,
+    subjectOf: options.subjectOf,
   });
 
   return {
@@ -2204,6 +2206,67 @@ describe("AuthorizationServer", () => {
       assertStrictEquals(body.scope, "read");
       assertStrictEquals(body.client_id, "client-1");
       assertStrictEquals(body.sub, "user-1");
+    });
+
+    it("derives sub from subjectOf, so introspection agrees with the id_token and UserInfo", async () => {
+      const result = createTestServer({
+        isPublicSuffix,
+        subjectOf: (user) => `acct:${user.id}`,
+      });
+      await setupTestData(result);
+      await result.tokenService.save({
+        accessToken: "subject-token",
+        accessTokenExpiresAt: new Date(Date.now() + 3600000),
+        client: testClient,
+        user: testUser,
+        scope: new BasicScope("read"),
+      });
+
+      const response = await result.server.handleIntrospectionRequest(
+        formRequest("http://localhost/introspect", {
+          token: "subject-token",
+        }, basicAuthHeader("client-1", "secret")),
+      );
+
+      assertStrictEquals(response.status, 200);
+      const body = await response.json();
+      assertStrictEquals(body.sub, "acct:user-1");
+      assertStrictEquals(body.username, "testuser");
+    });
+
+    it("keeps sub and username off a token with no user even when introspectionClaims supplies them", async () => {
+      const result = createTestServer({
+        isPublicSuffix,
+        introspectionClaims: () => ({
+          sub: "forged",
+          username: "forged",
+          permissions: ["posts:write"],
+        }),
+      });
+      await setupTestData(result);
+      await result.tokenService.save({
+        accessToken: "machine-token-with-hook",
+        accessTokenExpiresAt: new Date(Date.now() + 3600000),
+        client: testClient,
+        scope: new BasicScope("read"),
+      });
+
+      const response = await result.server.handleIntrospectionRequest(
+        formRequest("http://localhost/introspect", {
+          token: "machine-token-with-hook",
+        }, basicAuthHeader("client-1", "secret")),
+      );
+
+      assertStrictEquals(response.status, 200);
+      const body = await response.json();
+      assertStrictEquals(body.active, true);
+      assertEquals(body.permissions, ["posts:write"]);
+      assertStrictEquals(
+        body.sub,
+        undefined,
+        "a hook must not make a machine token look like it has a resource owner",
+      );
+      assertStrictEquals(body.username, undefined);
     });
 
     it("should omit sub and username for a token with no user, identifying it by client_id alone", async () => {

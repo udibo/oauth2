@@ -100,7 +100,7 @@
           "npm:react@^19.2.7"
         ]
       },
-      "jsr:@udibo/oauth2@0.4.1": {
+      "jsr:@udibo/oauth2@0.5.0": {
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/async@^1.4.0",
