@@ -43,6 +43,7 @@ import {
   assertPasswordPolicy,
   type PasswordPolicy,
 } from "./password-policy.ts";
+import { IdentityError } from "./errors.ts";
 import { enforceRateLimit, type RateLimiterLike } from "./rate-limit.ts";
 import { EmailOtpService, otpRateKey, type OtpStore } from "./otp.ts";
 import {
@@ -625,9 +626,12 @@ export class IdentityService<User extends IdentityUser> {
    * it does, mints a single-use reset token (voiding outstanding ones when the
    * token store implements `deleteBySubject`) and calls
    * `delivery.sendPasswordReset`. Only that branch awaits minting and delivery,
-   * so it is not timing-uniform, and a throwing token store surfaces only
-   * there — send from a background queue and throttle by IP at the route, as
-   * for {@link IdentityService.requestSignInLink}. With a `rateLimiter`,
+   * so it is not timing-uniform — send from a background queue and throttle by
+   * IP at the route, as for {@link IdentityService.requestSignInLink}. A
+   * token store that throws while minting is trapped like a throwing delivery
+   * hook: the call still resolves `void`, a `credential_mint.failed` event is
+   * emitted, and nothing is sent — so a store outage is not an enumeration
+   * oracle through the error either. With a `rateLimiter`,
    * requests throttle per target email, case-folded so casing variants share
    * one window — the check runs before the lookup, so a 429 reveals nothing —
    * and throw {@link IdentityError} `rate_limited` when exceeded; catch it and
@@ -651,18 +655,22 @@ export class IdentityService<User extends IdentityUser> {
       });
       return;
     }
-    await this.#issueAndDeliver(tokens, {
-      hook: "sendPasswordReset",
-      to: normalized,
-      subject: user.id,
-      data: { email: normalized },
-      ttlMs: this.#ttl.passwordReset,
-      requested: {
-        type: "password_reset.requested",
-        email: normalized,
-        userId: user.id,
-      },
-    });
+    await this.#trapMintFailure(
+      "password_reset",
+      () =>
+        this.#issueAndDeliver(tokens, {
+          hook: "sendPasswordReset",
+          to: normalized,
+          subject: user.id,
+          data: { email: normalized },
+          ttlMs: this.#ttl.passwordReset,
+          requested: {
+            type: "password_reset.requested",
+            email: normalized,
+            userId: user.id,
+          },
+        }),
+    );
   }
 
   /**
@@ -680,13 +688,14 @@ export class IdentityService<User extends IdentityUser> {
    * logged and the reset still completes, since the password has already
    * changed by then.
    *
-   * Sessions are revoked **after** the password is changed. If that revocation
-   * throws, the reset is reported failed — a `password_reset.failed`
-   * (`session_revocation_failed`) event fires, no `password_reset.completed`
-   * fires, and the error rethrows — rather than silently returning success with
-   * the user's old sessions still live. The reset token is already spent and
-   * the new password already set, so clear them by calling
-   * `revokeAllByUser` again yourself or by completing a fresh reset link.
+   * The token is consumed **last** — after the password is set and the
+   * sessions are revoked. If revocation throws, the reset is reported failed —
+   * a `password_reset.failed` (`session_revocation_failed`) event fires, no
+   * `password_reset.completed` fires, and the error rethrows — rather than
+   * silently returning success with the user's old sessions still live. The
+   * new password is already set by then, but the link is still unspent, so
+   * the user finishes the reset by submitting the same link again once the
+   * session store is back.
    *
    * @throws {IdentityError} `weak_password` when `password` fails the password
    * policy — including the 8–256 character defaults that apply when
@@ -708,39 +717,11 @@ export class IdentityService<User extends IdentityUser> {
         type: "password_reset.failed",
         reason: "invalid_token",
       }),
+      beforeConsume: (subject, data) =>
+        this.#applyPasswordReset(tokens, subject, data, input.password),
     });
     if (consumed.status !== "success") return null;
     const { resolved } = consumed;
-    await this.#users.setCredential(
-      resolved.subject,
-      await this.#passwords.hash(input.password),
-    );
-    try {
-      await this.#users.clearLegacyCredential?.(resolved.subject);
-    } catch (error) {
-      // A throwing hook must not skip session revocation after the password
-      // already changed.
-      console.error(
-        "[@udibo/oauth2] resetPassword legacy-credential clear failed:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-    await this.#voidPasswordlessCredentials(
-      tokens,
-      resolved.subject,
-      emailFromData(resolved.data),
-    );
-    if (this.#sessions) {
-      try {
-        await this.#sessions.revokeAllByUser(resolved.subject);
-      } catch (error) {
-        await this.#emit({
-          type: "password_reset.failed",
-          reason: "session_revocation_failed",
-        });
-        throw error;
-      }
-    }
     await this.#lockout?.reset(resolved.subject);
     await this.#emit({
       type: "password_reset.completed",
@@ -911,7 +892,11 @@ export class IdentityService<User extends IdentityUser> {
    * The synchronous path is not fully timing-uniform, though — only the
    * known-email branch awaits token minting and delivery — so send email from a
    * background queue and apply IP-level throttling at the route to close the
-   * residual latency/side-channel oracle. Throttled per email (case-folded,
+   * residual latency/side-channel oracle. A token store that throws while
+   * minting is trapped: the call still resolves `void` and a
+   * `credential_mint.failed` event is the only signal, so neither a store nor
+   * a mailer outage surfaces as an error on the known branch alone.
+   * Throttled per email (case-folded,
    * key `pwless:<email>`) when a `rateLimiter` — or a tighter
    * `rateLimiters.signInLink` — is configured; throws {@link IdentityError}
    * `rate_limited` in enforce mode. Default link lifetime is 15 minutes.
@@ -933,17 +918,21 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit({ type: "signin_link.requested", email: normalized });
       return;
     }
-    await this.#issueAndDeliver(tokens, {
-      hook: "sendSignInLink",
-      to: normalized,
-      subject: user.id,
-      ttlMs: options?.ttlMs ?? this.#ttl.signInLink,
-      requested: {
-        type: "signin_link.requested",
-        email: normalized,
-        userId: user.id,
-      },
-    });
+    await this.#trapMintFailure(
+      "signin_link",
+      () =>
+        this.#issueAndDeliver(tokens, {
+          hook: "sendSignInLink",
+          to: normalized,
+          subject: user.id,
+          ttlMs: options?.ttlMs ?? this.#ttl.signInLink,
+          requested: {
+            type: "signin_link.requested",
+            email: normalized,
+            userId: user.id,
+          },
+        }),
+    );
   }
 
   /**
@@ -986,7 +975,9 @@ export class IdentityService<User extends IdentityUser> {
    * {@link DeliveryHooks}): that exact code is invalidated — never a newer one a
    * retry may have delivered meanwhile — a `delivery.failed` event is emitted,
    * and the call still resolves `void`, so a mailer outage is not an enumeration
-   * oracle either.
+   * oracle either. Nor is an OTP store outage: a throw while minting the code
+   * is trapped the same way, with a `credential_mint.failed` event as the only
+   * signal.
    */
   async requestSignInCode(email: string): Promise<void> {
     const otp = this.#requireOtp("requestSignInCode");
@@ -1002,16 +993,18 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit({ type: "signin_code.requested", email: normalized });
       return;
     }
-    await otp.request({
-      email: normalized,
-      purpose: TokenPurpose.SignIn,
-      onDeliver: (code, expiresAt, codeId) =>
-        this.#deliverCode(normalized, code, user.id, expiresAt, codeId),
-    });
-    await this.#emit({
-      type: "signin_code.requested",
-      email: normalized,
-      userId: user.id,
+    await this.#trapMintFailure("signin_code", async () => {
+      await otp.request({
+        email: normalized,
+        purpose: TokenPurpose.SignIn,
+        onDeliver: (code, expiresAt, codeId) =>
+          this.#deliverCode(normalized, code, user.id, expiresAt, codeId),
+      });
+      await this.#emit({
+        type: "signin_code.requested",
+        email: normalized,
+        userId: user.id,
+      });
     });
   }
 
@@ -1223,6 +1216,41 @@ export class IdentityService<User extends IdentityUser> {
     });
   }
 
+  async #applyPasswordReset(
+    tokens: TokenFlowService,
+    subject: string,
+    data: Record<string, unknown> | undefined,
+    password: string,
+  ): Promise<void> {
+    await this.#users.setCredential(
+      subject,
+      await this.#passwords.hash(password),
+    );
+    try {
+      await this.#users.clearLegacyCredential?.(subject);
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] resetPassword legacy-credential clear failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    await this.#voidPasswordlessCredentials(
+      tokens,
+      subject,
+      emailFromData(data),
+    );
+    if (!this.#sessions) return;
+    try {
+      await this.#sessions.revokeAllByUser(subject);
+    } catch (error) {
+      await this.#emit({
+        type: "password_reset.failed",
+        reason: "session_revocation_failed",
+      });
+      throw error;
+    }
+  }
+
   async #voidPasswordlessCredentials(
     tokens: TokenFlowService,
     subject: string,
@@ -1237,6 +1265,28 @@ export class IdentityService<User extends IdentityUser> {
           "passwordless credentials; they stay usable until they expire:",
         error instanceof Error ? error.message : error,
       );
+    }
+  }
+
+  async #trapMintFailure(
+    flow: Extract<IdentityEvent, { type: "credential_mint.failed" }>["flow"],
+    mint: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await mint();
+    } catch (error) {
+      if (error instanceof IdentityError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[@udibo/oauth2] ${flow} request could not mint its credential; ` +
+          `nothing was sent:`,
+        message,
+      );
+      await this.#emit({
+        type: "credential_mint.failed",
+        flow,
+        error: message,
+      });
     }
   }
 

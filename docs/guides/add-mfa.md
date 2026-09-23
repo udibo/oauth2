@@ -94,12 +94,15 @@ export const mfa = new MfaService({
 ```
 
 The `rateLimiter` is not optional in spirit: a six-digit code is one in a
-million, and an unthrottled `verify` endpoint is a brute-force target. It is
-keyed `mfa:verify:<userId>`, and a successful verification resets the window so
-a legitimate user who fat-fingers a code never accumulates toward a block. When
-the limit is hit, `verify` throws `IdentityError("rate_limited")` — map it to
-`429` with `Retry-After`, or set `protectionMode: "log-only"` to watch real
-traffic for a week before enforcing.
+million, and an unthrottled `verify` endpoint is a brute-force target — and so
+is an unthrottled `confirmEnrollment`, which checks a guess against the pending
+secret the same way. Both count toward one window keyed `mfa:verify:<userId>`,
+and a successful verification or confirmed enrollment resets it so a legitimate
+user who fat-fingers a code never accumulates toward a block (a `reset` that
+throws is logged, never turned into a failed sign-in — the code is already
+spent). When the limit is hit, `verify` and `confirmEnrollment` throw
+`IdentityError("rate_limited")` — map it to `429` with `Retry-After`, or set
+`protectionMode: "log-only"` to watch real traffic for a week before enforcing.
 
 Configure TOTP `digits`, `periodSeconds`, and `algorithm` consistently with
 enrollment; changing them requires a migration or re-enrollment. `windows` only
@@ -391,8 +394,8 @@ Before going live:
 - [ ] **The three atomic store methods are conditional writes.**
       `advanceLastStep`, `consumeRecoveryHash`, and `activateTotp` are single
       statements whose affected-row count is the answer.
-- [ ] **`verify` is rate limited** with a shared store if you run more than one
-      instance, and `protectionMode` is `"enforce"`.
+- [ ] **`verify` and `confirmEnrollment` are rate limited** with a shared store
+      if you run more than one instance, and `protectionMode` is `"enforce"`.
 - [ ] **Every sign-in path passes the gate** — password, passwordless link,
       passwordless code, and every social callback — and the session is minted
       only after it.

@@ -91,9 +91,12 @@ export interface OAuth2ProviderOptions {
   /** Whether to run PKCE (S256). Defaults to `false`. */
   usesPkce?: boolean;
   /**
-   * Extra fixed query params to add to the authorize URL. They are applied
-   * after `response_type`, `client_id`, `redirect_uri`, `scope`, and `state`,
-   * so a key with one of those names replaces the connector's value.
+   * Extra fixed query params to add to the authorize URL (an `audience`, a
+   * tenant hint). The protocol params always win: `response_type`,
+   * `client_id`, `redirect_uri`, `scope`, `state`, the PKCE `code_challenge`
+   * pair, and a `prompt` the flow passes are written after these, so a
+   * same-named key here cannot replace the connector's CSRF `state` or
+   * downgrade PKCE.
    */
   authorizationParams?: Record<string, string>;
   /**
@@ -217,16 +220,16 @@ export function oauth2Provider(
       input: ExternalAuthorizationUrlInput,
     ): Promise<string> {
       const url = new URL(options.authorizationEndpoint);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", options.clientId);
-      url.searchParams.set("redirect_uri", input.redirectUri);
-      url.searchParams.set("scope", input.scopes.join(scopeSeparator));
-      url.searchParams.set("state", input.state);
       for (
         const [key, value] of Object.entries(options.authorizationParams ?? {})
       ) {
         url.searchParams.set(key, value);
       }
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", options.clientId);
+      url.searchParams.set("redirect_uri", input.redirectUri);
+      url.searchParams.set("scope", input.scopes.join(scopeSeparator));
+      url.searchParams.set("state", input.state);
       if (input.codeVerifier) {
         url.searchParams.set(
           "code_challenge",

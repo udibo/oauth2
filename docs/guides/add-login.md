@@ -329,6 +329,12 @@ resets the password. `revokeOthers` powers "sign out everywhere else" on your
 own settings page: it keeps the session the user is sitting in and ends the
 rest, which is what someone who has just changed their password expects.
 
+The reset token is consumed only after `revokeAllByUser` returns. If it throws,
+`resetPassword` emits `password_reset.failed` (`session_revocation_failed`) and
+rethrows with the link still unspent, so the user finishes the reset by
+submitting the same link again once your session store is back — the password is
+already set, and `setCredential` is simply called again with the same value.
+
 `resetPassword` also voids the subject's outstanding **passwordless**
 credentials — a pending sign-in link and a pending sign-in code — so a magic
 link an attacker triggered before the reset stops working. Both calls are
@@ -483,7 +489,10 @@ Two rules:
   `requestPasswordReset` response body is enumeration-safe, but if the known-
   account path awaits an SMTP round-trip and the unknown-account path doesn't,
   response _timing_ reveals which emails have accounts. Hand the message to a
-  queue and return.
+  queue and return. Errors are enumeration-safe already: a token store that
+  throws while minting is trapped like a throwing hook — the call still resolves
+  `void`, nothing is sent, and a `credential_mint.failed` event is the only
+  signal — so watch that event, because no error will reach your route.
 - **`message.url` is built from the `baseUrl` you configure** — an origin (or
   origin + prefix) you control, e.g. `https://app.example.com`. Never derive
   emailed links from the incoming request's `Host` header; a host-header
@@ -652,7 +661,11 @@ Every flow outcome emits one `IdentityEvent`: `sign_in.succeeded`,
 `sign_in.failed` (with the internal reason), `sign_in.rate_limited`,
 `sign_in.locked`, `lockout`, `sign_up`, and the requested / completed / failed
 lifecycle of password reset, email verification, and account unlock. Persist
-them in your own audit store via the `onEvent` option.
+them in your own audit store via the `onEvent` option. Two of them are the
+_only_ signal of their outcome, because the flow that produced them resolves
+uniformly on purpose: `delivery.failed` (a hook threw) and
+`credential_mint.failed` (the token or OTP store threw before anything was
+minted). Alert on both.
 
 The hook is awaited but isolated: a rejection is logged and swallowed, so a down
 audit sink can never break sign-in. Two consequences: don't rely on it for

@@ -620,6 +620,46 @@ describe("IdentityService", () => {
     );
   });
 
+  it("resetPassword leaves the link redeemable when session revocation fails, so a retry finishes the reset", async () => {
+    const revoked: string[] = [];
+    let sessionsDown = true;
+    const { service, events, minted } = makeEventService({
+      sessions: {
+        revokeAllByUser(userId) {
+          if (sessionsDown) {
+            return Promise.reject(new Error("session store down"));
+          }
+          revoked.push(userId);
+          return Promise.resolve(1);
+        },
+        revokeOthers: () => Promise.resolve(0),
+      },
+    });
+    const user = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestPasswordReset("a@b.co");
+    const token = minted.passwordReset[0];
+
+    await assertRejects(
+      () => service.resetPassword({ token, password: "newpassword1" }),
+      Error,
+      "session store down",
+    );
+    assertEquals(revoked, []);
+
+    sessionsDown = false;
+    assertEquals(
+      await service.resetPassword({ token, password: "newpassword1" }),
+      { userId: user.id },
+    );
+    assertEquals(revoked, [user.id]);
+    assertEquals(eventsOfType(events, "password_reset.completed"), [
+      { type: "password_reset.completed", userId: user.id },
+    ]);
+  });
+
   it("enforces the password policy on signUp and resetPassword", async () => {
     const { store } = makeStore();
     const tokens = new TokenFlowService(new MemoryTokenFlowStore());
@@ -2996,6 +3036,75 @@ describe("IdentityService passwordless", () => {
     assertEquals(known.codes.length, 1);
     assertEquals(unknown.codes.length, 0);
   });
+
+  function makeStoreOutageService() {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    const tokenBacking = new MemoryTokenFlowStore();
+    const otpBacking = new MemoryOtpStore();
+    let down = false;
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      tokens: new TokenFlowService({
+        save: (record) =>
+          down
+            ? Promise.reject(new Error("token store down"))
+            : tokenBacking.save(record),
+        get: (hash) => tokenBacking.get(hash),
+        markConsumed: (hash, at) => tokenBacking.markConsumed(hash, at),
+      }),
+      otp: {
+        store: {
+          create: (record) =>
+            down
+              ? Promise.reject(new Error("otp store down"))
+              : otpBacking.create(record),
+          findActive: (email, purpose) => otpBacking.findActive(email, purpose),
+          recordAttempt: (id) => otpBacking.recordAttempt(id),
+          consume: (id) => otpBacking.consume(id),
+          invalidate: (email, purpose) => otpBacking.invalidate(email, purpose),
+          invalidateById: (id) => otpBacking.invalidateById(id),
+        },
+      },
+      delivery: {
+        sendPasswordReset: () => {},
+        sendSignInLink: () => {},
+        sendSignInCode: () => {},
+      },
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const signUp = () =>
+      service.signUp({
+        password: "hunter2hunter2",
+        profile: { email: "a@b.co" },
+      });
+    return { service, events, signUp, takeDown: () => (down = true) };
+  }
+
+  for (
+    const [method, flow] of [
+      ["requestPasswordReset", "password_reset"],
+      ["requestSignInLink", "signin_link"],
+      ["requestSignInCode", "signin_code"],
+    ] as const
+  ) {
+    it(`${method} resolves for a known email when its store throws, as it does for an unknown one`, async () => {
+      using consoleError = stub(console, "error");
+      const { service, events, signUp, takeDown } = makeStoreOutageService();
+      await signUp();
+      takeDown();
+
+      assertEquals(await service[method]("ghost@b.co"), undefined);
+      assertEquals(await service[method]("a@b.co"), undefined);
+
+      const failed = eventsOfType(events, "credential_mint.failed");
+      assertEquals(failed.length, 1);
+      assertEquals(failed[0].flow, flow);
+      assertEquals(consoleError.calls.length, 1);
+    });
+  }
 
   it("requires the tokens/otp options for the flows that need them", async () => {
     const { store } = makeStore();
