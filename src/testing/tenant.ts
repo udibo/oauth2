@@ -123,7 +123,7 @@ export interface FakeTenantOptions {
 }
 
 /**
- * A stand-in for a Udibo tenant, for testing an app that signs in against one
+ * A stand-in for a Udibo Identity tenant, for testing an app that signs in against one
  * without running the identity service. It answers the tenant's protocol
  * surface — discovery, authorize, token, introspection, UserInfo, JWKS — the
  * caller's own `GET /api/memberships`, and the two authorization questions,

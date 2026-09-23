@@ -1,5 +1,5 @@
 /**
- * Contract test suite for a Udibo tenant's authorization answers: what
+ * Contract test suite for a Udibo Identity tenant's authorization answers: what
  * introspection reports about a signed-in person, what `GET /api/memberships`
  * lists for them, and what `POST /api/check` and `POST /api/check/batch`
  * answer.
@@ -109,7 +109,7 @@ interface Introspection {
  * safe as long as nothing else uses that namespace.
  */
 export function runTenantContractTests(options: TenantContractOptions): void {
-  describe(options.describeName ?? "Udibo tenant contract", () => {
+  describe(options.describeName ?? "Udibo Identity tenant contract", () => {
     let tenant: TenantContractFixture;
     let metadata: { token_endpoint: string; introspection_endpoint: string };
     let send: typeof fetch;

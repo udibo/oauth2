@@ -241,7 +241,7 @@ runLockoutStoreContractTests({
 });
 
 runTenantContractTests({
-  describeName: "createFakeTenant satisfies the Udibo tenant contract",
+  describeName: "createFakeTenant satisfies the Udibo Identity tenant contract",
   setup: async () => {
     const client = { id: "contract-app", secret: "contract-secret" };
     const redirectUri = "http://app.localhost/callback";
