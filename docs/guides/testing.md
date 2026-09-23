@@ -17,7 +17,7 @@ client/reader constructor or run the
 | Helper                                                            | Purpose                                                               |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `createMemoryAuthorizationServer` from `/testing`                 | Run the real protocol implementation with isolated in-memory services |
-| `createFakeTenant` from `/testing`                                | Stand in for a Udibo tenant, served on a real socket                  |
+| `createFakeTenant` from `/testing`                                | Stand in for a Udibo Identity tenant, served on a real socket         |
 | `createAuthenticatedTestSession` from `/hono/bff/testing`         | Register an access token and create a corresponding BFF session       |
 | `createTestSession` from `/hono/bff/testing`                      | Seed a session for BFF session-endpoint tests                         |
 | `createMockBffClient`, `MockOAuth2Provider` from `/react/testing` | Render React behavior with controlled auth state                      |
@@ -63,11 +63,11 @@ cover no session, insufficient scope, and a user trying to access another user's
 record. Keep the CSRF guard enabled in tests that claim to exercise browser
 credential handling.
 
-## An app built on a Udibo tenant
+## An app built on a Udibo Identity tenant
 
-An app that signs in against a Udibo tenant reads more than a token: the
-`permissions` claim, the organization the person picked at sign-in, the caller's
-`GET /api/memberships`, and the tenant's answers to `POST /api/check`.
+An app that signs in against a Udibo Identity tenant reads more than a token:
+the `permissions` claim, the organization the person picked at sign-in, the
+caller's `GET /api/memberships`, and the tenant's answers to `POST /api/check`.
 `createFakeTenant` answers all of them with the shapes a tenant uses, so the
 app's own routes can be tested without the identity service. Serve it on a
 loopback port, point the app's issuer at that origin, and decide who signs in:

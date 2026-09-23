@@ -26,10 +26,10 @@
  *   user / client / scope types. Suitable for tests, examples, and
  *   prototypes — never for production.
  *
- * - **A fake Udibo tenant.** {@link createFakeTenant} answers a tenant's
+ * - **A fake Udibo Identity tenant.** {@link createFakeTenant} answers a tenant's
  *   protocol surface and its `/api/check` questions over `fetch`, with the
  *   claims a real tenant issues — permissions, the organization picked at
- *   sign-in, and resource grants — so an app built on a Udibo tenant can test
+ *   sign-in, and resource grants — so an app built on a Udibo Identity tenant can test
  *   its own routes without running the identity service.
  *
  * Nothing in this module is an OAuth2 primitive — only testing support.
