@@ -10,8 +10,10 @@ import { decodeBase64Url } from "@std/encoding/base64url";
 import { describe, it } from "@std/testing/bdd";
 
 import { BasicScope } from "../models/scope.ts";
+import type { RefreshToken } from "../models/token.ts";
 import {
   basicAuthHeader,
+  exchangeToken,
   MemoryAuthorizationCodeService,
   MemoryClientService,
   MemoryTokenService,
@@ -28,6 +30,7 @@ import {
 } from "./authorization-server.ts";
 import { AuthorizationCodeGrant } from "./grants/authorization-code.ts";
 import { ClientCredentialsGrant } from "./grants/client-credentials.ts";
+import { RefreshTokenGrant } from "./grants/refresh-token.ts";
 import {
   createJwtAccessTokenGenerator,
   generateSigningKey,
@@ -147,6 +150,75 @@ describe("OIDC issuance", () => {
     assertEquals(claims!.nonce, "nonce-123");
     assertEquals(claims!.preferred_username, "testuser");
     assert(typeof claims!.exp === "number" && typeof claims!.iat === "number");
+  });
+
+  it("keeps nonce absent when the request sent none, whatever userClaims returns", async () => {
+    const { server, grant, signingKey } = await createOidcServer(
+      undefined,
+      () => ({ nonce: "injected-by-hook" }),
+    );
+    const body = await exchangeCodeWithNonce(server, grant, "openid");
+
+    const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
+    assertExists(claims);
+    assertEquals(
+      claims!.nonce,
+      undefined,
+      "the protocol nonce is authoritative: a request without one yields an id_token without one",
+    );
+  });
+
+  it("stamps the request's nonce over one userClaims returns", async () => {
+    const { server, grant, signingKey } = await createOidcServer(
+      undefined,
+      () => ({ nonce: "injected-by-hook" }),
+    );
+    const body = await exchangeCodeWithNonce(
+      server,
+      grant,
+      "openid",
+      "nonce-123",
+    );
+
+    const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
+    assertEquals(claims!.nonce, "nonce-123");
+  });
+
+  it("userinfo honors clockSkewSeconds on the bearer token's expiry", async () => {
+    const userService = new MemoryUserService();
+    const clientService = new MemoryClientService(userService);
+    const tokenService = new MemoryTokenService({ clientService, userService });
+    await userService.add(testUser, "password");
+    await clientService.add(testClient, "secret", testUser.id);
+    const server = new AuthorizationServer<TestClient, TestUser, BasicScope>({
+      resolve: () => ({
+        services: { clientService, tokenService },
+        issuer: "https://auth.example.com",
+      }),
+      grants: {},
+      signingKeys: new StaticSigningKeyProvider(await generateSigningKey()),
+      clockSkewSeconds: 30,
+    });
+    await tokenService.save({
+      accessToken: "drifted-token",
+      accessTokenExpiresAt: new Date(Date.now() - 10_000),
+      client: testClient,
+      user: testUser,
+      scope: new BasicScope("openid"),
+    });
+
+    const userinfo = await server.handleUserInfoRequest(
+      new Request("https://auth.example.com/userinfo", {
+        headers: { authorization: "Bearer drifted-token" },
+      }),
+    );
+
+    assertEquals(
+      userinfo.status,
+      200,
+      "a token expired within the configured skew is still accepted",
+    );
+    assertEquals((await userinfo.json()).sub, "user-1");
   });
 
   it("omits the id_token without the openid scope", async () => {
@@ -525,6 +597,59 @@ describe("RP-Initiated Logout", () => {
     assertEquals(calls[0].client?.id, "client-1");
   });
 
+  it("refuses a logout whose client_id disagrees with the id_token_hint's audience", async () => {
+    const { server, calls, signingKey } = await createLogoutServer();
+    const otherClientsToken = await signJwt(signingKey, {
+      iss: "https://auth.example.com",
+      sub: testUser.id,
+      aud: "client-2",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    const response = await server.handleEndSessionRequest(
+      logout({
+        client_id: "client-1",
+        id_token_hint: otherClientsToken,
+        post_logout_redirect_uri: POST_LOGOUT,
+      }),
+    );
+
+    assertEquals(
+      response.status,
+      400,
+      "RP-Initiated Logout requires client_id to match the id_token's audience",
+    );
+    assertEquals((await response.json()).error, "invalid_request");
+    assertFalse(response.headers.get("location"));
+    assertEquals(
+      calls.length,
+      0,
+      "an inconsistent request ends no session for anyone",
+    );
+  });
+
+  it("accepts a client_id that matches the id_token_hint's audience", async () => {
+    const { server, calls, signingKey } = await createLogoutServer();
+    const hint = await signJwt(signingKey, {
+      iss: "https://auth.example.com",
+      sub: testUser.id,
+      aud: ["client-1", "client-2"],
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    const response = await server.handleEndSessionRequest(
+      logout({
+        client_id: "client-1",
+        id_token_hint: hint,
+        post_logout_redirect_uri: POST_LOGOUT,
+      }),
+    );
+
+    assertEquals(response.status, 302);
+    assertEquals(calls[0].client?.id, "client-1");
+    assertEquals(calls[0].subject, testUser.id);
+  });
+
   it("ignores an id_token_hint it cannot verify", async () => {
     const { server, calls } = await createLogoutServer();
     const forged = await signJwt(await generateSigningKey(), {
@@ -585,6 +710,159 @@ describe("RP-Initiated Logout", () => {
       wired.end_session_endpoint,
       "https://auth.example.com/end_session",
     );
+  });
+});
+
+describe("JWT access token expiry", () => {
+  class JwtTokenService extends MemoryTokenService<
+    TestClient,
+    TestUser,
+    BasicScope
+  > {
+    override generateAccessToken: MemoryTokenService<
+      TestClient,
+      TestUser,
+      BasicScope
+    >["generateAccessToken"];
+    constructor(
+      options: ConstructorParameters<
+        typeof MemoryTokenService<TestClient, TestUser, BasicScope>
+      >[0],
+      signingKey: SigningKey,
+    ) {
+      super(options);
+      this.generateAccessToken = createJwtAccessTokenGenerator({
+        signingKeys: new StaticSigningKeyProvider(signingKey),
+        issuer: "https://auth.example.com",
+        lifetimeSeconds: 3600,
+      });
+    }
+  }
+
+  async function createJwtServices(options: {
+    accessTokenLifetime?: number;
+    refreshTokenLifetime?: number;
+    refreshTokenMaxLifetime?: number;
+  }) {
+    const signingKey = await generateSigningKey();
+    const userService = new MemoryUserService();
+    const clientService = new MemoryClientService(userService);
+    const tokenService = new JwtTokenService(
+      { clientService, userService, ...options },
+      signingKey,
+    );
+    await userService.add(testUser, "password");
+    await clientService.add(testClient, "secret", testUser.id);
+    return { signingKey, clientService, tokenService };
+  }
+
+  async function expOf(jwt: string, key: SigningKey): Promise<number> {
+    const claims = await verifyJwt(jwt, key.publicJwk);
+    assertExists(claims);
+    assert(typeof claims!.exp === "number");
+    return claims!.exp as number;
+  }
+
+  function seconds(date: Date | undefined): number {
+    assertExists(date);
+    return Math.ceil(date!.getTime() / 1000);
+  }
+
+  it("never outlives the stored access token expiry", async () => {
+    const { signingKey, clientService, tokenService } = await createJwtServices(
+      { accessTokenLifetime: 60 },
+    );
+    const grant = new ClientCredentialsGrant<TestClient, TestUser, BasicScope>({
+      resolve: () => ({ clientService, tokenService }),
+    });
+
+    const token = await grant.generateToken(
+      testClient,
+      testUser,
+      new BasicScope("read"),
+      tokenService,
+    );
+
+    const exp = await expOf(token.accessToken, signingKey);
+    assert(
+      exp <= seconds(token.accessTokenExpiresAt),
+      `JWT exp ${exp} must not exceed the stored expiry ${
+        seconds(token.accessTokenExpiresAt)
+      }`,
+    );
+  });
+
+  it("never outlives a new refresh family's cap", async () => {
+    const { signingKey, clientService, tokenService } = await createJwtServices(
+      {
+        accessTokenLifetime: 600,
+        refreshTokenLifetime: 30,
+        refreshTokenMaxLifetime: 30,
+      },
+    );
+    const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+      resolve: () => ({ clientService, tokenService }),
+    });
+
+    const token = await grant.generateToken(
+      testClient,
+      testUser,
+      new BasicScope("read"),
+      tokenService,
+    );
+
+    const exp = await expOf(token.accessToken, signingKey);
+    assert(
+      exp <= seconds(token.accessTokenExpiresAt),
+      `JWT exp ${exp} must not exceed the family-capped expiry ${
+        seconds(token.accessTokenExpiresAt)
+      }`,
+    );
+    assert(exp <= Math.ceil(Date.now() / 1000) + 30);
+  });
+
+  it("never outlives the family cap on a rotation", async () => {
+    const { signingKey, clientService, tokenService } = await createJwtServices(
+      {
+        accessTokenLifetime: 600,
+        refreshTokenLifetime: 30,
+        refreshTokenMaxLifetime: 30,
+      },
+    );
+    const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+      resolve: () => ({ clientService, tokenService }),
+    });
+    const familyCreatedAt = new Date(Date.now() - 20_000);
+    const original: RefreshToken<TestClient, TestUser, BasicScope> = {
+      accessToken: crypto.randomUUID(),
+      accessTokenExpiresAt: new Date(Date.now() + 600_000),
+      refreshToken: crypto.randomUUID(),
+      refreshTokenExpiresAt: new Date(Date.now() + 30_000),
+      client: testClient,
+      user: testUser,
+      scope: new BasicScope("read"),
+      familyId: crypto.randomUUID(),
+      familyCreatedAt,
+    };
+    await tokenService.save(original);
+
+    const rotated = await exchangeToken(
+      grant,
+      tokenRequest(
+        { grant_type: "refresh_token", refresh_token: original.refreshToken },
+        basicAuthHeader("client-1", "secret"),
+      ),
+      testClient,
+    );
+
+    const exp = await expOf(rotated.accessToken, signingKey);
+    assert(
+      exp <= seconds(rotated.accessTokenExpiresAt),
+      `JWT exp ${exp} must not exceed the rotation's capped expiry ${
+        seconds(rotated.accessTokenExpiresAt)
+      }`,
+    );
+    assert(exp <= seconds(familyCreatedAt) + 30);
   });
 });
 

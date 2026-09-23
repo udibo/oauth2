@@ -323,10 +323,12 @@ export function createJwtAccessTokenGenerator(options: {
    */
   audience?: string;
   /**
-   * Token lifetime in seconds for the `exp` claim. Defaults to 3600. Set
-   * independently of the token service's `accessTokenExpiresAt` and of any
-   * refresh-family cap, which shorten only the stored expiry — an offline
-   * verifier honors this `exp`, so keep it no longer than those.
+   * Upper bound in seconds on the `exp` claim. Defaults to 3600. The claim
+   * is the earlier of this and the expiry the grant passes as the fifth
+   * argument — the token service's `accessTokenExpiresAt`, already clamped to
+   * any refresh-family cap — so an offline verifier never accepts the token
+   * past the server's own expiry. A wrapper that drops that argument falls
+   * back to this lifetime alone.
    */
   lifetimeSeconds?: number;
   /** Maps a user to the `sub` claim. Defaults to the user's `id` property. */
@@ -354,10 +356,11 @@ export function createJwtAccessTokenGenerator(options: {
   user: unknown,
   scope?: { toString(): string } | null,
   authenticationContext?: AuthenticationContext,
+  expiresAt?: Date,
 ) => Promise<string> {
   const lifetime = options.lifetimeSeconds ?? 3600;
   const subjectOf = options.subjectOf ?? defaultSubjectOf;
-  return async (client, user, scope, authenticationContext) => {
+  return async (client, user, scope, authenticationContext, expiresAt) => {
     const event = user
       ? snapshotAuthenticationContext(authenticationContext)
       : undefined;
@@ -366,6 +369,9 @@ export function createJwtAccessTokenGenerator(options: {
     const extraClaims = user && options.userClaims
       ? await options.userClaims(user, scope, client, event)
       : undefined;
+    const storedExp = expiresAt
+      ? Math.floor(expiresAt.getTime() / 1000)
+      : now + lifetime;
     const payload: Record<string, unknown> = {
       ...extraClaims,
       iss: options.issuer,
@@ -373,7 +379,7 @@ export function createJwtAccessTokenGenerator(options: {
       client_id: client.id,
       aud: options.audience ?? client.id,
       iat: now,
-      exp: now + lifetime,
+      exp: Math.min(now + lifetime, storedExp),
       jti: crypto.randomUUID(),
     };
     const scopeText = scope?.toString();

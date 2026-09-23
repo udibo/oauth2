@@ -102,7 +102,10 @@ should not be enabled for new deployments.
 
 - Offline JWT validation does not consult token revocation state. A revoked
   token can remain valid until its signed expiry. Use an appropriate short
-  lifetime or online validation when prompt revocation is required.
+  lifetime or online validation when prompt revocation is required. That signed
+  expiry is the server's own: `createJwtAccessTokenGenerator` clamps `exp` to
+  the expiry the grant stores, refresh-family cap included, so the revocation
+  window is never longer than the stored access-token lifetime.
 
 - **Clock skew is two options, and only one of them is on by default.**
   `JwksTokenReaderOptions.clockSkewSeconds` (default 30) governs the reader's
