@@ -100,7 +100,7 @@
           "npm:react@^19.2.7"
         ]
       },
-      "jsr:@udibo/oauth2@0.5.0": {
+      "jsr:@udibo/oauth2@0.6.0": {
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/async@^1.4.0",
@@ -108,7 +108,7 @@
           "jsr:@std/encoding@^1.0.11",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/http-error@~0.11.1",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "npm:@testing-library/react@^16.3.3",
           "npm:@types/react@^19.2.17",
           "npm:axe-core@^4.13.0",
