@@ -128,8 +128,9 @@ runOtpStoreContractTests({
 
 Each `makeStore` must provide fresh state. Follow the suite's options for the
 other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
-lockout, token flows, and token readers. The BFF session suite lives in
-`@udibo/oauth2/hono/bff/testing`.
+lockout, token flows, token readers, and pending login requests
+(`AuthRequestStorage`, whose optional `take` is raced by two concurrent
+callers). The BFF session suite lives in `@udibo/oauth2/hono/bff/testing`.
 
 In addition to the shared contracts, test your adapter's transaction boundaries:
 

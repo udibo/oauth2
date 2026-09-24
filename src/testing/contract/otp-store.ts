@@ -27,6 +27,7 @@ import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { OtpRecord, OtpStore } from "../../identity/otp.ts";
+import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
 /** Options for {@link runOtpStoreContractTests}. */
 export interface OtpStoreContractOptions {
@@ -132,14 +133,16 @@ export function runOtpStoreContractTests(
     });
 
     describe("consume", () => {
-      it("claims an active code only once under concurrency", async () => {
+      it(`claims an active code for exactly one of ${CONCURRENT_CALLERS} concurrent consumers`, async () => {
         const created = record();
         await store.create(created);
-        const results = await Promise.all([
-          store.consume(created.id),
-          store.consume(created.id),
-        ]);
-        assertEquals(results.sort(), [false, true]);
+        const results = await race(() => store.consume(created.id));
+        assertStrictEquals(
+          results.filter((claimed) => claimed).length,
+          1,
+          "a code is single-use — consumers racing one code must not each " +
+            "be told they claimed it",
+        );
         assertStrictEquals(await store.consume("missing-code"), false);
       });
       it("takes the record out of the active set", async () => {
