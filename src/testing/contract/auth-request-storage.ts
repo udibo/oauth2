@@ -6,8 +6,8 @@
  * The load-bearing method is the optional `take`: `DirectClient` claims the
  * record with it before calling the token endpoint, so of two callbacks racing
  * on one `state` only one reaches it. Only an atomic read-and-remove survives
- * two callers taking one record at the same time. This suite issues those two
- * calls.
+ * concurrent callers taking one record. This suite races eight of them on one
+ * record.
  *
  * @example Verify a Redis-backed store
  * ```ts
@@ -32,6 +32,7 @@ import type {
   AuthRequestRecord,
   AuthRequestStorage,
 } from "../../client/storage.ts";
+import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
 /** Options for {@link runAuthRequestStorageContractTests}. */
 export interface AuthRequestStorageContractOptions {
@@ -70,9 +71,10 @@ function record(overrides: Partial<AuthRequestRecord> = {}): AuthRequestRecord {
  * Runs the {@link AuthRequestStorage} contract suite. Call it from your own
  * test file — it registers `describe` / `it` blocks the test runner picks up.
  *
- * The concurrency cases take one `state` from two callers at once; a store
- * whose `take` reads, awaits, then deletes hands the record to both and fails
- * them.
+ * The concurrency cases take one `state` from eight callers at once. A store
+ * whose `take` reads, awaits, then deletes hands the record to more than one
+ * of them and fails in practice — a race is probabilistic, so a lucky
+ * interleaving can still pass a single run.
  */
 export function runAuthRequestStorageContractTests(
   options: AuthRequestStorageContractOptions,
@@ -158,19 +160,16 @@ export function runAuthRequestStorageContractTests(
           assertStrictEquals(await store.take!("no-such-state"), null);
         });
 
-        it("hands one record to exactly one of two concurrent takes", async () => {
+        it(`hands one record to exactly one of ${CONCURRENT_CALLERS} concurrent takes`, async () => {
           const stored = record();
           await store.set("state-1", stored);
-          const results = await Promise.all([
-            store.take!("state-1"),
-            store.take!("state-1"),
-          ]);
+          const results = await race(() => store.take!("state-1"));
           const winners = results.filter((result) => result !== null);
           assertStrictEquals(
             winners.length,
             1,
-            "a state is single-use — two callbacks racing on it must not " +
-              "both receive the PKCE verifier",
+            "a state is single-use — callbacks racing on it must not each " +
+              "receive the PKCE verifier",
           );
           assertEquals(winners[0], stored);
           assertStrictEquals(await store.get("state-1"), null);
