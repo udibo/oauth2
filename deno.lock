@@ -1113,7 +1113,7 @@
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:hono@^4.13.7"
         ]
       },
@@ -1121,7 +1121,7 @@
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:hono@^4.13.7"
         ]
       },
@@ -1129,7 +1129,7 @@
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:hono@^4.13.7"
         ]
       },
@@ -1140,7 +1140,7 @@
           "jsr:@std/streams@^1.1.2",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/juniper@0.16",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:@opentelemetry/api@^1.9.1",
           "npm:@testing-library/react@^16.3.3",
           "npm:@types/react@^19.2.16",
@@ -1157,7 +1157,7 @@
           "jsr:@std/streams@^1.1.2",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/juniper@0.16",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:@opentelemetry/api@^1.9.1",
           "npm:@testing-library/react@^16.3.3",
           "npm:@types/react@^19.2.16",
@@ -1196,7 +1196,7 @@
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/juniper@0.16",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:@types/react@^19.2.16",
           "npm:hono@^4.13.7",
           "npm:react-dom@^19.2.7",
@@ -1210,7 +1210,7 @@
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/path@^1.1.5",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/oauth2@~0.5.1",
+          "jsr:@udibo/oauth2@0.6",
           "npm:@types/react@^19.2.16",
           "npm:esbuild@~0.28.2",
           "npm:hono@^4.13.7",

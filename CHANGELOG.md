@@ -1,3 +1,19 @@
+# [0.6.0](https://github.com/udibo/oauth2/compare/0.5.1...0.6.0) (2026-09-24)
+
+### Bug Fixes
+
+- **client:** report a stalled body as unavailable
+  ([#41](https://github.com/udibo/oauth2/issues/41))
+  ([4fc7345](https://github.com/udibo/oauth2/commit/4fc73451a20e50b597c4974b1dde7c15a941a9d1)),
+  closes [#39](https://github.com/udibo/oauth2/issues/39)
+
+### Features
+
+- **testing:** add the AuthRequestStorage contract
+  ([#42](https://github.com/udibo/oauth2/issues/42))
+  ([183d9a0](https://github.com/udibo/oauth2/commit/183d9a0b3dccb22710fad6f1087a6827923a78cd)),
+  closes [#40](https://github.com/udibo/oauth2/issues/40)
+
 ## [0.5.1](https://github.com/udibo/oauth2/compare/0.5.0...0.5.1) (2026-09-23)
 
 ### Bug Fixes
