@@ -31,7 +31,7 @@
     "jsr:@ts-morph/bootstrap@0.29": "0.29.0",
     "jsr:@ts-morph/common@0.29": "0.29.0",
     "jsr:@udibo/http-error@~0.11.1": "0.11.1",
-    "jsr:@udibo/juniper@0.16": "0.16.0",
+    "jsr:@udibo/juniper@0.17": "0.17.0",
     "npm:@babel/core@^7.29.7": "7.29.7",
     "npm:@opentelemetry/api@^1.9.1": "1.9.1",
     "npm:@testing-library/react@^16.3.3": "16.3.3_@testing-library+dom@10.4.1_@types+react@19.3.0_react@19.3.0_react-dom@19.3.0",
@@ -176,8 +176,8 @@
         "jsr:@std/http"
       ]
     },
-    "@udibo/juniper@0.16.0": {
-      "integrity": "f80f08cbf31f189c0a22587b4af07766447e119a9382533872acb8a93f6e2849",
+    "@udibo/juniper@0.17.0": {
+      "integrity": "dd01d11ea662cc8c50f0f00c2b6b5ef0f43e54896237d84596af70cdab0781e6",
       "dependencies": [
         "jsr:@deno/esbuild-plugin",
         "jsr:@std/async@^1.5.0",
@@ -1139,7 +1139,7 @@
           "jsr:@std/path@^1.1.5",
           "jsr:@std/streams@^1.1.2",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "jsr:@udibo/oauth2@0.6",
           "npm:@opentelemetry/api@^1.9.1",
           "npm:@testing-library/react@^16.3.3",
@@ -1156,7 +1156,7 @@
           "jsr:@std/path@^1.1.5",
           "jsr:@std/streams@^1.1.2",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "jsr:@udibo/oauth2@0.6",
           "npm:@opentelemetry/api@^1.9.1",
           "npm:@testing-library/react@^16.3.3",
@@ -1182,7 +1182,7 @@
           "jsr:@std/encoding@^1.0.11",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/http-error@~0.11.1",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "npm:@testing-library/react@^16.3.3",
           "npm:@types/react@^19.2.17",
           "npm:axe-core@^4.13.0",
@@ -1195,7 +1195,7 @@
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/testing@^1.0.20",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "jsr:@udibo/oauth2@0.6",
           "npm:@types/react@^19.2.16",
           "npm:hono@^4.13.7",
