@@ -99,7 +99,8 @@ export interface AuthRequestStorage {
    * before the token call but lets concurrent callers that both read it
    * before either deletes it redeem it twice. Implement it with the backing
    * store's own atomic primitive (`GETDEL`, `DELETE … RETURNING`) whenever
-   * the store is shared between processes or requests.
+   * the store is shared between processes or requests, and check it with
+   * `runAuthRequestStorageContractTests` from `@udibo/oauth2/testing/contract`.
    */
   take?(
     state: string,

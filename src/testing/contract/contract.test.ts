@@ -37,6 +37,9 @@ import { runOtpStoreContractTests } from "./otp-store.ts";
 import { runRateLimitStoreContractTests } from "./rate-limit-store.ts";
 import { runLockoutStoreContractTests } from "./lockout-store.ts";
 import { runTenantContractTests } from "./tenant.ts";
+import { runAuthRequestStorageContractTests } from "./auth-request-storage.ts";
+import { MemoryAuthRequestStorage } from "../../client/storage.ts";
+import { SessionStorageAuthRequestStorage } from "../../client/browser-storage.ts";
 import { createFakeTenant } from "../tenant.ts";
 import { encodeBasicAuth } from "../../utils/basic-auth.ts";
 import {
@@ -213,6 +216,21 @@ runTokenReaderContractTests<TestClient, TestUser>({
       ],
     };
   },
+});
+
+runAuthRequestStorageContractTests({
+  describeName:
+    "MemoryAuthRequestStorage satisfies AuthRequestStorage contract",
+  makeStore: () => new MemoryAuthRequestStorage(),
+});
+
+runAuthRequestStorageContractTests({
+  describeName:
+    "SessionStorageAuthRequestStorage satisfies AuthRequestStorage contract",
+  makeStore: () =>
+    new SessionStorageAuthRequestStorage({
+      keyPrefix: `contract:${crypto.randomUUID()}:`,
+    }),
 });
 
 runMfaStoreContractTests({
