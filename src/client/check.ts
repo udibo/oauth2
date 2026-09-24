@@ -105,9 +105,10 @@ export interface CheckPermissionsResult {
  * deleted after the signature, so catch it on that path rather than reading a
  * throw as a bug in your own setup. A redirect, or a `2xx` whose body is not a
  * JSON object or exceeds the response-size cap, also throws
- * {@linkcode ServerError}, and a request whose response headers do not
- * arrive before the deadline throws {@linkcode TemporarilyUnavailableError}.
- * The body's shape is not validated beyond being a JSON object.
+ * {@linkcode ServerError}. A response that does not arrive in full before the
+ * deadline — whether its headers or its body stall — or whose connection
+ * drops mid-body throws {@linkcode TemporarilyUnavailableError}. The body's
+ * shape is not validated beyond being a JSON object.
  *
  * @example
  * ```ts

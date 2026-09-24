@@ -123,6 +123,8 @@ export async function sendGuarded(
  * @param res The response from {@link sendGuarded}.
  * @param what The endpoint's name, for error messages.
  * @returns The parsed JSON object.
+ * @throws {TemporarilyUnavailableError} on a `2xx` whose body stops arriving —
+ * the deadline fires or the connection drops mid-body.
  * @throws {OAuth2Error} on a non-OK status, an oversized body, a body that is
  * not valid JSON, or JSON that is not an object.
  */
@@ -133,6 +135,14 @@ export async function receiveJson(
   const body = await readBounded(res);
 
   if (!res.ok) throw errorFromBody(res, safeParse(body.text), what, body.text);
+
+  if (body.interrupted) {
+    throw new TemporarilyUnavailableError(
+      `the ${what} response body did not arrive in full ` +
+        `(${describeError(body.interrupted.cause)})`,
+      { cause: body.interrupted.cause },
+    );
+  }
 
   if (body.truncated) {
     throw new ServerError(
@@ -231,6 +241,7 @@ export function assertField(
 interface BoundedBody {
   text: string;
   truncated: boolean;
+  interrupted?: { cause: unknown };
 }
 
 async function readBounded(res: Response): Promise<BoundedBody> {
@@ -255,8 +266,8 @@ async function readBounded(res: Response): Promise<BoundedBody> {
       chunks.push(value);
       size += value.byteLength;
     }
-  } catch {
-    return { text: decode(chunks, size), truncated: true };
+  } catch (cause) {
+    return { text: decode(chunks, size), truncated, interrupted: { cause } };
   } finally {
     await reader.cancel().catch(() => {});
   }

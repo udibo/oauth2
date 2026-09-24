@@ -31,6 +31,7 @@ import {
   AccessDeniedError,
   InvalidGrantError,
   ServerError,
+  TemporarilyUnavailableError,
 } from "../errors.ts";
 import { base64urlEncode } from "../utils/crypto.ts";
 
@@ -42,7 +43,8 @@ import {
   MemoryRefreshTokenStorage,
   MemoryTokenStorage,
 } from "./storage.ts";
-import { MAX_RESPONSE_BYTES } from "./_http.ts";
+import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
+import { serveStalledBody } from "./_test_interrupted_body.ts";
 import type { OAuth2ClientEvent } from "./events.ts";
 
 const ISSUER = "http://localhost";
@@ -1814,6 +1816,28 @@ describe("DirectClient response hardening", () => {
     await assertRejects(() => client.revoke("rt-seed"), ServerError);
     assertEquals(sink.calls, [REVOKE_URL]);
   });
+
+  it(
+    "reports a token response that stalls past the deadline as temporarily unavailable",
+    async () => {
+      await using endpoint = serveStalledBody('{"access_token":"at-');
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: endpoint.url },
+        refreshTokenStorage: seededRefreshStore(),
+      });
+      const started = performance.now();
+      const error = await assertRejects(() => client.refresh());
+      assert(
+        error instanceof TemporarilyUnavailableError,
+        `expected a TemporarilyUnavailableError, got ${error}`,
+      );
+      assert(
+        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
+        "the call must end at the deadline, not before it",
+      );
+    },
+  );
 
   it("refuses an HTML userinfo response", async () => {
     const client = new DirectClient({

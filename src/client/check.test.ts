@@ -7,8 +7,12 @@ import {
 import { describe, it } from "@std/testing/bdd";
 
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
-import { MAX_RESPONSE_BYTES } from "./_http.ts";
+import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
 import { checkPermissions } from "./check.ts";
+import {
+  serveDroppedBody,
+  serveStalledBody,
+} from "./_test_interrupted_body.ts";
 
 function fetchAnswering(
   handler: (input: Request) => Response | Promise<Response>,
@@ -199,6 +203,49 @@ describe("checkPermissions", () => {
     );
     assertStringIncludes(error.message, "exceeded");
   });
+
+  it(
+    "reports a body that stalls past the deadline as temporarily unavailable",
+    async () => {
+      await using endpoint = serveStalledBody('{"subject":"user-1",');
+      const started = performance.now();
+      const error = await assertRejects(
+        () =>
+          checkPermissions({
+            endpoint: endpoint.url,
+            accessToken: "token-1",
+            permissions: "posts:write",
+          }),
+      );
+      assert(
+        error instanceof TemporarilyUnavailableError,
+        `expected a TemporarilyUnavailableError, got ${error}`,
+      );
+      assert(
+        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
+        "the call must end at the deadline, not before it",
+      );
+    },
+  );
+
+  it(
+    "reports a connection dropped mid-body as temporarily unavailable",
+    async () => {
+      await using endpoint = serveDroppedBody('{"subject":"user-1",');
+      const error = await assertRejects(
+        () =>
+          checkPermissions({
+            endpoint: endpoint.url,
+            accessToken: "token-1",
+            permissions: "posts:write",
+          }),
+      );
+      assert(
+        error instanceof TemporarilyUnavailableError,
+        `expected a TemporarilyUnavailableError, got ${error}`,
+      );
+    },
+  );
 
   it("cancels the body of a refused response", async () => {
     let cancelled = false;
