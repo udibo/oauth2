@@ -247,6 +247,28 @@ describe("checkPermissions", () => {
     },
   );
 
+  it(
+    "refuses a body past the response cap even when the connection then drops",
+    async () => {
+      await using endpoint = serveDroppedBody(
+        `{"padding":"${"x".repeat(MAX_RESPONSE_BYTES)}"}`,
+      );
+      const error = await assertRejects(
+        () =>
+          checkPermissions({
+            endpoint: endpoint.url,
+            accessToken: "token-1",
+            permissions: "posts:write",
+          }),
+      );
+      assert(
+        error instanceof ServerError,
+        `expected a ServerError, got ${error}`,
+      );
+      assertStringIncludes(error.message, "exceeded");
+    },
+  );
+
   it("cancels the body of a refused response", async () => {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({

@@ -68,14 +68,31 @@ async function answerThenDrop(conn: Deno.Conn, partial: string): Promise<void> {
     const request = new Uint8Array(64 * 1024);
     await conn.read(request);
     const body = encoder.encode(partial);
-    await conn.write(encoder.encode(
-      "HTTP/1.1 200 OK\r\n" +
-        "content-type: application/json\r\n" +
-        `content-length: ${body.byteLength + 1024}\r\n` +
-        "connection: close\r\n\r\n",
-    ));
-    await conn.write(body);
+    await writeAll(
+      conn,
+      encoder.encode(
+        "HTTP/1.1 200 OK\r\n" +
+          "content-type: application/json\r\n" +
+          `content-length: ${body.byteLength + 1024}\r\n` +
+          "connection: close\r\n\r\n",
+      ),
+    );
+    await writeAll(conn, body);
+  } catch (error) {
+    if (!isClientHangup(error)) throw error;
   } finally {
     conn.close();
   }
+}
+
+async function writeAll(conn: Deno.Conn, bytes: Uint8Array): Promise<void> {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    written += await conn.write(bytes.subarray(written));
+  }
+}
+
+function isClientHangup(error: unknown): boolean {
+  return error instanceof Deno.errors.BrokenPipe ||
+    error instanceof Deno.errors.ConnectionReset;
 }

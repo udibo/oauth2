@@ -123,8 +123,8 @@ export async function sendGuarded(
  * @param res The response from {@link sendGuarded}.
  * @param what The endpoint's name, for error messages.
  * @returns The parsed JSON object.
- * @throws {TemporarilyUnavailableError} on a `2xx` whose body stops arriving —
- * the deadline fires or the connection drops mid-body.
+ * @throws {TemporarilyUnavailableError} on a `2xx` whose body stops arriving
+ * within the size cap — the deadline fires or the connection drops mid-body.
  * @throws {OAuth2Error} on a non-OK status, an oversized body, a body that is
  * not valid JSON, or JSON that is not an object.
  */
@@ -136,18 +136,18 @@ export async function receiveJson(
 
   if (!res.ok) throw errorFromBody(res, safeParse(body.text), what, body.text);
 
+  if (body.truncated) {
+    throw new ServerError(
+      `the ${what} response exceeded ${MAX_RESPONSE_BYTES} bytes — refusing ` +
+        `to parse a response this large`,
+    );
+  }
+
   if (body.interrupted) {
     throw new TemporarilyUnavailableError(
       `the ${what} response body did not arrive in full ` +
         `(${describeError(body.interrupted.cause)})`,
       { cause: body.interrupted.cause },
-    );
-  }
-
-  if (body.truncated) {
-    throw new ServerError(
-      `the ${what} response exceeded ${MAX_RESPONSE_BYTES} bytes — refusing ` +
-        `to parse a response this large`,
     );
   }
 
