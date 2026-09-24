@@ -55,6 +55,7 @@ import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
 
 import type {
   DirectClient,
+  SessionState,
   TokenBundle,
   UserInfoClaims,
 } from "../../../client/mod.ts";
@@ -1519,16 +1520,74 @@ export class HonoBff {
       if (!data) {
         return c.json({ isAuthenticated: false, user: null });
       }
-      const expiresAt = data.tokens.accessTokenExpiresAt;
-      const sessionExpiresIn = expiresAt !== undefined
+      return c.json(this.#signedInState(data));
+    };
+  }
+
+  /**
+   * Who is signed in on this request, for a server that renders pages: the
+   * answer `GET /auth/session` gives the browser, read without a round trip to
+   * it. Seed the React provider's `initialState` with it so a signed-in page
+   * renders signed in on the first paint.
+   *
+   * A session counts exactly when the probe would count it. A session older
+   * than `sessionMaxAgeMs` is destroyed and its cookie cleared on this
+   * response, just as the probe does. It never returns a token, and it does
+   * not refresh one: `sessionExpiresIn` is `0` once the access token has
+   * expired, and the next `attachToken` or `protect` refreshes it when the
+   * session holds a refresh token.
+   *
+   * It skips the CSRF header check, because the answer goes to your server,
+   * not to a page that could read it cross-site. Call it only on the server.
+   * It sets no caching policy. A response built from its answer is one
+   * person's, so send it with a private or `no-store` `Cache-Control`.
+   *
+   * @param c The request's Hono context. The session cookie is read from it.
+   * @returns The same fields as `BffClient.getSession()`. Signed out,
+   * `user`, `sessionExpiresIn` and `logoutUrl` are all `null`.
+   *
+   * @example Seed the React provider from a server-rendered page
+   * ```ts
+   * import { Hono } from "hono";
+   * import type { SessionState } from "@udibo/oauth2/client";
+   * import type { HonoBff } from "@udibo/oauth2/hono/bff";
+   *
+   * declare const bff: HonoBff;
+   * declare function renderPage(initialState: SessionState): string;
+   *
+   * const app = new Hono();
+   * app.route("/auth", bff.routes());
+   * app.get("/", async (c) => {
+   *   c.header("Cache-Control", "private, no-store");
+   *   return c.html(renderPage(await bff.readSession(c)));
+   * });
+   * ```
+   */
+  async readSession(c: Context): Promise<SessionState> {
+    const cookieValue = getCookie(c, this.#cookieName);
+    const data = cookieValue
+      ? await this.#readLiveSession(c, cookieValue)
+      : null;
+    if (!data) {
+      return {
+        isAuthenticated: false,
+        user: null,
+        sessionExpiresIn: null,
+        logoutUrl: null,
+      };
+    }
+    return this.#signedInState(data);
+  }
+
+  #signedInState(data: SessionData): SessionState {
+    const expiresAt = data.tokens.accessTokenExpiresAt;
+    return {
+      isAuthenticated: true,
+      user: data.user ?? null,
+      sessionExpiresIn: expiresAt !== undefined
         ? Math.max(0, Math.round((expiresAt - Date.now()) / 1000))
-        : null;
-      return c.json({
-        isAuthenticated: true,
-        user: data.user ?? null,
-        sessionExpiresIn,
-        logoutUrl: this.#paths.logout,
-      });
+        : null,
+      logoutUrl: this.#paths.logout,
     };
   }
 

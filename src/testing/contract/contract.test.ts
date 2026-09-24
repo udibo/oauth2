@@ -253,14 +253,24 @@ runTenantContractTests({
       issuer: `http://127.0.0.1:${server.addr.port}`,
     });
     await tenant.addClient({ ...client, redirectUris: [redirectUri] });
+    let signedIn: string | null = null;
     return {
       issuer: tenant.issuer,
       client,
-      addUser: async (permissions) => {
+      addUser: async (permissions, profile = {}) => {
         const id = crypto.randomUUID();
-        await tenant.addUser({ id, username: id, permissions });
+        await tenant.addUser({
+          id,
+          username: id,
+          permissions,
+          email: profile.email,
+          emailVerified: profile.emailVerified ?? true,
+          hasPassword: profile.password ?? true,
+        });
         return id;
       },
+      linkAccount: (userId, account) =>
+        Promise.resolve(tenant.linkAccount(userId, account)),
       addOrganization: () => {
         const id = crypto.randomUUID();
         tenant.addOrganization({ id, slug: `org-${id}` });
@@ -282,8 +292,13 @@ runTenantContractTests({
         tenant.grant(grant);
         return Promise.resolve();
       },
-      signIn: async (userId, organizationId) => {
-        tenant.signInAs(userId, { organizationId });
+      signIn: async (userId, organizationId, options = {}) => {
+        if (!options.sameBrowser) {
+          tenant.signInAs(userId, { organizationId });
+          signedIn = userId;
+        } else if (signedIn !== userId) {
+          throw new Error("sameBrowser continues only the latest sign-in");
+        }
         const verifier = generateCodeVerifier();
         const authorize = new URL("/api/oauth2/authorize", tenant.issuer);
         authorize.search = new URLSearchParams({
@@ -294,6 +309,9 @@ runTenantContractTests({
           state: "contract",
           code_challenge: await generateCodeChallenge(verifier),
           code_challenge_method: "S256",
+          ...options.sameBrowser && organizationId
+            ? { organization: organizationId }
+            : {},
         }).toString();
         const redirect = await fetch(authorize, { redirect: "manual" });
         await redirect.body?.cancel();

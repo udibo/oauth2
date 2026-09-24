@@ -105,10 +105,48 @@ and an `audience` to test a resource server that validates locally against the
 tenant's JWKS. `issueAccessToken` mints a token directly, for an API test that
 does not need the browser flow.
 
-The fake answers what an app asks a tenant for, not everything a tenant does: it
-has no hosted pages, no organization or account API, no management API, and no
-policy — no MFA, no lockout, no session limits. Test those against a real
-tenant.
+The fake also answers the two APIs an app calls with the signed-in person's own
+token:
+
+- **The organization API** under `/api/organizations`. It creates an
+  organization owned by its creator, lists the caller's organizations and
+  members, and handles renames, deletes, invitations, offers and accepting them,
+  and revoking a tier. Any member can read the organization and its members. An
+  `owner` or `admin` manages it, and anyone below that gets the same `404` on
+  those actions, whatever the reason. An `admin` asking to delete the
+  organization, or to offer or revoke the `owner` tier, gets `403`. An
+  invitation to the address of someone already in the tenant becomes a pending
+  membership. Any other address gets an invitation, which only the verified
+  holder of that address can accept. `defineOrganizationRole` adds a role to
+  invite with beside the built-in tiers.
+- **The account API** under `/api/account`: the person's own metadata bucket,
+  their login sessions, and their linked accounts. Every `signInAs` is a new
+  browser. The first authorization after it starts a login session, and later
+  ones in that browser continue it. Name the device with
+  `signInAs(id, { userAgent, ipAddress })`, seed metadata with `userMetadata`,
+  add linked accounts with `linkAccount`, and set `hasPassword: false` to test
+  the refusal to disconnect someone's last way in.
+
+A login session and the credentials issued from it are tied together only for a
+first-party application, which is what `addClient` registers unless you pass
+`type: "third-party"`. For a first-party application:
+
+- Signing in again in the same browser revokes the credentials that session
+  issued before.
+- Revoking one of its tokens at the revocation endpoint, as a sign-out does,
+  ends the session.
+- Ending the session revokes its credentials.
+
+A third-party application's credentials only name the session they came from as
+the caller's current one. Revoking them leaves the session alone, and they
+outlive it.
+
+The same contract suite runs these answers against the fake and against the real
+identity service, so both give the same shapes and refusals. The fake still does
+not do everything a tenant does. It has no hosted pages and no management API.
+Its organization API does not grant application roles to members, and it does
+not let an organization define its own roles. It has no policy: no MFA, no
+lockout, no rate limits and no session limits. Test those against a real tenant.
 
 ## Persistent storage contracts
 
