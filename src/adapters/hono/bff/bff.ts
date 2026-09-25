@@ -52,6 +52,11 @@ import { Hono } from "hono";
 import type { Context, Handler, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
+import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_BODY_BYTES,
+  readBoundedBody,
+} from "../../../utils/_body.ts";
 
 import type {
   DirectClient,
@@ -319,6 +324,23 @@ export interface HonoBffBackchannelOptions {
     | Promise<BackchannelLogoutSubject | null>
     | BackchannelLogoutSubject
     | null;
+  /**
+   * The largest request body, in bytes, the receiver reads. The body is read
+   * before the `logout_token` is verified, so the cap bounds what an
+   * anonymous caller can make the BFF buffer. Bytes are counted as they
+   * arrive, so a chunked body or a `Content-Length` that understates the body
+   * cannot get past it. A larger body is refused with `400 invalid_request` —
+   * the status OIDC Back-Channel Logout 1.0 §2.8 requires for a failed
+   * request — without calling
+   * {@linkcode HonoBffBackchannelOptions.verifyLogoutToken}.
+   *
+   * The default is far above a `logout_token`, a JWT of a few KiB. When an
+   * earlier middleware has already read the body, the receiver uses Hono's
+   * parsed copy and the cap does not apply; bound the body in that middleware.
+   *
+   * @default 65536
+   */
+  maxBodyBytes?: number;
 }
 
 /**
@@ -986,7 +1008,9 @@ export class HonoBff {
    * {@linkcode HonoBffPaths.basePath}, when the session cookie would die
    * before the session behind it (see
    * {@linkcode HonoBffOptions.sessionMaxAgeMs}), when `sessionMaxAgeMs` or a
-   * numeric `cookie.maxAge` is not positive or exceeds 400 days, or when
+   * numeric `cookie.maxAge` is not positive or exceeds 400 days, when
+   * {@linkcode HonoBffBackchannelOptions.maxBodyBytes} is not a positive
+   * integer (a `RangeError`), or when
    * {@linkcode HonoBffOptions.extraParams} or
    * {@linkcode HonoBffOptions.forwardedParams} names a reserved authorize
    * parameter, gives one a name that is empty or not equal to its trimmed
@@ -1052,6 +1076,13 @@ export class HonoBff {
           );
         }
       }
+    }
+
+    if (options.backchannelLogout?.maxBodyBytes !== undefined) {
+      assertMaxBodyBytes(
+        options.backchannelLogout.maxBodyBytes,
+        "backchannelLogout.maxBodyBytes",
+      );
     }
 
     if (options.backchannelLogout && !supportsBackchannelLogout(this.#store)) {
@@ -1537,7 +1568,9 @@ export class HonoBff {
    * carrying a signed `logout_token`; the configured verifier validates it (and
    * returns the subject / OP session id), then the matching server-side
    * session(s) are destroyed. Responds `200` on success and `400` on a
-   * missing/invalid token, with `Cache-Control: no-store`, per the spec.
+   * missing/invalid token or a body over
+   * {@linkcode HonoBffBackchannelOptions.maxBodyBytes}, with
+   * `Cache-Control: no-store`, per the spec.
    */
   backchannelHandler(): Handler {
     return async (c) => {
@@ -1547,7 +1580,19 @@ export class HonoBff {
 
       let logoutToken: string | undefined;
       try {
-        logoutToken = (await c.req.formData()).get("logout_token")?.toString();
+        const form = c.req.raw.bodyUsed
+          ? await c.req.formData()
+          : await this.#readBackchannelForm(c, opts);
+        if (!form) {
+          return c.json(
+            {
+              error: "invalid_request",
+              error_description: "request body is too large",
+            },
+            400,
+          );
+        }
+        logoutToken = form.get("logout_token")?.toString();
       } catch {
         logoutToken = undefined;
       }
@@ -1585,6 +1630,20 @@ export class HonoBff {
       await this.#store.destroyByLogout({ sub: subject.sub, sid: subject.sid });
       return c.body(null, 200);
     };
+  }
+
+  async #readBackchannelForm(
+    c: Context,
+    opts: HonoBffBackchannelOptions,
+  ): Promise<FormData | null> {
+    const bytes = await readBoundedBody(
+      c.req.raw,
+      opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    );
+    if (!bytes) return null;
+    return await new Response(bytes, {
+      headers: { "content-type": c.req.header("content-type") ?? "" },
+    }).formData();
   }
 
   async #resolveSessionEntry(c: Context): Promise<SessionResolution> {

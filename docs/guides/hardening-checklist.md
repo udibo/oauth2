@@ -35,6 +35,9 @@ sections apply only when you host those flows.
 - [ ] The app handles invalid tokens separately from issuer outages.
 - [ ] Any proxy has a fixed trusted target; trusted-forwarded-header policy
       matches deployment.
+- [ ] Routes the package does not cap, including resource-server APIs that
+      accept form-encoded bodies and `honoIdentityRoutes`, have a request-size
+      limit in the framework or reverse proxy.
 
 ## If your app hosts an authorization server
 
@@ -46,6 +49,8 @@ sections apply only when you host those flows.
 - [ ] Client-credentials tokens represent the client or its service account, not
       its human owner.
 - [ ] Consent and scope policy match the clients you allow.
+- [ ] `maxBodyBytes` stays at its 64 KiB default unless your clients send larger
+      token, revocation, introspection or end-session bodies.
 - [ ] Persisted signing keys survive deployment; rotation and JWT revocation
       limits are understood.
 - [ ] The deprecated password grant is not enabled for new integrations.

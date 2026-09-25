@@ -17,6 +17,34 @@ The middleware does not control reverse-proxy access logs, tracing exporters, or
 logs your own handlers emit. Configure those separately to avoid recording
 credentials, request bodies, or raw callback URLs.
 
+## Request body limits
+
+The package caps the bodies it reads before authenticating the caller. Each read
+counts bytes as they arrive and stops at the cap, whatever the `Content-Length`
+header claims, and a body with no `Content-Length` (chunked) is counted the same
+way. Both caps default to 64 KiB, far above the largest legitimate field, a JWT
+of a few KiB.
+
+- **`AuthorizationServer`** caps the token, revocation, introspection, device
+  authorization and end-session endpoints with `maxBodyBytes`. An oversized body
+  gets `413` with `error: "invalid_request"`: RFC 6749 §5.2 names no error code
+  for size, and `413` tells the client that retrying the same body cannot
+  succeed.
+- **`HonoBff`** caps the back-channel logout receiver with
+  `backchannelLogout.maxBodyBytes`. An oversized body gets `400` with
+  `error: "invalid_request"`, because OIDC Back-Channel Logout 1.0 §2.8 requires
+  `400` for every failed logout request. `verifyLogoutToken` is not called. When
+  a middleware mounted before the receiver has already read the body (for
+  example with `c.req.parseBody()`), the receiver reads Hono's parsed copy and
+  the cap does not apply, so that middleware needs its own limit.
+
+Other body reads are not capped by the package. When a request carries no bearer
+`Authorization` header, `ResourceServer` reads a form-encoded `POST` body in
+full to look for an `access_token` parameter, and `honoIdentityRoutes` reads
+JSON and form bodies for sign-in, registration and the other identity flows. Put
+a request-size limit in front of those routes, in your framework (for example
+Hono's `bodyLimit` middleware) or your reverse proxy.
+
 ## Deliberate deviations (stricter than spec)
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists

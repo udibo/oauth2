@@ -236,6 +236,14 @@ These protections are on by default, deliberately stricter than RFC 6749:
   define. `validateCodeChallenge` is exported from
   `@udibo/oauth2/server/authorization` if you mint codes by calling the grant
   directly and want the same check.
+- **Request bodies are capped at 64 KiB.** The token, revocation, introspection,
+  device authorization and end-session endpoints read their form body before the
+  caller is authenticated, so each read stops once it passes `maxBodyBytes` (an
+  `AuthorizationServer` option, default `65536`). Bytes are counted as they
+  arrive, so a chunked body or an understated `Content-Length` does not get past
+  the cap. An oversized body is refused with `413` and `invalid_request` before
+  `resolve` runs. The largest legitimate field is a JWT of a few KiB, so raise
+  the cap only if your clients send larger bodies.
 
 `AuthorizationCodeGrant` takes four options worth setting deliberately:
 
