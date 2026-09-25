@@ -1,8 +1,35 @@
 const encoder = new TextEncoder();
 
-/** A local endpoint whose `200` response body never finishes arriving. */
+/** A local endpoint whose response never finishes arriving. */
 export interface InterruptedBodyServer extends AsyncDisposable {
   url: string;
+}
+
+/**
+ * Accepts every request and never sends response headers: each request hangs
+ * until the client gives up or the server is disposed.
+ */
+export function serveNoHeaders(): InterruptedBodyServer {
+  const pending = new Set<() => void>();
+  const server = Deno.serve(
+    { port: 0, hostname: "127.0.0.1", onListen: () => {} },
+    (request) =>
+      new Promise<Response>((resolve) => {
+        const answer = () => {
+          pending.delete(answer);
+          resolve(new Response(null, { status: 503 }));
+        };
+        pending.add(answer);
+        request.signal.addEventListener("abort", answer, { once: true });
+      }),
+  );
+  return {
+    url: `http://127.0.0.1:${server.addr.port}/`,
+    async [Symbol.asyncDispose]() {
+      for (const answer of pending) answer();
+      await server.shutdown();
+    },
+  };
 }
 
 /**

@@ -78,8 +78,11 @@ export type RedirectPolicy = "refuse" | "follow";
  * @param what The endpoint's name, for error messages.
  * @param options `redirect` policy and `timeoutMs` deadline.
  * @returns The response, which may still be a non-OK status.
- * @throws {ServerError} when the request cannot be made, times out, or (under
- * `"refuse"`) answers with a redirect.
+ * @throws {TemporarilyUnavailableError} when the request cannot be made or its
+ * response headers do not arrive before the deadline; `cause` is the
+ * transport failure.
+ * @throws {ServerError} when (under `"refuse"`) the endpoint answers with a
+ * redirect.
  */
 export async function sendGuarded(
   fetchImpl: typeof fetch,
@@ -98,7 +101,7 @@ export async function sendGuarded(
       signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
     });
   } catch (error) {
-    throw new ServerError(
+    throw new TemporarilyUnavailableError(
       `could not reach the ${what} (${describeError(error)})`,
       { cause: error },
     );

@@ -131,43 +131,22 @@ export interface CheckPermissionsResult {
 export async function checkPermissions(
   options: CheckPermissionsOptions,
 ): Promise<CheckPermissionsResult> {
-  const fetchImpl = options.fetch ?? fetch;
-  const reportUnreachable: typeof fetch = async (input, init) => {
-    try {
-      return await fetchImpl(input, init);
-    } catch (cause) {
-      throw new TemporarilyUnavailableError("check endpoint unreachable", {
-        cause,
-      });
-    }
-  };
-  let response: Response;
-  try {
-    response = await sendGuarded(
-      reportUnreachable,
-      options.endpoint,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${options.accessToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          permissions: options.permissions,
-          ...(options.resource ? { resource: options.resource } : {}),
-        }),
+  const response = await sendGuarded(
+    options.fetch ?? fetch,
+    options.endpoint,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${options.accessToken}`,
+        "content-type": "application/json",
       },
-      CHECK_ENDPOINT,
-    );
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.cause instanceof TemporarilyUnavailableError
-    ) {
-      throw error.cause;
-    }
-    throw error;
-  }
+      body: JSON.stringify({
+        permissions: options.permissions,
+        ...(options.resource ? { resource: options.resource } : {}),
+      }),
+    },
+    CHECK_ENDPOINT,
+  );
   if (response.status >= 500) {
     await response.body?.cancel();
     throw new TemporarilyUnavailableError(

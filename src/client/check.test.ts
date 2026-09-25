@@ -2,6 +2,7 @@ import {
   assert,
   assertEquals,
   assertRejects,
+  assertStrictEquals,
   assertStringIncludes,
 } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
@@ -69,17 +70,18 @@ describe("checkPermissions", () => {
   });
 
   it("reports an unreachable or failing endpoint as temporarily unavailable", async () => {
-    await assertRejects(
+    const dnsFailure = new TypeError("dns failure");
+    const unreachable = await assertRejects(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
           accessToken: "token-1",
           permissions: "posts:write",
-          fetch: (() =>
-            Promise.reject(new TypeError("dns failure"))) as typeof fetch,
+          fetch: (() => Promise.reject(dnsFailure)) as typeof fetch,
         }),
       TemporarilyUnavailableError,
     );
+    assertStrictEquals(unreachable.cause, dnsFailure);
     await assertRejects(
       () =>
         checkPermissions({
