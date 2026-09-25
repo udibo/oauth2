@@ -1584,6 +1584,22 @@ describe("HonoBff", () => {
         });
       });
 
+      it("logs out when an earlier middleware already parsed the body", async () => {
+        const { bff, store } = makeBcBff(() => ({ sub: "user-1" }));
+        const session = await seed(store, { user: { sub: "user-1" } });
+        const app = new Hono();
+        app.use(async (c, next) => {
+          await c.req.parseBody();
+          await next();
+        });
+        app.route("/auth", bff.routes());
+
+        const res = await post(app, { logout_token: "tok" });
+        await res.body?.cancel();
+        assertStrictEquals(res.status, 200);
+        assertStrictEquals(await store.read(session), null);
+      });
+
       it("rejects a maxBodyBytes that is not a positive integer", () => {
         for (const maxBodyBytes of [0, -1, 1.5, Number.NaN, Infinity]) {
           assertThrows(

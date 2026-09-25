@@ -910,7 +910,12 @@ export class AuthorizationServer<
     request: Request,
     options: { keepReadable?: boolean } = {},
   ): Promise<Uint8Array<ArrayBuffer>> {
-    const bytes = await readBoundedBody(request, this.#maxBodyBytes, options);
+    const bytes = await readBoundedBody(request, this.#maxBodyBytes, options)
+      .catch((cause) => {
+        throw new InvalidRequestError("request body could not be read", {
+          cause,
+        });
+      });
     if (!bytes) {
       throw new InvalidRequestError(
         413,

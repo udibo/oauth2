@@ -279,6 +279,28 @@ describe("AuthorizationServer request body limit", () => {
         assertStrictEquals(calls.resolve, 0);
       });
 
+      it("answers a body stream that errors mid-read with 400 invalid_request", async () => {
+        const { server, calls } = await createServer();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`${endpoint.fields}&`));
+            controller.error(new Error("client aborted the upload"));
+          },
+        });
+        const response = await endpoint.handle(
+          server,
+          new Request(`http://localhost${endpoint.path}`, {
+            method: "POST",
+            headers: formHeaders(),
+            body: stream,
+          }),
+        );
+        assertStrictEquals(response.status, 400);
+        const body = await response.json();
+        assertStrictEquals(body.error, "invalid_request");
+        assertStrictEquals(calls.endSession, 0);
+      });
+
       it("applies a configured maxBodyBytes", async () => {
         const { server } = await createServer(512);
         await withHttpServer(server, async (origin) => {

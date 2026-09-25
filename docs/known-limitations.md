@@ -33,7 +33,10 @@ of a few KiB.
 - **`HonoBff`** caps the back-channel logout receiver with
   `backchannelLogout.maxBodyBytes`. An oversized body gets `400` with
   `error: "invalid_request"`, because OIDC Back-Channel Logout 1.0 §2.8 requires
-  `400` for every failed logout request. `verifyLogoutToken` is not called.
+  `400` for every failed logout request. `verifyLogoutToken` is not called. When
+  a middleware mounted before the receiver has already read the body (for
+  example with `c.req.parseBody()`), the receiver reads Hono's parsed copy and
+  the cap does not apply, so that middleware needs its own limit.
 
 Other body reads are not capped by the package. When a request carries no bearer
 `Authorization` header, `ResourceServer` reads a form-encoded `POST` body in

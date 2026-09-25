@@ -334,7 +334,9 @@ export interface HonoBffBackchannelOptions {
    * request — without calling
    * {@linkcode HonoBffBackchannelOptions.verifyLogoutToken}.
    *
-   * The default is far above a `logout_token`, a JWT of a few KiB.
+   * The default is far above a `logout_token`, a JWT of a few KiB. When an
+   * earlier middleware has already read the body, the receiver uses Hono's
+   * parsed copy and the cap does not apply; bound the body in that middleware.
    *
    * @default 65536
    */
@@ -1578,11 +1580,10 @@ export class HonoBff {
 
       let logoutToken: string | undefined;
       try {
-        const bytes = await readBoundedBody(
-          c.req.raw,
-          opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
-        );
-        if (!bytes) {
+        const form = c.req.raw.bodyUsed
+          ? await c.req.formData()
+          : await this.#readBackchannelForm(c, opts);
+        if (!form) {
           return c.json(
             {
               error: "invalid_request",
@@ -1591,9 +1592,6 @@ export class HonoBff {
             400,
           );
         }
-        const form = await new Response(bytes, {
-          headers: { "content-type": c.req.header("content-type") ?? "" },
-        }).formData();
         logoutToken = form.get("logout_token")?.toString();
       } catch {
         logoutToken = undefined;
@@ -1632,6 +1630,20 @@ export class HonoBff {
       await this.#store.destroyByLogout({ sub: subject.sub, sid: subject.sid });
       return c.body(null, 200);
     };
+  }
+
+  async #readBackchannelForm(
+    c: Context,
+    opts: HonoBffBackchannelOptions,
+  ): Promise<FormData | null> {
+    const bytes = await readBoundedBody(
+      c.req.raw,
+      opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    );
+    if (!bytes) return null;
+    return await new Response(bytes, {
+      headers: { "content-type": c.req.header("content-type") ?? "" },
+    }).formData();
   }
 
   async #resolveSessionEntry(c: Context): Promise<SessionResolution> {
