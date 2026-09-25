@@ -1326,6 +1326,7 @@ describe("HonoBff", () => {
       verify: (
         t: string,
       ) => { sub?: string; sid?: string } | null,
+      maxBodyBytes?: number,
     ) {
       const store = new MemorySessionStore();
       const bff = new HonoBff({
@@ -1334,7 +1335,10 @@ describe("HonoBff", () => {
         defaultReturnTo: "/",
         csrf: false,
         sessionStore: store,
-        backchannelLogout: { verifyLogoutToken: verify },
+        backchannelLogout: {
+          verifyLogoutToken: verify,
+          ...(maxBodyBytes === undefined ? {} : { maxBodyBytes }),
+        },
       });
       return { bff, store };
     }
@@ -1415,6 +1419,180 @@ describe("HonoBff", () => {
       const resN = await post(makeApp(nuller.bff), { logout_token: "tok" });
       assertStrictEquals(resN.status, 400);
       await resN.body?.cancel();
+    });
+
+    describe("request body limit", () => {
+      const DEFAULT_LIMIT = 64 * 1024;
+      const CHUNK_BYTES = 16 * 1024;
+
+      /** A logout body padded with an ignored parameter to exactly `bytes`. */
+      function paddedLogout(bytes: number): string {
+        const prefix = "logout_token=tok&pad=";
+        return prefix + "a".repeat(bytes - prefix.length);
+      }
+
+      function countingStream(form: string) {
+        const bytes = new TextEncoder().encode(form);
+        const state = { pulled: 0, cancelled: false };
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (state.pulled >= bytes.byteLength) return controller.close();
+            const chunk = bytes.subarray(
+              state.pulled,
+              state.pulled + CHUNK_BYTES,
+            );
+            state.pulled += chunk.byteLength;
+            controller.enqueue(chunk);
+          },
+          cancel() {
+            state.cancelled = true;
+          },
+        });
+        return { stream, state };
+      }
+
+      function makeCountingBff(maxBodyBytes?: number) {
+        const verified: string[] = [];
+        const { bff } = makeBcBff((token) => {
+          verified.push(token);
+          return { sub: "user-1" };
+        }, maxBodyBytes);
+        return { app: makeApp(bff), verified };
+      }
+
+      async function withHttpServer(
+        app: Hono,
+        fn: (url: string) => Promise<void>,
+      ): Promise<void> {
+        const http = Deno.serve(
+          { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+          app.fetch,
+        );
+        try {
+          await fn(`http://127.0.0.1:${http.addr.port}/auth/backchannel`);
+        } finally {
+          await http.shutdown();
+        }
+      }
+
+      async function assertRefused(res: Response): Promise<void> {
+        assertStrictEquals(res.status, 400);
+        assertStrictEquals(res.headers.get("cache-control"), "no-store");
+        const body = await res.json();
+        assertStrictEquals(body.error, "invalid_request");
+        assertStrictEquals(
+          body.error_description,
+          "request body is too large",
+        );
+      }
+
+      const formHeaders = {
+        "content-type": "application/x-www-form-urlencoded",
+      };
+
+      it("accepts a body of exactly the default 64 KiB limit", async () => {
+        const { app, verified } = makeCountingBff();
+        await withHttpServer(app, async (url) => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: formHeaders,
+            body: paddedLogout(DEFAULT_LIMIT),
+          });
+          await res.body?.cancel();
+          assertStrictEquals(res.status, 200);
+          assertEquals(verified, ["tok"]);
+        });
+      });
+
+      it("refuses a body whose Content-Length declares one byte over the limit, before verifying the logout_token", async () => {
+        const { app, verified } = makeCountingBff();
+        await withHttpServer(app, async (url) => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: formHeaders,
+            body: paddedLogout(DEFAULT_LIMIT + 1),
+          });
+          await assertRefused(res);
+          assertEquals(verified, []);
+        });
+      });
+
+      it("counts the bytes of a chunked body that carries no Content-Length", async () => {
+        const { app, verified } = makeCountingBff();
+        const { stream } = countingStream(paddedLogout(1024 * 1024));
+        await withHttpServer(app, async (url) => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: formHeaders,
+            body: stream,
+          });
+          await assertRefused(res);
+          assertEquals(verified, []);
+        });
+      });
+
+      it("stops reading at the limit when Content-Length understates the body", async () => {
+        const { app, verified } = makeCountingBff();
+        const { stream, state } = countingStream(
+          paddedLogout(4 * 1024 * 1024),
+        );
+        const res = await app.request("/auth/backchannel", {
+          method: "POST",
+          headers: { ...formHeaders, "content-length": "64" },
+          body: stream,
+        });
+        await assertRefused(res);
+        assert(
+          state.pulled <= DEFAULT_LIMIT + CHUNK_BYTES,
+          `read ${state.pulled} bytes past a ${DEFAULT_LIMIT}-byte limit`,
+        );
+        assert(state.cancelled, "the request body stream was not cancelled");
+        assertEquals(verified, []);
+      });
+
+      it("refuses a body whose Content-Length declares more than the limit without reading it", async () => {
+        const { app, verified } = makeCountingBff();
+        const { stream, state } = countingStream(paddedLogout(1024 * 1024));
+        const res = await app.request("/auth/backchannel", {
+          method: "POST",
+          headers: { ...formHeaders, "content-length": `${1024 * 1024}` },
+          body: stream,
+        });
+        await assertRefused(res);
+        assertStrictEquals(state.pulled, 0);
+        assertEquals(verified, []);
+      });
+
+      it("applies a configured maxBodyBytes", async () => {
+        const { app, verified } = makeCountingBff(512);
+        await withHttpServer(app, async (url) => {
+          const atLimit = await fetch(url, {
+            method: "POST",
+            headers: formHeaders,
+            body: paddedLogout(512),
+          });
+          await atLimit.body?.cancel();
+          assertStrictEquals(atLimit.status, 200);
+
+          const overLimit = await fetch(url, {
+            method: "POST",
+            headers: formHeaders,
+            body: paddedLogout(513),
+          });
+          await assertRefused(overLimit);
+          assertEquals(verified, ["tok"]);
+        });
+      });
+
+      it("rejects a maxBodyBytes that is not a positive integer", () => {
+        for (const maxBodyBytes of [0, -1, 1.5, Number.NaN, Infinity]) {
+          assertThrows(
+            () => makeBcBff(() => null, maxBodyBytes),
+            RangeError,
+            "maxBodyBytes",
+          );
+        }
+      });
     });
 
     it("throws at construction with a stateless (incapable) store", () => {
