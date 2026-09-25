@@ -67,10 +67,11 @@ class MockClientService implements ClientServiceInterface<Client, User> {
   ): Promise<Client | undefined> {
     const client = this.clients.get(id);
     if (!client) return Promise.resolve(undefined);
-    if (client.secret) {
-      if (!secret || client.secret !== secret) {
-        return Promise.resolve(undefined);
-      }
+    if (!client.secret) {
+      return Promise.resolve(secret ? undefined : client);
+    }
+    if (!secret || client.secret !== secret) {
+      return Promise.resolve(undefined);
     }
     return Promise.resolve(client);
   }

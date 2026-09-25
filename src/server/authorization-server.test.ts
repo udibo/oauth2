@@ -446,6 +446,34 @@ describe("AuthorizationServer", () => {
       assertStrictEquals(body.get("grant_type"), "client_credentials");
     });
 
+    it("answers invalid_client when a public client presents a secret it was never issued", async () => {
+      const publicClient: TestClient = {
+        id: "stray-secret-client",
+        grants: ["client_credentials"],
+      };
+      await clientService.add(publicClient);
+
+      const asPublic = await server.handleTokenRequest(tokenRequest({
+        grant_type: "client_credentials",
+        client_id: publicClient.id,
+      }));
+      assertStrictEquals(asPublic.status, 200);
+
+      const response = await server.handleTokenRequest(tokenRequest({
+        grant_type: "client_credentials",
+        client_id: publicClient.id,
+        client_secret: "never-issued",
+      }));
+
+      assertStrictEquals(response.status, 401);
+      const body = await response.json();
+      assertStrictEquals(body.error, "invalid_client");
+      assertStrictEquals(
+        body.error_description,
+        "client authentication failed",
+      );
+    });
+
     it("should reject unsupported grant type", async () => {
       const request = tokenRequest({ grant_type: "unknown" });
 
