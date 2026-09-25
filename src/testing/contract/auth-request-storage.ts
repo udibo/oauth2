@@ -72,7 +72,8 @@ export interface AuthRequestStorageContractOptions {
    * `DirectClient` clears it on every sign-out, and removing everything would
    * cancel other users' sign-ins still in progress. The suite then drops the
    * clear-everything case and instead requires that `clear()` leaves every
-   * record still inside its lifetime readable and redeemable.
+   * record still inside its lifetime readable and redeemable, and removes a
+   * record created at the epoch (`createdAt: 0`), which is past any lifetime.
    */
   clear?: "all" | "scoped";
   /**
@@ -174,6 +175,16 @@ export function runAuthRequestStorageContractTests(
               : await store.get("state-1"),
             first,
             message,
+          );
+        });
+
+        it('removes a record past any lifetime (clear: "scoped")', async () => {
+          await store.set("expired", record({ createdAt: 0 }));
+          await store.clear();
+          assertStrictEquals(
+            await store.get("expired"),
+            null,
+            "a scoped clear() must still remove expired records",
           );
         });
       }
