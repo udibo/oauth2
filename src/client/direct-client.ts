@@ -400,9 +400,13 @@ export class DirectClient extends OAuth2ClientBase {
    * @returns The server's metadata document.
    * @throws {Error} when the client was configured with explicit `endpoints`
    * rather than an `issuer` — there is nothing to discover.
+   * @throws {TemporarilyUnavailableError} the last attempt's error when both
+   * well-known paths fail because the server cannot be reached or its
+   * response does not arrive in full before the deadline; `cause` is the
+   * transport failure.
    * @throws {OAuth2Error} the last attempt's error when both well-known paths
-   * fail: the server is unreachable, answers non-OK or with something other
-   * than a JSON object, or reports an `issuer` other than the configured one.
+   * fail otherwise: the server answers non-OK or with something other than a
+   * JSON object, or reports an `issuer` other than the configured one.
    *
    * @example
    * ```ts
@@ -644,6 +648,9 @@ export class DirectClient extends OAuth2ClientBase {
    *
    * @param input The callback URL, its query string, or the parsed params.
    * @returns The persisted tokens and the `returnTo` recorded at login.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    * @throws {OAuth2Error} when the callback carries `?error=…`, or the token
    * exchange fails.
    * @throws {TypeError} when `code` or `state` is missing.
@@ -740,6 +747,9 @@ export class DirectClient extends OAuth2ClientBase {
    * `returnTo`, plus the raw response.
    * @throws {InvalidGrantError} when `state` is unknown or older than
    * `authRequestTtlMs`.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    */
   async exchangeAuthorizationCode(
     code: string,
@@ -790,6 +800,9 @@ export class DirectClient extends OAuth2ClientBase {
    *
    * @param refreshToken The refresh token to redeem.
    * @returns The new tokens, the rotated refresh token, and the raw response.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    * @throws {OAuth2Error} when the token endpoint rejects the grant.
    */
   async exchangeRefreshToken(refreshToken: string): Promise<ExchangeResult> {
@@ -814,6 +827,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @returns The persisted token bundle.
    * @throws {Error} when the client has no `clientSecret` — RFC 6749 §4.4
    * restricts this grant to confidential clients.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    * @throws {OAuth2Error} when the token endpoint rejects the grant.
    *
    * @example
@@ -869,6 +885,11 @@ export class DirectClient extends OAuth2ClientBase {
    * one is dead.
    * @throws {Error} whatever the configured `RefreshTokenStorage` threw when
    * the read itself failed.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
+   * @throws {OAuth2Error} when the token endpoint rejects the refresh for
+   * another reason.
    */
   refresh(): Promise<string> {
     return this.#sharedRefresh(true);
@@ -950,6 +971,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @returns The server's device authorization response.
    * @throws {Error} when no device authorization endpoint is configured or
    * discoverable.
+   * @throws {TemporarilyUnavailableError} when the device authorization
+   * endpoint cannot be reached or its response does not arrive in full before
+   * the deadline; `cause` is the transport failure.
    * @throws {OAuth2Error} when the server rejects the request.
    *
    * @example
@@ -1002,6 +1026,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @throws {InvalidGrantError} when `expiresAt` passes before approval. A
    * server that reports the code expired first throws `ExpiredTokenError`
    * instead.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure. Polling stops on it.
    * @throws {OAuth2Error} on any other terminal error from the server.
    */
   async pollDeviceToken(
@@ -1056,6 +1083,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @returns The introspection response; check `active`.
    * @throws {Error} when the client has no `clientSecret` — RFC 7662 requires
    * an authenticated caller.
+   * @throws {TemporarilyUnavailableError} when the introspection endpoint
+   * cannot be reached or its response does not arrive in full before the
+   * deadline; `cause` is the transport failure.
    * @throws {OAuth2Error} when the endpoint rejects the request.
    */
   async introspect(
@@ -1093,6 +1123,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @param options `tokenTypeHint` tells the server which kind to look up
    * first.
    * @throws {Error} when no revocation endpoint is configured or discoverable.
+   * @throws {TemporarilyUnavailableError} when the revocation endpoint cannot
+   * be reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    * @throws {OAuth2Error} when the endpoint rejects the request.
    */
   async revoke(
@@ -1126,6 +1159,9 @@ export class DirectClient extends OAuth2ClientBase {
    * @throws {Error} when no userinfo endpoint is configured or discoverable.
    * @throws {InvalidGrantError} when no usable token is stored and there is no
    * refresh token to mint one.
+   * @throws {TemporarilyUnavailableError} when the token or userinfo endpoint
+   * cannot be reached or its response does not arrive in full before the
+   * deadline; `cause` is the transport failure.
    * @throws {OAuth2Error} when the refresh or the userinfo endpoint fails.
    */
   async getUserInfo(): Promise<UserInfoClaims> {
@@ -1403,6 +1439,9 @@ export class DirectClient extends OAuth2ClientBase {
    * than 30 seconds left, otherwise a freshly refreshed one.
    * @throws {InvalidGrantError} when a refresh is needed and no refresh token
    * is stored, or the stored one is dead.
+   * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
+   * reached or its response does not arrive in full before the deadline;
+   * `cause` is the transport failure.
    * @throws {OAuth2Error} when a needed refresh fails for another reason.
    */
   async getAccessToken(): Promise<string> {
