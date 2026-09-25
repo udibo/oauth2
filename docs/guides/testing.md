@@ -129,8 +129,12 @@ runOtpStoreContractTests({
 Each `makeStore` must provide fresh state. Follow the suite's options for the
 other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
 lockout, token flows, token readers, and pending login requests
-(`AuthRequestStorage`, whose optional `take` is raced by two concurrent
-callers). The BFF session suite lives in `@udibo/oauth2/hono/bff/testing`.
+(`AuthRequestStorage`, whose optional `take` is raced by eight concurrent
+callers). Register an `AuthRequestStorage` shared between users with
+`clear: "scoped"` when its `clear()` removes only expired records: the suite
+then requires `clear()` to leave every in-progress sign-in intact and to remove
+an expired record, instead of removing everything. The BFF session suite lives
+in `@udibo/oauth2/hono/bff/testing`.
 
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
