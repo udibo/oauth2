@@ -22,6 +22,20 @@
  * });
  * ```
  *
+ * @example Verify a store shared between users, whose `clear()` removes only expired records
+ * ```ts
+ * import { runAuthRequestStorageContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { AuthRequestStorage } from "@udibo/oauth2/client";
+ *
+ * declare function freshSharedAuthRequestStorage(): Promise<AuthRequestStorage>;
+ *
+ * runAuthRequestStorageContractTests({
+ *   describeName: "SharedAuthRequestStorage satisfies AuthRequestStorage contract",
+ *   makeStore: freshSharedAuthRequestStorage,
+ *   clear: "scoped",
+ * });
+ * ```
+ *
  * @module
  */
 
@@ -50,6 +64,17 @@ export interface AuthRequestStorageContractOptions {
    * that meant to implement it and does not fails loudly.
    */
   take?: boolean;
+  /**
+   * What the store's {@link AuthRequestStorage.clear} removes. Defaults to
+   * `"all"`: every record, as a store private to one browser or session
+   * does. Pass `"scoped"` for a store shared between users whose `clear()`
+   * deliberately removes less — only expired records, say — because a
+   * `DirectClient` clears it on every sign-out, and removing everything would
+   * cancel other users' sign-ins still in progress. The suite then drops the
+   * clear-everything case and instead requires that `clear()` leaves every
+   * record still inside its lifetime readable and redeemable.
+   */
+  clear?: "all" | "scoped";
   /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"AuthRequestStorage contract"`.
@@ -80,6 +105,7 @@ export function runAuthRequestStorageContractTests(
   options: AuthRequestStorageContractOptions,
 ): void {
   const expectTake = options.take ?? true;
+  const clearScope = options.clear ?? "all";
 
   describe(options.describeName ?? "AuthRequestStorage contract", () => {
     let store: AuthRequestStorage;
@@ -123,13 +149,34 @@ export function runAuthRequestStorageContractTests(
         );
       });
 
-      it("clears every record", async () => {
-        await store.set("state-1", record());
-        await store.set("state-2", record());
-        await store.clear();
-        assertStrictEquals(await store.get("state-1"), null);
-        assertStrictEquals(await store.get("state-2"), null);
-      });
+      if (clearScope === "all") {
+        it("clears every record", async () => {
+          await store.set("state-1", record());
+          await store.set("state-2", record());
+          await store.clear();
+          assertStrictEquals(await store.get("state-1"), null);
+          assertStrictEquals(await store.get("state-2"), null);
+        });
+      } else {
+        it('leaves every in-progress record in place (clear: "scoped")', async () => {
+          const first = record({ codeVerifier: "verifier-1" });
+          const second = record({ codeVerifier: "verifier-2" });
+          await store.set("state-1", first);
+          await store.set("state-2", second);
+          await store.clear();
+          const message =
+            "clear() on a shared store must not cancel another user's sign-in " +
+            "that is still in progress";
+          assertEquals(await store.get("state-2"), second, message);
+          assertEquals(
+            expectTake
+              ? await store.take!("state-1")
+              : await store.get("state-1"),
+            first,
+            message,
+          );
+        });
+      }
     });
 
     if (expectTake) {

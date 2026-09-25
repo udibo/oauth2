@@ -38,7 +38,11 @@ import { runRateLimitStoreContractTests } from "./rate-limit-store.ts";
 import { runLockoutStoreContractTests } from "./lockout-store.ts";
 import { runTenantContractTests } from "./tenant.ts";
 import { runAuthRequestStorageContractTests } from "./auth-request-storage.ts";
-import { MemoryAuthRequestStorage } from "../../client/storage.ts";
+import {
+  type AuthRequestRecord,
+  type AuthRequestStorage,
+  MemoryAuthRequestStorage,
+} from "../../client/storage.ts";
 import { SessionStorageAuthRequestStorage } from "../../client/browser-storage.ts";
 import { createFakeTenant } from "../tenant.ts";
 import { encodeBasicAuth } from "../../utils/basic-auth.ts";
@@ -231,6 +235,38 @@ runAuthRequestStorageContractTests({
     new SessionStorageAuthRequestStorage({
       keyPrefix: `contract:${crypto.randomUUID()}:`,
     }),
+});
+
+class SharedAuthRequestStorage implements AuthRequestStorage {
+  static readonly TTL_MS = 10 * 60_000;
+  readonly #records = new Map<string, AuthRequestRecord>();
+  get(state: string): AuthRequestRecord | null {
+    return this.#records.get(state) ?? null;
+  }
+  set(state: string, value: AuthRequestRecord): void {
+    this.#records.set(state, value);
+  }
+  take(state: string): AuthRequestRecord | null {
+    const record = this.#records.get(state) ?? null;
+    this.#records.delete(state);
+    return record;
+  }
+  delete(state: string): void {
+    this.#records.delete(state);
+  }
+  clear(): void {
+    const cutoff = Date.now() - SharedAuthRequestStorage.TTL_MS;
+    for (const [state, record] of this.#records) {
+      if (record.createdAt < cutoff) this.#records.delete(state);
+    }
+  }
+}
+
+runAuthRequestStorageContractTests({
+  describeName:
+    "A store shared between users, whose clear() removes only expired records, satisfies AuthRequestStorage contract",
+  makeStore: () => new SharedAuthRequestStorage(),
+  clear: "scoped",
 });
 
 runMfaStoreContractTests({
