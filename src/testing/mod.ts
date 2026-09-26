@@ -27,10 +27,11 @@
  *   prototypes — never for production.
  *
  * - **A fake Udibo Identity tenant.** {@link createFakeTenant} answers a tenant's
- *   protocol surface and its `/api/check` questions over `fetch`, with the
- *   claims a real tenant issues — permissions, the organization picked at
- *   sign-in, and resource grants — so an app built on a Udibo Identity tenant can test
- *   its own routes without running the identity service.
+ *   protocol surface, its `/api/check` questions, and its organization and
+ *   account APIs over `fetch`, with the claims a real tenant issues —
+ *   permissions, the organization picked at sign-in, and resource grants — so
+ *   an app built on a Udibo Identity tenant can test its own routes without
+ *   running the identity service.
  *
  * Nothing in this module is an OAuth2 primitive — only testing support.
  * Production code should never import from here.
@@ -65,9 +66,11 @@ export {
   type FakeTenant,
   type FakeTenantClient,
   type FakeTenantGrant,
+  type FakeTenantLinkedAccount,
   type FakeTenantMembership,
   type FakeTenantOptions,
   type FakeTenantOrganization,
+  type FakeTenantOrganizationRole,
   type FakeTenantSignIn,
   type FakeTenantSubject,
   type FakeTenantTokenRequest,

@@ -41,6 +41,37 @@ sign-in button. Construct the client once per browser app, not on every render.
 For server rendering, derive any initial auth state from the current request; do
 not share a token-owning `DirectClient` across users.
 
+With a `HonoBff`, `bff.readSession(c)` gives the server the answer
+`GET /auth/session` gives the browser, without tokens. Pass it to the provider
+as `initialState`, and a signed-in page renders signed in on the first paint
+instead of waiting for the session probe:
+
+```tsx
+import type { SessionState } from "@udibo/oauth2/client";
+import { BffClient } from "@udibo/oauth2/client";
+import { OAuth2Provider } from "@udibo/oauth2/react";
+import type { ReactNode } from "react";
+
+const client = new BffClient();
+
+export function Root(
+  props: { session: SessionState; children: ReactNode },
+) {
+  return (
+    <OAuth2Provider client={client} initialState={props.session}>
+      {props.children}
+    </OAuth2Provider>
+  );
+}
+```
+
+`readSession` applies the same session lifetime as the probe. In
+`sessionMode:
+"own"`, it destroys a session past `sessionMaxAgeMs` and clears
+its cookie. Shared mode leaves lifetime enforcement to the application and its
+session store. It sets no caching policy, so send a page rendered from its
+answer with a private or `no-store` `Cache-Control`.
+
 A rendering guard does not protect data. Keep bearer/session validation,
 required scopes, and record-level authorization on the server. Use the same
 `BffClient.fetch` for credentialed API calls so the CSRF header is included.

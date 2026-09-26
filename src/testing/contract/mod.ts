@@ -80,5 +80,7 @@ export {
   runTenantContractTests,
   type TenantContractFixture,
   type TenantContractOptions,
+  type TenantContractProfile,
+  type TenantContractSignInOptions,
   type TenantContractTokens,
 } from "./tenant.ts";

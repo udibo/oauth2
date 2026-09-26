@@ -2395,6 +2395,152 @@ describe("HonoBff", () => {
     });
   });
 
+  describe("readSession", () => {
+    function makeRenderingApp(bff: HonoBff): Hono {
+      const app = makeApp(bff);
+      app.get("/page", async (c) => c.json(await bff.readSession(c)));
+      return app;
+    }
+
+    it("reports nobody signed in when the request carries no session cookie", async () => {
+      const app = makeRenderingApp(makeBff());
+
+      const res = await app.request("/page");
+
+      assertEquals(await res.json(), {
+        isAuthenticated: false,
+        user: null,
+        sessionExpiresIn: null,
+        logoutUrl: null,
+      });
+      assertStrictEquals(res.headers.get("set-cookie"), null);
+    });
+
+    it("reports the signed-in user, when the token expires and how to sign out, and no token", async () => {
+      const bff = makeBff({
+        resolveUser: () => ({ sub: testUser.id, plan: "enterprise" }),
+      });
+      const app = makeRenderingApp(bff);
+      const cookie = await loginCookie(app);
+
+      const res = await app.request("/page", { headers: { cookie } });
+
+      const session = await res.json();
+      assertEquals(Object.keys(session).sort(), [
+        "isAuthenticated",
+        "logoutUrl",
+        "sessionExpiresIn",
+        "user",
+      ]);
+      assertStrictEquals(session.isAuthenticated, true);
+      assertEquals(session.user, { sub: testUser.id, plan: "enterprise" });
+      assertStrictEquals(session.logoutUrl, "/auth/logout");
+      assert(
+        session.sessionExpiresIn > 0,
+        `sessionExpiresIn was ${session.sessionExpiresIn}`,
+      );
+    });
+
+    it("answers what the session probe answers for the same session", async () => {
+      const bff = makeBff();
+      const app = makeRenderingApp(bff);
+      const cookie = await loginCookie(app);
+
+      const probed = await (await app.request("/auth/session", {
+        headers: { cookie },
+      })).json();
+      const read = await (await app.request("/page", { headers: { cookie } }))
+        .json();
+
+      assertEquals(read, probed);
+    });
+
+    it("needs no CSRF header, because it never answers a browser directly", async () => {
+      const bff = makeCsrfBff();
+      const app = makeRenderingApp(bff);
+      const cookie = await createTestSession(bff, {
+        user: { sub: testUser.id },
+      });
+
+      const probe = await app.request("/auth/session", { headers: { cookie } });
+      await probe.body?.cancel();
+      assertStrictEquals(probe.status, 403);
+      const res = await app.request("/page", { headers: { cookie } });
+      assertStrictEquals((await res.json()).isAuthenticated, true);
+    });
+
+    it("reports nobody signed in for a cookie the store no longer holds", async () => {
+      const app = makeRenderingApp(makeBff());
+
+      const res = await app.request("/page", {
+        headers: { cookie: "oauth2_session=forgotten" },
+      });
+
+      assertStrictEquals((await res.json()).isAuthenticated, false);
+    });
+
+    it("destroys a session older than sessionMaxAgeMs and clears its cookie", async () => {
+      const store = new MemorySessionStore();
+      const bff = makeBff({ sessionStore: store, sessionMaxAgeMs: 60 * 1000 });
+      const app = makeRenderingApp(bff);
+      const cookie = await createTestSession(bff, {
+        user: { sub: testUser.id },
+        createdAt: Date.now() - 61_000,
+      });
+
+      const res = await app.request("/page", { headers: { cookie } });
+
+      assertStrictEquals((await res.json()).isAuthenticated, false);
+      assertStringIncludes(
+        res.headers.getSetCookie().join("\n"),
+        "Max-Age=0",
+      );
+      assertStrictEquals(await store.read(cookie.split("=")[1]), null);
+    });
+
+    it("keeps a session younger than sessionMaxAgeMs without touching its cookie", async () => {
+      const bff = makeBff({ sessionMaxAgeMs: 60 * 1000 });
+      const app = makeRenderingApp(bff);
+      const cookie = await createTestSession(bff, {
+        user: { sub: testUser.id },
+        createdAt: Date.now() - 59_000,
+      });
+
+      const res = await app.request("/page", { headers: { cookie } });
+
+      assertStrictEquals((await res.json()).isAuthenticated, true);
+      assertStrictEquals(res.headers.get("set-cookie"), null);
+    });
+
+    it("leaves the session's age to the app in sessionMode: shared", async () => {
+      const bff = makeBff({
+        sessionMode: "shared",
+        sessionMaxAgeMs: 60 * 1000,
+        cookie: { name: "session_id", secure: false },
+      });
+      const app = makeRenderingApp(bff);
+      const cookie = await createTestSession(bff, {
+        user: { sub: testUser.id },
+        createdAt: Date.now() - 3_600_000,
+      });
+
+      const res = await app.request("/page", { headers: { cookie } });
+
+      assertStrictEquals((await res.json()).isAuthenticated, true);
+    });
+
+    it("sets no caching policy, leaving the page's own to the app", async () => {
+      const bff = makeBff();
+      const app = makeRenderingApp(bff);
+      const cookie = await loginCookie(app);
+
+      const res = await app.request("/page", { headers: { cookie } });
+      await res.body?.cancel();
+
+      assertStrictEquals(res.headers.get("cache-control"), null);
+    });
+  });
+
   describe("logout handler", () => {
     it("destroys the session, clears the cookie, and redirects", async () => {
       const bff = makeBff();
