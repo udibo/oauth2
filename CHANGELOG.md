@@ -1,3 +1,27 @@
+# [0.8.0](https://github.com/udibo/oauth2/compare/0.7.0...0.8.0) (2026-09-26)
+
+- feat!: add readSession and fake tenant org/account APIs
+  ([#46](https://github.com/udibo/oauth2/issues/46))
+  ([17e28ab](https://github.com/udibo/oauth2/commit/17e28ab5750b807ba0d3d85cd931071a9491b01c))
+
+### BREAKING CHANGES
+
+- TenantContractFixture asks more of a fixture. linkAccount is now required and
+  links an external account to a person. addUser must honor its optional
+  profile: give the person profile.email, verify it unless emailVerified is
+  false, and with password false leave them no password while signIn can still
+  sign them in. signIn takes a third argument, and with { sameBrowser: true } it
+  must sign the person in from the browser their previous sign-in used. The
+  fixture's client must be first-party. createFakeTenant also changed: a second
+  authorization under one signInAs revokes a first-party application's earlier
+  credentials, so call signInAs before each sign-in that should stay
+  independent, or register the client with type "third-party". A membership
+  seeded without roles, or with [], now holds ["member"] instead of none.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- fix(testing): isolate concurrent session issuance
+
 # [0.7.0](https://github.com/udibo/oauth2/compare/0.6.0...0.7.0) (2026-09-25)
 
 - feat(client)!: report pre-header timeouts as unavailable
