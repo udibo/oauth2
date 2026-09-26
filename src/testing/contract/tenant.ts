@@ -1369,6 +1369,17 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         assertEquals(tooDeep.status, 400);
       });
 
+      it("measures the metadata limit in UTF-8 bytes and preserves the bucket on refusal", async () => {
+        const caller = await person();
+        const notes = "界".repeat(6 * 1024);
+        const reply = await call(caller.token, "PATCH", "/api/account", {
+          userMetadata: { notes },
+        });
+        assertEquals(reply.status, 400);
+        const read = await call(caller.token, "GET", "/api/account");
+        assertEquals(read.body, { userMetadata: {} });
+      });
+
       it("keeps the merged bucket to sixteen kilobytes, however small each patch is", async () => {
         const caller = await person();
         const half = "x".repeat(9 * 1024);

@@ -1561,9 +1561,11 @@ export class HonoBff {
    * it. Seed the React provider's `initialState` with it so a signed-in page
    * renders signed in on the first paint.
    *
-   * A session counts exactly when the probe would count it. A session older
-   * than `sessionMaxAgeMs` is destroyed and its cookie cleared on this
-   * response, just as the probe does. It never returns a token, and it does
+   * A session counts exactly when the probe would count it. In `sessionMode:
+   * "own"`, a session older than `sessionMaxAgeMs` is destroyed and its cookie
+   * cleared on this response, just as the probe does. Shared mode leaves
+   * lifetime enforcement to the application and its session store.
+   * It never returns a token, and it does
    * not refresh one: `sessionExpiresIn` is `0` once the access token has
    * expired, and the next `attachToken` or `protect` refreshes it when the
    * session holds a refresh token.

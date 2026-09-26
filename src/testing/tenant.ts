@@ -203,8 +203,9 @@ export interface FakeTenant {
   /** Adds an organization. Throws on a duplicate id. */
   addOrganization(organization: FakeTenantOrganization): void;
   /**
-   * Makes a person a member of an organization, replacing any earlier
-   * membership or offer there. Throws when the organization does not exist.
+   * Makes a person a member of an organization, replacing earlier membership
+   * grants, including pending grants. Email-address invitations remain.
+   * Throws when the organization does not exist.
    */
   addMember(
     organizationId: string,
@@ -212,8 +213,9 @@ export interface FakeTenant {
     membership?: FakeTenantMembership,
   ): void;
   /**
-   * Ends a membership and withdraws any offer the person holds there. From
-   * then on introspection and `/api/check` stop answering for that
+   * Ends a membership and removes the person's pending membership grants.
+   * Email-address invitations remain. From then on introspection and
+   * `/api/check` stop answering for that
    * organization on credentials issued in it, and UserInfo drops its `org_*`
    * claims; a JWT access token or id_token already minted keeps its claims
    * until it expires.
@@ -609,6 +611,7 @@ export async function createFakeTenant(
   const redirectOrigins = new Set<string>();
   let signedIn: ChosenSignIn | null = null;
   const pendingIssuance = new Map<string, Issuance>();
+  const issuanceQueue = new Map<string, Promise<void>>();
 
   const acceptedRoles = (organizationId: string | undefined, userId: string) =>
     organizationId
@@ -739,11 +742,17 @@ export async function createFakeTenant(
     work: () => Promise<T>,
   ): Promise<T> => {
     if (!userId) return await work();
+    const previous = issuanceQueue.get(userId);
+    const { promise, resolve } = Promise.withResolvers<void>();
+    issuanceQueue.set(userId, promise);
+    await previous;
     pendingIssuance.set(userId, issuance);
     try {
       return await work();
     } finally {
       pendingIssuance.delete(userId);
+      if (issuanceQueue.get(userId) === promise) issuanceQueue.delete(userId);
+      resolve();
     }
   };
 
@@ -1005,40 +1014,42 @@ export async function createFakeTenant(
       : typeof refreshToken === "string"
       ? signInOfRefreshToken.get(refreshToken)
       : undefined;
-    const family = typeof refreshToken === "string" && signIn
-      ? await liveCredentials((credential) => credential.signIn === signIn)
-      : [];
-    const response = await withIssuance(
+    return await withIssuance(
       signIn?.userId,
       { organizationId: signIn?.organizationId, sessionId: signIn?.sessionId },
-      () => server.handleTokenRequest(request),
+      async () => {
+        const family = typeof refreshToken === "string" && signIn
+          ? await liveCredentials((credential) => credential.signIn === signIn)
+          : [];
+        const response = await server.handleTokenRequest(request);
+        if (!response.ok) {
+          await endSessionsOfRevoked(family);
+          return response;
+        }
+        if (signIn) {
+          const session = signIn.sessionId
+            ? loginSessions.get(signIn.sessionId)
+            : undefined;
+          if (session) session.lastActiveAt = new Date();
+          const issued = await response.clone().json() as {
+            access_token: string;
+            refresh_token?: string;
+          };
+          const credential = credentials.get(issued.access_token);
+          if (credential) {
+            credential.signIn = signIn;
+            credential.refreshToken = issued.refresh_token;
+          }
+          if (issued.refresh_token) {
+            signInOfRefreshToken.set(issued.refresh_token, signIn);
+          }
+          if (typeof code === "string" && credential?.boundSessionId) {
+            await revokeBoundTo(credential.boundSessionId, issued.access_token);
+          }
+        }
+        return response;
+      },
     );
-    if (!response.ok) {
-      await endSessionsOfRevoked(family);
-      return response;
-    }
-    if (signIn) {
-      const session = signIn.sessionId
-        ? loginSessions.get(signIn.sessionId)
-        : undefined;
-      if (session) session.lastActiveAt = new Date();
-      const issued = await response.clone().json() as {
-        access_token: string;
-        refresh_token?: string;
-      };
-      const credential = credentials.get(issued.access_token);
-      if (credential) {
-        credential.signIn = signIn;
-        credential.refreshToken = issued.refresh_token;
-      }
-      if (issued.refresh_token) {
-        signInOfRefreshToken.set(issued.refresh_token, signIn);
-      }
-      if (typeof code === "string" && credential?.boundSessionId) {
-        await revokeBoundTo(credential.boundSessionId, issued.access_token);
-      }
-    }
-    return response;
   };
 
   const revocation = async (request: Request): Promise<Response> => {

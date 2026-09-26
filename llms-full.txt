@@ -2792,10 +2792,12 @@ export function Root(
 }
 ```
 
-`readSession` applies the same session lifetime as the probe. It destroys a
-session past `sessionMaxAgeMs` and clears its cookie. It sets no caching policy,
-so send a page rendered from its answer with a private or `no-store`
-`Cache-Control`.
+`readSession` applies the same session lifetime as the probe. In
+`sessionMode:
+"own"`, it destroys a session past `sessionMaxAgeMs` and clears
+its cookie. Shared mode leaves lifetime enforcement to the application and its
+session store. It sets no caching policy, so send a page rendered from its
+answer with a private or `no-store` `Cache-Control`.
 
 A rendering guard does not protect data. Keep bearer/session validation,
 required scopes, and record-level authorization on the server. Use the same
