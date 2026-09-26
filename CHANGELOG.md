@@ -1,3 +1,45 @@
+# [0.7.0](https://github.com/udibo/oauth2/compare/0.6.0...0.7.0) (2026-09-25)
+
+- feat(client)!: report pre-header timeouts as unavailable
+  ([#49](https://github.com/udibo/oauth2/issues/49))
+  ([f56a5f4](https://github.com/udibo/oauth2/commit/f56a5f48596e3b18cb635e041c1799aabf0e9001)),
+  closes [#43](https://github.com/udibo/oauth2/issues/43)
+
+### Features
+
+- **server:** cap unauthenticated request bodies
+  ([#53](https://github.com/udibo/oauth2/issues/53))
+  ([2d1a556](https://github.com/udibo/oauth2/commit/2d1a5560d0464c54da307ab2fc5ac3416ffa6086)),
+  closes [#44](https://github.com/udibo/oauth2/issues/44)
+  [#44](https://github.com/udibo/oauth2/issues/44)
+- **testing:** let a shared auth-request store scope clear
+  ([#51](https://github.com/udibo/oauth2/issues/51))
+  ([eeb833d](https://github.com/udibo/oauth2/commit/eeb833d341603aa813c80f14a4502733fa127191))
+
+### BREAKING CHANGES
+
+- an unreachable endpoint or a deadline before response headers now throws
+  TemporarilyUnavailableError (not a ServerError subclass) with the original
+  error as cause; the BffClient session probe error event changes the same way.
+  Callers catching ServerError for these cases should check
+  TemporarilyUnavailableError or extensions.error === "temporarily_unavailable".
+
+# [0.6.0](https://github.com/udibo/oauth2/compare/0.5.1...0.6.0) (2026-09-24)
+
+### Bug Fixes
+
+- **client:** report a stalled body as unavailable
+  ([#41](https://github.com/udibo/oauth2/issues/41))
+  ([4fc7345](https://github.com/udibo/oauth2/commit/4fc73451a20e50b597c4974b1dde7c15a941a9d1)),
+  closes [#39](https://github.com/udibo/oauth2/issues/39)
+
+### Features
+
+- **testing:** add the AuthRequestStorage contract
+  ([#42](https://github.com/udibo/oauth2/issues/42))
+  ([183d9a0](https://github.com/udibo/oauth2/commit/183d9a0b3dccb22710fad6f1087a6827923a78cd)),
+  closes [#40](https://github.com/udibo/oauth2/issues/40)
+
 ## [0.5.1](https://github.com/udibo/oauth2/compare/0.5.0...0.5.1) (2026-09-23)
 
 ### Bug Fixes

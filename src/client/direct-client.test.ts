@@ -31,6 +31,7 @@ import {
   AccessDeniedError,
   InvalidGrantError,
   ServerError,
+  TemporarilyUnavailableError,
 } from "../errors.ts";
 import { base64urlEncode } from "../utils/crypto.ts";
 
@@ -42,7 +43,8 @@ import {
   MemoryRefreshTokenStorage,
   MemoryTokenStorage,
 } from "./storage.ts";
-import { MAX_RESPONSE_BYTES } from "./_http.ts";
+import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
+import { serveNoHeaders, serveStalledBody } from "./_test_interrupted_body.ts";
 import type { OAuth2ClientEvent } from "./events.ts";
 
 const ISSUER = "http://localhost";
@@ -1159,7 +1161,10 @@ describe("DirectClient", () => {
         "a blip on a background timer must not paint a user-visible error",
       );
 
-      await assertRejects(() => client.refresh(), ServerError);
+      await assertRejects(
+        () => client.refresh(),
+        TemporarilyUnavailableError,
+      );
       assertEquals(
         events.map((event) => event.type),
         ["error"],
@@ -1735,7 +1740,10 @@ describe("DirectClient response hardening", () => {
           });
         })) as typeof fetch,
     });
-    const error = await assertRejects(() => client.refresh(), ServerError);
+    const error = await assertRejects(
+      () => client.refresh(),
+      TemporarilyUnavailableError,
+    );
     assertStringIncludes(error.message, "timed out");
   });
 
@@ -1783,13 +1791,17 @@ describe("DirectClient response hardening", () => {
     );
   });
 
-  it("reports an unreachable endpoint instead of leaking the raw failure", async () => {
+  it("reports an unreachable endpoint as temporarily unavailable, caused by the transport failure", async () => {
+    const refused = new TypeError("connection refused");
     const client = publicClient(
-      (() =>
-        Promise.reject(new TypeError("connection refused"))) as typeof fetch,
+      (() => Promise.reject(refused)) as typeof fetch,
     );
-    const error = await assertRejects(() => client.refresh(), ServerError);
+    const error = await assertRejects(
+      () => client.refresh(),
+      TemporarilyUnavailableError,
+    );
     assertStringIncludes(error.message, "could not reach the token endpoint");
+    assertStrictEquals(error.cause, refused);
   });
 
   it("refuses a device authorization response with no device_code", async () => {
@@ -1814,6 +1826,28 @@ describe("DirectClient response hardening", () => {
     await assertRejects(() => client.revoke("rt-seed"), ServerError);
     assertEquals(sink.calls, [REVOKE_URL]);
   });
+
+  it(
+    "reports a token response that stalls past the deadline as temporarily unavailable",
+    async () => {
+      await using endpoint = serveStalledBody('{"access_token":"at-');
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: endpoint.url },
+        refreshTokenStorage: seededRefreshStore(),
+      });
+      const started = performance.now();
+      const error = await assertRejects(() => client.refresh());
+      assert(
+        error instanceof TemporarilyUnavailableError,
+        `expected a TemporarilyUnavailableError, got ${error}`,
+      );
+      assert(
+        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
+        "the call must end at the deadline, not before it",
+      );
+    },
+  );
 
   it("refuses an HTML userinfo response", async () => {
     const client = new DirectClient({
@@ -1841,6 +1875,71 @@ function seededTokenStore(): MemoryTokenStorage {
   });
   return store;
 }
+
+describe("DirectClient unavailable endpoints", () => {
+  it(
+    "reports every call whose response headers never arrive as temporarily unavailable, caused by the timeout",
+    async () => {
+      await using endpoint = serveNoHeaders();
+      const confidential = new DirectClient({
+        clientId: "svc",
+        clientSecret: CLIENT_SECRET,
+        endpoints: {
+          token: `${endpoint.url}token`,
+          introspection: `${endpoint.url}introspect`,
+          revocation: `${endpoint.url}revoke`,
+          userInfo: `${endpoint.url}userinfo`,
+          deviceAuthorization: `${endpoint.url}device_authorization`,
+        },
+        tokenStorage: seededTokenStore(),
+        refreshTokenStorage: seededRefreshStore(),
+      });
+      const discovering = new DirectClient({
+        clientId: "spa",
+        issuer: endpoint.url,
+      });
+      const calls: Record<string, () => Promise<unknown>> = {
+        discover: () => discovering.discover(),
+        refresh: () => confidential.refresh(),
+        exchangeRefreshToken: () => confidential.exchangeRefreshToken("rt"),
+        getClientCredentialsToken: () =>
+          confidential.getClientCredentialsToken(),
+        startDeviceAuthorization: () => confidential.startDeviceAuthorization(),
+        pollDeviceToken: () =>
+          confidential.pollDeviceToken("device-code", { interval: 1 }),
+        introspect: () => confidential.introspect("at-probe"),
+        revoke: () => confidential.revoke("rt-seed"),
+        getUserInfo: () => confidential.getUserInfo(),
+      };
+      const started = performance.now();
+      const outcomes = await Promise.all(
+        Object.entries(calls).map(async ([name, call]) => {
+          try {
+            await call();
+            return { name, error: undefined as unknown };
+          } catch (error) {
+            return { name, error };
+          }
+        }),
+      );
+      assert(
+        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
+        "the calls must end at the deadline, not before it",
+      );
+      for (const { name, error } of outcomes) {
+        assert(
+          error instanceof TemporarilyUnavailableError,
+          `${name}: expected a TemporarilyUnavailableError, got ${error}`,
+        );
+        assert(
+          error.cause instanceof DOMException &&
+            error.cause.name === "TimeoutError",
+          `${name}: expected the deadline's TimeoutError as the cause, got ${error.cause}`,
+        );
+      }
+    },
+  );
+});
 
 describe("DirectClient logout", () => {
   it("revokes the refresh token, clears state, and emits logged_out", async () => {

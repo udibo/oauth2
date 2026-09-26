@@ -13,7 +13,7 @@
     "jsr:@udibo/http-error@~0.11.1": "0.11.1",
     "jsr:@udibo/oauth2@0.1": "0.1.0",
     "npm:@types/react@^19.2.17": "19.3.0",
-    "npm:hono@^4.7.0": "4.13.8",
+    "npm:hono@^4.7.0": "4.13.7",
     "npm:react@19": "19.2.8"
   },
   "jsr": {
@@ -76,8 +76,8 @@
     "csstype@3.2.3": {
       "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="
     },
-    "hono@4.13.8": {
-      "integrity": "sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ=="
+    "hono@4.13.7": {
+      "integrity": "sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ=="
     },
     "react@19.2.8": {
       "integrity": "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw=="
@@ -100,7 +100,7 @@
           "npm:react@^19.2.7"
         ]
       },
-      "jsr:@udibo/oauth2@0.5.0": {
+      "jsr:@udibo/oauth2@0.7.0": {
         "dependencies": [
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/async@^1.4.0",
@@ -108,7 +108,7 @@
           "jsr:@std/encoding@^1.0.11",
           "jsr:@std/testing@^1.0.20",
           "jsr:@udibo/http-error@~0.11.1",
-          "jsr:@udibo/juniper@0.16",
+          "jsr:@udibo/juniper@0.17",
           "npm:@testing-library/react@^16.3.3",
           "npm:@types/react@^19.2.17",
           "npm:axe-core@^4.13.0",

@@ -28,6 +28,7 @@ import { assertEquals, assertStrictEquals } from "@std/assert";
 import { beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { MfaStore } from "../../identity/mfa/service.ts";
+import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
 /** Options for {@link runMfaStoreContractTests}. */
 export interface MfaStoreContractOptions {
@@ -57,10 +58,11 @@ function countTrue(results: boolean[]): number {
  * Runs the {@link MfaStore} contract suite. Call it from your own test file —
  * it registers `describe` / `it` blocks the test runner picks up.
  *
- * The atomicity cases issue two or more overlapping calls and assert the
- * outcome a conditional write produces. An implementation that reads, then
- * awaits, then writes fails them, which is the point: the same store passes
- * every sequential check.
+ * The atomicity cases issue overlapping calls — eight on one key where only one
+ * may win — and assert the outcome a conditional write produces. An
+ * implementation that reads, then awaits, then writes fails them in practice,
+ * which is the point: the same store passes every sequential check. A race is
+ * probabilistic, so a lucky interleaving can still pass a single run.
  */
 export function runMfaStoreContractTests(
   options: MfaStoreContractOptions,
@@ -131,12 +133,11 @@ export function runMfaStoreContractTests(
         assertEquals(record?.pendingSecretBase32, SECRET_B);
       });
 
-      it("activates for exactly one of two concurrent confirmations", async () => {
+      it(`activates for exactly one of ${CONCURRENT_CALLERS} concurrent confirmations`, async () => {
         await store.setPendingTotp(USER, SECRET_A);
-        const results = await Promise.all([
-          store.activateTotp(USER, SECRET_A, 10),
-          store.activateTotp(USER, SECRET_A, 20),
-        ]);
+        const results = await race((caller) =>
+          store.activateTotp(USER, SECRET_A, 10 + caller)
+        );
         assertStrictEquals(
           countTrue(results),
           1,
@@ -204,11 +205,8 @@ export function runMfaStoreContractTests(
         assertStrictEquals(await store.advanceLastStep(OTHER_USER, 1), false);
       });
 
-      it("admits exactly one of two concurrent claims on the same step", async () => {
-        const results = await Promise.all([
-          store.advanceLastStep(USER, 101),
-          store.advanceLastStep(USER, 101),
-        ]);
+      it(`admits exactly one of ${CONCURRENT_CALLERS} concurrent claims on the same step`, async () => {
+        const results = await race(() => store.advanceLastStep(USER, 101));
         assertStrictEquals(
           countTrue(results),
           1,
@@ -277,17 +275,14 @@ export function runMfaStoreContractTests(
         assertEquals(await store.getRecoveryHashes(USER), ["h1"]);
       });
 
-      it("burns a code for exactly one of two concurrent redemptions", async () => {
+      it(`burns a code for exactly one of ${CONCURRENT_CALLERS} concurrent redemptions`, async () => {
         await store.setRecoveryHashes(USER, ["h1", "h2"]);
-        const results = await Promise.all([
-          store.consumeRecoveryHash(USER, "h1"),
-          store.consumeRecoveryHash(USER, "h1"),
-        ]);
+        const results = await race(() => store.consumeRecoveryHash(USER, "h1"));
         assertStrictEquals(
           countTrue(results),
           1,
-          "a recovery code is single-use — two requests racing one code must " +
-            "not both be told they redeemed it",
+          "a recovery code is single-use — requests racing one code must " +
+            "not each be told they redeemed it",
         );
         assertEquals(await store.getRecoveryHashes(USER), ["h2"]);
       });

@@ -3,8 +3,8 @@
  * behind verification links, password-reset links, and magic links.
  *
  * The load-bearing method is `markConsumed`: it is what makes a link
- * single-use, and only a conditional write survives two requests redeeming one
- * link at the same time. This suite issues those two requests.
+ * single-use, and only a conditional write survives concurrent requests
+ * redeeming one link. This suite races eight of them on one link.
  *
  * @example Verify a database-backed store
  * ```ts
@@ -29,6 +29,7 @@ import type {
   TokenFlowRecord,
   TokenFlowStore,
 } from "../../identity/token-flow.ts";
+import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
 /** Options for {@link runTokenFlowStoreContractTests}. */
 export interface TokenFlowStoreContractOptions {
@@ -79,8 +80,10 @@ function record(
  * Runs the {@link TokenFlowStore} contract suite. Call it from your own test
  * file — it registers `describe` / `it` blocks the test runner picks up.
  *
- * The concurrency cases redeem one token from two callers at once; a store that
- * reads, awaits, then writes hands the token to both and fails them.
+ * The concurrency cases redeem one token from eight callers at once. A store
+ * that reads, awaits, then writes hands the token to more than one of them and
+ * fails in practice — a race is probabilistic, so a lucky interleaving can
+ * still pass a single run.
  */
 export function runTokenFlowStoreContractTests(
   options: TokenFlowStoreContractOptions,
@@ -168,18 +171,17 @@ export function runTokenFlowStoreContractTests(
         );
       });
 
-      it("claims a token for exactly one of two concurrent redemptions", async () => {
+      it(`claims a token for exactly one of ${CONCURRENT_CALLERS} concurrent redemptions`, async () => {
         await store.save(record({ tokenHash: "hash-1" }));
         const now = Date.now();
-        const results = await Promise.all([
-          store.markConsumed("hash-1", now),
-          store.markConsumed("hash-1", now + 1),
-        ]);
+        const results = await race((caller) =>
+          store.markConsumed("hash-1", now + caller)
+        );
         assertStrictEquals(
           countTrue(results),
           1,
-          "a link is single-use — two requests racing one link must not both " +
-            "be told they claimed it",
+          "a link is single-use — requests racing one link must not each be " +
+            "told they claimed it",
         );
       });
 

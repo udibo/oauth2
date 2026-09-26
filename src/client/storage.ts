@@ -99,14 +99,22 @@ export interface AuthRequestStorage {
    * before the token call but lets concurrent callers that both read it
    * before either deletes it redeem it twice. Implement it with the backing
    * store's own atomic primitive (`GETDEL`, `DELETE … RETURNING`) whenever
-   * the store is shared between processes or requests.
+   * the store is shared between processes or requests, and check it with
+   * `runAuthRequestStorageContractTests` from `@udibo/oauth2/testing/contract`.
    */
   take?(
     state: string,
   ): Promise<AuthRequestRecord | null> | AuthRequestRecord | null;
   /** Removes one entry — a claimed or stale one. */
   delete(state: string): Promise<void> | void;
-  /** Removes every entry. Called when the client clears its session. */
+  /**
+   * Removes every entry. `DirectClient` calls it whenever it clears its
+   * session — on sign-out, and when a refresh finds the grant dead. A store
+   * shared between users may scope it instead, removing only expired records,
+   * so that one user's sign-out does not cancel another user's sign-in still
+   * in progress; register such a store with the contract suite's
+   * `clear: "scoped"`.
+   */
   clear(): Promise<void> | void;
 }
 

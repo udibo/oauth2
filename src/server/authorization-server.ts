@@ -69,6 +69,11 @@ import {
   verifyJwt,
 } from "./signing-keys.ts";
 import { validateCodeChallenge } from "../utils/pkce.ts";
+import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_BODY_BYTES,
+  readBoundedBody,
+} from "../utils/_body.ts";
 
 interface EndSessionParameters {
   clientId: string | null;
@@ -332,6 +337,26 @@ export interface AuthorizationServerOptions<
    * bundle.
    */
   isPublicSuffix?: IsPublicSuffix;
+  /**
+   * The largest request body, in bytes, the server reads at the token,
+   * revocation, introspection, device authorization and end-session
+   * endpoints. Each reads its form body before it has authenticated the
+   * caller, so the cap bounds what an anonymous request can make the server
+   * buffer. Bytes are counted as they arrive, so a chunked body or a
+   * `Content-Length` that understates the body cannot get past it. A larger
+   * body is refused with `413` and `invalid_request` before the request's
+   * context is resolved or any client is authenticated.
+   *
+   * The default fits every body these endpoints legitimately receive: the
+   * largest field is a JWT (`id_token_hint`, or a token presented for
+   * introspection or revocation), a few KiB even with a large claim set.
+   * Raise it only if your clients send larger ones.
+   *
+   * @default 65536
+   * @throws {RangeError} From the constructor when it is not a positive
+   *   integer.
+   */
+  maxBodyBytes?: number;
 }
 
 /**
@@ -671,6 +696,7 @@ export class AuthorizationServer<
   signingKeys?: SigningKeyProvider;
   #endSession?: EndSessionFn<Client>;
   #isPublicSuffix?: IsPublicSuffix;
+  #maxBodyBytes: number;
   #subjectOf: (user: User) => string;
   #userClaims?: (
     user: User,
@@ -697,6 +723,7 @@ export class AuthorizationServer<
    *
    * @throws {Error} If any grant's map key does not equal its `grantType`.
    * @throws {Error} If `requireOidc` is set without `signingKeys`.
+   * @throws {RangeError} If `maxBodyBytes` is not a positive integer.
    */
   constructor(options: AuthorizationServerOptions<Client, User, S>) {
     super({
@@ -731,6 +758,8 @@ export class AuthorizationServer<
       );
     }
     this.#isPublicSuffix = options.isPublicSuffix;
+    this.#maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    assertMaxBodyBytes(this.#maxBodyBytes, "maxBodyBytes");
     this.#subjectOf = options.subjectOf ?? defaultSubjectOf;
     this.#userClaims = options.userClaims;
     this.#introspectionClaims = options.introspectionClaims;
@@ -877,6 +906,25 @@ export class AuthorizationServer<
     return grant;
   }
 
+  async #readBody(
+    request: Request,
+    options: { keepReadable?: boolean } = {},
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    const bytes = await readBoundedBody(request, this.#maxBodyBytes, options)
+      .catch((cause) => {
+        throw new InvalidRequestError("request body could not be read", {
+          cause,
+        });
+      });
+    if (!bytes) {
+      throw new InvalidRequestError(
+        413,
+        `request body exceeds ${this.#maxBodyBytes} bytes`,
+      );
+    }
+    return bytes;
+  }
+
   async #beginClientAuthenticatedRequest<
     G extends DispatchableGrant<Client, User, S> | undefined = undefined,
   >(
@@ -902,13 +950,16 @@ export class AuthorizationServer<
       );
     }
 
-    const context = await this.authorizationContext(request);
-
-    const body = await request.clone().formData().catch(() => {
+    const bytes = await this.#readBody(request, { keepReadable: true });
+    const body = await new Response(bytes, {
+      headers: { "content-type": contentType },
+    }).formData().catch(() => {
       throw new InvalidRequestError(
         "body must be application/x-www-form-urlencoded",
       );
     });
+
+    const context = await this.authorizationContext(request);
 
     const grant = options.grantFromBody?.(body) as G;
     const client = grant
@@ -929,7 +980,9 @@ export class AuthorizationServer<
    * `application/x-www-form-urlencoded`, or no `grant_type` — is a 400
    * `invalid_request`. A `grant_type` with no registered grant is
    * `unsupported_grant_type`, checked before client authentication; a client
-   * not registered for the grant is `unauthorized_client`.
+   * not registered for the grant is `unauthorized_client`. A body over
+   * {@linkcode AuthorizationServerOptions.maxBodyBytes} is a 413
+   * `invalid_request`, refused before the request context is resolved.
    */
   async handleTokenRequest(request: Request): Promise<Response> {
     try {
@@ -1105,7 +1158,9 @@ export class AuthorizationServer<
    * when sent, names the client ahead of the hint's audience, and when both
    * are sent `client_id` must be one of the hint's audiences — a mismatch is
    * a 400 `invalid_request` (OIDC RP-Initiated Logout 1.0 §2). `state` rides
-   * along only to a URI that passed authorization.
+   * along only to a URI that passed authorization. A POST body over
+   * {@linkcode AuthorizationServerOptions.maxBodyBytes} is a 413
+   * `invalid_request`, refused before `endSession` runs.
    *
    * Wire the app's session teardown through the `endSession` **constructor
    * option**; this method answers 404 without it, and the discovery document
@@ -1153,7 +1208,9 @@ export class AuthorizationServer<
   async #endSessionParameters(request: Request): Promise<EndSessionParameters> {
     const url = new URL(request.url);
     const params = request.method === "POST"
-      ? new URLSearchParams(await request.text())
+      ? new URLSearchParams(
+        new TextDecoder().decode(await this.#readBody(request)),
+      )
       : url.searchParams;
     const idTokenHint = params.get("id_token_hint");
     const hint = idTokenHint ? await this.#readIdTokenHint(idTokenHint) : null;

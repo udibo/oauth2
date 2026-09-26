@@ -78,8 +78,11 @@ export type RedirectPolicy = "refuse" | "follow";
  * @param what The endpoint's name, for error messages.
  * @param options `redirect` policy and `timeoutMs` deadline.
  * @returns The response, which may still be a non-OK status.
- * @throws {ServerError} when the request cannot be made, times out, or (under
- * `"refuse"`) answers with a redirect.
+ * @throws {TemporarilyUnavailableError} when the request cannot be made or its
+ * response headers do not arrive before the deadline; `cause` is the
+ * transport failure.
+ * @throws {ServerError} when (under `"refuse"`) the endpoint answers with a
+ * redirect.
  */
 export async function sendGuarded(
   fetchImpl: typeof fetch,
@@ -98,7 +101,7 @@ export async function sendGuarded(
       signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
     });
   } catch (error) {
-    throw new ServerError(
+    throw new TemporarilyUnavailableError(
       `could not reach the ${what} (${describeError(error)})`,
       { cause: error },
     );
@@ -123,6 +126,8 @@ export async function sendGuarded(
  * @param res The response from {@link sendGuarded}.
  * @param what The endpoint's name, for error messages.
  * @returns The parsed JSON object.
+ * @throws {TemporarilyUnavailableError} on a `2xx` whose body stops arriving
+ * within the size cap — the deadline fires or the connection drops mid-body.
  * @throws {OAuth2Error} on a non-OK status, an oversized body, a body that is
  * not valid JSON, or JSON that is not an object.
  */
@@ -138,6 +143,14 @@ export async function receiveJson(
     throw new ServerError(
       `the ${what} response exceeded ${MAX_RESPONSE_BYTES} bytes — refusing ` +
         `to parse a response this large`,
+    );
+  }
+
+  if (body.interrupted) {
+    throw new TemporarilyUnavailableError(
+      `the ${what} response body did not arrive in full ` +
+        `(${describeError(body.interrupted.cause)})`,
+      { cause: body.interrupted.cause },
     );
   }
 
@@ -231,6 +244,7 @@ export function assertField(
 interface BoundedBody {
   text: string;
   truncated: boolean;
+  interrupted?: { cause: unknown };
 }
 
 async function readBounded(res: Response): Promise<BoundedBody> {
@@ -255,8 +269,8 @@ async function readBounded(res: Response): Promise<BoundedBody> {
       chunks.push(value);
       size += value.byteLength;
     }
-  } catch {
-    return { text: decode(chunks, size), truncated: true };
+  } catch (cause) {
+    return { text: decode(chunks, size), truncated, interrupted: { cause } };
   } finally {
     await reader.cancel().catch(() => {});
   }

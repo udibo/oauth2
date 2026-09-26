@@ -1,6 +1,6 @@
 {
   "name": "@udibo/oauth2",
-  "version": "0.5.1",
+  "version": "0.7.0",
   "description": "A flexible OAuth2 toolkit: framework-agnostic authorization & resource servers, a typed client, Hono adapters (including a backend-for-frontend), and React bindings.",
   "license": "MIT",
   "exports": {
@@ -44,7 +44,7 @@
   },
   "imports": {
     "@udibo/http-error": "jsr:@udibo/http-error@^0.11.1",
-    "@udibo/juniper": "jsr:@udibo/juniper@^0.16.0",
+    "@udibo/juniper": "jsr:@udibo/juniper@^0.17.0",
     "@std/testing": "jsr:@std/testing@^1.0.20",
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "@std/async": "jsr:@std/async@^1.4.0",

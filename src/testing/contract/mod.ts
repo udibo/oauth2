@@ -11,11 +11,12 @@
  * library are tested by the exact same checks.
  *
  * The identity layer's storage seams — `MfaStore`, `TokenFlowStore`,
- * `OtpStore`, `RateLimitStore`, `LockoutStore` — have runners of their
- * own. Those interfaces document methods that **must be atomic**
- * (single-use recovery codes, single-use links, the TOTP replay guard,
- * the guess and failure budgets), and each suite checks that claim with
- * overlapping calls: a read-modify-write implementation passes every
+ * `OtpStore`, `RateLimitStore`, `LockoutStore` — and the client's
+ * `AuthRequestStorage` have runners of their own. Those interfaces document
+ * methods that **must be atomic** (single-use recovery codes, single-use
+ * links, the TOTP replay guard, the guess and failure budgets, the
+ * single-use claim of a login's `state`), and each suite checks that claim
+ * with overlapping calls: a read-modify-write implementation passes every
  * sequential case and fails the concurrent one, which is the whole
  * reason the suites exist.
  *
@@ -71,6 +72,10 @@ export {
   type LockoutStoreContractOptions,
   runLockoutStoreContractTests,
 } from "./lockout-store.ts";
+export {
+  type AuthRequestStorageContractOptions,
+  runAuthRequestStorageContractTests,
+} from "./auth-request-storage.ts";
 export {
   runTenantContractTests,
   type TenantContractFixture,
