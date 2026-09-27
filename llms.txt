@@ -31,6 +31,10 @@
 - Rate limits, lockout, and bot challenges require explicit configuration.
   Log-only mode does not enforce. MFA routes need authentication, CSRF, and a
   pending first-factor state before creating a full session.
+- For app-owned login, run `verifyCaptcha` with a configured `CaptchaProvider`
+  in your route before an identity flow. No provider means an unchallenged pass;
+  reject a `"fail"` with `IdentityError("captcha_failed")`. Audit `degraded` and
+  keep rate limits and lockout in place when a provider outage fails open.
 - Generic OIDC/Google connectors trust direct TLS exchange and validate ID-token
   claims without signature verification. Apple verifies signatures and uses
   form_post; its transient cookie requires SameSite=None; Secure. Never use these
@@ -52,6 +56,7 @@
 - [Quickstart](docs/quickstart.md): run and inspect a complete local application
 - [Host authorization for your app](docs/guides/become-an-oauth-provider.md): services, endpoints, grants, consent, refresh, and OIDC issuance
 - [Add login](docs/guides/add-login.md): app-owned user/credential storage, sessions, mail, and protections
+- [CAPTCHA route example](docs/guides/add-login.md#captcha-at-the-route-boundary): app-owned bot challenge before an identity flow
 - [Protect an API](docs/guides/protect-an-api.md): introspection/JWKS, scopes, and BFF proxying
 - [React integration](docs/guides/react.md): session state, guards, and forms for app-owned login
 - [Integration testing](docs/guides/testing.md): route fixtures, persistent store contracts, and browser checks

@@ -657,6 +657,64 @@ emailed reset token proves the same account ownership — but call
 `resetSignInThrottle` there too.) The discriminated result (`success` /
 `expired` / `invalid`) lets the page offer a fresh link for an expired one.
 
+## CAPTCHA at the route boundary
+
+`CaptchaProvider` is an app-owned adapter for a bot-challenge service such as
+Turnstile, hCaptcha, or reCAPTCHA. The package ships no provider. Call
+`verifyCaptcha` in a route **before** `IdentityService` looks up an identifier;
+the Hono identity route factory does not read a challenge token for you. Use an
+app-owned handler for an endpoint that requires a challenge.
+
+```ts
+import {
+  type CaptchaProvider,
+  IdentityError,
+  type IdentityService,
+  type IdentityUser,
+  verifyCaptcha,
+} from "@udibo/oauth2/identity";
+
+declare const identity: IdentityService<IdentityUser>;
+declare const captcha: CaptchaProvider | undefined;
+declare const captchaToken: string | null;
+declare const clientIp: string | undefined;
+declare const identifier: string;
+declare const password: string;
+declare const audit: {
+  record(event: { type: string; action: string }): Promise<void>;
+};
+
+const challenge = await verifyCaptcha({
+  provider: captcha,
+  token: captchaToken,
+  context: { ip: clientIp, action: "signin" },
+});
+if (challenge.degraded) {
+  await audit.record({ type: "captcha.unavailable", action: "signin" });
+}
+if (challenge.decision === "fail") {
+  throw new IdentityError("captcha_failed");
+}
+const user = await identity.signIn({ identifier, password });
+```
+
+Implement `CaptchaProvider.verify` by verifying the client token server-side.
+Return `{ success: false }` for a forged, expired, or replayed token; throw only
+when the provider cannot be reached. `verifyCaptcha` catches that outage and, by
+default, returns a `"pass"` with `degraded: true` so existing rate limits and
+lockout remain the fallback. Pass `failOpen: false` to refuse during outages.
+With no configured provider it returns an unchallenged `"pass"`; merely wiring
+the seam does not enable a challenge. A `"fail"` is a route-level refusal with
+the stable `captcha_failed` code (HTTP 403), before any account lookup. Apply
+the same challenge decision to known and unknown identifiers. For reset and
+email-sending routes, keep the response uniform so the challenge does not become
+an account-existence oracle.
+
+See the
+[extension reference](../trigger-points.md#identity--udibooauth2identity) for
+the seam's failure behavior and the
+[`CaptchaProvider` example](../../src/identity/captcha.ts) for an adapter shape.
+
 ## The audit seam: `onEvent`
 
 Every flow outcome emits one `IdentityEvent`: `sign_in.succeeded`,

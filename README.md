@@ -76,6 +76,11 @@ a browser app with a backend, start with the BFF guide.
 authorization server. The framework-independent core accepts standard `Request`
 and `Response` objects; Hono adapters add routing and middleware.
 
+For app-owned login, `CaptchaProvider` and `verifyCaptcha` let your route check
+a client-issued bot-challenge token before calling `IdentityService`. The
+package does not include a challenge provider; see the
+[CAPTCHA route example](docs/guides/add-login.md#captcha-at-the-route-boundary).
+
 ## Examples
 
 From a checkout of this repository:

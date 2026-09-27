@@ -28,12 +28,13 @@ provides OAuth2 protocol handling and optional identity flows.
 
 Add only the features your application needs:
 
-| Feature                         | Guide                                                         |
-| ------------------------------- | ------------------------------------------------------------- |
-| Social or enterprise OIDC login | [External sign-in](guides/social-sign-in.md)                  |
-| TOTP and recovery codes         | [MFA](guides/add-mfa.md)                                      |
-| Email codes and magic links     | [Passwordless sign-in](guides/passwordless.md)                |
-| Existing password hashes        | [Password migration](guides/migrate-from-another-provider.md) |
+| Feature                         | Guide                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| Social or enterprise OIDC login | [External sign-in](guides/social-sign-in.md)                               |
+| TOTP and recovery codes         | [MFA](guides/add-mfa.md)                                                   |
+| Email codes and magic links     | [Passwordless sign-in](guides/passwordless.md)                             |
+| Existing password hashes        | [Password migration](guides/migrate-from-another-provider.md)              |
+| Bot challenge for own login     | [CAPTCHA route example](guides/add-login.md#captcha-at-the-route-boundary) |
 
 These guides explain application integrations. Hosted-service administration,
 commercial platform architecture, and internal Udibo operations are outside this
