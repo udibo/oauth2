@@ -55,8 +55,7 @@
 - [Use Udibo](docs/guides/use-udibo.md): private-beta prerequisites, BFF wiring, validation, troubleshooting
 - [Quickstart](docs/quickstart.md): run and inspect a complete local application
 - [Host authorization for your app](docs/guides/become-an-oauth-provider.md): services, endpoints, grants, consent, refresh, and OIDC issuance
-- [Add login](docs/guides/add-login.md): app-owned user/credential storage, sessions, mail, and protections
-- [CAPTCHA route example](docs/guides/add-login.md#captcha-at-the-route-boundary): app-owned bot challenge before an identity flow
+- [Add login](docs/guides/add-login.md): app-owned user/credential storage, sessions, mail, protections, and a CAPTCHA route example
 - [Protect an API](docs/guides/protect-an-api.md): introspection/JWKS, scopes, and BFF proxying
 - [React integration](docs/guides/react.md): session state, guards, and forms for app-owned login
 - [Integration testing](docs/guides/testing.md): route fixtures, persistent store contracts, and browser checks
