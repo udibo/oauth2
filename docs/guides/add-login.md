@@ -713,7 +713,8 @@ an account-existence oracle.
 See the
 [extension reference](../trigger-points.md#identity--udibooauth2identity) for
 the seam's failure behavior and the
-[`CaptchaProvider` example](../../src/identity/captcha.ts) for an adapter shape.
+[`CaptchaProvider` source example](https://github.com/udibo/oauth2/blob/main/src/identity/captcha.ts)
+for an adapter shape.
 
 ## The audit seam: `onEvent`
 
