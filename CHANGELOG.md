@@ -1,3 +1,11 @@
+# [0.9.0](https://github.com/udibo/oauth2/compare/0.8.0...0.9.0) (2026-09-27)
+
+### Features
+
+- **server:** let apps refuse logout redirects
+  ([#57](https://github.com/udibo/oauth2/issues/57))
+  ([5e1a1df](https://github.com/udibo/oauth2/commit/5e1a1dfc741b530f6f396be964e769e09e0870b0))
+
 # [0.8.0](https://github.com/udibo/oauth2/compare/0.7.0...0.8.0) (2026-09-26)
 
 - feat!: add readSession and fake tenant org/account APIs
