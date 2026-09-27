@@ -116,8 +116,18 @@ export interface EndSessionContext<Client extends ClientInterface> {
 /** What an app's {@link EndSessionFn} may ask the server to do afterwards. */
 export interface EndSessionResult {
   /**
+   * The app refused this logout (for example, the verified `id_token_hint`
+   * names a different person than the current session). Ignore the caller's
+   * redirect and all `headers`, including any `Set-Cookie`, so the response
+   * neither sends the browser to the RP nor clears the current session.
+   * Answer at `fallback` if supplied, otherwise 204. Omit or set `false` to
+   * preserve the normal logout behavior.
+   */
+  refused?: boolean;
+  /**
    * Headers to merge into the response — the session-clearing `Set-Cookie`,
-   * typically. The server owns `Location`; anything else is yours.
+   * typically. The server owns `Location`; anything else is yours. Ignored
+   * when `refused` is true.
    */
   headers?: HeadersInit;
   /**
@@ -1193,8 +1203,10 @@ export class AuthorizationServer<
         logoutHint: params.logoutHint,
       }) ?? {};
 
-      const headers = new Headers(result.headers);
-      const authorized = this.#postLogoutRedirect(client, params);
+      const headers = new Headers(result.refused ? undefined : result.headers);
+      const authorized = result.refused
+        ? undefined
+        : this.#postLogoutRedirect(client, params);
       const target = authorized ?? result.fallback;
       if (!target) return new Response(null, { status: 204, headers });
       headers.set("Location", target);
