@@ -712,6 +712,12 @@ POST), and `/end_session` (GET and POST). OIDC discovery, JWKS, and UserInfo go
 live when OIDC issuance is configured; `/end_session` goes live when the
 `endSession` option is configured.
 
+For RP-initiated logout, compare a verified `subject` with the active session
+before ending it. If they name different people, return
+`{ refused: true, fallback: "/sign-in" }` from `endSession`. The server then
+ignores the relying party's redirect and any session-clearing headers, sending
+the browser to your fallback instead. Without a fallback it answers 204.
+
 The one thing `routes()` cannot decide for you is who the user is. The authorize
 endpoint asks your `authenticateUser` callback, which receives the Hono
 `Context` and returns one of three things: `{ user }` when a session exists, a

@@ -576,6 +576,43 @@ describe("RP-Initiated Logout", () => {
     assertEquals(response.headers.get("location"), "/signed-out");
   });
 
+  it("uses the app fallback without clearing a session when logout is refused", async () => {
+    const { server } = await createLogoutServer({
+      endSession: () => ({
+        refused: true,
+        fallback: "/sign-in",
+        headers: { "Set-Cookie": "session=; Max-Age=0" },
+      }),
+    });
+    const response = await server.handleEndSessionRequest(
+      logout({
+        client_id: "client-1",
+        post_logout_redirect_uri: POST_LOGOUT,
+        state: "rp-state",
+      }),
+    );
+
+    assertEquals(response.status, 302);
+    assertEquals(response.headers.get("location"), "/sign-in");
+    assertFalse(response.headers.has("set-cookie"));
+  });
+
+  it("answers 204 without session headers when a refused logout has no fallback", async () => {
+    const { server } = await createLogoutServer({
+      endSession: () => ({
+        refused: true,
+        headers: { "Set-Cookie": "session=; Max-Age=0" },
+      }),
+    });
+    const response = await server.handleEndSessionRequest(
+      logout({ client_id: "client-1", post_logout_redirect_uri: POST_LOGOUT }),
+    );
+
+    assertEquals(response.status, 204);
+    assertFalse(response.headers.has("location"));
+    assertFalse(response.headers.has("set-cookie"));
+  });
+
   it("reads the subject and the client from an expired id_token_hint", async () => {
     const { server, calls, signingKey } = await createLogoutServer();
     const expired = await signJwt(signingKey, {
