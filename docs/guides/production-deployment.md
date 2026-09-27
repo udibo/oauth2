@@ -188,7 +188,10 @@ boundary. Exact callbacks avoid this additional policy surface.
 `IdentityService` always applies password policy, but rate limiting, account
 lockout, and CAPTCHA are opt-in integrations. Construct the protections you
 need; `protectionMode: "log-only"` records decisions without enforcing them.
-Default deployed configuration should enforce.
+Default deployed configuration should enforce. Wire bot challenges in an
+app-owned route using the
+[CAPTCHA example](add-login.md#captcha-at-the-route-boundary); `IdentityService`
+does not apply them implicitly.
 
 Apply IP/request throttling at the route layer as well as identifier-based
 limits within identity flows. Rate-limit mail requests and code verification. A
