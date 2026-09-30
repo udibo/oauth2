@@ -127,6 +127,25 @@ token:
   add linked accounts with `linkAccount`, and set `hasPassword: false` to test
   the refusal to disconnect someone's last way in.
 
+It also answers the app's own machine credential, the way a tenant answers a bot
+the app runs. Register a client with `grants: ["client_credentials"]` and a
+`scopes` allowlist, which a tenant requires of such an application and
+`addClient` refuses to go without, and the token endpoint issues it a token that
+names no person, with no refresh token; its scope vocabulary is
+`identity:organizations:read` and `identity:organizations:write`, narrowed by
+that allowlist, and any other scope, an OIDC scope included, is refused
+`invalid_scope`. An `organization_id` is accepted on the `refresh_token` grant
+alone. That token is refused `403` wherever the tenant answers for a person, and
+`401` at UserInfo. Register the client with
+`machinePermissions: ["resource_grants.read"]`, as a tenant administrator would
+assign it, and `GET /api/resource-grants?type=…&id=…` under its token lists who
+holds a grant on that one resource, each row naming its holder and its role. A
+grant's `role` is the slug it is listed under, with the name
+`defineOrganizationRole` gave it; it defaults to a slug built from the grant's
+permissions, and a built-in tier is listed as `builtInRole` with no `roleId`. A
+person's token is refused `403` there, and a machine token without the
+permission or the `identity:organizations:read` scope gets `404`.
+
 A login session and the credentials issued from it are tied together only for a
 first-party application, which is what `addClient` registers unless you pass
 `type: "third-party"`. For a first-party application:
@@ -145,8 +164,9 @@ The same contract suite runs these answers against the fake and against the real
 identity service, so both give the same shapes and refusals. The fake still does
 not do everything a tenant does. It has no hosted pages and no management API.
 Its organization API does not grant application roles to members, and it does
-not let an organization define its own roles. It has no policy: no MFA, no
-lockout, no rate limits and no session limits. Test those against a real tenant.
+not let an organization define its own roles. It lists resource grants but does
+not place or revoke them over HTTP. It has no policy: no MFA, no lockout, no
+rate limits and no session limits. Test those against a real tenant.
 
 ## Persistent storage contracts
 

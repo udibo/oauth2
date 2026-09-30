@@ -3,7 +3,9 @@
  * about its signed-in people: what introspection reports, what
  * `GET /api/memberships` lists, what `POST /api/check` and
  * `POST /api/check/batch` answer, the organization API under
- * `/api/organizations`, and the account API under `/api/account`.
+ * `/api/organizations`, and the account API under `/api/account` — and what it
+ * answers the application itself: the `client_credentials` grant, and
+ * `GET /api/resource-grants` under the application's own machine token.
  *
  * It runs against `createFakeTenant` from `@udibo/oauth2/testing` and against the
  * real identity service in Udibo's own repository, so the fake an app tests
@@ -108,8 +110,44 @@ export interface TenantContractFixture {
     organizationId?: string,
     options?: TenantContractSignInOptions,
   ): Promise<TenantContractTokens>;
+  /**
+   * Registers a confidential application allowed the `client_credentials`
+   * grant and no other, whose tokens may carry `options.scopes` and nothing
+   * else, and which a tenant administrator has assigned `options.permissions`.
+   * Returns the credentials it signs in with.
+   */
+  addMachineClient(
+    options: TenantContractMachineClientOptions,
+  ): Promise<TenantContractClient>;
   /** Releases anything `setup` allocated. */
   cleanup?(): Promise<void> | void;
+}
+
+/** An application's credentials at the token endpoint. */
+export interface TenantContractClient {
+  /** The client id. */
+  id: string;
+  /** The client secret. */
+  secret: string;
+}
+
+/**
+ * A management permission a tenant administrator assigns a machine
+ * application. The suite assigns `resource_grants.read`, which is what
+ * `GET /api/resource-grants` requires.
+ */
+export type TenantContractMachinePermission = "resource_grants.read";
+
+/** What `TenantContractFixture.addMachineClient` registers. */
+export interface TenantContractMachineClientOptions {
+  /**
+   * The scopes the application's tokens may carry. The suite names
+   * `identity:organizations:read` alone, and expects a token asking for any
+   * other to be refused.
+   */
+  scopes: string[];
+  /** The permissions an administrator assigned the application. */
+  permissions: TenantContractMachinePermission[];
 }
 
 /** How `TenantContractFixture.signIn` signs a person in. */
@@ -150,6 +188,9 @@ export interface TenantContractOptions {
 interface Introspection {
   active?: boolean;
   sub?: string;
+  username?: string;
+  client_id?: string;
+  scope?: string;
   permissions?: string[];
   org_id?: string;
 }
@@ -1686,6 +1727,296 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           (await linkedOf(stranger.token)).identities.map((entry) => entry.id),
           [theirs],
         );
+      });
+    });
+
+    describe("client credentials and the resource-grants API", () => {
+      const ORGANIZATIONS_READ = "identity:organizations:read";
+      const DIRECT = "type=contract_document&id=direct";
+      let reader: TenantContractClient;
+      let unassigned: TenantContractClient;
+      let readerToken: string;
+      let userinfoEndpoint: string;
+
+      interface MachineTokens {
+        access_token?: string;
+        refresh_token?: string;
+        token_type?: string;
+        error?: string;
+      }
+
+      interface GrantRow {
+        id: string;
+        subjectType: string;
+        subjectId: string;
+        subjectRole: string | null;
+        subjectName: string | null;
+        subjectActive: boolean;
+        roleId: string | null;
+        builtInRole: string | null;
+        roleSlug: string;
+        roleName: string;
+      }
+
+      interface GrantList {
+        resource: { type: string; id: string };
+        grants: GrantRow[];
+      }
+
+      async function machineToken(
+        client: TenantContractClient,
+        scope?: string,
+      ): Promise<Reply<MachineTokens>> {
+        const response = await send(metadata.token_endpoint, {
+          method: "POST",
+          headers: { authorization: encodeBasicAuth(client.id, client.secret) },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            ...scope === undefined ? {} : { scope },
+          }),
+        });
+        const text = await response.text();
+        return {
+          status: response.status,
+          headers: response.headers,
+          body: text ? JSON.parse(text) : null,
+        };
+      }
+
+      async function issuedTo(
+        client: TenantContractClient,
+        scope?: string,
+      ): Promise<string> {
+        const issued = await machineToken(client, scope);
+        assertEquals(issued.status, 200, JSON.stringify(issued.body));
+        assert(issued.body.access_token);
+        return issued.body.access_token;
+      }
+
+      async function introspectAs(
+        client: TenantContractClient,
+        accessToken: string,
+      ): Promise<Introspection> {
+        const response = await send(metadata.introspection_endpoint, {
+          method: "POST",
+          headers: { authorization: encodeBasicAuth(client.id, client.secret) },
+          body: new URLSearchParams({ token: accessToken }),
+        });
+        assertEquals(response.status, 200);
+        return await response.json();
+      }
+
+      function grantsOn(
+        accessToken: string | null,
+        query: string,
+      ): Promise<Reply<GrantList>> {
+        return call<GrantList>(
+          accessToken,
+          "GET",
+          `/api/resource-grants?${query}`,
+        );
+      }
+
+      beforeAll(async () => {
+        const response = await send(
+          new URL("/.well-known/openid-configuration", tenant.issuer),
+        );
+        ({ userinfo_endpoint: userinfoEndpoint } = await response.json());
+        reader = await tenant.addMachineClient({
+          scopes: [ORGANIZATIONS_READ],
+          permissions: ["resource_grants.read"],
+        });
+        unassigned = await tenant.addMachineClient({
+          scopes: [ORGANIZATIONS_READ],
+          permissions: [],
+        });
+        readerToken = await issuedTo(reader, ORGANIZATIONS_READ);
+      });
+
+      it("issues a machine token with no refresh token, naming no person and no organization", async () => {
+        const issued = await machineToken(reader, ORGANIZATIONS_READ);
+        assertEquals(issued.status, 200, JSON.stringify(issued.body));
+        assertEquals(issued.body.token_type, "Bearer");
+        assert(issued.body.access_token);
+        assertFalse(
+          "refresh_token" in issued.body,
+          "a machine token has no refresh token",
+        );
+        const claims = await introspectAs(reader, issued.body.access_token);
+        assertEquals(claims.active, true);
+        assertEquals(claims.client_id, reader.id);
+        assertEquals(claims.scope, ORGANIZATIONS_READ);
+        assertFalse(claims.sub, "a machine token names no person");
+        assertFalse(claims.username, "a machine token names no person");
+        assertFalse(
+          claims.org_id,
+          "a machine token belongs to no organization",
+        );
+        assertEquals(sorted(claims.permissions), []);
+      });
+
+      it("refuses the grant to an application not registered for it, and refuses a machine token an OIDC scope or one outside its allowlist", async () => {
+        const interactive = await machineToken(
+          tenant.client,
+          ORGANIZATIONS_READ,
+        );
+        assertEquals(interactive.status, 401);
+        assertEquals(interactive.body.error, "unauthorized_client");
+        for (
+          const scope of [
+            "openid",
+            `${ORGANIZATIONS_READ} identity:organizations:write`,
+          ]
+        ) {
+          const refused = await machineToken(reader, scope);
+          assertEquals(refused.status, 400, scope);
+          assertEquals(refused.body.error, "invalid_scope", scope);
+        }
+      });
+
+      it("accepts organization_id on the refresh_token grant alone", async () => {
+        const response = await send(metadata.token_endpoint, {
+          method: "POST",
+          headers: { authorization: encodeBasicAuth(reader.id, reader.secret) },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            scope: ORGANIZATIONS_READ,
+            organization_id: organizations.home,
+          }),
+        });
+        const body = await response.json();
+        assertEquals(response.status, 400, JSON.stringify(body));
+        assertEquals(body.error, "invalid_request");
+      });
+
+      it("refuses a machine token wherever the tenant answers for a person", async () => {
+        const checked = await ask(readerToken, "/api/check", {
+          permissions: ["contract:tenant"],
+        });
+        assertEquals(checked.status, 403);
+        assertEquals(checked.body.reason, "machine_token");
+        for (const path of ["/api/memberships", "/api/account"]) {
+          const reply = await call<{ reason?: string }>(
+            readerToken,
+            "GET",
+            path,
+          );
+          assertEquals(reply.status, 403, path);
+          assertEquals(reply.body.reason, "machine_token", path);
+        }
+        const organizations = await call(
+          readerToken,
+          "GET",
+          "/api/organizations",
+        );
+        assertEquals(organizations.status, 403);
+        const userinfo = await send(userinfoEndpoint, {
+          headers: { authorization: `Bearer ${readerToken}` },
+        });
+        await userinfo.body?.cancel();
+        assertEquals(userinfo.status, 401);
+      });
+
+      it("lists who holds a grant on a resource, roles named, and an empty list where nobody does", async () => {
+        const direct = await grantsOn(readerToken, DIRECT);
+        assertEquals(direct.status, 200, JSON.stringify(direct.body));
+        assertStringIncludes(
+          direct.headers.get("cache-control") ?? "",
+          "no-store",
+        );
+        assertEquals(direct.body.resource, {
+          type: "contract_document",
+          id: "direct",
+        });
+        assertEquals(direct.body.grants.length, 1);
+        const [held] = direct.body.grants;
+        assertEquals(Object.keys(held).sort(), [
+          "builtInRole",
+          "id",
+          "roleId",
+          "roleName",
+          "roleSlug",
+          "subjectActive",
+          "subjectId",
+          "subjectName",
+          "subjectRole",
+          "subjectType",
+        ]);
+        assertEquals(held.subjectType, "user");
+        assertEquals(held.subjectId, people.outsider);
+        assertEquals(held.subjectRole, null);
+        assertEquals(held.subjectActive, true);
+        assert(held.subjectName, "a grant names its holder");
+        assert(held.id, "a grant has an id");
+        assert(held.roleId, "a grant names its role");
+        assert(held.roleSlug, "a grant names its role's slug");
+        assert(held.roleName, "a grant names its role's name");
+        assertEquals(held.builtInRole, null);
+
+        const shared = await grantsOn(
+          readerToken,
+          "type=contract_document&id=shared",
+        );
+        assertEquals(shared.status, 200);
+        assertEquals(
+          shared.body.grants.map((
+            grant,
+          ) => [grant.subjectType, grant.subjectId]),
+          [["organization", organizations.home]],
+        );
+
+        const nobody = await grantsOn(
+          readerToken,
+          `type=contract_document&id=nobody-${crypto.randomUUID()}`,
+        );
+        assertEquals(nobody.status, 200);
+        assertEquals(nobody.body.grants, []);
+      });
+
+      it("hides the listing from a machine token without the permission or the scope, and refuses a person's token and no token", async () => {
+        const withoutPermission = await issuedTo(
+          unassigned,
+          ORGANIZATIONS_READ,
+        );
+        assertEquals((await grantsOn(withoutPermission, DIRECT)).status, 404);
+        const withoutScope = await issuedTo(reader);
+        assertEquals((await grantsOn(withoutScope, DIRECT)).status, 404);
+        const { access_token } = await tenant.signIn(people.member);
+        const person = await call<{ reason?: string }>(
+          access_token,
+          "GET",
+          `/api/resource-grants?${DIRECT}`,
+        );
+        assertEquals(person.status, 403);
+        assertEquals(person.body.reason, "user_token");
+        assertEquals((await grantsOn(null, DIRECT)).status, 401);
+      });
+
+      it("refuses a resource type the tenant has not registered, and a resource missing its id", async () => {
+        const unregistered = await grantsOn(
+          readerToken,
+          "type=contract_unregistered&id=direct",
+        );
+        assertEquals(unregistered.status, 400);
+        const missing = await grantsOn(readerToken, "type=contract_document");
+        assertEquals(missing.status, 400);
+      });
+
+      it("bounds the type to 64 characters and the id to 255, refusing ASCII control characters and no other", async () => {
+        const long = await grantsOn(
+          readerToken,
+          `type=${"t".repeat(65)}&id=direct`,
+        );
+        assertEquals(long.status, 400);
+        const query = (id: string) =>
+          `type=contract_document&id=${encodeURIComponent(id)}`;
+        const wide = await grantsOn(readerToken, query("i".repeat(256)));
+        assertEquals(wide.status, 400);
+        const control = await grantsOn(readerToken, query("tab\there"));
+        assertEquals(control.status, 400);
+        const unicode = await grantsOn(readerToken, query("next\u0085line"));
+        assertEquals(unicode.status, 200, JSON.stringify(unicode.body));
+        assertEquals(unicode.body.grants, []);
       });
     });
   });

@@ -1,6 +1,7 @@
 import type { ClientInterface } from "../models/client.ts";
 import type { Token } from "../models/token.ts";
 import { AuthorizationCodeGrant } from "../server/grants/authorization-code.ts";
+import { ClientCredentialsGrant } from "../server/grants/client-credentials.ts";
 import { RefreshTokenGrant } from "../server/grants/refresh-token.ts";
 import { AuthorizationServer } from "../server/authorization-server.ts";
 import {
@@ -9,7 +10,7 @@ import {
   StaticSigningKeyProvider,
 } from "../server/signing-keys.ts";
 import { BasicScope } from "../models/scope.ts";
-import { InvalidRequestError } from "../errors.ts";
+import { AccessDeniedError, InvalidRequestError } from "../errors.ts";
 import { safeReturnTo } from "../utils/url.ts";
 
 import {
@@ -56,10 +57,39 @@ export interface FakeTenantUser {
   hasPassword?: boolean;
 }
 
-/** An OAuth2 application registered in a {@linkcode FakeTenant}. */
+/**
+ * A management permission a tenant administrator assigns a machine
+ * application, apart from any permission a role carries. A real tenant also
+ * knows `resource_grants.write`; the fake answers only the read it serves.
+ */
+export type FakeTenantMachinePermission = "resource_grants.read";
+
+/**
+ * An OAuth2 application registered in a {@linkcode FakeTenant}. Its `grants`
+ * default to `authorization_code` and `refresh_token`; name
+ * `client_credentials` for a machine application, whose token from that grant
+ * is the application's own and names no person.
+ */
 export interface FakeTenantClient extends ClientInterface {
   /** Omit for a public client. */
   secret?: string;
+  /**
+   * The scopes a `client_credentials` token may carry, as an administrator
+   * allowlists them on a real tenant. An application allowed that grant has
+   * to state it, as a tenant refuses to register one that does not;
+   * {@linkcode FakeTenant.addClient} throws. The fake's machine vocabulary is
+   * `identity:organizations:read` and `identity:organizations:write`, so a
+   * token asking for any other scope, allowlisted or not, an OIDC scope
+   * included, is refused with `invalid_scope`. Ignored on every other grant.
+   */
+  scopes?: string[];
+  /**
+   * The permissions a tenant administrator assigned this machine application.
+   * `GET /api/resource-grants` answers only a `client_credentials` token of an
+   * application holding `resource_grants.read`, and hides itself with a 404
+   * from every other. Defaults to none.
+   */
+  machinePermissions?: FakeTenantMachinePermission[];
   /**
    * `"jwt"` issues RFC 9068 access tokens signed with the tenant's JWKS key,
    * for a resource server that validates locally. Defaults to `"opaque"`.
@@ -115,6 +145,16 @@ export interface FakeTenantGrant {
   subject: FakeTenantSubject;
   /** What the subject may do on that one resource. */
   permissions: string[];
+  /**
+   * The slug of the role the grant confers, as `GET /api/resource-grants`
+   * reports it: `roleSlug`, with the name {@linkcode FakeTenant.defineOrganizationRole}
+   * gave it as `roleName`, or the slug again. Defaults to a slug built from
+   * `permissions`. A built-in tier (`owner`, `admin`, `member`) is listed as
+   * `builtInRole` with no `roleId`, the way a grant an administrator placed
+   * is. It changes only how the grant is listed; what it confers stays
+   * `permissions`.
+   */
+  role?: string;
 }
 
 /** An organization role your tenant defines beside the built-in tiers. */
@@ -185,7 +225,10 @@ export interface FakeTenantOptions {
  * caller's own `GET /api/memberships`, the two authorization questions,
  * `POST /api/check` and `POST /api/check/batch`, the organization API under
  * `/api/organizations`, and the account API under `/api/account`, with the
- * same shapes and refusals a real tenant uses.
+ * same shapes and refusals a real tenant uses. To the app itself it answers
+ * the `client_credentials` grant, for a client registered with it, and
+ * `GET /api/resource-grants` under that machine token, which lists who holds a
+ * grant on one resource once the client holds `resource_grants.read`.
  *
  * Nothing here is interactive: {@linkcode signInAs} decides who the next
  * authorization request authenticates, and there is no consent step. Serve
@@ -228,7 +271,10 @@ export interface FakeTenant {
   defineOrganizationRole(role: FakeTenantOrganizationRole): void;
   /** Registers a resource type, so `/api/check` accepts it. */
   registerResourceType(type: string): void;
-  /** Adds a resource grant. */
+  /**
+   * Adds a resource grant, which `/api/check` answers from and
+   * `GET /api/resource-grants` lists.
+   */
   grant(grant: FakeTenantGrant): void;
   /**
    * Links an external account to a person, as the account API lists it, and
@@ -279,6 +325,27 @@ const BUILT_IN_ROLES: readonly { slug: string; name: string }[] = [
   { slug: "admin", name: "Admin" },
   { slug: "member", name: "Member" },
 ];
+const ORGANIZATIONS_READ = "identity:organizations:read";
+const MACHINE_SCOPES: readonly string[] = [
+  ORGANIZATIONS_READ,
+  "identity:organizations:write",
+];
+const RESOURCE_GRANTS_READ: FakeTenantMachinePermission =
+  "resource_grants.read";
+const RESOURCE_TYPE_MAX_LENGTH = 64;
+const RESOURCE_ID_MAX_LENGTH = 255;
+// deno-lint-ignore no-control-regex
+const ASCII_CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
+const UNSTATED_ALLOWLIST =
+  "A client_credentials application has to state the scopes its tokens may " +
+  "be granted: pass `scopes`, an empty list to deny every scope.";
+const ORGANIZATION_ID_REFUSAL =
+  "organization_id is only accepted on the refresh_token grant";
+const USER_TOKEN_REFUSAL =
+  "Resource grants are placed and read by your application, not by the person " +
+  "using it. Call this with your application's own client credentials after " +
+  "deciding, in your own logic, that the share is allowed.";
+const MACHINE_TOKEN_REFUSAL = "A machine credential has no self to answer for.";
 const OWNER = "owner";
 const MANAGER_ROLES: readonly string[] = ["owner", "admin"];
 const DEFAULT_ROLES: readonly string[] = ["member"];
@@ -367,6 +434,34 @@ interface Caller {
   accessToken: string;
 }
 
+interface ResourceGrant extends FakeTenantGrant {
+  id: string;
+  role: string;
+  roleId: string | null;
+}
+
+function machineScopeCeiling(client: FakeTenantClient): readonly string[] {
+  return client.scopes?.filter((scope) => MACHINE_SCOPES.includes(scope)) ??
+    [];
+}
+
+function isBuiltInRole(slug: string): boolean {
+  return BUILT_IN_ROLES.some((role) => role.slug === slug);
+}
+
+function roleSlugOf(permissions: string[]): string {
+  const slug = permissions
+    .map((permission) =>
+      permission.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
+        /^-+|-+$/g,
+        "",
+      )
+    )
+    .filter(Boolean)
+    .join("-");
+  return slug || "grant";
+}
+
 type Route = (
   request: Request,
   params: string[],
@@ -389,12 +484,26 @@ class TenantTokenService extends MemoryTokenService<
     ) => void,
     readonly mintJwt: (
       client: FakeTenantClient,
-      user: FakeTenantUser,
+      user: FakeTenantUser | undefined,
       scope: BasicScope | null | undefined,
       organizationId: string | undefined,
     ) => Promise<string>,
   ) {
     super(options);
+  }
+
+  override acceptedScope(
+    client: FakeTenantClient,
+    user: FakeTenantUser | undefined,
+    scope?: BasicScope | null,
+  ): Promise<BasicScope | null | undefined | false> {
+    if (!scope || user) return Promise.resolve(scope);
+    const ceiling = machineScopeCeiling(client);
+    return Promise.resolve(
+      [...scope].every((requested) => ceiling.includes(requested))
+        ? scope
+        : false,
+    );
   }
 
   override async generateAccessToken(
@@ -403,7 +512,7 @@ class TenantTokenService extends MemoryTokenService<
     scope?: BasicScope | null,
   ): Promise<string> {
     const issuance = (user ? this.issuanceOf(user.id) : undefined) ?? {};
-    const accessToken = client.accessTokenFormat === "jwt" && user
+    const accessToken = client.accessTokenFormat === "jwt"
       ? await this.mintJwt(client, user, scope, issuance.organizationId)
       : await super.generateAccessToken(client, user, scope);
     this.recordCredential(accessToken, issuance, client);
@@ -604,7 +713,8 @@ export async function createFakeTenant(
   const definedRoles = new Map<string, string>();
   const invitations = new Map<string, Invitation>();
   const resourceTypes = new Set<string>();
-  const grants: FakeTenantGrant[] = [];
+  const grants: ResourceGrant[] = [];
+  const resourceRoleIds = new Map<string, string>();
   const loginSessions = new Map<string, LoginSession>();
   const linkedAccounts = new Map<string, LinkedAccount>();
   const credentials = new Map<string, Credential>();
@@ -675,10 +785,12 @@ export async function createFakeTenant(
         signingKeys,
         issuer,
         audience: client.audience ?? client.id,
-        userClaims: () => ({
-          username: user.username,
-          ...authorizationClaims(user.id, organizationId),
-        }),
+        userClaims: user
+          ? () => ({
+            username: user.username,
+            ...authorizationClaims(user.id, organizationId),
+          })
+          : undefined,
       })(client, user, scope),
   );
   const authorizationCodeService = new MemoryAuthorizationCodeService<
@@ -714,9 +826,18 @@ export async function createFakeTenant(
       refresh_token: new RefreshTokenGrant({
         resolve: () => ({ clientService, tokenService }),
       }),
+      client_credentials: new ClientCredentialsGrant({
+        resolve: () => ({ clientService, tokenService }),
+      }),
     },
     signingKeys,
-    scopesSupported: ["openid", "profile", "email", "offline_access"],
+    scopesSupported: [
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      ...MACHINE_SCOPES,
+    ],
     userClaims: (user) => ({
       preferred_username: user.username,
       name: user.name,
@@ -735,6 +856,10 @@ export async function createFakeTenant(
         )
         : {},
   });
+
+  const isMachineToken = (
+    token: Token<FakeTenantClient, FakeTenantUser, BasicScope>,
+  ) => !token.user;
 
   const withIssuance = async <T>(
     userId: string | undefined,
@@ -767,11 +892,7 @@ export async function createFakeTenant(
       return server.handleAuthError(error);
     }
     if (!token.user) {
-      return problem(
-        403,
-        "A machine credential has no self to answer for.",
-        machineRefusal,
-      );
+      return problem(403, MACHINE_TOKEN_REFUSAL, machineRefusal);
     }
     const user = users.get(token.user.id) ?? token.user;
     const organizationId = credentials.get(token.accessToken)?.organizationId;
@@ -799,8 +920,10 @@ export async function createFakeTenant(
   const answer = (asked: string[], held: Set<string>) =>
     Object.fromEntries(asked.map((p) => [p, held.has(p)]));
 
+  const personOnly = { reason: "machine_token" };
+
   const check = async (request: Request): Promise<Response> => {
-    const caller = await authenticated(request);
+    const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return caller;
     const body = await request.json().catch(() => null) as {
       permissions?: unknown;
@@ -848,7 +971,7 @@ export async function createFakeTenant(
   };
 
   const checkBatch = async (request: Request): Promise<Response> => {
-    const caller = await authenticated(request);
+    const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return caller;
     const body = await request.json().catch(() => null) as {
       permissions?: unknown;
@@ -900,7 +1023,7 @@ export async function createFakeTenant(
   };
 
   const memberships = async (request: Request): Promise<Response> => {
-    const caller = await authenticated(request);
+    const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return caller;
     return Response.json({
       memberships: [...organizations.values()]
@@ -1007,6 +1130,22 @@ export async function createFakeTenant(
 
   const token = async (request: Request): Promise<Response> => {
     const form = await request.clone().formData().catch(() => null);
+    const organizationId = form?.get("organization_id");
+    if (
+      typeof organizationId === "string" && organizationId.length > 0 &&
+      form?.get("grant_type") !== "refresh_token"
+    ) {
+      return Response.json(
+        {
+          error: "invalid_request",
+          error_description: ORGANIZATION_ID_REFUSAL,
+        },
+        {
+          status: 400,
+          headers: { "cache-control": "no-store", pragma: "no-cache" },
+        },
+      );
+    }
     const code = form?.get("code");
     const refreshToken = form?.get("refresh_token");
     const signIn = typeof code === "string"
@@ -1592,9 +1731,21 @@ export async function createFakeTenant(
       | Promise<Response>,
   ): Route =>
   async (request, params) => {
-    const caller = await authenticated(request, { reason: "machine_token" });
+    const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return noStore(caller);
     return noStore(await handler(caller, request, params));
+  };
+
+  const userinfo = async (request: Request): Promise<Response> => {
+    try {
+      const { token } = await server.authenticate(request);
+      if (isMachineToken(token)) {
+        throw new AccessDeniedError("client credentials have no end user");
+      }
+    } catch (error) {
+      return server.handleAuthError(error);
+    }
+    return await server.handleUserInfoRequest(request);
   };
 
   const readAccount = accountApi((caller) =>
@@ -1727,6 +1878,89 @@ export async function createFakeTenant(
     return new Response(null, { status: 204 });
   });
 
+  const machineCaller = async (
+    request: Request,
+  ): Promise<{ client: FakeTenantClient; scopes: string[] } | Response> => {
+    let token: Token<FakeTenantClient, FakeTenantUser, BasicScope>;
+    try {
+      ({ token } = await server.authenticate(request));
+    } catch (error) {
+      return server.handleAuthError(error);
+    }
+    if (!isMachineToken(token)) {
+      return problem(403, USER_TOKEN_REFUSAL, { reason: "user_token" });
+    }
+    return {
+      client: token.client,
+      scopes: token.scope ? [...token.scope] : [],
+    };
+  };
+
+  const resourceGrantJson = (grant: ResourceGrant) => {
+    const holder = grant.subject.type === "user"
+      ? users.get(grant.subject.id)
+      : undefined;
+    const organization = grant.subject.type === "organization"
+      ? organizations.get(grant.subject.id)
+      : undefined;
+    return {
+      id: grant.id,
+      subjectType: grant.subject.type,
+      subjectId: grant.subject.id,
+      subjectRole: null,
+      subjectName: holder
+        ? holder.name ?? holder.username
+        : organization?.name ?? null,
+      subjectActive: holder !== undefined || organization !== undefined,
+      roleId: grant.roleId,
+      builtInRole: isBuiltInRole(grant.role) ? grant.role : null,
+      roleSlug: grant.role,
+      roleName: roleName(grant.role),
+    };
+  };
+
+  const listResourceGrants = async (request: Request): Promise<Response> => {
+    const caller = await machineCaller(request);
+    if (caller instanceof Response) return noStore(caller);
+    if (
+      !caller.scopes.includes(ORGANIZATIONS_READ) ||
+      !caller.client.machinePermissions?.includes(RESOURCE_GRANTS_READ)
+    ) {
+      return noStore(problem(404, "Not found"));
+    }
+    const params = new URL(request.url).searchParams;
+    const type = params.get("type");
+    const id = params.get("id");
+    if (
+      !type || type.length > RESOURCE_TYPE_MAX_LENGTH || !id ||
+      id.length > RESOURCE_ID_MAX_LENGTH || ASCII_CONTROL_CHARACTERS.test(id)
+    ) {
+      return noStore(
+        invalid(
+          "resource",
+          "Pass the resource as `type` and `id` query parameters.",
+        ),
+      );
+    }
+    if (!resourceTypes.has(type)) {
+      return noStore(
+        invalid(
+          "type",
+          `No resource type "${type}" is registered for this tenant.`,
+        ),
+      );
+    }
+    return noStore(Response.json({
+      resource: { type, id },
+      grants: grants
+        .filter((grant) =>
+          grant.resource.type === type && grant.resource.id === id
+        )
+        .map(resourceGrantJson)
+        .sort((a, b) => a.roleName.localeCompare(b.roleName)),
+    }));
+  };
+
   const routes: Record<string, (request: Request) => Promise<Response>> = {
     "GET /.well-known/oauth-authorization-server": (r) =>
       server.handleMetadataRequest(r),
@@ -1737,12 +1971,13 @@ export async function createFakeTenant(
     [`POST ${PATHS.revocation}`]: revocation,
     [`POST ${PATHS.introspection}`]: (r) =>
       server.handleIntrospectionRequest(r),
-    [`GET ${PATHS.userinfo}`]: (r) => server.handleUserInfoRequest(r),
-    [`POST ${PATHS.userinfo}`]: (r) => server.handleUserInfoRequest(r),
+    [`GET ${PATHS.userinfo}`]: userinfo,
+    [`POST ${PATHS.userinfo}`]: userinfo,
     [`GET ${PATHS.jwks}`]: (r) => server.handleJwksRequest(r),
     "GET /api/memberships": memberships,
     "POST /api/check": check,
     "POST /api/check/batch": checkBatch,
+    "GET /api/resource-grants": listResourceGrants,
   };
 
   const segment = "([^/]+)";
@@ -1842,13 +2077,17 @@ export async function createFakeTenant(
     fetch: (request) =>
       route(request) ?? Promise.resolve(problem(404, "Not found")),
     addClient: async ({ secret, ...client }) => {
-      await clientService.add(
-        {
-          grants: ["authorization_code", "refresh_token"],
-          ...client,
-        },
-        secret,
-      );
+      const registered: FakeTenantClient = {
+        grants: ["authorization_code", "refresh_token"],
+        ...client,
+      };
+      if (
+        registered.grants?.includes("client_credentials") &&
+        registered.scopes === undefined
+      ) {
+        throw new Error(UNSTATED_ALLOWLIST);
+      }
+      await clientService.add(registered, secret);
       for (const uri of client.redirectUris ?? []) {
         try {
           redirectOrigins.add(new URL(uri).origin);
@@ -1914,7 +2153,13 @@ export async function createFakeTenant(
       resourceTypes.add(type);
     },
     grant: (grant) => {
-      grants.push(grant);
+      const role = grant.role ?? roleSlugOf(grant.permissions);
+      let roleId = isBuiltInRole(role) ? null : resourceRoleIds.get(role);
+      if (roleId === undefined) {
+        roleId = crypto.randomUUID();
+        resourceRoleIds.set(role, roleId);
+      }
+      grants.push({ ...grant, id: crypto.randomUUID(), role, roleId });
     },
     linkAccount: (userId, account) => {
       if (!users.has(userId)) {

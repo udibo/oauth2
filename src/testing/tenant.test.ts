@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
 
@@ -9,6 +9,10 @@ import { createFakeTenant, type FakeTenant } from "./tenant.ts";
 
 const APP = { id: "app", secret: "app-secret" };
 const PARTNER = { id: "partner", secret: "partner-secret" };
+const REPORTER = { id: "reporter", secret: "reporter-secret" };
+const JWT_REPORTER = { id: "jwt-reporter", secret: "jwt-reporter-secret" };
+const ORGANIZATIONS_READ = "identity:organizations:read";
+const ORGANIZATIONS_WRITE = "identity:organizations:write";
 const MCP = "http://127.0.0.1:1/mcp";
 const REDIRECT = "http://app.localhost/auth/callback";
 
@@ -42,6 +46,21 @@ describe("createFakeTenant", () => {
     await tenant.addClient({
       id: "mcp-client",
       redirectUris: ["http://127.0.0.1/callback"],
+      accessTokenFormat: "jwt",
+      audience: MCP,
+    });
+    await tenant.addClient({
+      id: REPORTER.id,
+      secret: REPORTER.secret,
+      grants: ["client_credentials"],
+      scopes: [ORGANIZATIONS_READ, ORGANIZATIONS_WRITE, "identity:users:read"],
+      machinePermissions: ["resource_grants.read"],
+    });
+    await tenant.addClient({
+      id: JWT_REPORTER.id,
+      secret: JWT_REPORTER.secret,
+      grants: ["client_credentials"],
+      scopes: [ORGANIZATIONS_READ],
       accessTokenFormat: "jwt",
       audience: MCP,
     });
@@ -130,6 +149,128 @@ describe("createFakeTenant", () => {
     });
     return await response.json();
   }
+
+  async function machineToken(
+    scope: string,
+    client = REPORTER,
+  ): Promise<
+    {
+      status: number;
+      body: { access_token?: string; scope?: string; error?: string };
+    }
+  > {
+    const response = await fetch(url("/api/oauth2/token"), {
+      method: "POST",
+      headers: { authorization: encodeBasicAuth(client.id, client.secret) },
+      body: new URLSearchParams({ grant_type: "client_credentials", scope }),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+
+  async function grantsOn(
+    id: string,
+  ): Promise<
+    {
+      roleId: string | null;
+      builtInRole: string | null;
+      roleSlug: string;
+      roleName: string;
+    }[]
+  > {
+    const { body } = await machineToken(ORGANIZATIONS_READ);
+    const response = await fetch(
+      url(`/api/resource-grants?type=document&id=${id}`),
+      { headers: { authorization: `Bearer ${body.access_token}` } },
+    );
+    assertEquals(response.status, 200, await response.clone().text());
+    return (await response.json()).grants;
+  }
+
+  it("refuses to register a machine client that states no scope allowlist", async () => {
+    await assertRejects(
+      () =>
+        tenant.addClient({
+          id: "unbounded",
+          secret: "unbounded-secret",
+          grants: ["client_credentials"],
+        }),
+      Error,
+      "scopes",
+    );
+  });
+
+  it("issues a machine token the allowlisted scopes its vocabulary has, and none it lacks", async () => {
+    const both = await machineToken(
+      `${ORGANIZATIONS_READ} ${ORGANIZATIONS_WRITE}`,
+    );
+    assertEquals(both.status, 200, JSON.stringify(both.body));
+    assertEquals(
+      both.body.scope,
+      `${ORGANIZATIONS_READ} ${ORGANIZATIONS_WRITE}`,
+    );
+    const outside = await machineToken("identity:users:read");
+    assertEquals(outside.status, 400);
+    assertEquals(outside.body.error, "invalid_scope");
+  });
+
+  it("mints a JWT naming the client as its subject for a machine client that opted in", async () => {
+    const issued = await machineToken(ORGANIZATIONS_READ, JWT_REPORTER);
+    assertEquals(issued.status, 200, JSON.stringify(issued.body));
+    const accessToken = issued.body.access_token!;
+    const reader = new JwksTokenReader<{ id: string }, unknown>({
+      issuer: tenant.issuer,
+      audience: MCP,
+      getClient: (claims) => ({ id: claims.client_id! }),
+    });
+    assert(
+      await reader.getToken(accessToken),
+      "the machine JWT did not verify against the tenant's JWKS",
+    );
+    const claims = JSON.parse(atob(accessToken.split(".")[1]));
+    assertEquals(claims.sub, JWT_REPORTER.id);
+    assertEquals(claims.client_id, JWT_REPORTER.id);
+    assertEquals(claims.scope, ORGANIZATIONS_READ);
+    assertFalse(
+      "permissions" in claims,
+      "a machine token holds no permissions",
+    );
+    assertFalse("username" in claims, "a machine token names no person");
+  });
+
+  it("lists a grant of a built-in tier as one, with no role id", async () => {
+    tenant.grant({
+      resource: { type: "document", id: "doc-5" },
+      subject: { type: "user", id: "bob" },
+      permissions: ["documents:read"],
+      role: "member",
+    });
+    const [held] = await grantsOn("doc-5");
+    assertEquals(held.builtInRole, "member");
+    assertEquals(held.roleId, null);
+    assertEquals(held.roleSlug, "member");
+    assertEquals(held.roleName, "Member");
+  });
+
+  it("lists a grant under the role it names, or under a slug built from its permissions, one id per role", async () => {
+    tenant.defineOrganizationRole({ slug: "reviewer", name: "Reviewer" });
+    for (const id of ["doc-3", "doc-4"]) {
+      tenant.grant({
+        resource: { type: "document", id },
+        subject: { type: "user", id: "bob" },
+        permissions: ["documents:read", "documents:comment"],
+        role: "reviewer",
+      });
+    }
+    const [derived] = await grantsOn("doc-1");
+    assertEquals(derived.roleSlug, "documents-read");
+    assertEquals(derived.roleName, "documents-read");
+    const [named] = await grantsOn("doc-3");
+    assertEquals(named.roleSlug, "reviewer");
+    assertEquals(named.roleName, "Reviewer");
+    const [sameRole] = await grantsOn("doc-4");
+    assertEquals(sameRole.roleId, named.roleId);
+    assert(derived.roleId !== named.roleId, "each role has an id of its own");
+  });
 
   it("advertises its endpoints on the issuer it was given", async () => {
     const metadata = await (await fetch(
