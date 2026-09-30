@@ -6,7 +6,7 @@ external database, or email service is required.
 
 If you want Udibo to host sign-in, use
 [the managed-service guide](guides/use-udibo.md). Udibo is currently in private
-beta with a [waitlist](https://udibo.com).
+beta; see [udibo.com](https://www.udibo.com/) for access.
 
 ## Run the example
 

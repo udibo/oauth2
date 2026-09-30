@@ -2,8 +2,9 @@
 
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
-> for the app's own users and API. Udibo is in private beta with a waitlist
-> at https://udibo.com; do not assume public registration is available.
+> for the app's own users and API. Udibo is in private beta; access starts at
+> https://www.udibo.com/. Do not assume public registration is available.
+> Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
 
@@ -52,7 +53,7 @@
 
 - [README](README.md): package overview, runtime boundaries, and entrypoints
 - [Documentation index](docs/index.md): choose managed or app-hosted integration
-- [Use Udibo](docs/guides/use-udibo.md): private-beta prerequisites, BFF wiring, validation, troubleshooting
+- [Use Udibo](docs/guides/use-udibo.md): hosted-service configuration values, BFF wiring, validation, troubleshooting
 - [Quickstart](docs/quickstart.md): run and inspect a complete local application
 - [Host authorization for your app](docs/guides/become-an-oauth-provider.md): services, endpoints, grants, consent, refresh, and OIDC issuance
 - [Add login](docs/guides/add-login.md): app-owned user/credential storage, sessions, mail, protections, and a CAPTCHA route example

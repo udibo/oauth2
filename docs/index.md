@@ -10,8 +10,9 @@ Udibo hosts the sign-in flow and issues tokens. Your app handles its callback,
 keeps its own session, and validates access to its API. You do not need to
 implement password storage, MFA enrollment, or an authorization server.
 
-**Private beta:** [join the waitlist](https://udibo.com). If you already have
-access, start with [the integration guide](guides/use-udibo.md).
+**Private beta:** see [udibo.com](https://www.udibo.com/) for access. If you
+already have an account, start with
+[the integration guide](guides/use-udibo.md).
 
 Then read [API protection](guides/protect-an-api.md) and
 [environment configuration](guides/deploy-across-environments.md).
