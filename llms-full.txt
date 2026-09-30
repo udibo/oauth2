@@ -2,8 +2,9 @@
 
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
-> for the app's own users and API. Udibo is in private beta with a waitlist
-> at https://udibo.com; do not assume public registration is available.
+> for the app's own users and API. Udibo is in private beta; access starts at
+> https://www.udibo.com/. Do not assume public registration is available.
+> Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
 
@@ -65,9 +66,9 @@ Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,
 React bindings, and optional login flows over your own database.
 
-**Udibo's managed identity service is in private beta.**
-[Join the waitlist](https://udibo.com). The self-hosted examples run locally
-without a hosted account.
+**Udibo's managed identity service is in private beta.** See
+[udibo.com](https://www.udibo.com/) for access. The self-hosted examples run
+locally without a hosted account.
 
 ## Choose your path
 
@@ -254,8 +255,9 @@ Udibo hosts the sign-in flow and issues tokens. Your app handles its callback,
 keeps its own session, and validates access to its API. You do not need to
 implement password storage, MFA enrollment, or an authorization server.
 
-**Private beta:** [join the waitlist](https://udibo.com). If you already have
-access, start with [the integration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
+**Private beta:** see [udibo.com](https://www.udibo.com/) for access. If you
+already have an account, start with
+[the integration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
 
 Then read [API protection](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md) and
 [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md).
@@ -317,24 +319,24 @@ Udibo handles sign-in and issues tokens for your application. Your backend
 completes the OAuth2 callback, maintains an application session, and protects
 application data.
 
-**Udibo is in private beta.** [Join the waitlist](https://udibo.com). The
-configuration below is for developers who already have beta access. Public
-registration and its setup instructions will be documented when access opens. To
-develop without an account, use the
+**Udibo is in private beta.** See [udibo.com](https://www.udibo.com/) for
+access. To develop without an account, use the
 [local identity provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md) or the
 [external-auth example](https://github.com/udibo/oauth2/blob/main/examples/hono/app-with-external-auth/README.md).
 
 ## What you need
 
-Obtain these values for your application through your beta setup:
+Register a confidential application in your tenant's dashboard, as described in
+[Connect your first application](https://www.udibo.com/docs/identity/get-started).
+The application's page shows its issuer and client ID:
 
-| Value                               | Use                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| Issuer URL                          | The identity service's issuer, copied exactly; it may differ from your app's origin |
-| Client ID and secret                | A confidential client registration for your backend                                 |
-| Callback URL                        | An exact registered URL, such as `https://app.example.com/auth/callback`            |
-| Allowed scopes                      | Identity claims and API permissions your application may request                    |
-| Introspection or JWKS configuration | Token validation for your API; use the mode configured for the application          |
+| Value                               | Use                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| Issuer URL                          | Your tenant's issuer, `https://{tenant-id}.udibo.com`; not your app's origin |
+| Client ID and secret                | A confidential client registration for your backend                          |
+| Callback URL                        | An exact registered URL, such as `https://app.example.com/auth/callback`     |
+| Allowed scopes                      | Identity claims and API permissions your application may request             |
+| Introspection or JWKS configuration | Token validation for your API; use the mode configured for the application   |
 
 Use separate registrations and secrets for development and production. Keep
 client credentials on the backend. The issuer and client ID are identifiers; a
@@ -473,8 +475,9 @@ Before pointing it at production:
 
 See [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md) and
 [application deployment](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) for the remaining app-side
-setup. Hosted-service administration and account provisioning are documented
-separately from this package.
+setup. Tenant configuration — sign-in methods, organizations, permissions, and
+webhooks — is covered in the
+[Udibo Identity guides](https://www.udibo.com/docs/identity).
 
 ---
 
@@ -488,7 +491,7 @@ external database, or email service is required.
 
 If you want Udibo to host sign-in, use
 [the managed-service guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md). Udibo is currently in private
-beta with a [waitlist](https://udibo.com).
+beta; see [udibo.com](https://www.udibo.com/) for access.
 
 ## Run the example
 
