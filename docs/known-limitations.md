@@ -327,12 +327,42 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 
 - **`./cli` is the only Deno-locked entrypoint.** It uses `Deno.serve`,
   `Deno.env`, `Deno.readTextFile` and `Deno.args`, so it runs on Deno and
-  nowhere else. Every other subpath is Web-standard — no `node:` import and no
-  runtime-specific global anywhere on the library path (the `Deno.env.get` you
-  see in connector JSDoc is example prose, not code the package runs). The CLI
-  is a development tool (`oidc keygen`, `idp dev`); nothing on the library path
-  imports it, so its floor never constrains the rest of the package. The generic
-  `/testing` and `/testing/contract` helpers register suites through
-  `@std/testing/bdd` and are verified on Deno only. The full matrix is in
+  nowhere else. Every other subpath is Web-standard — no `node:` import, and no
+  runtime-specific global on the library path beyond one feature check: the
+  default `fetch` uses `Deno.createHttpClient` when it exists, as the next item
+  describes (the `Deno.env.get` you see in connector JSDoc is example prose, not
+  code the package runs). The CLI is a development tool (`oidc keygen`,
+  `idp dev`); nothing on the library path imports it, so its floor never
+  constrains the rest of the package. The generic `/testing` and
+  `/testing/contract` helpers register suites through `@std/testing/bdd` and are
+  verified on Deno only. The full matrix is in
   [the README](../README.md#runtime-support); the support boundary is in
   [the stability policy](stability.md#runtime-support).
+- **On Deno, a request that misses the package's own deadline moves later
+  requests off the pooled connection.** Deno's global `fetch` sends every
+  request to an origin over one pooled HTTP/2 connection, and aborting a request
+  at its deadline resets only that request: if the connection itself has stopped
+  answering — a proxy still routing it to a backend that restarted, say — it
+  stays pooled, and every later request to that origin would time out on it as
+  well. So when one of the requests the package bounds with a deadline of its
+  own is sent with the default `fetch` to an `https` origin and misses that
+  deadline before its response has fully arrived, every later default-`fetch`
+  request from that process to that origin opens a connection of its own and
+  closes it once the response headers arrive. Those requests are:
+  `JwksTokenReader`'s JWKS and discovery fetches and `IntrospectionTokenReader`
+  (`fetchTimeoutMs`); `checkPermissions`; `DirectClient`'s discovery, token,
+  revocation and userinfo calls and `BffClient`'s session probe;
+  `breachedPasswordValidator`; and the external connectors' token exchange, plus
+  the OIDC connector's discovery. Nothing else triggers the switch: not a
+  request aborted for any other reason, not a deadline a caller sets on its own
+  signal (`DirectClient.fetch(url, { signal })`), and not the calls that carry
+  no package deadline — `DirectClient.fetch` and `BffClient.fetch`, the BFF
+  proxy, the connectors' userinfo requests, and Apple's JWKS. Those still take a
+  connection of their own to an origin that has already switched, and their
+  responses are the global `fetch`'s, unaltered. The switch trades connection
+  reuse to that origin, for the life of the process, for not depending on a
+  pooled connection that may be stalled. Plain `http` (which Deno sends over
+  HTTP/1.1, where an abort already discards the connection) keeps the shared
+  pool, and other runtimes use their global `fetch` unchanged. An injected
+  `fetch` manages its own connections and gets none of this; one that pins an
+  HTTP/2 client of its own should replace that client after a timeout.

@@ -11,6 +11,7 @@ import { MemoryAuthRequestStorage } from "../../client/storage.ts";
 import { isOAuth2Error } from "../../errors.ts";
 import type { AuthorizationServerMetadata } from "../../models/responses.ts";
 import type { TokenResponse } from "../../models/token.ts";
+import { defaultFetch } from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import {
   assertIdTokenClaims,
@@ -119,7 +120,7 @@ export function oidcProvider(options: OidcProviderOptions): ExternalProvider {
       id,
       input instanceof Request ? input.url : String(input),
     );
-    return (options.fetch ?? globalThis.fetch)(input, {
+    return (options.fetch ?? defaultFetch)(input, {
       ...init,
       redirect: "error",
     });

@@ -10,6 +10,11 @@ import { describe, it } from "@std/testing/bdd";
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
 import { base64urlEncode } from "../utils/crypto.ts";
 import {
+  generateTestCertificate,
+  runTrustingCertificate,
+  serveTls,
+} from "../utils/_test_tls.ts";
+import {
   JwksTokenReader,
   type JwksTokenReaderOptions,
 } from "./jwks-token-reader.ts";
@@ -1057,6 +1062,68 @@ describe("JwksTokenReader", () => {
       assertStrictEquals(token?.client.id, "my-client");
       assertStrictEquals(calls.length, 2);
       release!();
+    });
+
+    it("retries a timed-out fetch on a new HTTP/2 connection", async () => {
+      const certificate = await generateTestCertificate();
+      const key = await createKey("key-a");
+      const served: string[] = [];
+      await using server = serveTls(
+        certificate,
+        async (request, connection) => {
+          const { pathname } = new URL(request.url);
+          served.push(pathname);
+          if (pathname === "/.well-known/oauth-authorization-server") {
+            server.stall();
+            return Response.json({
+              issuer: server.url,
+              jwks_uri: `${server.url}/jwks`,
+            });
+          }
+          if (connection.stalled) {
+            await connection.released;
+            return new Response(null, { status: 503 });
+          }
+          return Response.json({ keys: [key.jwk] });
+        },
+      );
+      const token = await signToken(key, claimsFor({ iss: server.url }));
+
+      const outcomes = await runTrustingCertificate(
+        new URL("./_test_jwks_stalled_connection.ts", import.meta.url),
+        certificate,
+        [server.url, token, "3"],
+      );
+
+      assertEquals(served[0], "/.well-known/oauth-authorization-server");
+      assertEquals(outcomes, ["unavailable", "valid", "valid"]);
+    });
+
+    it("hands an injected fetch the request without a transport of its own", async () => {
+      const key = await createKey("key-a");
+      const inits: RequestInit[] = [];
+      const hanging = neverRespondingFetch();
+      const reader = createReader(
+        (input, init) => {
+          inits.push(init ?? {});
+          return hanging(input, init);
+        },
+        { fetchTimeoutMs: 10, minFetchIntervalMs: NEVER_THROTTLED },
+      );
+      const accessToken = await signToken(key, claimsFor());
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await assertRejects(
+          () => reader.getToken(accessToken),
+          TemporarilyUnavailableError,
+        );
+      }
+
+      assertStrictEquals(inits.length, 2);
+      assertEquals(inits.map((init) => Object.keys(init).sort()), [
+        ["headers", "signal"],
+        ["headers", "signal"],
+      ]);
     });
   });
 

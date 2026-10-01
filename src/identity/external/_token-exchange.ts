@@ -9,6 +9,7 @@
  * @module
  */
 
+import { packageDeadlineSignal } from "../../utils/_default-fetch.ts";
 import { describeError, sanitizeProviderText } from "./_shared.ts";
 import { ExternalAuthError } from "./errors.ts";
 
@@ -80,7 +81,9 @@ export async function runTokenExchange(
       },
       body: input.body,
       redirect: "manual",
-      signal: AbortSignal.timeout(input.timeoutMs ?? TOKEN_EXCHANGE_TIMEOUT_MS),
+      signal: packageDeadlineSignal(
+        AbortSignal.timeout(input.timeoutMs ?? TOKEN_EXCHANGE_TIMEOUT_MS),
+      ),
     });
   } catch (error) {
     throw fail(
