@@ -196,6 +196,11 @@ export interface AuthorizationServerContext<
   services: AuthorizationServerServices<Client, User, S>;
   /** The issuer identifier URL for this request. */
   issuer?: string;
+  /**
+   * Scopes advertised for this request in discovery metadata. Overrides the
+   * server-wide default, including when set to an empty array.
+   */
+  scopesSupported?: string[];
   /** URL of the authorization endpoint. Defaults to `${issuer}/authorize`. */
   authorizationEndpoint?: string;
   /** URL of the token endpoint. Defaults to `${issuer}/token`. */
@@ -243,7 +248,10 @@ export interface AuthorizationServerOptions<
     | Promise<AuthorizationServerContext<Client, User, S>>;
   /** Grants the server supports, keyed by `grant_type` (each key must equal `grant.grantType`). */
   grants: AuthorizationServerGrants<Client, User, S>;
-  /** Scopes supported by this server (advertised in RFC 8414 metadata). */
+  /**
+   * Default scopes advertised in RFC 8414 metadata when the request context
+   * does not supply scopesSupported.
+   */
   scopesSupported?: string[];
   /**
    * OIDC issuance keys. Configuring this turns the OIDC provider surface on:
@@ -1877,8 +1885,9 @@ export class AuthorizationServer<
     }
     metadata.response_types_supported = hasAuthCodeGrant ? ["code"] : [];
 
-    if (this.scopesSupported) {
-      metadata.scopes_supported = this.scopesSupported;
+    const scopesSupported = context.scopesSupported ?? this.scopesSupported;
+    if (scopesSupported) {
+      metadata.scopes_supported = scopesSupported;
     }
 
     if (this.signingKeys) {
