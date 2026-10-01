@@ -8,6 +8,7 @@
  * @module
  */
 
+import { defaultFetch } from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import { describeError, readErrorBody } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
@@ -138,7 +139,7 @@ export function oauth2Provider(
 ): ExternalProvider {
   const id = options.id;
   const fetchImpl: typeof fetch = (input, init) =>
-    (options.fetch ?? globalThis.fetch)(input, init);
+    (options.fetch ?? defaultFetch)(input, init);
   const scopeSeparator = options.scopeSeparator ?? " ";
 
   async function exchangeCode(

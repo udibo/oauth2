@@ -9,6 +9,11 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
 import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
+import {
+  generateTestCertificate,
+  runTrustingCertificate,
+  serveTls,
+} from "../utils/_test_tls.ts";
 import { checkPermissions } from "./check.ts";
 import {
   serveDroppedBody,
@@ -293,4 +298,30 @@ describe("checkPermissions", () => {
     );
     assert(cancelled, "a refused response's body must be released");
   });
+
+  it(
+    "sends the request after a timed-out one on a new HTTP/2 connection",
+    async () => {
+      const certificate = await generateTestCertificate();
+      await using server = serveTls(
+        certificate,
+        async (_request, connection) => {
+          if (connection.stalled) {
+            await connection.released;
+            return new Response(null, { status: 503 });
+          }
+          server.stall();
+          return Response.json(RESULT);
+        },
+      );
+
+      const outcomes = await runTrustingCertificate(
+        new URL("./_test_check_stalled_connection.ts", import.meta.url),
+        certificate,
+        [`${server.url}/api/check`, "3"],
+      );
+
+      assertEquals(outcomes, ["allowed", "unavailable", "allowed"]);
+    },
+  );
 });

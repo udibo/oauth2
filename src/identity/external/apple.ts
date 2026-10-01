@@ -18,6 +18,7 @@
 
 import { toArrayBuffer } from "../../utils/_buffer.ts";
 import { base64urlDecode } from "../../utils/crypto.ts";
+import { defaultFetch } from "../../utils/_default-fetch.ts";
 import { assertIdTokenClaims, describeError } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import {
@@ -107,7 +108,7 @@ interface JwkWithKid extends JsonWebKey {
 export function appleProvider(options: AppleProviderOptions): ExternalProvider {
   const id = "apple";
   const fetchImpl: typeof fetch = (input, init) =>
-    (options.fetch ?? globalThis.fetch)(input, init);
+    (options.fetch ?? defaultFetch)(input, init);
   const clientSecretFactory = options.clientSecret ??
     createAppleClientSecretFactory({
       providerId: id,

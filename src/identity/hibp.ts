@@ -20,6 +20,7 @@
 
 import { encodeHex } from "@std/encoding/hex";
 
+import { defaultFetch } from "../utils/_default-fetch.ts";
 import { dispatchIdentityEvent, type IdentityEventHook } from "./events.ts";
 
 /** Options for {@link breachedPasswordValidator}. */
@@ -89,7 +90,7 @@ export function breachedPasswordValidator(
   const threshold = options.threshold ?? 1;
   const failOpen = options.failOpen ?? true;
   const timeoutMs = options.timeoutMs ?? 3000;
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = options.fetch ?? defaultFetch;
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const onEvent = options.onEvent;
 

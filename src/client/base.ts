@@ -12,6 +12,7 @@
  * @module
  */
 
+import { defaultFetch } from "../utils/_default-fetch.ts";
 import {
   EventBus,
   type OAuth2ClientEvent,
@@ -57,6 +58,10 @@ export interface BaseOptions {
    *   an in-memory server. Preferred over stubbing `globalThis.fetch`,
    *   which would also intercept unrelated outbound requests the app may
    *   make.
+   *
+   * On Deno the default stops reusing a pooled HTTP/2 connection to a host
+   * once a request to it times out; an injected `fetch` manages its own
+   * connections.
    */
   fetch?: typeof fetch;
 }
@@ -181,7 +186,7 @@ export abstract class OAuth2ClientBase {
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> {
-    return (this.#customFetch ?? globalThis.fetch)(input, init);
+    return (this.#customFetch ?? defaultFetch)(input, init);
   }
 
   /**

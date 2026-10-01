@@ -28,6 +28,7 @@
  */
 
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
+import { defaultFetch } from "../utils/_default-fetch.ts";
 import { receiveJson, sendGuarded } from "./_http.ts";
 
 const CHECK_ENDPOINT = "check endpoint";
@@ -69,7 +70,9 @@ export interface CheckPermissionsOptions {
    * in tests. Defaults to the global `fetch`. Whichever is used, the call runs
    * under this package's deadline and response-size cap, and a redirect is
    * refused rather than followed so the bearer token never reaches the host
-   * it names.
+   * it names. On Deno the default stops reusing a pooled HTTP/2 connection to
+   * a host once a request to it times out; an injected `fetch` manages its own
+   * connections.
    */
   fetch?: typeof fetch;
 }
@@ -132,7 +135,7 @@ export async function checkPermissions(
   options: CheckPermissionsOptions,
 ): Promise<CheckPermissionsResult> {
   const response = await sendGuarded(
-    options.fetch ?? fetch,
+    options.fetch ?? defaultFetch,
     options.endpoint,
     {
       method: "POST",

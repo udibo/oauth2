@@ -20,6 +20,7 @@ import { BasicScope } from "../models/scope.ts";
 import type { Token } from "../models/token.ts";
 import { toArrayBuffer } from "../utils/_buffer.ts";
 import { base64urlDecode } from "../utils/crypto.ts";
+import { defaultFetch } from "../utils/_default-fetch.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
 
 /**
@@ -179,7 +180,9 @@ export interface JwksTokenReaderOptions<
   /**
    * `fetch` implementation used for JWKS and discovery requests. Defaults to
    * the global `fetch`. Inject it to route through a custom client (mTLS,
-   * timeouts, retries) or to stub the network in tests.
+   * timeouts, retries) or to stub the network in tests. On Deno the default
+   * stops reusing a pooled HTTP/2 connection to a host once a request to it
+   * times out; an injected `fetch` manages its own connections.
    */
   fetch?: typeof fetch;
 }
@@ -703,10 +706,13 @@ export class JwksTokenReader<
   }
 
   async #fetchJson(url: string, label: string): Promise<unknown> {
-    const fetchImpl = this.#customFetch ?? globalThis.fetch;
+    const fetchImpl = this.#customFetch ?? defaultFetch;
     const controller = new AbortController();
     const deadline = setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(
+          new DOMException(`${label} request timed out`, "TimeoutError"),
+        ),
       this.#fetchTimeoutMs,
     );
     try {
