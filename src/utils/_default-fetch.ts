@@ -1,9 +1,10 @@
 /**
  * Not part of the public API. The `fetch` the package sends with when its
  * caller injects none: the global `fetch`, resolved at call time, except that
- * on Deno, once a request to an `https` origin times out before its response
- * has fully arrived, later requests to that origin each use a connection of
- * their own instead of the pooled HTTP/2 connection, which may be stalled.
+ * on Deno, once a request to an `https` origin misses a deadline the package
+ * set (see {@link packageDeadlineSignal}) before its response has fully
+ * arrived, later requests to that origin each use a connection of their own
+ * instead of the pooled HTTP/2 connection, which may be stalled.
  *
  * @module
  */
@@ -14,9 +15,26 @@ interface HttpClient {
 
 type CreateHttpClient = (options: Record<string, never>) => HttpClient;
 
-const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 const abandonedOrigins = new Set<string>();
+
+const packageDeadlines = new WeakMap<AbortSignal, AbortSignal>();
+
+/**
+ * The signal to send a request with when the package bounds it by its own
+ * `deadline`; it also aborts when the caller's `signal` does. Only a request
+ * whose signal came from here can move its origin off the pooled connection,
+ * and only when `deadline` is what aborted it.
+ */
+export function packageDeadlineSignal(
+  deadline: AbortSignal,
+  signal?: AbortSignal | null,
+): AbortSignal {
+  const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  packageDeadlines.set(combined, deadline);
+  return combined;
+}
 
 /** The package's default `fetch`; see the module documentation. */
 export const defaultFetch: typeof fetch = async (input, init) => {
@@ -29,19 +47,23 @@ export const defaultFetch: typeof fetch = async (input, init) => {
     return await fetchOnOwnConnection(createHttpClient, input, init);
   }
 
-  const signal = init?.signal ??
-    (input instanceof Request ? input.signal : undefined);
-  const abandonIfTimedOut = () => {
-    if (signal && timedOut(signal)) abandonedOrigins.add(origin);
+  const signal = init?.signal;
+  const deadline = signal ? packageDeadlines.get(signal) : undefined;
+  if (!signal || !deadline) return await globalThis.fetch(input, init);
+
+  const abandonIfDeadlineMissed = () => {
+    if (deadline.aborted && signal.reason === deadline.reason) {
+      abandonedOrigins.add(origin);
+    }
   };
   let response: Response;
   try {
     response = await globalThis.fetch(input, init);
   } catch (error) {
-    abandonIfTimedOut();
+    abandonIfDeadlineMissed();
     throw error;
   }
-  return signal ? watchBody(response, abandonIfTimedOut) : response;
+  return watchBody(response, abandonIfDeadlineMissed);
 };
 
 function denoCreateHttpClient(): CreateHttpClient | undefined {
@@ -59,11 +81,6 @@ function httpsOrigin(input: RequestInfo | URL): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function timedOut(signal: AbortSignal): boolean {
-  return signal.aborted &&
-    (signal.reason as { name?: unknown } | undefined)?.name === "TimeoutError";
 }
 
 async function fetchOnOwnConnection(
@@ -85,8 +102,12 @@ async function fetchOnOwnConnection(
 }
 
 function watchBody(response: Response, onError: () => void): Response {
-  const source = response.body;
-  if (!source || NULL_BODY_STATUSES.has(response.status)) return response;
+  const { body: source, status } = response;
+  if (
+    !source || status < 200 || status > 599 || NULL_BODY_STATUSES.has(status)
+  ) {
+    return response;
+  }
   const reader = source.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -103,15 +124,9 @@ function watchBody(response: Response, onError: () => void): Response {
     },
     cancel: (reason) => reader.cancel(reason),
   });
-  const watched = new Response(body, {
-    status: response.status,
+  return new Response(body, {
+    status,
     statusText: response.statusText,
     headers: response.headers,
   });
-  Object.defineProperties(watched, {
-    url: { value: response.url },
-    redirected: { value: response.redirected },
-    type: { value: response.type },
-  });
-  return watched;
 }

@@ -71,8 +71,8 @@ export interface CheckPermissionsOptions {
    * under this package's deadline and response-size cap, and a redirect is
    * refused rather than followed so the bearer token never reaches the host
    * it names. On Deno the default stops reusing a pooled HTTP/2 connection to
-   * a host once a request to it times out; an injected `fetch` manages its own
-   * connections.
+   * a host once a check request to it misses its deadline; an injected `fetch`
+   * manages its own connections.
    */
   fetch?: typeof fetch;
 }

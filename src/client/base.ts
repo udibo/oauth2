@@ -60,8 +60,10 @@ export interface BaseOptions {
    *   make.
    *
    * On Deno the default stops reusing a pooled HTTP/2 connection to a host
-   * once a request to it times out; an injected `fetch` manages its own
-   * connections.
+   * once one of the client's own calls to it (discovery, token, revocation,
+   * userinfo, the session probe) misses its deadline; what the client's
+   * `fetch` method returns is the global `fetch`'s response, unaltered. An
+   * injected `fetch` manages its own connections.
    */
   fetch?: typeof fetch;
 }

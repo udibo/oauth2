@@ -2,8 +2,8 @@
  * Test-only TLS helpers, excluded from the published package. Deno negotiates
  * HTTP/2 only over TLS, so a test of how `fetch` pools HTTP/2 connections
  * needs a certificate the client trusts — and the global `fetch` trusts only
- * what the process was started with, which is why the client side runs in a
- * child process started with `--cert`.
+ * what the process was started with, which is why the client side runs as a
+ * sanitized test in a child process started with `--cert`.
  *
  * @module
  */
@@ -219,10 +219,87 @@ export function serveTls(
 }
 
 /**
- * Runs `script` in a child Deno process that trusts `certificate`, with
- * network access only, and returns the JSON its last stdout line prints.
+ * Serves one fixed raw HTTP/1.1 response over TLS on `127.0.0.1` at a free
+ * port, for status lines `Deno.serve` cannot produce, then closes each
+ * connection.
+ */
+export function serveRawTls(
+  certificate: TestCertificate,
+  response: string,
+): AsyncDisposable & { url: string } {
+  const listener = Deno.listenTls({
+    hostname: "127.0.0.1",
+    port: 0,
+    cert: certificate.cert,
+    key: certificate.key,
+    alpnProtocols: ["http/1.1"],
+  });
+  const answered = new Set<Promise<void>>();
+  const accepting = (async () => {
+    for await (const conn of listener) {
+      const answering = answerRaw(conn, response);
+      answered.add(answering);
+      answering.finally(() => answered.delete(answering));
+    }
+  })();
+  return {
+    url: `https://localhost:${listener.addr.port}`,
+    async [Symbol.asyncDispose]() {
+      listener.close();
+      await accepting;
+      await Promise.all(answered);
+    },
+  };
+}
+
+async function answerRaw(conn: Deno.TlsConn, response: string): Promise<void> {
+  const received = new Uint8Array(64 * 1024);
+  let request = "";
+  try {
+    while (!request.includes("\r\n\r\n")) {
+      const read = await conn.read(received);
+      if (read === null) return;
+      request += new TextDecoder().decode(received.subarray(0, read));
+    }
+    const bytes = new TextEncoder().encode(response);
+    let written = 0;
+    while (written < bytes.byteLength) {
+      written += await conn.write(bytes.subarray(written));
+    }
+  } catch (error) {
+    if (
+      !(error instanceof Deno.errors.BrokenPipe ||
+        error instanceof Deno.errors.ConnectionReset)
+    ) {
+      throw error;
+    }
+  } finally {
+    conn.close();
+  }
+}
+
+const RESULT_PREFIX = "CHILD RESULT ";
+const CHILD_TIMEOUT_MS = 60_000;
+
+/**
+ * Registers the one test a {@link runTrustingCertificate} child script runs:
+ * `run`'s result is reported back to the parent, and the child's resource and
+ * op sanitizers fail it if `run` leaves anything open.
+ */
+export function childTest(run: () => Promise<unknown>): void {
+  Deno.test("child", async () => {
+    console.log(RESULT_PREFIX + JSON.stringify(await run()));
+  });
+}
+
+/**
+ * Runs `script` — which registers its work with {@link childTest} — as a
+ * sanitized test in a child Deno process that trusts `certificate`, with
+ * network access only, and returns what it reported. The child is killed
+ * after a minute.
  *
- * @throws {Error} carrying the child's stderr when it exits non-zero.
+ * @throws {Error} carrying the child's output when it fails, leaks a
+ * resource, or runs out of time.
  */
 export async function runTrustingCertificate(
   script: URL,
@@ -235,26 +312,31 @@ export async function runTrustingCertificate(
     await Deno.writeTextFile(certFile, certificate.cert);
     const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
       args: [
-        "run",
-        "--quiet",
+        "test",
+        "--no-check",
         "--no-prompt",
         "--allow-net",
         `--cert=${certFile}`,
         script.href,
+        "--",
         ...args,
       ],
       cwd: new URL(".", import.meta.url),
       stdout: "piped",
       stderr: "piped",
+      signal: AbortSignal.timeout(CHILD_TIMEOUT_MS),
     }).output();
     const decoder = new TextDecoder();
-    if (code !== 0) {
+    const output = decoder.decode(stdout);
+    const result = output.split("\n").find((line) =>
+      line.startsWith(RESULT_PREFIX)
+    );
+    if (code !== 0 || result === undefined) {
       throw new Error(
-        `${script.href} exited ${code}: ${decoder.decode(stderr)}`,
+        `${script.href} exited ${code}:\n${output}\n${decoder.decode(stderr)}`,
       );
     }
-    const lines = decoder.decode(stdout).trim().split("\n");
-    return JSON.parse(lines[lines.length - 1]);
+    return JSON.parse(result.slice(RESULT_PREFIX.length));
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

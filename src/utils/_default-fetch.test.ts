@@ -1,10 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 
-import { defaultFetch } from "./_default-fetch.ts";
+import { defaultFetch, packageDeadlineSignal } from "./_default-fetch.ts";
 import {
   generateTestCertificate,
   runTrustingCertificate,
+  serveRawTls,
   serveTls,
   type TestCertificate,
   type TlsTestServer,
@@ -37,77 +38,136 @@ function serveStallable(certificate: TestCertificate): TlsTestServer {
         }),
       );
     }
+    if (pathname === "/redirect") {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "/answer" },
+      });
+    }
     if (pathname === "/answer-then-stall") server.stall();
     return new Response("ok");
   });
   return server;
 }
 
+async function runPlan(
+  certificate: TestCertificate,
+  steps: Record<string, unknown>[],
+): Promise<unknown> {
+  return await runTrustingCertificate(PLAN, certificate, [
+    JSON.stringify(steps),
+  ]);
+}
+
+const OK = { status: 200, body: "ok" };
+
 describe("defaultFetch", () => {
-  it("sends every request after a timed-out one on a new HTTP/2 connection", async () => {
+  it("sends every request after a missed package deadline on a new HTTP/2 connection", async () => {
     const certificate = await generateTestCertificate();
     await using server = serveStallable(certificate);
+    const answer = `${server.url}/answer`;
 
-    const outcomes = await runTrustingCertificate(PLAN, certificate, [
-      server.url,
-      JSON.stringify([
-        { path: "/answer-then-stall" },
-        { path: "/answer", timeoutMs: 300 },
-        { path: "/answer", timeoutMs: 5_000 },
-        { path: "/answer", timeoutMs: 5_000 },
-      ]),
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/answer-then-stall`, deadlineMs: 5_000 },
+      { url: answer, deadlineMs: 300 },
+      { url: answer, deadlineMs: 5_000 },
+      { url: answer, deadlineMs: 5_000 },
     ]);
 
-    assertEquals(outcomes, [
-      { status: 200, url: `${server.url}/answer-then-stall`, body: "ok" },
-      { error: "TimeoutError" },
-      { status: 200, url: `${server.url}/answer`, body: "ok" },
-      { status: 200, url: `${server.url}/answer`, body: "ok" },
-    ]);
+    assertEquals(outcomes, [OK, { error: "TimeoutError" }, OK, OK]);
   });
 
-  it("sends the request after a body that stalled past its deadline on a new connection", async () => {
+  it("sends the request after a body that stalled past its package deadline on a new connection", async () => {
     const certificate = await generateTestCertificate();
     await using server = serveStallable(certificate);
 
-    const outcomes = await runTrustingCertificate(PLAN, certificate, [
-      server.url,
-      JSON.stringify([
-        { path: "/answer-then-stall" },
-        { path: "/body", timeoutMs: 300 },
-        { path: "/answer", timeoutMs: 5_000 },
-      ]),
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/answer-then-stall`, deadlineMs: 5_000 },
+      { url: `${server.url}/body`, deadlineMs: 300 },
+      { url: `${server.url}/answer`, deadlineMs: 5_000 },
     ]);
 
-    assertEquals(outcomes, [
-      { status: 200, url: `${server.url}/answer-then-stall`, body: "ok" },
-      { error: "TimeoutError" },
-      { status: 200, url: `${server.url}/answer`, body: "ok" },
-    ]);
+    assertEquals(outcomes, [OK, { error: "TimeoutError" }, OK]);
   });
 
-  it("keeps the pooled connection after an abort that is not a timeout", async () => {
+  it("keeps the pooled connection after a plain abort", async () => {
     const certificate = await generateTestCertificate();
     await using server = serveStallable(certificate);
 
-    const outcomes = await runTrustingCertificate(PLAN, certificate, [
-      server.url,
-      JSON.stringify([
-        { path: "/answer" },
-        { path: "/hang", abortAfterMs: 200 },
-        { path: "/answer" },
-      ]),
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/answer`, deadlineMs: 5_000 },
+      { url: `${server.url}/hang`, deadlineMs: 5_000, abortAfterMs: 200 },
+      { url: `${server.url}/answer`, deadlineMs: 5_000 },
+    ]);
+
+    assertEquals(outcomes, [OK, { error: "AbortError" }, OK]);
+    assertEquals(server.connections, 1);
+  });
+
+  it("keeps the pooled connection after the caller's own timeout", async () => {
+    const certificate = await generateTestCertificate();
+    await using server = serveStallable(certificate);
+
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/answer` },
+      { url: `${server.url}/hang`, callerTimeoutMs: 200 },
+      { url: `${server.url}/answer` },
+      { url: `${server.url}/hang`, deadlineMs: 5_000, callerTimeoutMs: 200 },
+      { url: `${server.url}/answer` },
     ]);
 
     assertEquals(outcomes, [
-      { status: 200, url: `${server.url}/answer`, body: "ok" },
-      { error: "AbortError" },
-      { status: 200, url: `${server.url}/answer`, body: "ok" },
+      OK,
+      { error: "TimeoutError" },
+      OK,
+      { error: "TimeoutError" },
+      OK,
     ]);
     assertEquals(server.connections, 1);
   });
 
-  it("leaves a plain-http origin on the shared pool after a timeout", async () => {
+  it("returns a response whose status a Response cannot be built with", async () => {
+    const certificate = await generateTestCertificate();
+    await using server = serveRawTls(
+      certificate,
+      "HTTP/1.1 999 Unusual\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+    );
+
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/`, deadlineMs: 5_000 },
+    ]);
+
+    assertEquals(outcomes, [{ status: 999, body: "ok" }]);
+  });
+
+  it("hands a caller the global fetch's response, before and after its origin leaves the pool", async () => {
+    const certificate = await generateTestCertificate();
+    await using server = serveStallable(certificate);
+    const asReceived = {
+      status: 200,
+      url: `${server.url}/answer`,
+      redirected: true,
+      type: "basic",
+      headersImmutable: true,
+      body: "ok",
+    };
+
+    const outcomes = await runPlan(certificate, [
+      { url: `${server.url}/redirect`, inspect: true },
+      { url: `${server.url}/answer-then-stall`, deadlineMs: 5_000 },
+      { url: `${server.url}/answer`, deadlineMs: 300 },
+      { url: `${server.url}/redirect`, inspect: true },
+    ]);
+
+    assertEquals(outcomes, [
+      asReceived,
+      OK,
+      { error: "TimeoutError" },
+      asReceived,
+    ]);
+  });
+
+  it("leaves a plain-http origin on the shared pool after a missed deadline", async () => {
     const connections = new Set<number>();
     const released = Promise.withResolvers<void>();
     await using server = Deno.serve(
@@ -125,7 +185,7 @@ describe("defaultFetch", () => {
     const send = async (path: string, timeoutMs: number) => {
       try {
         const response = await defaultFetch(`${base}${path}`, {
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: packageDeadlineSignal(AbortSignal.timeout(timeoutMs)),
         });
         return await response.text();
       } catch (error) {
@@ -146,23 +206,31 @@ describe("defaultFetch", () => {
   });
 
   it("is the only way library code falls back to the global fetch", async () => {
-    const offenders: string[] = [];
-    for await (const path of librarySources(SOURCE_ROOT, "")) {
-      const code = (await Deno.readTextFile(new URL(path, SOURCE_ROOT)))
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/.*$/gm, "");
-      if (GLOBAL_FETCH_FALLBACK.test(code)) offenders.push(path);
-    }
+    assertEquals(await librarySourcesMatching(GLOBAL_FETCH_FALLBACK), []);
+  });
 
-    assertEquals(offenders, []);
+  it("is told about every deadline library code sets on a request", async () => {
+    assertEquals(await librarySourcesMatching(UNMARKED_SIGNAL), []);
   });
 });
 
 const SOURCE_ROOT = new URL("../", import.meta.url);
 const GLOBAL_FETCH_FALLBACK =
   /globalThis\.fetch\b|\?\?\s*\(?\s*fetch\b|=>\s*fetch\s*\(/;
+const UNMARKED_SIGNAL = /\bsignal:(?!\s*packageDeadlineSignal\()/;
 const NOT_LIBRARY_CODE =
   /(\.test\.tsx?|\.e2e\.ts)$|(^|\/)_test_|^testing\/|^react\/testing\.tsx$|^utils\/_default-fetch\.ts$/;
+
+async function librarySourcesMatching(pattern: RegExp): Promise<string[]> {
+  const matching: string[] = [];
+  for await (const path of librarySources(SOURCE_ROOT, "")) {
+    const code = (await Deno.readTextFile(new URL(path, SOURCE_ROOT)))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    if (pattern.test(code)) matching.push(path);
+  }
+  return matching;
+}
 
 async function* librarySources(
   root: URL,

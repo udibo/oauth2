@@ -20,7 +20,10 @@
 
 import { encodeHex } from "@std/encoding/hex";
 
-import { defaultFetch } from "../utils/_default-fetch.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../utils/_default-fetch.ts";
 import { dispatchIdentityEvent, type IdentityEventHook } from "./events.ts";
 
 /** Options for {@link breachedPasswordValidator}. */
@@ -102,7 +105,7 @@ export function breachedPasswordValidator(
 
       const response = await fetchImpl(`${baseUrl}${prefix}`, {
         headers: { "Add-Padding": "true" },
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: packageDeadlineSignal(AbortSignal.timeout(timeoutMs)),
       });
       if (!response.ok) {
         await response.body?.cancel();

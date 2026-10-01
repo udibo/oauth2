@@ -2261,9 +2261,9 @@ const tokenReader = new IntrospectionTokenReader<Client, User>({
 
 An aborted call surfaces as `TemporarilyUnavailableError` (503), which is the
 honest answer — the issuer is down, the caller's token is not necessarily bad.
-On Deno, a call that times out on the default `fetch` also stops later calls to
-that issuer from reusing the pooled HTTP/2 connection it stalled on, so one
-stuck connection cannot keep the reader unavailable; see
+On Deno, a call that misses `fetchTimeoutMs` on the default `fetch` also stops
+later calls to that issuer from reusing the pooled HTTP/2 connection it stalled
+on, so one stuck connection cannot keep the reader unavailable; see
 [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#runtime). A wrapper like the one
 above calls the global `fetch` itself and does not get that recovery.
 
@@ -2385,8 +2385,8 @@ are cached the refresh happens **in the background**: requests are answered from
 the cache rather than blocked behind the issuer. Requests are bounded by
 `fetchTimeoutMs` (default 5 seconds), so a blackholed JWKS host fails fast
 instead of hanging every request that joins the shared fetch. On Deno, a fetch
-that times out also moves the next one to a new connection rather than the
-pooled HTTP/2 connection it stalled on; see
+that misses that deadline also moves the next one to a new connection rather
+than the pooled HTTP/2 connection it stalled on; see
 [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#runtime).
 
 **Errors.** An unreachable or 5xx JWKS endpoint throws
@@ -6124,24 +6124,34 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   verified on Deno only. The full matrix is in
   [the README](https://github.com/udibo/oauth2/blob/main/README.md#runtime-support); the support boundary is in
   [the stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md#runtime-support).
-- **On Deno, a timed-out request moves later requests off the pooled
-  connection.** Deno's global `fetch` sends every request to an origin over one
-  pooled HTTP/2 connection, and aborting a request at its deadline resets only
-  that request: if the connection itself has stopped answering — a proxy still
-  routing it to a backend that restarted, say — it stays pooled, and every later
-  request to that origin would time out on it as well. So when the package calls
-  out with its default `fetch` (JWKS and discovery, introspection, the check
-  endpoint, the clients, the external connectors, the BFF proxy) and a request
-  to an `https` origin times out before its response has fully arrived, every
-  later request from that process to that origin opens a connection of its own
-  and closes it once the response headers arrive. That trades connection reuse
-  to that origin, for the life of the process, for not depending on a pooled
-  connection that may be stalled. A request aborted for any other reason, and
-  plain `http` (which Deno sends over HTTP/1.1, where an abort already discards
-  the connection), keep the shared pool. Other runtimes use their global `fetch`
-  unchanged. An injected `fetch` manages its own connections and gets none of
-  this; one that pins an HTTP/2 client of its own should replace that client
-  after a timeout.
+- **On Deno, a request that misses the package's own deadline moves later
+  requests off the pooled connection.** Deno's global `fetch` sends every
+  request to an origin over one pooled HTTP/2 connection, and aborting a request
+  at its deadline resets only that request: if the connection itself has stopped
+  answering — a proxy still routing it to a backend that restarted, say — it
+  stays pooled, and every later request to that origin would time out on it as
+  well. So when one of the requests the package bounds with a deadline of its
+  own is sent with the default `fetch` to an `https` origin and misses that
+  deadline before its response has fully arrived, every later default-`fetch`
+  request from that process to that origin opens a connection of its own and
+  closes it once the response headers arrive. Those requests are:
+  `JwksTokenReader`'s JWKS and discovery fetches and `IntrospectionTokenReader`
+  (`fetchTimeoutMs`); `checkPermissions`; `DirectClient`'s discovery, token,
+  revocation and userinfo calls and `BffClient`'s session probe;
+  `breachedPasswordValidator`; and the external connectors' token exchange, plus
+  the OIDC connector's discovery. Nothing else triggers the switch: not a
+  request aborted for any other reason, not a deadline a caller sets on its own
+  signal (`DirectClient.fetch(url, { signal })`), and not the calls that carry
+  no package deadline — `DirectClient.fetch` and `BffClient.fetch`, the BFF
+  proxy, the connectors' userinfo requests, and Apple's JWKS. Those still take a
+  connection of their own to an origin that has already switched, and their
+  responses are the global `fetch`'s, unaltered. The switch trades connection
+  reuse to that origin, for the life of the process, for not depending on a
+  pooled connection that may be stalled. Plain `http` (which Deno sends over
+  HTTP/1.1, where an abort already discards the connection) keeps the shared
+  pool, and other runtimes use their global `fetch` unchanged. An injected
+  `fetch` manages its own connections and gets none of this; one that pins an
+  HTTP/2 client of its own should replace that client after a timeout.
 
 ---
 
