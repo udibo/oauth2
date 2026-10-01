@@ -1,3 +1,11 @@
+## [0.9.1](https://github.com/udibo/oauth2/compare/0.9.0...0.9.1) (2026-10-01)
+
+### Bug Fixes
+
+- stop reusing a stalled HTTP/2 connection
+  ([#61](https://github.com/udibo/oauth2/issues/61))
+  ([3c80f93](https://github.com/udibo/oauth2/commit/3c80f9300aeb76d4d6d1ecbee8dd8c5d56502684))
+
 # [0.9.0](https://github.com/udibo/oauth2/compare/0.8.0...0.9.0) (2026-09-27)
 
 ### Features
