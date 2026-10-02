@@ -237,6 +237,57 @@ describe("createFakeTenant", () => {
     assertFalse("username" in claims, "a machine token names no person");
   });
 
+  it("refuses a machine token an OIDC scope even when its allowlist names one", async () => {
+    const oidcListed = { id: "oidc-listed", secret: "oidc-listed-secret" };
+    await tenant.addClient({
+      ...oidcListed,
+      grants: ["client_credentials"],
+      scopes: [ORGANIZATIONS_READ, "openid"],
+    });
+    const refused = await machineToken("openid", oidcListed);
+    assertEquals(refused.status, 400, JSON.stringify(refused.body));
+    assertEquals(refused.body.error, "invalid_scope");
+  });
+
+  it("answers a public client introspecting even its own token that it is inactive", async () => {
+    await tenant.addClient({
+      id: "public-app",
+      redirectUris: ["http://public.localhost/callback"],
+    });
+    const accessToken = await tenant.issueAccessToken({
+      clientId: "public-app",
+      userId: "ada",
+    });
+    const response = await fetch(url("/api/oauth2/introspect"), {
+      method: "POST",
+      body: new URLSearchParams({
+        client_id: "public-app",
+        token: accessToken,
+      }),
+    });
+    assertEquals(response.status, 200);
+    assertEquals(await response.json(), { active: false });
+  });
+
+  it("lists the grants on one resource in role-name order, compared by locale", async () => {
+    tenant.defineOrganizationRole({ slug: "zeta-reviewer", name: "Zeta" });
+    tenant.defineOrganizationRole({ slug: "alpha-reader", name: "alpha" });
+    tenant.grant({
+      resource: { type: "document", id: "doc-ordered" },
+      subject: { type: "user", id: "ada" },
+      permissions: ["documents:comment"],
+      role: "zeta-reviewer",
+    });
+    tenant.grant({
+      resource: { type: "document", id: "doc-ordered" },
+      subject: { type: "user", id: "bob" },
+      permissions: ["documents:read"],
+      role: "alpha-reader",
+    });
+    const listed = await grantsOn("doc-ordered");
+    assertEquals(listed.map((grant) => grant.roleName), ["alpha", "Zeta"]);
+  });
+
   it("lists a grant of a built-in tier as one, with no role id", async () => {
     tenant.grant({
       resource: { type: "document", id: "doc-5" },

@@ -111,10 +111,11 @@ export interface TenantContractFixture {
     options?: TenantContractSignInOptions,
   ): Promise<TenantContractTokens>;
   /**
-   * Registers a confidential application allowed the `client_credentials`
-   * grant and no other, whose tokens may carry `options.scopes` and nothing
-   * else, and which a tenant administrator has assigned `options.permissions`.
-   * Returns the credentials it signs in with.
+   * Registers an application allowed the `client_credentials` grant and no
+   * other, whose tokens may carry `options.scopes` and nothing else, and which
+   * a tenant administrator has assigned `options.permissions`. It is
+   * confidential unless `options.confidential` is `false`. Returns the
+   * credentials it signs in with: its id, and its secret when it has one.
    */
   addMachineClient(
     options: TenantContractMachineClientOptions,
@@ -127,8 +128,8 @@ export interface TenantContractFixture {
 export interface TenantContractClient {
   /** The client id. */
   id: string;
-  /** The client secret. */
-  secret: string;
+  /** The client secret, which a public application is never issued. */
+  secret?: string;
 }
 
 /**
@@ -148,6 +149,15 @@ export interface TenantContractMachineClientOptions {
   scopes: string[];
   /** The permissions an administrator assigned the application. */
   permissions: TenantContractMachinePermission[];
+  /**
+   * Whether the application is confidential, authenticating with a secret.
+   * Defaults to `true`. With `false` it is public and issued no secret, and
+   * the suite expects the token endpoint to refuse it the grant as
+   * `invalid_client`. A tenant that refuses to register a public application
+   * allowed the grant may leave the grant off, since that refusal is client
+   * authentication's and comes before the grant is considered.
+   */
+  confidential?: boolean;
 }
 
 /** How `TenantContractFixture.signIn` signs a person in. */
@@ -1733,10 +1743,24 @@ export function runTenantContractTests(options: TenantContractOptions): void {
     describe("client credentials and the resource-grants API", () => {
       const ORGANIZATIONS_READ = "identity:organizations:read";
       const DIRECT = "type=contract_document&id=direct";
-      let reader: TenantContractClient;
-      let unassigned: TenantContractClient;
+      const PAIRED = "type=contract_document&id=paired";
+      let reader: ConfidentialClient;
+      let unassigned: ConfidentialClient;
       let readerToken: string;
       let userinfoEndpoint: string;
+
+      type ConfidentialClient = Required<TenantContractClient>;
+
+      async function addConfidentialClient(
+        permissions: TenantContractMachinePermission[],
+      ): Promise<ConfidentialClient> {
+        const client = await tenant.addMachineClient({
+          scopes: [ORGANIZATIONS_READ],
+          permissions,
+        });
+        assert(client.secret, "a confidential application is issued a secret");
+        return { id: client.id, secret: client.secret };
+      }
 
       interface MachineTokens {
         access_token?: string;
@@ -1769,9 +1793,12 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       ): Promise<Reply<MachineTokens>> {
         const response = await send(metadata.token_endpoint, {
           method: "POST",
-          headers: { authorization: encodeBasicAuth(client.id, client.secret) },
+          headers: client.secret === undefined
+            ? {}
+            : { authorization: encodeBasicAuth(client.id, client.secret) },
           body: new URLSearchParams({
             grant_type: "client_credentials",
+            ...client.secret === undefined ? { client_id: client.id } : {},
             ...scope === undefined ? {} : { scope },
           }),
         });
@@ -1794,7 +1821,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       }
 
       async function introspectAs(
-        client: TenantContractClient,
+        client: ConfidentialClient,
         accessToken: string,
       ): Promise<Introspection> {
         const response = await send(metadata.introspection_endpoint, {
@@ -1822,15 +1849,19 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           new URL("/.well-known/openid-configuration", tenant.issuer),
         );
         ({ userinfo_endpoint: userinfoEndpoint } = await response.json());
-        reader = await tenant.addMachineClient({
-          scopes: [ORGANIZATIONS_READ],
-          permissions: ["resource_grants.read"],
-        });
-        unassigned = await tenant.addMachineClient({
-          scopes: [ORGANIZATIONS_READ],
-          permissions: [],
-        });
+        reader = await addConfidentialClient(["resource_grants.read"]);
+        unassigned = await addConfidentialClient([]);
         readerToken = await issuedTo(reader, ORGANIZATIONS_READ);
+        await tenant.grant({
+          resource: { type: "contract_document", id: "paired" },
+          subject: { type: "user", id: people.member },
+          permissions: ["contract:review"],
+        });
+        await tenant.grant({
+          resource: { type: "contract_document", id: "paired" },
+          subject: { type: "user", id: people.outsider },
+          permissions: ["contract:approve"],
+        });
       });
 
       it("issues a machine token with no refresh token, naming no person and no organization", async () => {
@@ -1853,6 +1884,24 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "a machine token belongs to no organization",
         );
         assertEquals(sorted(claims.permissions), []);
+      });
+
+      it("answers another application introspecting a machine token that it is inactive", async () => {
+        const claims = await introspectAs(unassigned, readerToken);
+        assertEquals(claims, { active: false });
+      });
+
+      it("refuses the grant to a public application, which has no secret to authenticate with", async () => {
+        const open = await tenant.addMachineClient({
+          scopes: [ORGANIZATIONS_READ],
+          permissions: [],
+          confidential: false,
+        });
+        assertFalse(open.secret, "a public application is issued no secret");
+        const refused = await machineToken(open, ORGANIZATIONS_READ);
+        assertEquals(refused.status, 401, JSON.stringify(refused.body));
+        assertEquals(refused.body.error, "invalid_client");
+        assertFalse(refused.body.access_token);
       });
 
       it("refuses the grant to an application not registered for it, and refuses a machine token an OIDC scope or one outside its allowlist", async () => {
@@ -1895,6 +1944,12 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         });
         assertEquals(checked.status, 403);
         assertEquals(checked.body.reason, "machine_token");
+        const batch = await ask(readerToken, "/api/check/batch", {
+          permissions: ["contract:read"],
+          resource: { type: "contract_document", ids: ["direct"] },
+        });
+        assertEquals(batch.status, 403);
+        assertEquals(batch.body.reason, "machine_token");
         for (const path of ["/api/memberships", "/api/account"]) {
           const reply = await call<{ reason?: string }>(
             readerToken,
@@ -1973,6 +2028,21 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         assertEquals(nobody.body.grants, []);
       });
 
+      it("lists the grants on one resource in role-name order", async () => {
+        const paired = await grantsOn(readerToken, PAIRED);
+        assertEquals(paired.status, 200, JSON.stringify(paired.body));
+        assertEquals(
+          paired.body.grants.map((grant) => grant.subjectId).sort(),
+          [people.member, people.outsider].sort(),
+        );
+        const names = paired.body.grants.map((grant) => grant.roleName);
+        assert(names[0] !== names[1], "each grant confers a role of its own");
+        assertEquals(
+          names,
+          [...names].sort((a, b) => a.localeCompare(b)),
+        );
+      });
+
       it("hides the listing from a machine token without the permission or the scope, and refuses a person's token and no token", async () => {
         const withoutPermission = await issuedTo(
           unassigned,
@@ -1992,14 +2062,22 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         assertEquals((await grantsOn(null, DIRECT)).status, 401);
       });
 
+      function refusedFields(reply: Reply<unknown>): string[] {
+        assertEquals(reply.status, 400, JSON.stringify(reply.body));
+        const { fieldErrors } = reply.body as {
+          fieldErrors?: Record<string, string>;
+        };
+        return Object.keys(fieldErrors ?? {});
+      }
+
       it("refuses a resource type the tenant has not registered, and a resource missing its id", async () => {
         const unregistered = await grantsOn(
           readerToken,
           "type=contract_unregistered&id=direct",
         );
-        assertEquals(unregistered.status, 400);
+        assertEquals(refusedFields(unregistered), ["type"]);
         const missing = await grantsOn(readerToken, "type=contract_document");
-        assertEquals(missing.status, 400);
+        assertEquals(refusedFields(missing), ["resource"]);
       });
 
       it("bounds the type to 64 characters and the id to 255, refusing ASCII control characters and no other", async () => {
@@ -2007,13 +2085,21 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           readerToken,
           `type=${"t".repeat(65)}&id=direct`,
         );
-        assertEquals(long.status, 400);
+        assertEquals(refusedFields(long), ["resource"]);
+        const longest = await grantsOn(
+          readerToken,
+          `type=${"t".repeat(64)}&id=direct`,
+        );
+        assertEquals(refusedFields(longest), ["type"]);
         const query = (id: string) =>
           `type=contract_document&id=${encodeURIComponent(id)}`;
         const wide = await grantsOn(readerToken, query("i".repeat(256)));
-        assertEquals(wide.status, 400);
+        assertEquals(refusedFields(wide), ["resource"]);
+        const widest = await grantsOn(readerToken, query("i".repeat(255)));
+        assertEquals(widest.status, 200, JSON.stringify(widest.body));
+        assertEquals(widest.body.grants, []);
         const control = await grantsOn(readerToken, query("tab\there"));
-        assertEquals(control.status, 400);
+        assertEquals(refusedFields(control), ["resource"]);
         const unicode = await grantsOn(readerToken, query("next\u0085line"));
         assertEquals(unicode.status, 200, JSON.stringify(unicode.body));
         assertEquals(unicode.body.grants, []);

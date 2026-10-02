@@ -3080,7 +3080,9 @@ the membership. Register a resource type and add grants to exercise
 resource-level answers, or register the client with `accessTokenFormat: "jwt"`
 and an `audience` to test a resource server that validates locally against the
 tenant's JWKS. `issueAccessToken` mints a token directly, for an API test that
-does not need the browser flow.
+does not need the browser flow. Introspection answers a confidential client, one
+registered with a `secret`, only about the tokens issued to it; any other caller
+gets `active: false`, as from a tenant.
 
 The fake also answers the two APIs an app calls with the signed-in person's own
 token:
@@ -3105,10 +3107,12 @@ token:
   the refusal to disconnect someone's last way in.
 
 It also answers the app's own machine credential, the way a tenant answers a bot
-the app runs. Register a client with `grants: ["client_credentials"]` and a
-`scopes` allowlist, which a tenant requires of such an application and
-`addClient` refuses to go without, and the token endpoint issues it a token that
-names no person, with no refresh token; its scope vocabulary is
+the app runs. Register a client with `grants: ["client_credentials"]`, a
+`secret`, and a `scopes` allowlist. A tenant requires the allowlist of such an
+application, and `addClient` refuses to go without it. Only a confidential
+client may use that grant (RFC 6749 §4.4), so one registered without a secret is
+refused `401 invalid_client`. The token endpoint issues a confidential one a
+token that names no person, with no refresh token; its scope vocabulary is
 `identity:organizations:read` and `identity:organizations:write`, narrowed by
 that allowlist, and any other scope, an OIDC scope included, is refused
 `invalid_scope`. An `organization_id` is accepted on the `refresh_token` grant

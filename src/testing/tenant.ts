@@ -1,7 +1,10 @@
 import type { ClientInterface } from "../models/client.ts";
 import type { Token } from "../models/token.ts";
 import { AuthorizationCodeGrant } from "../server/grants/authorization-code.ts";
-import { ClientCredentialsGrant } from "../server/grants/client-credentials.ts";
+import {
+  ClientCredentialsGrant,
+  type ClientCredentialsGrantOptions,
+} from "../server/grants/client-credentials.ts";
 import { RefreshTokenGrant } from "../server/grants/refresh-token.ts";
 import { AuthorizationServer } from "../server/authorization-server.ts";
 import {
@@ -10,7 +13,11 @@ import {
   StaticSigningKeyProvider,
 } from "../server/signing-keys.ts";
 import { BasicScope } from "../models/scope.ts";
-import { AccessDeniedError, InvalidRequestError } from "../errors.ts";
+import {
+  AccessDeniedError,
+  InvalidClientError,
+  InvalidRequestError,
+} from "../errors.ts";
 import { safeReturnTo } from "../utils/url.ts";
 
 import {
@@ -71,7 +78,14 @@ export type FakeTenantMachinePermission = "resource_grants.read";
  * is the application's own and names no person.
  */
 export interface FakeTenantClient extends ClientInterface {
-  /** Omit for a public client. */
+  /**
+   * Omit for a public client. Only a confidential client may use the
+   * `client_credentials` grant (RFC 6749 §4.4), since a public client has no
+   * credential to authenticate with (§2.1): a public client asking for it is
+   * refused `invalid_client`. Only a confidential client may introspect, and
+   * only the tokens issued to it; any other introspection answers
+   * `active: false`.
+   */
   secret?: string;
   /**
    * The scopes a `client_credentials` token may carry, as an administrator
@@ -330,6 +344,7 @@ const MACHINE_SCOPES: readonly string[] = [
   ORGANIZATIONS_READ,
   "identity:organizations:write",
 ];
+const OIDC_SCOPES: readonly string[] = ["openid", "profile", "email"];
 const RESOURCE_GRANTS_READ: FakeTenantMachinePermission =
   "resource_grants.read";
 const RESOURCE_TYPE_MAX_LENGTH = 64;
@@ -440,6 +455,31 @@ interface ResourceGrant extends FakeTenantGrant {
   roleId: string | null;
 }
 
+class ConfidentialClientCredentialsGrant
+  extends ClientCredentialsGrant<FakeTenantClient, FakeTenantUser> {
+  constructor(
+    options: ClientCredentialsGrantOptions<
+      FakeTenantClient,
+      FakeTenantUser,
+      BasicScope
+    >,
+    readonly isConfidential: (client: FakeTenantClient) => boolean,
+  ) {
+    super(options);
+  }
+
+  override async getAuthenticatedClient(
+    request: Request,
+    body: FormData,
+  ): Promise<FakeTenantClient> {
+    const client = await super.getAuthenticatedClient(request, body);
+    if (!this.isConfidential(client)) {
+      throw new InvalidClientError("client authentication failed");
+    }
+    return client;
+  }
+}
+
 function machineScopeCeiling(client: FakeTenantClient): readonly string[] {
   return client.scopes?.filter((scope) => MACHINE_SCOPES.includes(scope)) ??
     [];
@@ -498,11 +538,13 @@ class TenantTokenService extends MemoryTokenService<
     scope?: BasicScope | null,
   ): Promise<BasicScope | null | undefined | false> {
     if (!scope || user) return Promise.resolve(scope);
+    const requested = [...scope];
+    if (requested.some((name) => OIDC_SCOPES.includes(name))) {
+      return Promise.resolve(false);
+    }
     const ceiling = machineScopeCeiling(client);
     return Promise.resolve(
-      [...scope].every((requested) => ceiling.includes(requested))
-        ? scope
-        : false,
+      requested.every((name) => ceiling.includes(name)) ? scope : false,
     );
   }
 
@@ -766,6 +808,9 @@ export async function createFakeTenant(
   };
 
   const userService = new MemoryUserService<FakeTenantUser>();
+  const confidentialClients = new Set<string>();
+  const isConfidential = (client: FakeTenantClient) =>
+    confidentialClients.has(client.id);
   const clientService = new MemoryClientService<
     FakeTenantClient,
     FakeTenantUser
@@ -826,9 +871,10 @@ export async function createFakeTenant(
       refresh_token: new RefreshTokenGrant({
         resolve: () => ({ clientService, tokenService }),
       }),
-      client_credentials: new ClientCredentialsGrant({
-        resolve: () => ({ clientService, tokenService }),
-      }),
+      client_credentials: new ConfidentialClientCredentialsGrant(
+        { resolve: () => ({ clientService, tokenService }) },
+        isConfidential,
+      ),
     },
     signingKeys,
     scopesSupported: [
@@ -848,6 +894,8 @@ export async function createFakeTenant(
         signedIn?.userId === user.id ? signedIn.organizationId : undefined,
       ),
     }),
+    canIntrospectToken: (client, token) =>
+      isConfidential(client) && client.id === token.client.id,
     introspectionClaims: (token) =>
       token.user
         ? authorizationClaims(
@@ -2088,6 +2136,7 @@ export async function createFakeTenant(
         throw new Error(UNSTATED_ALLOWLIST);
       }
       await clientService.add(registered, secret);
+      if (secret) confidentialClients.add(registered.id);
       for (const uri of client.redirectUris ?? []) {
         try {
           redirectOrigins.add(new URL(uri).origin);

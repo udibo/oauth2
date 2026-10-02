@@ -346,9 +346,11 @@ runTenantContractTests({
         tenant.grant(grant);
         return Promise.resolve();
       },
-      addMachineClient: async ({ scopes, permissions }) => {
+      addMachineClient: async (
+        { scopes, permissions, confidential = true },
+      ) => {
         const id = `contract-machine-${crypto.randomUUID().slice(0, 8)}`;
-        const secret = crypto.randomUUID();
+        const secret = confidential ? crypto.randomUUID() : undefined;
         await tenant.addClient({
           id,
           secret,
