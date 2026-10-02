@@ -1,3 +1,23 @@
+# [0.10.0](https://github.com/udibo/oauth2/compare/0.9.2...0.10.0) (2026-10-02)
+
+- feat!: add machine clients to the fake tenant
+  ([#60](https://github.com/udibo/oauth2/issues/60))
+  ([5c01bfe](https://github.com/udibo/oauth2/commit/5c01bfe86a9ad7795575f594d874f15edc383c5b))
+
+### BREAKING CHANGES
+
+- the fake tenant's introspection endpoint answers `{
+active: false }` to a
+  public client, and to a confidential client asking about a token issued to
+  another client. A `client_credentials` request from a client registered
+  without a secret answers 401 `invalid_client`. Fixtures passed to
+  `runTenantContractTests` must implement
+  `TenantContractFixture.addMachineClient`, which registers a
+  `client_credentials` application with a scopes allowlist,
+  administrator-assigned permissions and an optional `confidential` flag. It
+  returns the application's id and, when confidential, its secret;
+  `TenantContractClient.secret` is optional.
+
 ## [0.9.2](https://github.com/udibo/oauth2/compare/0.9.1...0.9.2) (2026-10-02)
 
 ### Bug Fixes
