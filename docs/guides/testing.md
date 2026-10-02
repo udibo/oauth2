@@ -133,8 +133,8 @@ It also answers the app's own machine credential, the way a tenant answers a bot
 the app runs. Register a client with `grants: ["client_credentials"]`, a
 `secret`, and a `scopes` allowlist. A tenant requires the allowlist of such an
 application, and `addClient` refuses to go without it. Only a confidential
-client may use that grant (RFC 6749 Â§4.4), so one registered without a secret
-is refused `401 invalid_client`. The token endpoint issues a confidential one a
+client may use that grant (RFC 6749 §4.4), so one registered without a secret is
+refused `401 invalid_client`. The token endpoint issues a confidential one a
 token that names no person, with no refresh token; its scope vocabulary is
 `identity:organizations:read` and `identity:organizations:write`, narrowed by
 that allowlist, and any other scope, an OIDC scope included, is refused
@@ -142,9 +142,9 @@ that allowlist, and any other scope, an OIDC scope included, is refused
 alone. That token is refused `403` wherever the tenant answers for a person, and
 `401` at UserInfo. Register the client with
 `machinePermissions: ["resource_grants.read"]`, as a tenant administrator would
-assign it, and `GET /api/resource-grants?type=â€¦&id=â€¦` under its token lists
-who holds a grant on that one resource, each row naming its holder and its role.
-A grant's `role` is the slug it is listed under, with the name
+assign it, and `GET /api/resource-grants?type=…&id=…` under its token lists who
+holds a grant on that one resource, each row naming its holder and its role. A
+grant's `role` is the slug it is listed under, with the name
 `defineOrganizationRole` gave it; it defaults to a slug built from the grant's
 permissions, and a built-in tier is listed as `builtInRole` with no `roleId`. A
 person's token is refused `403` there, and a machine token without the
