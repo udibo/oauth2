@@ -1,3 +1,11 @@
+## [0.9.2](https://github.com/udibo/oauth2/compare/0.9.1...0.9.2) (2026-10-02)
+
+### Bug Fixes
+
+- **server:** resolve discovery scopes per request
+  ([#63](https://github.com/udibo/oauth2/issues/63))
+  ([3dde4b8](https://github.com/udibo/oauth2/commit/3dde4b8066bafd9bb64b846a5ea3368eb9758531))
+
 ## [0.9.1](https://github.com/udibo/oauth2/compare/0.9.0...0.9.1) (2026-10-01)
 
 ### Bug Fixes
