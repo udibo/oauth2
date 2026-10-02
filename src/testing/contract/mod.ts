@@ -20,6 +20,10 @@
  * sequential case and fails the concurrent one, which is the whole
  * reason the suites exist.
  *
+ * Identity user storage, session revocation, and authoritative session listing
+ * also have separate suites. They use app-owned fixture helpers to verify
+ * conditional credential writes and immediate, user-scoped session revocation.
+ *
  * The service runners take a factory plus seed helpers because `add` /
  * `register` methods aren't part of the public service interfaces — the
  * consumer tells the runner how to populate test data.
@@ -87,3 +91,19 @@ export {
   type TenantContractSignInOptions,
   type TenantContractTokens,
 } from "./tenant.ts";
+
+export {
+  type IdentityUserContractProfile,
+  type IdentityUserStoreContractFixture,
+  type IdentityUserStoreContractOptions,
+  runIdentityUserStoreContractTests,
+} from "./identity-user-store.ts";
+export {
+  type IdentitySessionContractState,
+  type ListableSessionServiceContractFixture,
+  type ListableSessionServiceContractOptions,
+  type RevocableSessionServiceContractFixture,
+  type RevocableSessionServiceContractOptions,
+  runListableSessionServiceContractTests,
+  runRevocableSessionServiceContractTests,
+} from "./identity-session.ts";
