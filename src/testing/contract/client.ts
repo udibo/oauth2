@@ -147,6 +147,22 @@ export function runClientServiceContractTests<
         assertEquals(auth?.id, client.id);
       });
 
+      it("returns undefined for a public client that presents a secret", async () => {
+        const client = makeClient(9);
+        await options.addClient(clientService, client);
+        assertStrictEquals(
+          await clientService.getAuthenticated(client.id, "unissued"),
+          undefined,
+        );
+      });
+
+      it("returns the public client when the presented secret is empty", async () => {
+        const client = makeClient(10);
+        await options.addClient(clientService, client);
+        const auth = await clientService.getAuthenticated(client.id, "");
+        assertEquals(auth?.id, client.id);
+      });
+
       it("returns undefined for a confidential client when no secret is supplied", async () => {
         const client = makeClient(3);
         await options.addClient(clientService, client, "secret");
