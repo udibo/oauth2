@@ -1,3 +1,12 @@
+# [0.11.0](https://github.com/udibo/oauth2/compare/0.10.0...0.11.0) (2026-10-02)
+
+### Features
+
+- **testing:** add identity store contracts
+  ([#65](https://github.com/udibo/oauth2/issues/65))
+  ([4d9d7ad](https://github.com/udibo/oauth2/commit/4d9d7ade9a5ec28989e6708b42ac0805a0632e15)),
+  closes [udibo/udibo#405](https://github.com/udibo/udibo/issues/405)
+
 # [0.10.0](https://github.com/udibo/oauth2/compare/0.9.2...0.10.0) (2026-10-02)
 
 - feat!: add machine clients to the fake tenant
