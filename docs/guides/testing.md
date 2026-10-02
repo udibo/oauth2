@@ -198,6 +198,61 @@ then requires `clear()` to leave every in-progress sign-in intact and to remove
 an expired record, instead of removing everything. The BFF session suite lives
 in `@udibo/oauth2/hono/bff/testing`.
 
+The identity user suite covers `IdentityUserStore`, separately from the OAuth2
+`UserServiceInterface`. Its fixture supplies your application's valid sign-up
+profiles and deterministic lookup keys. Explicitly enable the optional
+capabilities you use; a disabled capability is not checked:
+
+```ts
+import {
+  type IdentityUserStoreContractFixture,
+  type ListableSessionServiceContractFixture,
+  runIdentityUserStoreContractTests,
+  runListableSessionServiceContractTests,
+  runRevocableSessionServiceContractTests,
+} from "@udibo/oauth2/testing/contract";
+
+interface AppUser {
+  id: string;
+}
+declare function freshUsers(): Promise<
+  IdentityUserStoreContractFixture<AppUser>
+>;
+declare function freshSessions(): Promise<
+  ListableSessionServiceContractFixture
+>;
+
+runIdentityUserStoreContractTests({
+  makeFixture: freshUsers,
+  replaceCredential: true,
+  emailVerification: true,
+  legacyCredentials: true,
+});
+runRevocableSessionServiceContractTests({ makeFixture: freshSessions });
+runListableSessionServiceContractTests({ makeFixture: freshSessions });
+```
+
+Each fixture is fresh for each test and may provide `dispose()` to close its
+connections and delete its records. For credential replacement, supply
+`removeCredential` to seed a user without a native credential. For email
+verification, supply `setEmail` and `isEmailVerified`; for imported credentials,
+supply `setLegacyCredential`. These setup helpers manipulate your own store, not
+an in-memory substitute for the implementation being verified. The suite checks
+all stored credential fields, a read after a lost compare-and-set, and
+concurrent replacement winners. Email verification must reject a token issued
+for an address the user has since changed.
+
+The identity session suites exercise `RevocableSessionService` and the optional
+`ListableSessionService`; they are separate from the BFF's `SessionStore` suite.
+Translate `addSession`'s live, revoked, expired, and idle-timed-out states into
+your application's storage and clock policy. `isLive` must observe whether your
+application still accepts that session after revocation returns. Listing must
+exclude ended and foreign sessions, sort by latest activity, and expose only the
+documented display fields. Run both suites for a store with both capabilities.
+These tests cover observed concurrency scenarios; they do not prove every
+possible database interleaving or validate your application's normalization and
+sign-up policy.
+
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
 - Two consumers of one OTP/code/refresh token cannot both succeed.
