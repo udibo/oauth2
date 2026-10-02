@@ -31,6 +31,8 @@ export interface IdentityUserContractProfile {
 export interface IdentityUserStoreContractFixture<User extends IdentityUser> {
   /** Fresh, empty implementation being verified. */
   store: IdentityUserStore<User>;
+  /** Valid app-shaped user id that is absent from this fixture. */
+  unknownUserId: string;
   /** Distinct valid profiles; return the same profile for the same sequence (1 or 2). */
   makeProfile(sequence: number): IdentityUserContractProfile;
   /** Remove a native credential to exercise compare-and-set from undefined. */
@@ -122,7 +124,7 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
         undefined,
       );
       assertStrictEquals(
-        await store.getCredential("missing-identity-contract-user"),
+        await store.getCredential(fixture.unknownUserId),
         undefined,
       );
     });

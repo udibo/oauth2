@@ -3,7 +3,12 @@
  * These are distinct from the Hono BFF SessionStore contract.
  * @module
  */
-import { assertEquals, assertExists, assertStrictEquals } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStrictEquals,
+} from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type {
   ListableSessionService,
@@ -22,6 +27,12 @@ export type IdentitySessionContractState =
 export interface RevocableSessionServiceContractFixture {
   /** Implementation under test. */
   service: RevocableSessionService;
+  /** Two distinct existing owners, using your application's valid user-id format. */
+  userId: string;
+  /** Existing owner whose sessions must survive operations on userId. */
+  otherUserId: string;
+  /** Stable, distinct app-valid non-secret session ids for sequences 1 through 7 and 99. */
+  sessionId(sequence: number): string;
   /** Seed one unique session with the indicated owner and state. */
   addSession(
     userId: string,
@@ -61,8 +72,6 @@ export interface ListableSessionServiceContractOptions {
   describeName?: string;
 }
 
-const USER = "identity-session-user-one";
-const OTHER = "identity-session-user-two";
 function summary(
   id: string,
   lastSeenAt = Date.now() - 30_000,
@@ -88,50 +97,103 @@ export function runRevocableSessionServiceContractTests(
     let fixture: RevocableSessionServiceContractFixture;
     beforeEach(async () => {
       fixture = await options.makeFixture();
+      assert(
+        fixture.userId !== fixture.otherUserId,
+        "session fixture owners must be distinct",
+      );
     });
     afterEach(async () => {
       await fixture?.dispose?.();
     });
     async function seed(): Promise<void> {
-      for (const id of ["one", "two", "three"]) {
-        await fixture.addSession(USER, summary(id), "live");
+      for (
+        const id of [
+          fixture.sessionId(1),
+          fixture.sessionId(2),
+          fixture.sessionId(3),
+        ]
+      ) {
+        await fixture.addSession(fixture.userId, summary(id), "live");
       }
-      await fixture.addSession(OTHER, summary("other"), "live");
+      await fixture.addSession(
+        fixture.otherUserId,
+        summary(fixture.sessionId(4)),
+        "live",
+      );
     }
     it("reports zero for users without sessions", async () => {
-      assertEquals(await fixture.service.revokeAllByUser(USER), 0);
-      assertEquals(await fixture.service.revokeOthers(USER, "missing"), 0);
+      assertEquals(await fixture.service.revokeAllByUser(fixture.userId), 0);
+      assertEquals(
+        await fixture.service.revokeOthers(
+          fixture.userId,
+          fixture.sessionId(99),
+        ),
+        0,
+      );
     });
     it("revokes all of the selected user's sessions immediately and only once", async () => {
       await seed();
-      assertEquals(await fixture.service.revokeAllByUser(USER), 3);
-      for (const id of ["one", "two", "three"]) {
+      assertEquals(await fixture.service.revokeAllByUser(fixture.userId), 3);
+      for (
+        const id of [
+          fixture.sessionId(1),
+          fixture.sessionId(2),
+          fixture.sessionId(3),
+        ]
+      ) {
         assertStrictEquals(await fixture.isLive(id), false);
       }
-      assertStrictEquals(await fixture.isLive("other"), true);
-      assertEquals(await fixture.service.revokeAllByUser(USER), 0);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(4)), true);
+      assertEquals(await fixture.service.revokeAllByUser(fixture.userId), 0);
     });
     it("keeps only the selected current session and preserves another user's sessions", async () => {
       await seed();
-      assertEquals(await fixture.service.revokeOthers(USER, "two"), 2);
-      assertStrictEquals(await fixture.isLive("one"), false);
-      assertStrictEquals(await fixture.isLive("three"), false);
-      assertStrictEquals(await fixture.isLive("two"), true);
-      assertStrictEquals(await fixture.isLive("other"), true);
-      assertEquals(await fixture.service.revokeOthers(USER, "two"), 0);
+      assertEquals(
+        await fixture.service.revokeOthers(
+          fixture.userId,
+          fixture.sessionId(2),
+        ),
+        2,
+      );
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(1)), false);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(3)), false);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(2)), true);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(4)), true);
+      assertEquals(
+        await fixture.service.revokeOthers(
+          fixture.userId,
+          fixture.sessionId(2),
+        ),
+        0,
+      );
     });
     it("a foreign keepSessionId cannot exempt the selected user's sessions", async () => {
       await seed();
-      assertEquals(await fixture.service.revokeOthers(USER, "other"), 3);
-      for (const id of ["one", "two", "three"]) {
+      assertEquals(
+        await fixture.service.revokeOthers(
+          fixture.userId,
+          fixture.sessionId(4),
+        ),
+        3,
+      );
+      for (
+        const id of [
+          fixture.sessionId(1),
+          fixture.sessionId(2),
+          fixture.sessionId(3),
+        ]
+      ) {
         assertStrictEquals(await fixture.isLive(id), false);
       }
-      assertStrictEquals(await fixture.isLive("other"), true);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(4)), true);
     });
     it("does not double-count concurrent revocations", async () => {
       await seed();
       const results = await Promise.allSettled(
-        Array.from({ length: 8 }, () => fixture.service.revokeAllByUser(USER)),
+        Array.from(
+          { length: 8 },
+          () => fixture.service.revokeAllByUser(fixture.userId),
+        ),
       );
       const counts = results.map((result) => {
         if (result.status === "rejected") throw result.reason;
@@ -142,10 +204,16 @@ export function runRevocableSessionServiceContractTests(
         3,
         "concurrent revocation counts must not count a live session twice",
       );
-      for (const id of ["one", "two", "three"]) {
+      for (
+        const id of [
+          fixture.sessionId(1),
+          fixture.sessionId(2),
+          fixture.sessionId(3),
+        ]
+      ) {
         assertStrictEquals(await fixture.isLive(id), false);
       }
-      assertStrictEquals(await fixture.isLive("other"), true);
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(4)), true);
     });
   });
 }
@@ -163,32 +231,47 @@ export function runListableSessionServiceContractTests(
     let fixture: ListableSessionServiceContractFixture;
     beforeEach(async () => {
       fixture = await options.makeFixture();
+      assert(
+        fixture.userId !== fixture.otherUserId,
+        "session fixture owners must be distinct",
+      );
     });
     afterEach(async () => {
       await fixture?.dispose?.();
     });
     it("returns an empty list for a user without live sessions", async () => {
-      assertEquals(await fixture.service.listByUser(USER), []);
+      assertEquals(await fixture.service.listByUser(fixture.userId), []);
     });
     it("lists only the owner's live sessions in most-recently-active order", async () => {
-      const oldest = summary("oldest");
+      const oldest = summary(fixture.sessionId(1));
       const newest = {
-        ...summary("newest", Date.now() - 1_000),
+        ...summary(fixture.sessionId(2), Date.now() - 1_000),
         userAgent: "contract-browser",
         location: "Example City, US",
       };
-      const middle = summary("middle", Date.now() - 2_000);
+      const middle = summary(fixture.sessionId(3), Date.now() - 2_000);
       for (const value of [oldest, newest, middle]) {
-        await fixture.addSession(USER, value, "live");
+        await fixture.addSession(fixture.userId, value, "live");
       }
-      for (const state of ["revoked", "expired", "idle-timed-out"] as const) {
-        await fixture.addSession(USER, summary(state), state);
+      for (
+        const [index, state]
+          of (["revoked", "expired", "idle-timed-out"] as const).entries()
+      ) {
+        await fixture.addSession(
+          fixture.userId,
+          summary(fixture.sessionId(index + 5)),
+          state,
+        );
       }
-      await fixture.addSession(OTHER, summary("other"), "live");
-      const rows = await fixture.service.listByUser(USER);
+      await fixture.addSession(
+        fixture.otherUserId,
+        summary(fixture.sessionId(4)),
+        "live",
+      );
+      const rows = await fixture.service.listByUser(fixture.userId);
       assertEquals(
         rows.map((row) => row.id),
-        ["newest", "middle", "oldest"],
+        [fixture.sessionId(2), fixture.sessionId(3), fixture.sessionId(1)],
         "lists must exclude foreign and ended sessions and sort by last activity",
       );
       const expectedRows: SessionSummary[] = [newest, middle, oldest];
@@ -213,25 +296,47 @@ export function runListableSessionServiceContractTests(
         }
       }
       assertEquals(
-        (await fixture.service.listByUser(OTHER)).map((row) => row.id),
-        ["other"],
+        (await fixture.service.listByUser(fixture.otherUserId)).map((row) =>
+          row.id
+        ),
+        [fixture.sessionId(4)],
       );
     });
     it("removes revoked sessions from the authoritative list immediately", async () => {
-      await fixture.addSession(USER, summary("keep"), "live");
-      await fixture.addSession(USER, summary("end"), "live");
-      await fixture.addSession(OTHER, summary("other"), "live");
-      assertEquals(await fixture.service.revokeOthers(USER, "keep"), 1);
-      assertEquals(
-        (await fixture.service.listByUser(USER)).map((row) => row.id),
-        ["keep"],
+      await fixture.addSession(
+        fixture.userId,
+        summary(fixture.sessionId(1)),
+        "live",
       );
-      assertStrictEquals(await fixture.isLive("end"), false);
-      assertEquals(await fixture.service.revokeAllByUser(USER), 1);
-      assertEquals(await fixture.service.listByUser(USER), []);
+      await fixture.addSession(
+        fixture.userId,
+        summary(fixture.sessionId(2)),
+        "live",
+      );
+      await fixture.addSession(
+        fixture.otherUserId,
+        summary(fixture.sessionId(4)),
+        "live",
+      );
       assertEquals(
-        (await fixture.service.listByUser(OTHER)).map((row) => row.id),
-        ["other"],
+        await fixture.service.revokeOthers(
+          fixture.userId,
+          fixture.sessionId(1),
+        ),
+        1,
+      );
+      assertEquals(
+        (await fixture.service.listByUser(fixture.userId)).map((row) => row.id),
+        [fixture.sessionId(1)],
+      );
+      assertStrictEquals(await fixture.isLive(fixture.sessionId(2)), false);
+      assertEquals(await fixture.service.revokeAllByUser(fixture.userId), 1);
+      assertEquals(await fixture.service.listByUser(fixture.userId), []);
+      assertEquals(
+        (await fixture.service.listByUser(fixture.otherUserId)).map((row) =>
+          row.id
+        ),
+        [fixture.sessionId(4)],
       );
     });
   });

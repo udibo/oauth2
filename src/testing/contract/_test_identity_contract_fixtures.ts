@@ -7,6 +7,16 @@ import type {
   ListableSessionServiceContractFixture,
 } from "./identity-session.ts";
 
+function uuid(sequence: number): string {
+  return `019b0000-0000-7000-8000-${sequence.toString().padStart(12, "0")}`;
+}
+function requireUuid(value: string): void {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      value,
+    )
+  ) throw new TypeError("Fixture requires an app-valid UUID");
+}
 interface User {
   id: string;
   email: string;
@@ -22,7 +32,7 @@ export function userFixture(
   let sequence = 0;
   const store: IdentityUserStore<User> = {
     create(profile, credential) {
-      const user = { id: `user-${++sequence}`, email: String(profile.email) };
+      const user = { id: uuid(++sequence), email: String(profile.email) };
       users.set(user.id, user);
       credentials.set(user.id, structuredClone(credential));
       return Promise.resolve(structuredClone(user));
@@ -38,6 +48,7 @@ export function userFixture(
       return this.findByEmail(identifier);
     },
     getCredential(id) {
+      requireUuid(id);
       return Promise.resolve(
         structuredClone(stale.get(id) ?? credentials.get(id)),
       );
@@ -84,6 +95,7 @@ export function userFixture(
   if (fault === "cas-missing") delete store.replaceCredential;
   return {
     store,
+    unknownUserId: uuid(999),
     makeProfile(sequence) {
       const email = `user${sequence}@example.invalid`;
       return { profile: { email }, email, identifier: email };
@@ -120,6 +132,8 @@ export function sessionFixture(
     }
   >();
   function revoke(userId: string, keep?: string): number {
+    requireUuid(userId);
+    if (keep !== undefined) requireUuid(keep);
     let count = 0;
     for (const row of rows.values()) {
       if (
@@ -133,6 +147,9 @@ export function sessionFixture(
     return count;
   }
   return {
+    userId: uuid(1),
+    otherUserId: uuid(2),
+    sessionId: (sequence) => uuid(sequence + 100),
     service: {
       revokeAllByUser(userId) {
         return Promise.resolve(revoke(userId));
@@ -141,6 +158,7 @@ export function sessionFixture(
         return Promise.resolve(revoke(userId, keep));
       },
       listByUser(userId) {
+        requireUuid(userId);
         const list = [...rows.values()].filter((row) =>
           row.userId === userId &&
           (fault === "list-ended" || row.state === "live")
@@ -160,6 +178,8 @@ export function sessionFixture(
       },
     },
     addSession(userId, summary, state) {
+      requireUuid(userId);
+      requireUuid(summary.id);
       rows.set(summary.id, {
         userId,
         summary: structuredClone(summary),

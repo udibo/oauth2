@@ -3110,8 +3110,8 @@ It also answers the app's own machine credential, the way a tenant answers a bot
 the app runs. Register a client with `grants: ["client_credentials"]`, a
 `secret`, and a `scopes` allowlist. A tenant requires the allowlist of such an
 application, and `addClient` refuses to go without it. Only a confidential
-client may use that grant (RFC 6749 §4.4), so one registered without a secret is
-refused `401 invalid_client`. The token endpoint issues a confidential one a
+client may use that grant (RFC 6749 Â§4.4), so one registered without a secret
+is refused `401 invalid_client`. The token endpoint issues a confidential one a
 token that names no person, with no refresh token; its scope vocabulary is
 `identity:organizations:read` and `identity:organizations:write`, narrowed by
 that allowlist, and any other scope, an OIDC scope included, is refused
@@ -3119,9 +3119,9 @@ that allowlist, and any other scope, an OIDC scope included, is refused
 alone. That token is refused `403` wherever the tenant answers for a person, and
 `401` at UserInfo. Register the client with
 `machinePermissions: ["resource_grants.read"]`, as a tenant administrator would
-assign it, and `GET /api/resource-grants?type=…&id=…` under its token lists who
-holds a grant on that one resource, each row naming its holder and its role. A
-grant's `role` is the slug it is listed under, with the name
+assign it, and `GET /api/resource-grants?type=â€¦&id=â€¦` under its token lists
+who holds a grant on that one resource, each row naming its holder and its role.
+A grant's `role` is the slug it is listed under, with the name
 `defineOrganizationRole` gave it; it defaults to a slug built from the grant's
 permissions, and a built-in tier is listed as `builtInRole` with no `roleId`. A
 person's token is refused `403` there, and a machine token without the
@@ -3209,6 +3209,10 @@ runRevocableSessionServiceContractTests({ makeFixture: freshSessions });
 runListableSessionServiceContractTests({ makeFixture: freshSessions });
 ```
 
+Supply `unknownUserId` as a valid absent id for your user store. Session
+fixtures supply two distinct existing owners (`userId` and `otherUserId`) and
+deterministic, valid non-secret ids through `sessionId(sequence)`. This lets
+UUID-backed implementations use their real foreign-key owners and id format.
 Each fixture is fresh for each test and may provide `dispose()` to close its
 connections and delete its records. For credential replacement, supply
 `removeCredential` to seed a user without a native credential. For email
@@ -3216,8 +3220,8 @@ verification, supply `setEmail` and `isEmailVerified`; for imported credentials,
 supply `setLegacyCredential`. These setup helpers manipulate your own store, not
 an in-memory substitute for the implementation being verified. The suite checks
 all stored credential fields, a read after a lost compare-and-set, and
-concurrent replacement winners. Email verification must reject a token issued
-for an address the user has since changed.
+concurrent replacement winners. Email verification must not mark the current
+address verified using a token issued for an earlier address.
 
 The identity session suites exercise `RevocableSessionService` and the optional
 `ListableSessionService`; they are separate from the BFF's `SessionStore` suite.
