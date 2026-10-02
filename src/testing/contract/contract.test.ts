@@ -346,6 +346,20 @@ runTenantContractTests({
         tenant.grant(grant);
         return Promise.resolve();
       },
+      addMachineClient: async (
+        { scopes, permissions, confidential = true },
+      ) => {
+        const id = `contract-machine-${crypto.randomUUID().slice(0, 8)}`;
+        const secret = confidential ? crypto.randomUUID() : undefined;
+        await tenant.addClient({
+          id,
+          secret,
+          grants: ["client_credentials"],
+          scopes,
+          machinePermissions: permissions,
+        });
+        return { id, secret };
+      },
       signIn: async (userId, organizationId, options = {}) => {
         if (!options.sameBrowser) {
           tenant.signInAs(userId, { organizationId });

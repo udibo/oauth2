@@ -78,7 +78,10 @@ export {
 } from "./auth-request-storage.ts";
 export {
   runTenantContractTests,
+  type TenantContractClient,
   type TenantContractFixture,
+  type TenantContractMachineClientOptions,
+  type TenantContractMachinePermission,
   type TenantContractOptions,
   type TenantContractProfile,
   type TenantContractSignInOptions,
