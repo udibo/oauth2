@@ -4,6 +4,11 @@ import { BasicScope } from "../models/scope.ts";
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
 import { IntrospectionTokenReader } from "./introspection-token-reader.ts";
 import { encodeBasicAuth, parseBasicAuth } from "../utils/basic-auth.ts";
+import {
+  generateTestCertificate,
+  runTrustingCertificate,
+  serveTls,
+} from "../utils/_test_tls.ts";
 
 interface TestClient {
   id: string;
@@ -497,5 +502,29 @@ describe("IntrospectionTokenReader", () => {
       });
       await assertRejects(() => reader.getToken("t"), ServerError);
     });
+  });
+
+  it("sends the request after a timed-out one on a new HTTP/2 connection", async () => {
+    const certificate = await generateTestCertificate();
+    await using server = serveTls(certificate, async (_request, connection) => {
+      if (connection.stalled) {
+        await connection.released;
+        return new Response(null, { status: 503 });
+      }
+      server.stall();
+      return Response.json({
+        active: true,
+        token_type: "Bearer",
+        client_id: "my-client",
+      });
+    });
+
+    const outcomes = await runTrustingCertificate(
+      new URL("./_test_introspection_stalled_connection.ts", import.meta.url),
+      certificate,
+      [`${server.url}/introspect`, "3"],
+    );
+
+    assertEquals(outcomes, ["active", "unavailable", "active"]);
   });
 });

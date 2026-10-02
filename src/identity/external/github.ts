@@ -5,6 +5,7 @@
  * @module
  */
 
+import { defaultFetch } from "../../utils/_default-fetch.ts";
 import { describeError } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import { ExternalAuthError } from "./errors.ts";
@@ -70,7 +71,7 @@ export function githubProvider(
 ): ExternalProvider {
   const id = "github";
   const fetchImpl: typeof fetch = (input, init) =>
-    (options.fetch ?? globalThis.fetch)(input, init);
+    (options.fetch ?? defaultFetch)(input, init);
 
   async function exchangeCode(input: ExternalProfileInput): Promise<string> {
     const { value } = await runTokenExchange({

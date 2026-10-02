@@ -73,6 +73,7 @@ import {
 } from "../../../errors.ts";
 import type { ClientInterface } from "../../../models/client.ts";
 import type { AbstractScope, BasicScope } from "../../../models/scope.ts";
+import { defaultFetch } from "../../../utils/_default-fetch.ts";
 import { timingSafeMatchIndex } from "../../../utils/_timing-safe.ts";
 import { sha256Hash } from "../../../server/utils/hash.ts";
 import type { HonoAuthorizationServer } from "../authorization-server.ts";
@@ -2045,8 +2046,7 @@ export class HonoBff {
       options.forwardHeaders,
       this.#csrf?.headerName,
     );
-    const fetchImpl = options.fetch ??
-      ((input: URL, init: RequestInit) => fetch(input, init));
+    const fetchImpl = options.fetch ?? defaultFetch;
     const retryOn401 = options.retryOn401 ?? true;
     const mountPrefix = (options.stripPrefix ?? "").endsWith("/")
       ? options.stripPrefix!.slice(0, -1)

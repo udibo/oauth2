@@ -30,6 +30,10 @@ import {
   type AuthorizationServerOptions,
 } from "./authorization-server.ts";
 import type { DispatchableGrant } from "./grants/grant.ts";
+import {
+  generateSigningKey,
+  StaticSigningKeyProvider,
+} from "./signing-keys.ts";
 import { isPublicSuffix } from "./public-suffix/mod.ts";
 import type { IsPublicSuffix } from "./redirect-uri.ts";
 
@@ -444,6 +448,34 @@ describe("AuthorizationServer", () => {
       assertStrictEquals(request.bodyUsed, false);
       const body = await request.formData();
       assertStrictEquals(body.get("grant_type"), "client_credentials");
+    });
+
+    it("answers invalid_client when a public client presents a secret it was never issued", async () => {
+      const publicClient: TestClient = {
+        id: "stray-secret-client",
+        grants: ["client_credentials"],
+      };
+      await clientService.add(publicClient);
+
+      const asPublic = await server.handleTokenRequest(tokenRequest({
+        grant_type: "client_credentials",
+        client_id: publicClient.id,
+      }));
+      assertStrictEquals(asPublic.status, 200);
+
+      const response = await server.handleTokenRequest(tokenRequest({
+        grant_type: "client_credentials",
+        client_id: publicClient.id,
+        client_secret: "never-issued",
+      }));
+
+      assertStrictEquals(response.status, 401);
+      const body = await response.json();
+      assertStrictEquals(body.error, "invalid_client");
+      assertStrictEquals(
+        body.error_description,
+        "client authentication failed",
+      );
     });
 
     it("should reject unsupported grant type", async () => {
@@ -2490,5 +2522,98 @@ describe("AuthorizationServer", () => {
       const resA = await server.handleMetadataRequest(metaRequest("a"));
       assertStrictEquals((await resA.json()).issuer, "https://a.example.com");
     });
+  });
+});
+
+describe("discovery scopes from per-request context", () => {
+  for (const oidc of [false, true]) {
+    it(`isolates concurrent ${oidc ? "OIDC" : "OAuth2"} scope vocabularies and keeps the option default`, async () => {
+      const services = createTestServices();
+      const defaults = ["read", "write", "admin"];
+      const scopesByHost: Record<string, string[] | undefined> = {
+        "a.example.com": ["openid", "profile"],
+        "b.example.com": ["openid", "email"],
+        "empty.example.com": [],
+      };
+      const resolved = Promise.withResolvers<void>();
+      let resolving = 0;
+      const server = new AuthorizationServer({
+        scopesSupported: defaults,
+        signingKeys: new StaticSigningKeyProvider(await generateSigningKey()),
+        grants: {},
+        resolve: async (request) => {
+          const url = new URL(request.url);
+          const context = {
+            services: {
+              clientService: services.clientService,
+              tokenService: services.tokenService,
+            },
+            issuer: url.origin,
+            scopesSupported: scopesByHost[url.hostname],
+          };
+          if (++resolving === 4) resolved.resolve();
+          await resolved.promise;
+          return context;
+        },
+      });
+      const request = (host: string) =>
+        new Request(
+          `https://${host}/.well-known/${
+            oidc ? "openid-configuration" : "oauth-authorization-server"
+          }`,
+        );
+      const metadata = async (host: string) => {
+        const response = oidc
+          ? await server.handleOidcMetadataRequest(request(host))
+          : await server.handleMetadataRequest(request(host));
+        assertEquals(response.status, 200);
+        return await response.json();
+      };
+      const hosts = [
+        "default.example.com",
+        "a.example.com",
+        "b.example.com",
+        "empty.example.com",
+      ];
+      const documents = await Promise.all(hosts.map(metadata));
+
+      assertEquals(
+        documents.map((document) => document.issuer),
+        hosts.map((host) => `https://${host}`),
+      );
+      assertEquals(documents.map((document) => document.scopes_supported), [
+        defaults,
+        ["openid", "profile"],
+        ["openid", "email"],
+        [],
+      ]);
+      assertEquals(server.scopesSupported, defaults);
+      assertEquals(
+        (await metadata("default.example.com")).scopes_supported,
+        defaults,
+      );
+    });
+  }
+
+  it("omits scopes when neither the request nor the options advertise them", async () => {
+    const services = createTestServices();
+    const server = new AuthorizationServer({
+      grants: {},
+      resolve: () => ({
+        services: {
+          clientService: services.clientService,
+          tokenService: services.tokenService,
+        },
+        issuer: "https://auth.example.com",
+      }),
+    });
+
+    const response = await server.handleMetadataRequest(
+      new Request(
+        "https://auth.example.com/.well-known/oauth-authorization-server",
+      ),
+    );
+    assertEquals(response.status, 200);
+    assertEquals("scopes_supported" in await response.json(), false);
   });
 });

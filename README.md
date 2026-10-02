@@ -5,9 +5,9 @@ Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,
 React bindings, and optional login flows over your own database.
 
-**Udibo's managed identity service is in private beta.**
-[Join the waitlist](https://udibo.com). The self-hosted examples run locally
-without a hosted account.
+**Udibo's managed identity service is in private beta.** See
+[udibo.com](https://www.udibo.com/) for access. The self-hosted examples run
+locally without a hosted account.
 
 ## Choose your path
 

@@ -22,13 +22,17 @@ export interface ClientServiceInterface<
    *   always advertises `none` in `token_endpoint_auth_methods_supported`, so
    *   an implementation that demands a secret from every client makes that
    *   advertisement false.
+   * - A **public** client must resolve `undefined` when a non-empty `secret` is
+   *   presented. It was issued no secret, so a request carrying one is
+   *   misconfigured or confused about the client's type, and the server answers
+   *   `invalid_client` rather than silently treating it as public. An empty
+   *   `secret` carries no credential — a Basic header of `client_id:` decodes
+   *   to one — and counts as presenting none, so the client resolves.
    * - A **confidential** client resolves only with its correct `secret`. With
    *   the secret missing or wrong, resolve `undefined`.
    *
    * `runClientServiceContractTests` from `@udibo/oauth2/testing/contract` pins
-   * both rules; run it against your implementation. It does not pin whether a
-   * public client that presents a `secret` resolves, so do not rely on either
-   * answer.
+   * all three rules; run it against your implementation.
    *
    * @param id The presented `client_id` — unauthenticated input.
    * @param secret The presented `client_secret`, omitted when the request

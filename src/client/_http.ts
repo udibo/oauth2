@@ -28,6 +28,7 @@ import {
   UnsupportedResponseTypeError,
   UnsupportedTokenTypeError,
 } from "../errors.ts";
+import { packageDeadlineSignal } from "../utils/_default-fetch.ts";
 import { sanitizeProviderText } from "../utils/text.ts";
 
 /** Response bytes accepted from an endpoint before the call is refused. */
@@ -98,7 +99,7 @@ export async function sendGuarded(
     res = await fetchImpl(url, {
       ...init,
       redirect: redirect === "refuse" ? "manual" : "follow",
-      signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+      signal: packageDeadlineSignal(deadline, init.signal),
     });
   } catch (error) {
     throw new TemporarilyUnavailableError(

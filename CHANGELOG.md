@@ -1,3 +1,19 @@
+## [0.9.2](https://github.com/udibo/oauth2/compare/0.9.1...0.9.2) (2026-10-02)
+
+### Bug Fixes
+
+- **server:** resolve discovery scopes per request
+  ([#63](https://github.com/udibo/oauth2/issues/63))
+  ([3dde4b8](https://github.com/udibo/oauth2/commit/3dde4b8066bafd9bb64b846a5ea3368eb9758531))
+
+## [0.9.1](https://github.com/udibo/oauth2/compare/0.9.0...0.9.1) (2026-10-01)
+
+### Bug Fixes
+
+- stop reusing a stalled HTTP/2 connection
+  ([#61](https://github.com/udibo/oauth2/issues/61))
+  ([3c80f93](https://github.com/udibo/oauth2/commit/3c80f9300aeb76d4d6d1ecbee8dd8c5d56502684))
+
 # [0.9.0](https://github.com/udibo/oauth2/compare/0.8.0...0.9.0) (2026-09-27)
 
 ### Features
@@ -212,6 +228,15 @@ Release hardening:
   (including mixed-case names). Move each requirement to a fixed value in
   `extraParams` so browser input cannot weaken assurance or freshness.
 - Require confidential-client authentication alongside PKCE by default.
+- **Breaking:** refuse a public client that presents a client secret. A client
+  registered without a secret now fails authentication with `invalid_client`
+  (HTTP 401) when a request carries a non-empty `client_secret`, instead of
+  being authenticated as a public client. An empty secret — what a `client_id:`
+  Basic header decodes to — still counts as presenting none.
+  `runClientServiceContractTests` pins the rule and `MemoryClientService`
+  implements it, so a consumer relying on the memory fixture's leniency must
+  either stop sending the unissued secret or register the client as
+  confidential.
 - Enforce single-winner refresh rotation and OTP consumption.
 - Keep logout and replacement login authoritative during asynchronous refreshes.
 - Reject updates that would restore revoked stateful BFF sessions.

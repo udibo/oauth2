@@ -17,6 +17,10 @@ import { BasicScope } from "../models/scope.ts";
 import type { IntrospectionResponse, Token } from "../models/token.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../utils/_default-fetch.ts";
 
 /**
  * Options for configuring the introspection token reader.
@@ -80,7 +84,10 @@ export interface IntrospectionTokenReaderOptions<
   /**
    * `fetch` implementation used to call the introspection endpoint. Defaults
    * to the global `fetch`. Inject it to route through a custom client (mTLS,
-   * timeouts, retries) or to stub the network in tests.
+   * timeouts, retries) or to stub the network in tests. On Deno the default
+   * stops reusing a pooled HTTP/2 connection to a host once a request to it
+   * misses {@linkcode fetchTimeoutMs}; an injected `fetch` manages its own
+   * connections.
    */
   fetch?: typeof fetch;
 }
@@ -211,10 +218,13 @@ export class IntrospectionTokenReader<
   }
 
   async #introspect(accessToken: string): Promise<IntrospectionResponse> {
-    const fetchImpl = this.customFetch ?? globalThis.fetch;
+    const fetchImpl = this.customFetch ?? defaultFetch;
     const controller = new AbortController();
     const deadline = setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(
+          new DOMException("token introspection timed out", "TimeoutError"),
+        ),
       this.fetchTimeoutMs,
     );
     try {
@@ -227,7 +237,7 @@ export class IntrospectionTokenReader<
             "Authorization": encodeBasicAuth(this.clientId, this.clientSecret),
           },
           body: new URLSearchParams({ token: accessToken }),
-          signal: controller.signal,
+          signal: packageDeadlineSignal(controller.signal),
         });
       } catch (cause) {
         throw new TemporarilyUnavailableError(

@@ -117,6 +117,11 @@ const tokenReader = new IntrospectionTokenReader<Client, User>({
 
 An aborted call surfaces as `TemporarilyUnavailableError` (503), which is the
 honest answer — the issuer is down, the caller's token is not necessarily bad.
+On Deno, a call that misses `fetchTimeoutMs` on the default `fetch` also stops
+later calls to that issuer from reusing the pooled HTTP/2 connection it stalled
+on, so one stuck connection cannot keep the reader unavailable; see
+[Known Limitations](../known-limitations.md#runtime). A wrapper like the one
+above calls the global `fetch` itself and does not get that recovery.
 
 **This package's introspection endpoint answers for refresh tokens too**, with
 `active: true` and no `token_type` (an access token carries
@@ -235,7 +240,10 @@ A refresh that fails is absorbed — the cached keys keep serving — and once k
 are cached the refresh happens **in the background**: requests are answered from
 the cache rather than blocked behind the issuer. Requests are bounded by
 `fetchTimeoutMs` (default 5 seconds), so a blackholed JWKS host fails fast
-instead of hanging every request that joins the shared fetch.
+instead of hanging every request that joins the shared fetch. On Deno, a fetch
+that misses that deadline also moves the next one to a new connection rather
+than the pooled HTTP/2 connection it stalled on; see
+[Known Limitations](../known-limitations.md#runtime).
 
 **Errors.** An unreachable or 5xx JWKS endpoint throws
 `TemporarilyUnavailableError` when nothing is cached (a down issuer must not

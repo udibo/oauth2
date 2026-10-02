@@ -2,8 +2,9 @@
 
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
-> for the app's own users and API. Udibo is in private beta with a waitlist
-> at https://udibo.com; do not assume public registration is available.
+> for the app's own users and API. Udibo is in private beta; access starts at
+> https://www.udibo.com/. Do not assume public registration is available.
+> Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
 
@@ -65,9 +66,9 @@ Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,
 React bindings, and optional login flows over your own database.
 
-**Udibo's managed identity service is in private beta.**
-[Join the waitlist](https://udibo.com). The self-hosted examples run locally
-without a hosted account.
+**Udibo's managed identity service is in private beta.** See
+[udibo.com](https://www.udibo.com/) for access. The self-hosted examples run
+locally without a hosted account.
 
 ## Choose your path
 
@@ -254,8 +255,9 @@ Udibo hosts the sign-in flow and issues tokens. Your app handles its callback,
 keeps its own session, and validates access to its API. You do not need to
 implement password storage, MFA enrollment, or an authorization server.
 
-**Private beta:** [join the waitlist](https://udibo.com). If you already have
-access, start with [the integration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
+**Private beta:** see [udibo.com](https://www.udibo.com/) for access. If you
+already have an account, start with
+[the integration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
 
 Then read [API protection](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md) and
 [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md).
@@ -317,24 +319,24 @@ Udibo handles sign-in and issues tokens for your application. Your backend
 completes the OAuth2 callback, maintains an application session, and protects
 application data.
 
-**Udibo is in private beta.** [Join the waitlist](https://udibo.com). The
-configuration below is for developers who already have beta access. Public
-registration and its setup instructions will be documented when access opens. To
-develop without an account, use the
+**Udibo is in private beta.** See [udibo.com](https://www.udibo.com/) for
+access. To develop without an account, use the
 [local identity provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md) or the
 [external-auth example](https://github.com/udibo/oauth2/blob/main/examples/hono/app-with-external-auth/README.md).
 
 ## What you need
 
-Obtain these values for your application through your beta setup:
+Register a confidential application in your tenant's dashboard, as described in
+[Connect your first application](https://www.udibo.com/docs/identity/get-started).
+The application's page shows its issuer and client ID:
 
-| Value                               | Use                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| Issuer URL                          | The identity service's issuer, copied exactly; it may differ from your app's origin |
-| Client ID and secret                | A confidential client registration for your backend                                 |
-| Callback URL                        | An exact registered URL, such as `https://app.example.com/auth/callback`            |
-| Allowed scopes                      | Identity claims and API permissions your application may request                    |
-| Introspection or JWKS configuration | Token validation for your API; use the mode configured for the application          |
+| Value                               | Use                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| Issuer URL                          | Your tenant's issuer, `https://{tenant-id}.udibo.com`; not your app's origin |
+| Client ID and secret                | A confidential client registration for your backend                          |
+| Callback URL                        | An exact registered URL, such as `https://app.example.com/auth/callback`     |
+| Allowed scopes                      | Identity claims and API permissions your application may request             |
+| Introspection or JWKS configuration | Token validation for your API; use the mode configured for the application   |
 
 Use separate registrations and secrets for development and production. Keep
 client credentials on the backend. The issuer and client ID are identifiers; a
@@ -473,8 +475,9 @@ Before pointing it at production:
 
 See [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md) and
 [application deployment](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) for the remaining app-side
-setup. Hosted-service administration and account provisioning are documented
-separately from this package.
+setup. Tenant configuration — sign-in methods, organizations, permissions, and
+webhooks — is covered in the
+[Udibo Identity guides](https://www.udibo.com/docs/identity).
 
 ---
 
@@ -488,7 +491,7 @@ external database, or email service is required.
 
 If you want Udibo to host sign-in, use
 [the managed-service guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md). Udibo is currently in private
-beta with a [waitlist](https://udibo.com).
+beta; see [udibo.com](https://www.udibo.com/) for access.
 
 ## Run the example
 
@@ -609,13 +612,18 @@ Three services back the server:
 
 - **`ClientServiceInterface<Client, User>`** — `get(id)`,
   `getAuthenticated(id, secret?)`, and `getUser(client)` (the subject of a
-  client-credentials token). Returning `undefined` is the conformant default:
-  RFC 6749 §4.4 has no resource owner, so the grant issues a token with no user
-  and the client itself is the subject (RFC 9068 §2.2). Return a user only when
-  that user is a principal of its own — a per-application service account.
-  Returning the human who owns the application hands the machine that person's
-  identity, which is the _Client Impersonating Resource Owner_ attack of RFC
-  9700 §4.15.
+  client-credentials token). For `getUser`, returning `undefined` is the
+  conformant default: RFC 6749 §4.4 has no resource owner, so the grant issues a
+  token with no user and the client itself is the subject (RFC 9068 §2.2).
+  Return a user only when that user is a principal of its own — a
+  per-application service account. Returning the human who owns the application
+  hands the machine that person's identity, which is the _Client Impersonating
+  Resource Owner_ attack of RFC 9700 §4.15. `getAuthenticated` resolves a
+  confidential client only with its correct secret, and a public client only
+  when the request presents none — a public client that sends a secret it was
+  never issued resolves `undefined`, which the server answers with
+  `invalid_client`. `runClientServiceContractTests` from
+  `@udibo/oauth2/testing/contract` pins all three rules.
 - **`TokenServiceInterface<Client, User, Scope>`** — token generation, storage,
   and revocation. Extend `AbstractTokenService` (from
   `@udibo/oauth2/server/authorization`) and implement the five storage methods
@@ -1072,7 +1080,10 @@ that switches it off, and `requireClientAuthentication` on the
 authorization-code grant does not (it constrains confidential clients that send
 a `code_verifier` in place of their secret). Whether a given client may
 authenticate with `none` is still decided per client, by whether it has a
-secret; discovery describes the endpoint, not which clients you registered.
+secret; discovery describes the endpoint, not which clients you registered. A
+public client that presents a non-empty `client_secret` anyway is refused with
+`invalid_client` rather than authenticated as public — it was issued no secret,
+so the request is misconfigured — and the contract suite pins that answer.
 Clients that discover — including this package's `DirectClient` via `discover()`
 — configure themselves from it, so keep the advertised endpoints matching where
 you actually mounted the routes.
@@ -2258,6 +2269,11 @@ const tokenReader = new IntrospectionTokenReader<Client, User>({
 
 An aborted call surfaces as `TemporarilyUnavailableError` (503), which is the
 honest answer — the issuer is down, the caller's token is not necessarily bad.
+On Deno, a call that misses `fetchTimeoutMs` on the default `fetch` also stops
+later calls to that issuer from reusing the pooled HTTP/2 connection it stalled
+on, so one stuck connection cannot keep the reader unavailable; see
+[Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#runtime). A wrapper like the one
+above calls the global `fetch` itself and does not get that recovery.
 
 **This package's introspection endpoint answers for refresh tokens too**, with
 `active: true` and no `token_type` (an access token carries
@@ -2376,7 +2392,10 @@ A refresh that fails is absorbed — the cached keys keep serving — and once k
 are cached the refresh happens **in the background**: requests are answered from
 the cache rather than blocked behind the issuer. Requests are bounded by
 `fetchTimeoutMs` (default 5 seconds), so a blackholed JWKS host fails fast
-instead of hanging every request that joins the shared fetch.
+instead of hanging every request that joins the shared fetch. On Deno, a fetch
+that misses that deadline also moves the next one to a new connection rather
+than the pooled HTTP/2 connection it stalled on; see
+[Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#runtime).
 
 **Errors.** An unreachable or 5xx JWKS endpoint throws
 `TemporarilyUnavailableError` when nothing is cached (a down issuer must not
@@ -6122,15 +6141,45 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 
 - **`./cli` is the only Deno-locked entrypoint.** It uses `Deno.serve`,
   `Deno.env`, `Deno.readTextFile` and `Deno.args`, so it runs on Deno and
-  nowhere else. Every other subpath is Web-standard — no `node:` import and no
-  runtime-specific global anywhere on the library path (the `Deno.env.get` you
-  see in connector JSDoc is example prose, not code the package runs). The CLI
-  is a development tool (`oidc keygen`, `idp dev`); nothing on the library path
-  imports it, so its floor never constrains the rest of the package. The generic
-  `/testing` and `/testing/contract` helpers register suites through
-  `@std/testing/bdd` and are verified on Deno only. The full matrix is in
+  nowhere else. Every other subpath is Web-standard — no `node:` import, and no
+  runtime-specific global on the library path beyond one feature check: the
+  default `fetch` uses `Deno.createHttpClient` when it exists, as the next item
+  describes (the `Deno.env.get` you see in connector JSDoc is example prose, not
+  code the package runs). The CLI is a development tool (`oidc keygen`,
+  `idp dev`); nothing on the library path imports it, so its floor never
+  constrains the rest of the package. The generic `/testing` and
+  `/testing/contract` helpers register suites through `@std/testing/bdd` and are
+  verified on Deno only. The full matrix is in
   [the README](https://github.com/udibo/oauth2/blob/main/README.md#runtime-support); the support boundary is in
   [the stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md#runtime-support).
+- **On Deno, a request that misses the package's own deadline moves later
+  requests off the pooled connection.** Deno's global `fetch` sends every
+  request to an origin over one pooled HTTP/2 connection, and aborting a request
+  at its deadline resets only that request: if the connection itself has stopped
+  answering — a proxy still routing it to a backend that restarted, say — it
+  stays pooled, and every later request to that origin would time out on it as
+  well. So when one of the requests the package bounds with a deadline of its
+  own is sent with the default `fetch` to an `https` origin and misses that
+  deadline before its response has fully arrived, every later default-`fetch`
+  request from that process to that origin opens a connection of its own and
+  closes it once the response headers arrive. Those requests are:
+  `JwksTokenReader`'s JWKS and discovery fetches and `IntrospectionTokenReader`
+  (`fetchTimeoutMs`); `checkPermissions`; `DirectClient`'s discovery, token,
+  revocation and userinfo calls and `BffClient`'s session probe;
+  `breachedPasswordValidator`; and the external connectors' token exchange, plus
+  the OIDC connector's discovery. Nothing else triggers the switch: not a
+  request aborted for any other reason, not a deadline a caller sets on its own
+  signal (`DirectClient.fetch(url, { signal })`), and not the calls that carry
+  no package deadline — `DirectClient.fetch` and `BffClient.fetch`, the BFF
+  proxy, the connectors' userinfo requests, and Apple's JWKS. Those still take a
+  connection of their own to an origin that has already switched, and their
+  responses are the global `fetch`'s, unaltered. The switch trades connection
+  reuse to that origin, for the life of the process, for not depending on a
+  pooled connection that may be stalled. Plain `http` (which Deno sends over
+  HTTP/1.1, where an abort already discards the connection) keeps the shared
+  pool, and other runtimes use their global `fetch` unchanged. An injected
+  `fetch` manages its own connections and gets none of this; one that pins an
+  HTTP/2 client of its own should replace that client after a timeout.
 
 ---
 
