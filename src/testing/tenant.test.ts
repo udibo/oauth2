@@ -249,6 +249,24 @@ describe("createFakeTenant", () => {
     assertEquals(refused.body.error, "invalid_scope");
   });
 
+  it("refuses client_credentials to a public client as a failed authentication, before asking whether it may use the grant", async () => {
+    await tenant.addClient({
+      id: "public-interactive",
+      redirectUris: ["http://public.localhost/callback"],
+    });
+    const response = await fetch(url("/api/oauth2/token"), {
+      method: "POST",
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: "public-interactive",
+        scope: ORGANIZATIONS_READ,
+      }),
+    });
+    const body = await response.json();
+    assertEquals(response.status, 401, JSON.stringify(body));
+    assertEquals(body.error, "invalid_client");
+  });
+
   it("answers a public client introspecting even its own token that it is inactive", async () => {
     await tenant.addClient({
       id: "public-app",

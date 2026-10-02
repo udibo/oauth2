@@ -1743,7 +1743,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
     describe("client credentials and the resource-grants API", () => {
       const ORGANIZATIONS_READ = "identity:organizations:read";
       const DIRECT = "type=contract_document&id=direct";
-      const PAIRED = "type=contract_document&id=paired";
+      const RANKED = "type=contract_document&id=ranked";
       let reader: ConfidentialClient;
       let unassigned: ConfidentialClient;
       let readerToken: string;
@@ -1852,16 +1852,20 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         reader = await addConfidentialClient(["resource_grants.read"]);
         unassigned = await addConfidentialClient([]);
         readerToken = await issuedTo(reader, ORGANIZATIONS_READ);
-        await tenant.grant({
-          resource: { type: "contract_document", id: "paired" },
-          subject: { type: "user", id: people.member },
-          permissions: ["contract:review"],
-        });
-        await tenant.grant({
-          resource: { type: "contract_document", id: "paired" },
-          subject: { type: "user", id: people.outsider },
-          permissions: ["contract:approve"],
-        });
+        const ranked: [string, "user" | "organization", string][] = [
+          ["contract:review", "user", people.member],
+          ["contract:share", "user", people.outsider],
+          ["contract:approve", "user", people.leaver],
+          ["contract:comment", "user", people.solo],
+          ["contract:audit", "organization", organizations.home],
+        ];
+        for (const [permission, type, id] of ranked) {
+          await tenant.grant({
+            resource: { type: "contract_document", id: "ranked" },
+            subject: { type, id },
+            permissions: [permission],
+          });
+        }
       });
 
       it("issues a machine token with no refresh token, naming no person and no organization", async () => {
@@ -2029,14 +2033,24 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       });
 
       it("lists the grants on one resource in role-name order", async () => {
-        const paired = await grantsOn(readerToken, PAIRED);
-        assertEquals(paired.status, 200, JSON.stringify(paired.body));
+        const ranked = await grantsOn(readerToken, RANKED);
+        assertEquals(ranked.status, 200, JSON.stringify(ranked.body));
         assertEquals(
-          paired.body.grants.map((grant) => grant.subjectId).sort(),
-          [people.member, people.outsider].sort(),
+          ranked.body.grants.map((grant) => grant.subjectId).sort(),
+          [
+            people.member,
+            people.outsider,
+            people.leaver,
+            people.solo,
+            organizations.home,
+          ].sort(),
         );
-        const names = paired.body.grants.map((grant) => grant.roleName);
-        assert(names[0] !== names[1], "each grant confers a role of its own");
+        const names = ranked.body.grants.map((grant) => grant.roleName);
+        assertEquals(
+          new Set(names).size,
+          names.length,
+          "each grant confers a role of its own",
+        );
         assertEquals(
           names,
           [...names].sort((a, b) => a.localeCompare(b)),
