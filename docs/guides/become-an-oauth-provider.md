@@ -352,6 +352,49 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+## Form parameter cardinality
+
+The token, revocation, introspection and device-authorization handlers reject
+repeated recognized singleton form parameters with `400 invalid_request`, even
+when the values are identical. The check runs before `resolve`, client
+authentication, grant execution or token lookup. Error responses keep
+`Cache-Control: no-store` and `Pragma: no-cache`, including when
+`errorFormat: "problem-details"` is configured.
+
+| Endpoint / grant             | Singleton form parameters               |
+| ---------------------------- | --------------------------------------- |
+| All four endpoints           | `client_id`, `client_secret`            |
+| Token, all grants            | `grant_type`                            |
+| Token, `authorization_code`  | `code`, `redirect_uri`, `code_verifier` |
+| Token, `refresh_token`       | `refresh_token`, `scope`                |
+| Token, `client_credentials`  | `scope`                                 |
+| Token, `password`            | `username`, `password`, `scope`         |
+| Token, device-code grant     | `device_code`                           |
+| Revocation and introspection | `token`, `token_type_hint`              |
+| Device authorization         | `scope`                                 |
+
+The token handler selects the grant-specific fields from the single raw
+`grant_type`. It leaves another grant's fields and unknown extensions alone.
+Repeated `resource` and `audience` values are preserved, as are custom-grant
+extension fields; your custom grant owns their validation. This check does not
+change the existing priority of Basic authentication over singleton body
+credentials, or validate authorization-query, callback or end-session
+parameters.
+
+[RFC 6749 §3.2](https://www.rfc-editor.org/rfc/rfc6749.html#section-3.2) and
+[RFC 8628 §3.1](https://www.rfc-editor.org/rfc/rfc8628.html#section-3.1)
+prohibit repeated request parameters at their respective endpoints. Revocation
+uses the
+[RFC 7009 §2.2.1](https://www.rfc-editor.org/rfc/rfc7009.html#section-2.2.1)
+error format. For introspection, refusing repeated scalar `token` and
+`token_type_hint` fields is the package's parsing policy;
+[RFC 7662 §2.1](https://www.rfc-editor.org/rfc/rfc7662.html#section-2.1) does
+not state a general prohibition on repeated extension parameters. The multivalue
+resource/audience conventions in
+[RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707.html#section-2) and
+[RFC 8693 §2.1](https://www.rfc-editor.org/rfc/rfc8693.html#section-2.1) remain
+available to extensions.
+
 ## Refresh-token rotation and reuse detection
 
 The `RefreshTokenGrant` rotates on every refresh: it revokes the presented token
