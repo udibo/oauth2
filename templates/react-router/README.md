@@ -133,6 +133,18 @@ The demo shortcuts to replace before shipping:
 - Swap the `Memory*Service` stores (`oauth2/server.ts`) and the in-memory
   session `Map` (`sessions.ts`) for persistent implementations —
   `@udibo/oauth2/testing/contract` has conformance tests for yours.
+- **The BFF session store.** `HonoBff` defaults to `MemorySessionStore`,
+  separate from the issuer's login `Map` in `sessions.ts`. Configure its
+  `sessionStore` in `oauth2/server.ts` for restarts and multiple instances.
+  Choose a shared stateful store, or `EncryptedCookieSessionStore` when its
+  [revocation and cookie limits](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#cookies-and-sessions)
+  suit your app.
+- **Pending browser login.** The server's `DirectClient` defaults to
+  `MemoryAuthRequestStorage` for pending `state` and PKCE verifier records.
+  Configure the BFF's `authRequestStorage` factory or the client's storage so
+  login and callback can use the same record across restarts and instances. See
+  [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md)
+  for shared storage and encrypted pending-login cookie options.
 - Set `OAUTH2_CLIENT_SECRET` — the app refuses to start in production without
   it, since the development fallback is public in the template source.
 - Wire a real mailer into `oauth2/identity.ts`, and add rate limiting on the

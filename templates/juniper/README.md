@@ -137,6 +137,18 @@ The starter's shortcuts, and what replaces each:
   across instances.
 - **The in-memory session `Map`** in `sessions.ts`: move it to your store and
   add expiry and rotation.
+- **The BFF session store.** `HonoBff` defaults to `MemorySessionStore`,
+  separate from the issuer's login `Map` in `sessions.ts`. Configure its
+  `sessionStore` in `oauth2/server.ts` for restarts and multiple instances.
+  Choose a shared stateful store, or `EncryptedCookieSessionStore` when its
+  [revocation and cookie limits](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#cookies-and-sessions)
+  suit your app.
+- **Pending browser login.** The server's `DirectClient` defaults to
+  `MemoryAuthRequestStorage` for pending `state` and PKCE verifier records.
+  Configure the BFF's `authRequestStorage` factory or the client's storage so
+  login and callback can use the same record across restarts and instances. See
+  [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md)
+  for shared storage and encrypted pending-login cookie options.
 - **How long a sign-in lasts.** `sessionMaxAgeMs` in `oauth2/server.ts` is the
   single place that says so: it stamps the session cookie's `Max-Age` and bounds
   the session server-side. The template states the package default of 14 days
