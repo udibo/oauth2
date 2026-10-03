@@ -4,8 +4,7 @@
 
 - **testing:** add identity store contracts
   ([#65](https://github.com/udibo/oauth2/issues/65))
-  ([4d9d7ad](https://github.com/udibo/oauth2/commit/4d9d7ade9a5ec28989e6708b42ac0805a0632e15)),
-  closes [udibo/udibo#405](https://github.com/udibo/udibo/issues/405)
+  ([4d9d7ad](https://github.com/udibo/oauth2/commit/4d9d7ade9a5ec28989e6708b42ac0805a0632e15))
 
 # [0.10.0](https://github.com/udibo/oauth2/compare/0.9.2...0.10.0) (2026-10-02)
 

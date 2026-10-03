@@ -74,8 +74,15 @@ The release job depends on these, all in place:
 The `0.0.0` tag on the initial package import is a version baseline, not a
 published package; without it semantic-release would have chosen `1.0.0` for a
 repository with no release tags. `scripts/verify-release.ts` rejects any first
-version other than `0.1.0`, so it passes every release now that the `0.1.0` tag
-exists. The workflow prints a semantic-release dry run before the real run.
+version other than `0.1.0`; that version rule passes now that the `0.1.0` tag
+exists. The same guard checks commit messages since semantic-release's last
+release head and rejects references to the private application repository before
+notes are generated, release files are prepared, or packages are published. With
+no previous release, it checks all commits. Pull-request CI applies the same
+check to commits since the base head and the proposed squash title and body,
+including edits to that text. Keep commit footers and URLs public; these guards
+do not remove references from Git history or rewrite published release notes.
+The workflow prints a semantic-release dry run before the real run.
 
 ## npm trusted publishing
 
@@ -105,7 +112,8 @@ exist yet, which is why 0.1.0 could not use it.
 
 ## What the release does
 
-- Checks the proposed version against the first-release rule above.
+- Checks the proposed version and unreleased commit references against the rules
+  above.
 - Generates `CHANGELOG.md` and stamps `src/deno.json` and every example/template
   dependency pin with the release version.
 - Stages the complete documentation payload using the same task exercised by the

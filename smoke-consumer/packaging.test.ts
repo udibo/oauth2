@@ -18,6 +18,7 @@ const packageDir = new URL("../", import.meta.url);
 
 interface WorkflowStep {
   name?: string;
+  if?: string;
   uses?: string;
   run?: string;
   with?: Record<string, unknown>;
@@ -32,6 +33,7 @@ interface WorkflowJob {
 }
 
 interface Workflow {
+  on: { pull_request: { types: string[] } };
   jobs: Record<string, WorkflowJob>;
 }
 
@@ -482,6 +484,24 @@ describe("release workflow", () => {
       step.uses?.startsWith("actions/checkout@")
     );
     assertEquals(checkout?.with?.["fetch-depth"], 0);
+  });
+
+  it("checks branch commits and proposed squash text before PR admission", () => {
+    const steps = workflow.jobs["oauth2-package"].steps;
+    const checkout = steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@")
+    );
+    assertEquals(checkout?.with?.["fetch-depth"], 0);
+    const guard = steps.find((step) => step.run?.includes("--references-only"));
+    assert(guard);
+    assertEquals(guard.if, "github.event_name == 'pull_request'");
+    assertEquals(guard.env, {
+      RELEASE_REFERENCE_BASE: "${{ github.event.pull_request.base.sha }}",
+      RELEASE_REFERENCE_PR_TITLE: "${{ github.event.pull_request.title }}",
+      RELEASE_REFERENCE_PR_BODY: "${{ github.event.pull_request.body }}",
+    });
+    assert(guard.run?.includes("scripts/verify-release.ts --references-only"));
+    assert(workflow.on.pull_request.types.includes("edited"));
   });
 
   it("prints the computed version before the step that publishes it", () => {
