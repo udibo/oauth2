@@ -5,7 +5,7 @@ import { stub } from "@std/testing/mock";
 import { BasicScope } from "@udibo/oauth2/server";
 
 import app from "./main.ts";
-import { tokenReader } from "./oauth2/server.ts";
+import { CLIENT_ID, CLIENT_SECRET, tokenReader } from "./oauth2/server.ts";
 
 /**
  * Tokens the stubbed `getToken` recognises. Any token not in this map
@@ -58,6 +58,17 @@ describe("api-service example", () => {
     const html = await res.text();
     assertEquals(html.includes("API service"), true);
     assertEquals(html.includes("/api/admin"), true);
+  });
+
+  it("GET / homepage shows credential placeholders without the configured secret", async () => {
+    const res = await app.request("/");
+    assertStrictEquals(res.status, 200);
+    const html = await res.text();
+    assertEquals(html.includes(CLIENT_SECRET), false);
+    assertEquals(
+      html.split(`-u "${CLIENT_ID}:&lt;client-secret&gt;"`).length - 1,
+      4,
+    );
   });
 
   it("GET / homepage links the authorize URL with this server's redirect_uri", async () => {

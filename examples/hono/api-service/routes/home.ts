@@ -4,10 +4,10 @@
  * Documents each protected endpoint, demonstrates the OAuth2 flows
  * end-to-end against the companion auth server (the
  * `app-with-own-auth/` example on port 8001), and provides a token
- * tester that hits this server's `/api/*` endpoints. The flows route
- * through this server's own `/dev/*` proxy so the `client_secret`
- * stays server-side and the browser doesn't need CORS on the auth
- * server.
+ * tester that hits this server's `/api/*` endpoints. Browser-driven
+ * exchanges use this server's `/dev/*` proxy, which attaches configured
+ * client credentials server-side without requiring CORS on the auth
+ * server. Displayed curl commands use a client-secret placeholder.
  *
  * @module
  */
@@ -24,7 +24,6 @@ import { escapeHtml } from "../html.ts";
 import {
   AUTH_SERVER_URL,
   CLIENT_ID,
-  CLIENT_SECRET,
   PKCE_COOKIE,
   REDIRECT_URI,
 } from "../oauth2/server.ts";
@@ -46,8 +45,7 @@ export default app;
 
 function homePage(codeChallenge: string): string {
   const clientId = escapeHtml(CLIENT_ID);
-  const clientSecret = escapeHtml(CLIENT_SECRET);
-  const auth = `${clientId}:${clientSecret}`;
+  const auth = `${clientId}:&lt;client-secret&gt;`;
   const authServer = escapeHtml(AUTH_SERVER_URL);
   const redirectUri = escapeHtml(REDIRECT_URI);
   const authorizeUrl =
@@ -89,8 +87,10 @@ function homePage(codeChallenge: string): string {
   and tests the resulting token against this server's
   <code>/api/*</code> endpoints. <code>client_credentials</code> and
   <code>refresh_token</code> run in-page through a server-side proxy
-  (<code>/dev/token</code>) so the <code>client_secret</code> never
-  reaches the browser; <code>authorization_code</code> redirects through
+  (<code>/dev/token</code>), which attaches configured client credentials
+  server-side. Replace <code>&lt;client-secret&gt;</code> in the displayed
+  curl commands with your client secret when running them in your terminal.
+  <code>authorization_code</code> redirects through
   the auth server and lands on this server's
   <code><a href="/dev/callback">/dev/callback</a></code>.
 </p>
@@ -125,7 +125,7 @@ function homePage(codeChallenge: string): string {
 <h3>1. Client credentials</h3>
 <p>No user involved — the confidential client authenticates itself.</p>
 <pre><code>curl -X POST ${authServer}/oauth2/token \\
-  -u ${auth} \\
+  -u "${auth}" \\
   -d "grant_type=client_credentials"</code></pre>
 <div class="runner">
   <strong>Run in browser</strong>
@@ -159,7 +159,7 @@ function homePage(codeChallenge: string): string {
 <h3>3. Refresh token</h3>
 <p>Use a <code>refresh_token</code> from a previous flow to rotate the access token.</p>
 <pre><code>curl -X POST ${authServer}/oauth2/token \\
-  -u ${auth} \\
+  -u "${auth}" \\
   -d "grant_type=refresh_token&amp;refresh_token=&lt;paste-refresh-token&gt;"</code></pre>
 <div class="runner">
   <strong>Run in browser</strong>
@@ -177,7 +177,7 @@ function homePage(codeChallenge: string): string {
 <ol>
   <li>Device requests a code pair:
     <pre><code>curl -X POST ${authServer}/oauth2/device_authorization \\
-  -u ${auth} \\
+  -u "${auth}" \\
   -d "client_id=${clientId}&amp;scope=read"</code></pre>
     <div class="runner">
       <strong>Run in browser</strong>
@@ -193,7 +193,7 @@ function homePage(codeChallenge: string): string {
       <code>admin</code> or <code>user</code>, and approves.</li>
   <li>Device polls the token endpoint with the <code>device_code</code>:
     <pre><code>curl -X POST ${authServer}/oauth2/token \\
-  -u ${auth} \\
+  -u "${auth}" \\
   -d "grant_type=urn:ietf:params:oauth:grant-type:device_code&amp;device_code=&lt;paste-device-code&gt;"</code></pre>
     <div class="runner">
       <strong>Run in browser</strong>

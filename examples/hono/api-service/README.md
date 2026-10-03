@@ -19,8 +19,9 @@ endpoint) that needs to accept tokens but has no frontend of its own.
   against the companion `app-with-own-auth/` example and tests the resulting
   token against `/api/*`.
 - A dev-only `/dev/callback` redirect target and `/dev/token` proxy so the
-  homepage can exercise the auth-code flow without exposing the client secret in
-  the browser. Real api-services don't host these. The auth-code flow uses PKCE
+  homepage can exercise the auth-code flow with server-side client credentials.
+  Displayed curl commands use a client-secret placeholder for local terminal
+  use. Real api-services don't host these. The auth-code flow uses PKCE
   (required by default under OAuth 2.1, even for confidential clients): the
   homepage mints a verifier, stashes it in an HttpOnly cookie, and puts only the
   S256 challenge in the authorize URL; `/dev/callback` reads the verifier back
@@ -54,8 +55,8 @@ readable. When you copy this to a real project:
 - **Register this service as a client with the external IDP** (e.g. Udibo,
   Auth0, Cognito). The `CLIENT_ID` / `CLIENT_SECRET` here authenticate the
   _introspection request_ — the IDP gates who can introspect tokens.
-- **Drop the `/dev/*` mount.** Token acquisition is a client-app concern; this
-  service shouldn't host it.
+- **Drop the demo `/` walkthrough and `/dev/*` mounts.** Token acquisition is a
+  client-app concern; this service shouldn't host it.
 - **Persist anything you cache on the introspection response.** The example
   calls introspection on every request; production deployments typically cache
   active tokens in memory (or Redis) until expiry to avoid hitting the IDP on
