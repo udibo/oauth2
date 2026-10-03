@@ -30,11 +30,15 @@ publish manifest. Links in these copies point to the public repository so they
 remain usable from the JSR package root.
 
 Run these commands from a clean checkout. The standalone CI workflow also runs
-package, script, example and template tests on Linux, macOS and Windows. The npm
-artifact is built and consumed under Node in CI on every run, which is what
-keeps the published npm build honest: `deno task npm:build` then
-`deno task npm:smoke` installs the packed tarball into `npm-smoke-consumer/` and
-proves the Node claims in the README's runtime table.
+package, script, example and template tests on Linux, macOS and Windows. A
+separate React browser job runs `deno task test:browser` with an explicit Chrome
+path, so a missing browser fails instead of skipping the suite. The release job
+requires both the package matrix and the browser job to succeed; a failed or
+skipped prerequisite prevents publication. The npm artifact is built and
+consumed under Node in CI on every run, which is what keeps the published npm
+build honest: `deno task npm:build` then `deno task npm:smoke` installs the
+packed tarball into `npm-smoke-consumer/` and proves the Node claims in the
+README's runtime table.
 
 ## Release configuration
 

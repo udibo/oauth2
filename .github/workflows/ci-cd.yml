@@ -93,7 +93,7 @@ jobs:
 
   release-oauth2-package:
     name: Release @udibo/oauth2 to JSR and npm
-    needs: [oauth2-package]
+    needs: [oauth2-package, react-browser]
     if: >-
       github.event_name == 'push'
       && github.ref == 'refs/heads/main'
