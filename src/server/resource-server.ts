@@ -25,6 +25,7 @@ import {
   type RequireConditions,
 } from "../models/authorization.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
+import { assertClockSkewSeconds } from "./_clock-skew.ts";
 
 /** Bearer token regex pattern. */
 export const BEARER_TOKEN =
@@ -88,7 +89,9 @@ export interface ResourceServerOptions<
   /**
    * Leeway in seconds applied to the access token's expiry, to absorb clock
    * drift between whoever issued the token and this server. Defaults to `0`:
-   * a token whose expiry has passed is refused immediately.
+   * a token whose expiry has passed is refused immediately. Must be finite and
+   * non-negative, with a finite millisecond conversion; fractional seconds
+   * are supported.
    *
    * This is the one expiry check every token reader's result passes through,
    * which is why the leeway belongs here rather than in a reader:
@@ -192,8 +195,6 @@ export class ResourceServer<
   Scope: ScopeConstructor<S>;
   /** Protection space named in `WWW-Authenticate` challenges. */
   realm: string;
-  /** Leeway in seconds applied to the access token's expiry. Defaults to `0`. */
-  clockSkewSeconds: number;
   /** Body format used for error responses: OAuth2 or RFC 9457 problem details. */
   errorFormat: "oauth2" | "problem-details";
   /** When true, handler boundaries rethrow {@linkcode OAuth2Error} instead of returning a response. */
@@ -205,7 +206,34 @@ export class ResourceServer<
     | ResourceServerContext<Client, User, S>
     | Promise<ResourceServerContext<Client, User, S>>;
 
-  /** Creates a resource server from the given {@linkcode ResourceServerOptions}. */
+  #clockSkewSeconds = 0;
+
+  /**
+   * Leeway in seconds applied to the access token's expiry. Defaults to `0`.
+   * May be reassigned to any non-negative finite number with a finite
+   * millisecond conversion, including fractional seconds.
+   */
+  get clockSkewSeconds(): number {
+    return this.#clockSkewSeconds;
+  }
+
+  /**
+   * Sets the expiry leeway, preserving the previous value if validation fails.
+   *
+   * @throws {RangeError} If the value is negative, non-finite, or overflows
+   *   when converted to milliseconds.
+   */
+  set clockSkewSeconds(value: number) {
+    assertClockSkewSeconds(value);
+    this.#clockSkewSeconds = value;
+  }
+
+  /**
+   * Creates a resource server from the given {@linkcode ResourceServerOptions}.
+   *
+   * @throws {RangeError} If `clockSkewSeconds` is negative, non-finite, or
+   *   overflows when converted to milliseconds.
+   */
   constructor(options: ResourceServerOptions<Client, User, S>) {
     this.Scope = options.Scope ??
       (BasicScope as unknown as ScopeConstructor<S>);

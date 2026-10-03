@@ -214,6 +214,17 @@ reaches an `IntrospectionTokenReader`, which has no notion of skew.
 Anything else resolves to `undefined` — the same `invalid_token` response as an
 unknown opaque token, with no detail leaked about which check failed.
 
+Both clock-skew options accept non-negative finite seconds, including fractional
+values, whose conversion to milliseconds is also finite. An invalid value throws
+`RangeError` during construction, rather than producing an HTTP authentication
+refusal. You can change `ResourceServer.clockSkewSeconds` after construction; an
+invalid assignment throws `RangeError` and keeps the previous value.
+
+**Migration:** `ResourceServer.clockSkewSeconds` is now an accessor. Subclasses
+should configure it through the constructor option or assignment, rather than
+redeclaring it as a class field. Code that inspects own properties should read
+this property directly.
+
 **Don't let an `id_token` in.** The three checks above — `typ`, the required
 client-id claim, and the `id_token`-claim rejection — exist because an
 `id_token` is signed by the same issuer with the same keys, and accepting one as
