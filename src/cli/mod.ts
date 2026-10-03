@@ -72,8 +72,10 @@ function matchCommand(
  * use: `0` when the command succeeded or help was requested, `1` for no
  * command, an unknown command, a bad argument, or a command failure.
  *
- * Command output goes to stdout; usage text and errors go to stderr, so
- * piping stdout to a secret store never picks up prose.
+ * Help text and development-provider banners use stdout. Missing or unknown
+ * commands and command failures report on stderr. Successful `oidc keygen`
+ * without help writes one JWK line on stdout and guidance on stderr. Use that
+ * exact invocation and check its exit code before storing stdout as a secret.
  *
  * The `@udibo/oauth2/cli` entrypoint calls this with `Deno.args` when run as
  * the main module. Call it directly to mount these commands inside your own
