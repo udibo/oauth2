@@ -6124,7 +6124,14 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   option; verify your relying parties accept ES256.
 - `id_token` claims are released per scope through the app-provided `userClaims`
   hook; there is no `claims` request-parameter support.
-- `acr` / `amr` are not asserted.
+- Authentication-event claims (`auth_time`, `acr`, and `amr`) are opt-in through
+  the configured claims hooks. The application supplies verified evidence, and
+  its code/token stores must retain the captured snapshot across refreshes. The
+  package does not infer assurance or methods, or enforce the raw `acr_values`,
+  `max_age`, and `prompt` controls. Omit unknown evidence; legacy and userless
+  tokens do not gain it automatically. See
+  [Preserve the authentication event](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#preserve-the-authentication-event)
+  for store, hook, and BFF integration.
 
 ## Identity flows (`@udibo/oauth2/identity`)
 
