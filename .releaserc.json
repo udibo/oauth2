@@ -68,7 +68,7 @@
       "@semantic-release/exec",
       {
         "prepareCmd": "deno task release:prepare ${nextRelease.version} && deno fmt",
-        "verifyReleaseCmd": "deno run --allow-run=git --allow-read scripts/verify-release.ts ${nextRelease.version}"
+        "verifyReleaseCmd": "deno run --allow-run=git --allow-read scripts/verify-release.ts ${nextRelease.version} ${lastRelease.gitHead || ''}"
       }
     ],
     [
