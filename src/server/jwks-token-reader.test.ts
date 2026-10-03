@@ -6,8 +6,13 @@ import {
   assertThrows,
 } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { FakeTime } from "@std/testing/time";
 
-import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
+import {
+  InvalidTokenError,
+  ServerError,
+  TemporarilyUnavailableError,
+} from "../errors.ts";
 import { base64urlEncode } from "../utils/crypto.ts";
 import {
   generateTestCertificate,
@@ -18,6 +23,7 @@ import {
   JwksTokenReader,
   type JwksTokenReaderOptions,
 } from "./jwks-token-reader.ts";
+import { ResourceServer } from "./resource-server.ts";
 
 const ISSUER = "https://auth.example.com";
 const AUDIENCE = "https://api.example.com";
@@ -751,6 +757,107 @@ describe("JwksTokenReader", () => {
   });
 
   describe("clock skew", () => {
+    for (
+      const clockSkewSeconds of [
+        NaN,
+        Infinity,
+        -Infinity,
+        -1,
+        Number.MAX_VALUE,
+      ]
+    ) {
+      it(`rejects invalid clock skew ${clockSkewSeconds} at construction`, () => {
+        const { fetch } = jwksFetch({ keys: [] });
+        assertThrows(
+          () => createReader(fetch, { clockSkewSeconds }),
+          RangeError,
+          "clockSkewSeconds",
+        );
+      });
+    }
+
+    it("allows zero, fractional and large finite clock skew", () => {
+      const { fetch } = jwksFetch({ keys: [] });
+      for (const clockSkewSeconds of [0, 0.5, Number.MAX_VALUE / 1000]) {
+        createReader(fetch, { clockSkewSeconds });
+      }
+    });
+
+    it("preserves the default 30-second claim leeway", async () => {
+      using _time = new FakeTime("2026-10-02T12:00:00.000Z");
+      const key = await createKey("key-a");
+      const { fetch } = jwksFetch({ keys: [key.jwk] });
+      const reader = createReader(fetch);
+      const now = Date.now() / 1000;
+      for (const overrides of [{ exp: now - 29 }, { nbf: now + 30 }]) {
+        const accessToken = await signToken(key, claimsFor(overrides));
+        assertStrictEquals(
+          (await reader.getToken(accessToken))?.client.id,
+          "my-client",
+        );
+      }
+      for (const overrides of [{ exp: now - 30 }, { nbf: now + 31 }]) {
+        const accessToken = await signToken(key, claimsFor(overrides));
+        assertStrictEquals(await reader.getToken(accessToken), undefined);
+      }
+    });
+
+    it("checks signed exp and nbf at fractional and zero leeway boundaries", async () => {
+      using _time = new FakeTime("2026-10-02T12:00:00.000Z");
+      const key = await createKey("key-a");
+      const { fetch } = jwksFetch({ keys: [key.jwk] });
+      const now = Date.now() / 1000;
+      const fractionalReader = createReader(fetch, { clockSkewSeconds: 0.5 });
+      const zeroReader = createReader(fetch, { clockSkewSeconds: 0 });
+      for (const overrides of [{ exp: now - 0.25 }, { nbf: now + 0.5 }]) {
+        const accessToken = await signToken(key, claimsFor(overrides));
+        assertStrictEquals(
+          (await fractionalReader.getToken(accessToken))?.client.id,
+          "my-client",
+        );
+        assertStrictEquals(await zeroReader.getToken(accessToken), undefined);
+      }
+      for (const overrides of [{ exp: now - 0.5 }, { nbf: now + 0.75 }]) {
+        const accessToken = await signToken(key, claimsFor(overrides));
+        assertStrictEquals(
+          await fractionalReader.getToken(accessToken),
+          undefined,
+        );
+      }
+      const currentToken = await signToken(key, claimsFor({ nbf: now }));
+      assertStrictEquals(
+        (await zeroReader.getToken(currentToken))?.client.id,
+        "my-client",
+      );
+    });
+
+    it("keeps the reader claim skew separate from the resource-server expiry skew", async () => {
+      using _time = new FakeTime("2026-10-02T12:00:00.000Z");
+      const key = await createKey("key-a");
+      const { fetch } = jwksFetch({ keys: [key.jwk] });
+      const reader = createReader(fetch, { clockSkewSeconds: 0.5 });
+      const server = new ResourceServer<TestClient, TestUser>({
+        resolve: () => ({ services: { tokenService: reader } }),
+      });
+      const exp = Date.now() / 1000 - 0.25;
+      const accessToken = await signToken(key, claimsFor({ exp }));
+      assertStrictEquals(
+        (await reader.getToken(accessToken))?.accessTokenExpiresAt?.getTime(),
+        exp * 1000,
+      );
+      await assertRejects(
+        () => server.getToken(accessToken, { tokenService: reader }),
+        InvalidTokenError,
+        "access token has expired",
+      );
+      server.clockSkewSeconds = 0.5;
+      assertStrictEquals(
+        (await server.getToken(accessToken, { tokenService: reader }))
+          .accessToken,
+        accessToken,
+      );
+    });
+
     it("accepts a token that expired within the skew", async () => {
       const key = await createKey("key-a");
       const { fetch } = jwksFetch({ keys: [key.jwk] });

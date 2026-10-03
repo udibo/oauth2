@@ -25,6 +25,7 @@ import {
   packageDeadlineSignal,
 } from "../utils/_default-fetch.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
+import { assertClockSkewSeconds } from "./_clock-skew.ts";
 
 /**
  * Claims of a validated JWT access token, as defined by RFC 9068 §2.2.
@@ -124,7 +125,9 @@ export interface JwksTokenReaderOptions<
   clientIdClaim?: string;
   /**
    * Leeway in seconds applied to `exp` and `nbf` to absorb clock drift
-   * between the issuer and this server. Defaults to 30.
+   * between the issuer and this server. Defaults to 30. Must be finite and
+   * non-negative, with a finite millisecond conversion; fractional seconds
+   * are supported.
    *
    * This governs this reader's own claim checks. The token it returns carries
    * the issuer's `exp` verbatim, and {@linkcode ResourceServer} re-checks that
@@ -439,6 +442,8 @@ export class JwksTokenReader<
    * @throws {TypeError} If `issuer` is not an absolute URL, `audience` is
    *   empty, or `algorithms` names an algorithm this package cannot verify
    *   (a silently ignored entry would read as a policy that isn't enforced).
+   * @throws {RangeError} If `clockSkewSeconds` is negative, non-finite, or
+   *   overflows when converted to milliseconds.
    */
   constructor(options: JwksTokenReaderOptions<Client, User, S>) {
     this.#issuer = options.issuer;
@@ -458,6 +463,7 @@ export class JwksTokenReader<
     this.#types = (options.types ?? ["at+jwt"]).map(normalizeType);
     this.#clientIdClaim = options.clientIdClaim ?? "client_id";
     this.#clockSkewSeconds = options.clockSkewSeconds ?? 30;
+    assertClockSkewSeconds(this.#clockSkewSeconds);
     this.#cacheMaxAgeMs = options.cacheMaxAgeMs ?? 600_000;
     this.#minFetchIntervalMs = options.minFetchIntervalMs ?? 30_000;
     this.#fetchTimeoutMs = options.fetchTimeoutMs ?? 5_000;

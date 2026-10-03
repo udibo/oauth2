@@ -1,5 +1,6 @@
-import { assertRejects, assertStrictEquals } from "@std/assert";
+import { assertRejects, assertStrictEquals, assertThrows } from "@std/assert";
 import { beforeEach, describe, it } from "@std/testing/bdd";
+import { FakeTime } from "@std/testing/time";
 import { BasicScope } from "../models/scope.ts";
 import {
   AccessDeniedError,
@@ -89,6 +90,61 @@ describe("BEARER_TOKEN", () => {
 
 describe("ResourceServer", () => {
   describe("constructor", () => {
+    for (
+      const clockSkewSeconds of [
+        NaN,
+        Infinity,
+        -Infinity,
+        -1,
+        Number.MAX_VALUE,
+      ]
+    ) {
+      it(`rejects invalid clock skew ${clockSkewSeconds} at construction`, () => {
+        const services = createTestServices();
+        assertThrows(
+          () =>
+            new ResourceServer<TestClient, TestUser>({
+              resolve: () => ({
+                services: { tokenService: services.tokenService },
+              }),
+              clockSkewSeconds,
+            }),
+          RangeError,
+          "clockSkewSeconds",
+        );
+      });
+
+      it(`refuses assigning invalid clock skew ${clockSkewSeconds} and retains its previous value`, () => {
+        const { server } = createTestServer();
+        server.clockSkewSeconds = 0.5;
+        assertThrows(
+          () => {
+            server.clockSkewSeconds = clockSkewSeconds;
+          },
+          RangeError,
+          "clockSkewSeconds",
+        );
+        assertStrictEquals(server.clockSkewSeconds, 0.5);
+      });
+    }
+
+    it("preserves zero default and valid mutable clock skew", () => {
+      const { server } = createTestServer();
+      assertStrictEquals(server.clockSkewSeconds, 0);
+      for (const clockSkewSeconds of [0, 0.5, Number.MAX_VALUE / 1000]) {
+        server.clockSkewSeconds = clockSkewSeconds;
+        assertStrictEquals(server.clockSkewSeconds, clockSkewSeconds);
+        const services = createTestServices();
+        const configured = new ResourceServer<TestClient, TestUser>({
+          resolve: () => ({
+            services: { tokenService: services.tokenService },
+          }),
+          clockSkewSeconds,
+        });
+        assertStrictEquals(configured.clockSkewSeconds, clockSkewSeconds);
+      }
+    });
+
     it("should use default Scope class", () => {
       const { server } = createTestServer();
       const scope = new server.Scope("read write");
@@ -570,6 +626,50 @@ describe("ResourceServer", () => {
 
       const token = await server.getToken("no-expiry-token", { tokenService });
       assertStrictEquals(token.accessToken, "no-expiry-token");
+    });
+
+    it("applies fractional mutable skew to expiry while preserving no-expiry tokens", async () => {
+      using time = new FakeTime("2026-10-02T12:00:00.000Z");
+      server.clockSkewSeconds = 0.5;
+      await tokenService.save({
+        accessToken: "fractional-expiry-token",
+        accessTokenExpiresAt: new Date(Date.now() - 500),
+        client: testClient,
+        user: testUser,
+      });
+      await tokenService.save({
+        accessToken: "no-expiry-token",
+        client: testClient,
+        user: testUser,
+      });
+      assertStrictEquals(
+        (await server.getToken("fractional-expiry-token", { tokenService }))
+          .accessToken,
+        "fractional-expiry-token",
+      );
+      time.tick(1);
+      await assertRejects(
+        () => server.getToken("fractional-expiry-token", { tokenService }),
+        InvalidTokenError,
+        "access token has expired",
+      );
+      server.clockSkewSeconds = 0.75;
+      assertStrictEquals(
+        (await server.getToken("fractional-expiry-token", { tokenService }))
+          .accessToken,
+        "fractional-expiry-token",
+      );
+      server.clockSkewSeconds = 0;
+      await assertRejects(
+        () => server.getToken("fractional-expiry-token", { tokenService }),
+        InvalidTokenError,
+        "access token has expired",
+      );
+      assertStrictEquals(
+        (await server.getToken("no-expiry-token", { tokenService }))
+          .accessToken,
+        "no-expiry-token",
+      );
     });
   });
 
