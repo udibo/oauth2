@@ -23,7 +23,9 @@ function hasControlCharacter(value: string): boolean {
  * that some browsers resolve as a host, and any value containing a C0 control
  * character or `DEL` — browsers strip TAB/CR/LF before parsing a URL, so
  * `/<TAB>/evil.com` would otherwise navigate to `evil.com`. Anything else
- * collapses to `fallback` (default `/`).
+ * collapses to `fallback` (default `/`), which is returned verbatim. The
+ * fallback is trusted caller configuration; do not pass user-controlled input
+ * there.
  *
  * Percent-encoded control characters (`/%09/x`) are safe and pass through: a
  * browser does not decode them before parsing, so they stay on the origin.
@@ -62,17 +64,17 @@ export function safeReturnTo(
   return value;
 }
 
-/** Options for {@link loginContinuation}. */
+/** Trusted application configuration for {@link loginContinuation}. */
 export interface LoginContinuationOptions {
   /**
-   * The authorization endpoint (absolute URL or path). When `returnTo` points at
-   * it, the flow is **resumed** (the in-flight authorize request already carries
+   * Trusted authorization endpoint (absolute URL or path). When `returnTo` points
+   * at it, the flow is **resumed** (the in-flight authorize request already carries
    * its `state`). Omit it and every `returnTo` starts a fresh login.
    */
   authorizeEndpoint?: string;
-  /** The login path to start a fresh login. Defaults to `"/auth/login"`. */
+  /** Trusted login path for a fresh login. Defaults to `"/auth/login"`. */
   loginPath?: string;
-  /** Fallback when `returnTo` is missing/unsafe. Defaults to `"/"`. */
+  /** Trusted fallback for missing/unsafe `returnTo`. Defaults to `"/"`. */
   defaultReturnTo?: string;
 }
 
@@ -90,7 +92,8 @@ export interface LoginContinuationOptions {
  *
  * Pure and client-safe — the same logic behind `HonoBff.loginContinuation`
  * (server) and `BffClient.loginContinuation` (browser). `returnTo` is
- * open-redirect-guarded via {@link safeReturnTo}.
+ * open-redirect-guarded via {@link safeReturnTo}. The fallback, authorization
+ * endpoint and login path are trusted application configuration.
  */
 export function loginContinuation(
   returnTo: string | null | undefined,
