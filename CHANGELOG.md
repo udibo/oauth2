@@ -1,3 +1,12 @@
+## [0.11.1](https://github.com/udibo/oauth2/compare/0.11.0...0.11.1) (2026-10-03)
+
+### Bug Fixes
+
+- **ci:** reject private release references
+  ([#67](https://github.com/udibo/oauth2/issues/67))
+  ([b0cbbb9](https://github.com/udibo/oauth2/commit/b0cbbb9ec050e335b8a049bd779a8f68e2fa63ae)),
+  closes [#24](https://github.com/udibo/oauth2/issues/24)
+
 # [0.11.0](https://github.com/udibo/oauth2/compare/0.10.0...0.11.0) (2026-10-02)
 
 ### Features
