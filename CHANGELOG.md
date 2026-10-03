@@ -1,3 +1,12 @@
+## [0.12.1](https://github.com/udibo/oauth2/compare/0.12.0...0.12.1) (2026-10-03)
+
+### Bug Fixes
+
+- reject duplicate singleton form parameters
+  ([#70](https://github.com/udibo/oauth2/issues/70))
+  ([5b0a05f](https://github.com/udibo/oauth2/commit/5b0a05f72c904909cf3c6e42246bbe484e5c453b)),
+  closes [#69](https://github.com/udibo/oauth2/issues/69)
+
 # [0.12.0](https://github.com/udibo/oauth2/compare/0.11.1...0.12.0) (2026-10-03)
 
 - fix!: validate finite clock skew
