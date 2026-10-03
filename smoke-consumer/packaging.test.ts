@@ -17,6 +17,7 @@ import { parse as parseYaml } from "@std/yaml";
 const packageDir = new URL("../", import.meta.url);
 
 interface WorkflowStep {
+  "continue-on-error"?: boolean | string;
   name?: string;
   if?: string;
   uses?: string;
@@ -26,6 +27,8 @@ interface WorkflowStep {
 }
 
 interface WorkflowJob {
+  "continue-on-error"?: boolean | string;
+  env?: Record<string, string>;
   needs?: string[];
   if?: string;
   permissions?: Record<string, string>;
@@ -466,8 +469,30 @@ describe("release workflow", () => {
     assert(condition.includes("github.event_name == 'push'"));
   });
 
-  it("runs only after the package's own checks and tests pass", () => {
-    assertEquals(release.needs, ["oauth2-package"]);
+  it("runs only after the package matrix and browser tests pass", () => {
+    assertEquals(release.needs, ["oauth2-package", "react-browser"]);
+    assertFalse(
+      /\b(?:always|cancelled|failure|success)\s*\(/i.test(release.if ?? ""),
+    );
+  });
+
+  it("requires a real browser test verdict without skipped or allowed failures", () => {
+    const browser = workflow.jobs["react-browser"];
+    assert(browser);
+    assertEquals(browser.if, undefined);
+    assertEquals(browser["continue-on-error"] ?? false, false);
+    const test = browser.steps.find((step) =>
+      step.run?.trim() === "deno task test:browser"
+    );
+    assert(test);
+    assertEquals(
+      test.env?.CHROMIUM_PATH ?? browser.env?.CHROMIUM_PATH,
+      "/usr/bin/google-chrome",
+    );
+    for (const step of browser.steps) {
+      assertEquals(step.if, undefined);
+      assertEquals(step["continue-on-error"] ?? false, false);
+    }
   });
 
   it("mints an OIDC token instead of storing a JSR credential", () => {
