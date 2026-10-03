@@ -924,6 +924,44 @@ export class AuthorizationServer<
     return grant;
   }
 
+  #assertSingletonParameters(
+    body: FormData,
+    parameters: readonly string[],
+  ): void {
+    for (const parameter of parameters) {
+      if (body.getAll(parameter).length > 1) {
+        throw new InvalidRequestError(
+          `${parameter} parameter must not be repeated`,
+        );
+      }
+    }
+  }
+
+  #assertTokenSingletonParameters(body: FormData): void {
+    this.#assertSingletonParameters(body, ["grant_type"]);
+    let parameters: readonly string[];
+    switch (body.get("grant_type")) {
+      case "authorization_code":
+        parameters = ["code", "redirect_uri", "code_verifier"];
+        break;
+      case "refresh_token":
+        parameters = ["refresh_token", "scope"];
+        break;
+      case "password":
+        parameters = ["username", "password", "scope"];
+        break;
+      case "client_credentials":
+        parameters = ["scope"];
+        break;
+      case DEVICE_AUTHORIZATION_GRANT_TYPE:
+        parameters = ["device_code"];
+        break;
+      default:
+        parameters = [];
+    }
+    this.#assertSingletonParameters(body, parameters);
+  }
+
   async #readBody(
     request: Request,
     options: { keepReadable?: boolean } = {},
@@ -950,6 +988,7 @@ export class AuthorizationServer<
     options: {
       grantFromBody?: (body: FormData) => G;
       requiredGrantType?: string;
+      validateBody?: (body: FormData) => void;
     } = {},
   ): Promise<{
     context: AuthorizationServerContext<Client, User, S>;
@@ -977,6 +1016,9 @@ export class AuthorizationServer<
       );
     });
 
+    this.#assertSingletonParameters(body, ["client_id", "client_secret"]);
+    options.validateBody?.(body);
+
     const context = await this.authorizationContext(request);
 
     const grant = options.grantFromBody?.(body) as G;
@@ -995,7 +1037,8 @@ export class AuthorizationServer<
    * Supports multiple grant types based on the configured grants.
    *
    * A malformed request — wrong method, a content-type other than
-   * `application/x-www-form-urlencoded`, or no `grant_type` — is a 400
+   * `application/x-www-form-urlencoded`, no `grant_type`, or a repeated
+   * recognized singleton form parameter — is a 400
    * `invalid_request`. A `grant_type` with no registered grant is
    * `unsupported_grant_type`, checked before client authentication; a client
    * not registered for the grant is `unauthorized_client`. A body over
@@ -1007,6 +1050,7 @@ export class AuthorizationServer<
       const { context, body, client, grant } = await this
         .#beginClientAuthenticatedRequest(request, {
           grantFromBody: (body) => this.#grantFromBody(body),
+          validateBody: (body) => this.#assertTokenSingletonParameters(body),
         });
 
       const token = await grant.token(request, client, body);
@@ -1628,7 +1672,8 @@ export class AuthorizationServer<
    * endpoint cannot be used as an oracle for whether a token value is live or
    * whose it is. That covers the token only: a malformed request — wrong
    * method, a content-type other than `application/x-www-form-urlencoded`, or
-   * no `token` parameter — is a 400 `invalid_request`, as on the token
+   * no `token` parameter, or repeated `token`, `token_type_hint`, `client_id` or
+   * `client_secret` — is a 400 `invalid_request`, as on the token
    * endpoint.
    *
    * `token_type_hint` orders the lookup rather than restricting it, so a client
@@ -1639,7 +1684,13 @@ export class AuthorizationServer<
   async handleRevocationRequest(request: Request): Promise<Response> {
     try {
       const { context, body, client } = await this
-        .#beginClientAuthenticatedRequest(request);
+        .#beginClientAuthenticatedRequest(request, {
+          validateBody: (body) =>
+            this.#assertSingletonParameters(body, [
+              "token",
+              "token_type_hint",
+            ]),
+        });
 
       const token = body.get("token");
       if (typeof token !== "string") {
@@ -1729,14 +1780,21 @@ export class AuthorizationServer<
    * `application/x-www-form-urlencoded`, is a 400 `invalid_request`, as on the
    * token endpoint.
    *
+   * Repeated `token`, `token_type_hint`, `client_id` or `client_secret` form
+   * parameters are refused before the context is resolved.
+   *
    * @see https://datatracker.ietf.org/doc/html/rfc7662
    */
   async handleIntrospectionRequest(request: Request): Promise<Response> {
     try {
       const { context, body, client } = await this
-        .#beginClientAuthenticatedRequest(
-          request,
-        );
+        .#beginClientAuthenticatedRequest(request, {
+          validateBody: (body) =>
+            this.#assertSingletonParameters(body, [
+              "token",
+              "token_type_hint",
+            ]),
+        });
 
       const tokenValue = body.get("token");
       if (typeof tokenValue !== "string") {
@@ -1957,6 +2015,9 @@ export class AuthorizationServer<
    * `application/x-www-form-urlencoded`, is a 400 `invalid_request`, as on the
    * token endpoint.
    *
+   * Repeated `scope`, `client_id` or `client_secret` form parameters are
+   * refused before the context is resolved.
+   *
    * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.1
    * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.2
    */
@@ -1967,6 +2028,8 @@ export class AuthorizationServer<
       const { context, body, client } = await this
         .#beginClientAuthenticatedRequest(request, {
           requiredGrantType: DEVICE_AUTHORIZATION_GRANT_TYPE,
+          validateBody: (body) =>
+            this.#assertSingletonParameters(body, ["scope"]),
         });
 
       const grant = this.#deviceAuthorizationGrant();
