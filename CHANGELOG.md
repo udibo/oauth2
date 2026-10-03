@@ -1,3 +1,12 @@
+## [0.12.2](https://github.com/udibo/oauth2/compare/0.12.1...0.12.2) (2026-10-03)
+
+### Bug Fixes
+
+- use placeholders in example commands
+  ([#80](https://github.com/udibo/oauth2/issues/80))
+  ([d359857](https://github.com/udibo/oauth2/commit/d3598576b54121428f8763f584895b98334d8576)),
+  closes [#79](https://github.com/udibo/oauth2/issues/79)
+
 ## [0.12.1](https://github.com/udibo/oauth2/compare/0.12.0...0.12.1) (2026-10-03)
 
 ### Bug Fixes
