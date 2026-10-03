@@ -1,3 +1,20 @@
+# [0.12.0](https://github.com/udibo/oauth2/compare/0.11.1...0.12.0) (2026-10-03)
+
+- fix!: validate finite clock skew
+  ([#68](https://github.com/udibo/oauth2/issues/68))
+  ([a817697](https://github.com/udibo/oauth2/commit/a817697306f5a0d686334c86ec92dbfa1796d2b0)),
+  closes [#66](https://github.com/udibo/oauth2/issues/66)
+
+### BREAKING CHANGES
+
+- `ResourceServer.clockSkewSeconds` is now an accessor. Subclasses must
+  configure it through constructor options or assignment rather than redeclaring
+  a class field; reflection that expects an own property must read it directly.
+  Non-finite, negative, or millisecond-overflowing skew is rejected at
+  construction and on reassignment.
+
+## Closes
+
 ## [0.11.1](https://github.com/udibo/oauth2/compare/0.11.0...0.11.1) (2026-10-03)
 
 ### Bug Fixes
