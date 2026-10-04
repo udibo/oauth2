@@ -2,7 +2,8 @@
 
 This guide applies when your app delegates sign-in to Udibo or another
 OAuth2/OIDC server. Use the same integration code with different configuration
-for each environment. Udibo is in [private beta](use-udibo.md).
+for each environment. For the values a Udibo registration provides, see
+[Use Udibo's identity service](use-udibo.md).
 
 ## Keep these values together
 

@@ -2,8 +2,9 @@
 
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
-> for the app's own users and API. Udibo is in private beta; access starts at
-> https://www.udibo.com/. Do not assume public registration is available.
+> for the app's own users and API. The managed service requires a Udibo account;
+> https://www.udibo.com/ explains how to get one. Do not create or assume an
+> account on the user's behalf.
 > Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
@@ -47,7 +48,7 @@
   complete suite runs on Deno; Node has import/type smoke coverage for 19 subpaths.
   Bun is unverified. The CLI is Deno-only and is not a production dependency.
 - Public docs cover application integration. Do not infer hosted-service admin
-  APIs, tenant platform architecture, pricing, or beta availability from this package.
+  APIs, tenant platform architecture, pricing, or account availability from this package.
 
 ## Docs
 

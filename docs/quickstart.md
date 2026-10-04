@@ -5,8 +5,8 @@ protected API working together. Everything runs locally; no Udibo account,
 external database, or email service is required.
 
 If you want Udibo to host sign-in, use
-[the managed-service guide](guides/use-udibo.md). Udibo is currently in private
-beta; see [udibo.com](https://www.udibo.com/) for access.
+[the managed-service guide](guides/use-udibo.md). It requires a Udibo account;
+see [udibo.com](https://www.udibo.com/) for how to get one.
 
 ## Run the example
 

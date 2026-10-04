@@ -17,8 +17,10 @@ examples and templates alongside it.
   security-sensitive storage operations atomic and test concurrent callers.
 - Public docs serve developers and coding agents integrating an application with
   Udibo or hosting authorization for their own app. Keep hosted-platform
-  internals and business operations out of the package docs. Udibo is currently
-  in private beta with a waitlist; do not imply public signup is available.
+  internals and business operations out of the package docs. Do not label
+  Udibo's hosted service or its pricing as beta, preview, provisional or new;
+  point readers to https://www.udibo.com/ for getting an account, and do not
+  imply self-serve signup is available.
 - Public docs explain package usage. Do not add per-document changelogs or
   internal-business frontmatter; release history belongs in `CHANGELOG.md`.
 - Follow Conventional Commits and the PR template. Do not publish, enable the

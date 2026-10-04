@@ -296,4 +296,5 @@ const identity = new IdentityService({
 
 This guide documents the package's password-verification API. Export
 availability, account provisioning, and migration into Udibo's hosted service
-follow that service's own documentation and beta support process.
+are outside this package; see [udibo.com](https://www.udibo.com/) for the hosted
+service.
