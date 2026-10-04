@@ -4,9 +4,10 @@ Udibo handles sign-in and issues tokens for your application. Your backend
 completes the OAuth2 callback, maintains an application session, and protects
 application data.
 
-**Udibo is in private beta.** See [udibo.com](https://www.udibo.com/) for
-access. To develop without an account, use the
-[local identity provider](run-a-local-identity-provider.md) or the
+You need a Udibo account to register your application; see
+[udibo.com](https://www.udibo.com/) for how to get one. To develop without an
+account, use the [local identity provider](run-a-local-identity-provider.md) or
+the
 [external-auth example](../../examples/hono/app-with-external-auth/README.md).
 
 ## What you need

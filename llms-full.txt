@@ -2,8 +2,9 @@
 
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
-> for the app's own users and API. Udibo is in private beta; access starts at
-> https://www.udibo.com/. Do not assume public registration is available.
+> for the app's own users and API. The managed service requires a Udibo account;
+> https://www.udibo.com/ describes how to get one. Do not assume immediate
+> registration, and do not create an account on the user's behalf.
 > Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
@@ -47,7 +48,7 @@
   complete suite runs on Deno; Node has import/type smoke coverage for 19 subpaths.
   Bun is unverified. The CLI is Deno-only and is not a production dependency.
 - Public docs cover application integration. Do not infer hosted-service admin
-  APIs, tenant platform architecture, pricing, or beta availability from this package.
+  APIs, tenant platform architecture, pricing, or account availability from this package.
 
 ---
 
@@ -66,15 +67,15 @@ Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,
 React bindings, and optional login flows over your own database.
 
-**Udibo's managed identity service is in private beta.** See
-[udibo.com](https://www.udibo.com/) for access. The self-hosted examples run
-locally without a hosted account.
+Using Udibo's managed identity service requires a Udibo account; see
+[udibo.com](https://www.udibo.com/) for how to get one. The self-hosted examples
+run locally without a hosted account.
 
 ## Choose your path
 
 | Your application needs                      | Start here                                                                                                                |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Udibo to handle sign-in                     | [Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md) — private-beta access required                                   |
+| Udibo to handle sign-in                     | [Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md) — requires a Udibo account                                       |
 | Its own login and authorization server      | [Run the quickstart](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md), then [host authorization for your app](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md) |
 | An API that accepts access tokens           | [Protect an API](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md)                                                                           |
 | A React application with server-held tokens | [Juniper starter](https://github.com/udibo/oauth2/blob/main/templates/juniper/README.md) or [React Router starter](https://github.com/udibo/oauth2/blob/main/templates/react-router/README.md)                |
@@ -255,8 +256,8 @@ Udibo hosts the sign-in flow and issues tokens. Your app handles its callback,
 keeps its own session, and validates access to its API. You do not need to
 implement password storage, MFA enrollment, or an authorization server.
 
-**Private beta:** see [udibo.com](https://www.udibo.com/) for access. If you
-already have an account, start with
+You need a Udibo account; see [udibo.com](https://www.udibo.com/) for how to get
+one. If you already have an account, start with
 [the integration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
 
 Then read [API protection](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md) and
@@ -319,9 +320,10 @@ Udibo handles sign-in and issues tokens for your application. Your backend
 completes the OAuth2 callback, maintains an application session, and protects
 application data.
 
-**Udibo is in private beta.** See [udibo.com](https://www.udibo.com/) for
-access. To develop without an account, use the
-[local identity provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md) or the
+You need a Udibo account to register your application; see
+[udibo.com](https://www.udibo.com/) for how to get one. To develop without an
+account, use the [local identity provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md) or
+the
 [external-auth example](https://github.com/udibo/oauth2/blob/main/examples/hono/app-with-external-auth/README.md).
 
 ## What you need
@@ -490,8 +492,8 @@ protected API working together. Everything runs locally; no Udibo account,
 external database, or email service is required.
 
 If you want Udibo to host sign-in, use
-[the managed-service guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md). Udibo is currently in private
-beta; see [udibo.com](https://www.udibo.com/) for access.
+[the managed-service guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md). It requires a Udibo account;
+see [udibo.com](https://www.udibo.com/) for how to get one.
 
 ## Run the example
 
@@ -4875,7 +4877,9 @@ const identity = new IdentityService({
 
 This guide documents the package's password-verification API. Export
 availability, account provisioning, and migration into Udibo's hosted service
-follow that service's own documentation and beta support process.
+are outside this package; see
+[Move an existing application to Udibo](https://www.udibo.com/docs/identity/migrate)
+for user import and a coordinated cutover.
 
 ---
 
@@ -4885,7 +4889,8 @@ follow that service's own documentation and beta support process.
 
 This guide applies when your app delegates sign-in to Udibo or another
 OAuth2/OIDC server. Use the same integration code with different configuration
-for each environment. Udibo is in [private beta](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
+for each environment. For the values an application registration in Udibo
+provides, see [Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
 
 ## Keep these values together
 

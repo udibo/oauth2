@@ -5,15 +5,15 @@ Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,
 React bindings, and optional login flows over your own database.
 
-**Udibo's managed identity service is in private beta.** See
-[udibo.com](https://www.udibo.com/) for access. The self-hosted examples run
-locally without a hosted account.
+Using Udibo's managed identity service requires a Udibo account; see
+[udibo.com](https://www.udibo.com/) for how to get one. The self-hosted examples
+run locally without a hosted account.
 
 ## Choose your path
 
 | Your application needs                      | Start here                                                                                                                |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Udibo to handle sign-in                     | [Use Udibo's identity service](docs/guides/use-udibo.md) — private-beta access required                                   |
+| Udibo to handle sign-in                     | [Use Udibo's identity service](docs/guides/use-udibo.md) — requires a Udibo account                                       |
 | Its own login and authorization server      | [Run the quickstart](docs/quickstart.md), then [host authorization for your app](docs/guides/become-an-oauth-provider.md) |
 | An API that accepts access tokens           | [Protect an API](docs/guides/protect-an-api.md)                                                                           |
 | A React application with server-held tokens | [Juniper starter](templates/juniper/README.md) or [React Router starter](templates/react-router/README.md)                |
