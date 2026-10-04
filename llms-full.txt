@@ -3,8 +3,8 @@
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
 > for the app's own users and API. The managed service requires a Udibo account;
-> https://www.udibo.com/ explains how to get one. Do not create or assume an
-> account on the user's behalf.
+> https://www.udibo.com/ describes how to get one. Do not assume immediate
+> registration, and do not create an account on the user's behalf.
 > Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
@@ -4877,8 +4877,9 @@ const identity = new IdentityService({
 
 This guide documents the package's password-verification API. Export
 availability, account provisioning, and migration into Udibo's hosted service
-are outside this package; see [udibo.com](https://www.udibo.com/) for the hosted
-service.
+are outside this package; see
+[Move an existing application to Udibo](https://www.udibo.com/docs/identity/migrate)
+for user import and a coordinated cutover.
 
 ---
 
@@ -4888,8 +4889,8 @@ service.
 
 This guide applies when your app delegates sign-in to Udibo or another
 OAuth2/OIDC server. Use the same integration code with different configuration
-for each environment. For the values a Udibo registration provides, see
-[Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
+for each environment. For the values an application registration in Udibo
+provides, see [Use Udibo's identity service](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md).
 
 ## Keep these values together
 

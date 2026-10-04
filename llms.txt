@@ -3,8 +3,8 @@
 > OAuth2/OIDC integration tools for TypeScript applications. Two paths:
 > connect an app to Udibo's managed identity service, or host authorization
 > for the app's own users and API. The managed service requires a Udibo account;
-> https://www.udibo.com/ explains how to get one. Do not create or assume an
-> account on the user's behalf.
+> https://www.udibo.com/ describes how to get one. Do not assume immediate
+> registration, and do not create an account on the user's behalf.
 > Hosted tenant setup is documented at https://www.udibo.com/docs/identity.
 
 ## Integration rules
