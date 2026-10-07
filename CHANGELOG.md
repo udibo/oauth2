@@ -1,3 +1,20 @@
+## [0.13.0](https://github.com/udibo/oauth2/compare/0.12.2...0.13.0) (2026-10-07)
+
+### ⚠ BREAKING CHANGES
+
+- **server:** `ClientCredentialsGrant` refuses a token request that presents no
+  client secret with 401 `invalid_client`. Register machine clients as
+  confidential and authenticate them with their client secret, by HTTP Basic or
+  `client_secret` in the body. A client service written before 0.9.2 must pass
+  `runClientServiceContractTests`, or `client_credentials` is not limited to
+  confidential clients.
+
+### Bug Fixes
+
+- **server:** admit only confidential clients to client_credentials
+  ([#83](https://github.com/udibo/oauth2/issues/83))
+  ([638123e](https://github.com/udibo/oauth2/commit/638123eb53de8e3024428a777489a283996b66c1))
+
 ## [0.12.2](https://github.com/udibo/oauth2/compare/0.12.1...0.12.2) (2026-10-03)
 
 ### Bug Fixes
