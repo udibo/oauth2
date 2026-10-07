@@ -398,6 +398,23 @@ describe("release configuration", () => {
     assertEquals(breaking?.release, "minor");
   });
 
+  it("reads a ! in the commit header as a breaking change", () => {
+    for (
+      const name of [
+        "@semantic-release/commit-analyzer",
+        "@semantic-release/release-notes-generator",
+      ]
+    ) {
+      assertEquals(
+        pluginOptions(name).preset,
+        "conventionalcommits",
+        `${name} must use the conventionalcommits preset: the angular preset ` +
+          `does not parse \`feat!:\` or \`fix(scope)!:\`, so such a commit ` +
+          `cuts no release and its breaking change never reaches the notes`,
+      );
+    }
+  });
+
   it("type-checks the package before spending an immutable version", () => {
     const jsr = pluginOptions("@sebbo2002/semantic-release-jsr");
     const args = (jsr.publishArgs ?? []) as string[];
@@ -637,6 +654,29 @@ describe("release workflow", () => {
           `${name} is configured in .releaserc.json but not pinned in the ` +
             `npx package set, so npx would resolve a floating version while ` +
             `id-token: write is active`,
+        );
+      }
+    }
+  });
+
+  it("pins the commit preset in both npx package sets", () => {
+    const releaseConfig = readJson(".releaserc.json");
+    const presets = new Set(
+      (releaseConfig.plugins as unknown[])
+        .filter(Array.isArray)
+        .map((plugin) => (plugin[1] as { preset?: string }).preset)
+        .filter((preset) => preset !== undefined),
+    );
+    assert(presets.size > 0, ".releaserc.json names no commit preset");
+    const npxSteps = release.steps.filter((step) => step.run?.includes("npx"));
+    assertEquals(npxSteps.length, 2);
+    for (const step of npxSteps) {
+      for (const preset of presets) {
+        assert(
+          step.run?.includes(`--package conventional-changelog-${preset}@`),
+          `the ${preset} preset is named in .releaserc.json but not pinned ` +
+            `in the npx package set, so npx would resolve a floating version ` +
+            `while id-token: write is active`,
         );
       }
     }
