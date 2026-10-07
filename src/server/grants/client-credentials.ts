@@ -53,7 +53,9 @@ export type ClientCredentialsGrantOptions<
  * with 401 `invalid_client`. Register a machine client with a secret and send
  * that secret with HTTP Basic or as `client_secret` in the body. The grant
  * relies on `ClientServiceInterface.getAuthenticated` refusing a public client
- * that presents a secret, which `runClientServiceContractTests` pins.
+ * that presents a secret, which `runClientServiceContractTests` pins. A client
+ * service written before 0.9.2 must pass `runClientServiceContractTests`, or
+ * `client_credentials` is not limited to confidential clients.
  *
  * **The token need not carry a user.** RFC 6749 §4.4 has no resource owner, so
  * a `ClientServiceInterface.getUser` that resolves nothing is the conformant

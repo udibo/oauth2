@@ -233,6 +233,15 @@ describe("ClientCredentialsGrant", () => {
       assertExists(response.headers.get("www-authenticate"));
     });
 
+    it("refuses a public client whose Basic password is empty even when the body carries a client_secret", async () => {
+      const server = await createTestServer();
+      const response = await server.handleTokenRequest(tokenRequest(
+        { grant_type: "client_credentials", client_secret: "junk" },
+        { authorization: encodeBasicAuth(publicClient.id, "") },
+      ));
+      await assertInvalidClient(response);
+    });
+
     it("refuses a public client that presents a secret it was never issued", async () => {
       const server = await createTestServer();
       const response = await server.handleTokenRequest(tokenRequest({
