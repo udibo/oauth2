@@ -308,6 +308,7 @@ runTenantContractTests({
     });
     await tenant.addClient({ ...client, redirectUris: [redirectUri] });
     let signedIn: string | null = null;
+    let browserCookie: string | null = null;
     return {
       issuer: tenant.issuer,
       client,
@@ -341,6 +342,13 @@ runTenantContractTests({
         tenant.removeMember(organizationId, userId);
         return Promise.resolve();
       },
+      addRole: (permissions) =>
+        Promise.resolve(
+          tenant.defineOrganizationRole({
+            slug: `contract-${crypto.randomUUID()}`,
+            permissions,
+          }),
+        ),
       grant: (grant) => {
         tenant.registerResourceType(grant.resource.type);
         tenant.grant(grant);
@@ -364,6 +372,7 @@ runTenantContractTests({
         if (!options.sameBrowser) {
           tenant.signInAs(userId, { organizationId });
           signedIn = userId;
+          browserCookie = null;
         } else if (signedIn !== userId) {
           throw new Error("sameBrowser continues only the latest sign-in");
         }
@@ -381,8 +390,13 @@ runTenantContractTests({
             ? { organization: organizationId }
             : {},
         }).toString();
-        const redirect = await fetch(authorize, { redirect: "manual" });
+        const redirect = await fetch(authorize, {
+          redirect: "manual",
+          headers: browserCookie ? { cookie: browserCookie } : {},
+        });
         await redirect.body?.cancel();
+        browserCookie = redirect.headers.get("set-cookie")?.split(";")[0] ??
+          browserCookie;
         const code = new URL(redirect.headers.get("location")!).searchParams
           .get("code")!;
         const response = await fetch(

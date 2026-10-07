@@ -90,6 +90,13 @@ export interface TenantContractFixture {
   /** Ends a membership. */
   removeMember(organizationId: string, userId: string): Promise<void>;
   /**
+   * Defines a tenant-wide role carrying `permissions`, which an
+   * organization's manager may grant a member through
+   * `POST /api/organizations/:organizationId/members/:userId/roles`, and
+   * returns its id.
+   */
+  addRole(permissions: string[]): Promise<string>;
+  /**
    * Grants `permissions` on one instance of a resource type to a person, or
    * to every member of an organization. Registers the type if it is new.
    */
@@ -1359,6 +1366,498 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const reply = await call(null, "GET", "/api/organizations");
         assertEquals(reply.status, 401);
       });
+
+      describe("application roles a manager grants a member", () => {
+        const APP_PERMISSION = "contract:app";
+        let roleId: string;
+        let option: { id?: string; slug: string; name: string };
+
+        interface HeldRole {
+          id: string | null;
+          builtInRole: string | null;
+          organizationId: string | null;
+          slug: string;
+          name: string;
+          permissions: string[];
+        }
+
+        interface Assignment {
+          id: string;
+          subjectId: string;
+          roleId: string | null;
+          builtInRole: string | null;
+          scopeType: string;
+          scopeId: string;
+          created: boolean;
+        }
+
+        beforeAll(async () => {
+          roleId = await tenant.addRole([APP_PERMISSION]);
+          const listed = await call<
+            { id?: string; slug: string; name: string }[]
+          >(
+            seats.admin.token,
+            "GET",
+            `/api/organizations/${organization.id}/member-roles`,
+          );
+          assertEquals(listed.status, 200);
+          const found = listed.body.find((entry) => entry.id === roleId);
+          assert(found, "member-roles does not list the role by its id");
+          option = found;
+        });
+
+        const rolesPath = (userId: string, organizationId = organization.id) =>
+          `/api/organizations/${organizationId}/members/${userId}/roles`;
+
+        async function seated(): Promise<Person> {
+          const seatedPerson = await person();
+          await seat(
+            seats.owner.token,
+            organization.id,
+            seatedPerson,
+            "member",
+          );
+          return seatedPerson;
+        }
+
+        async function grantRole(
+          managerToken: string,
+          userId: string,
+          id = roleId,
+          organizationId = organization.id,
+        ): Promise<Reply<Assignment>> {
+          return await call<Assignment>(
+            managerToken,
+            "POST",
+            rolesPath(userId, organizationId),
+            { roleId: id },
+          );
+        }
+
+        async function heldBy(
+          userId: string,
+          managerToken = seats.admin.token,
+          organizationId = organization.id,
+        ): Promise<HeldRole[]> {
+          const reply = await call<HeldRole[]>(
+            managerToken,
+            "GET",
+            rolesPath(userId, organizationId),
+          );
+          assertEquals(reply.status, 200, JSON.stringify(reply.body));
+          return reply.body;
+        }
+
+        async function holds(
+          accessToken: string,
+          organizationId?: string,
+        ): Promise<boolean> {
+          const reply = await ask(accessToken, "/api/check", {
+            permissions: [APP_PERMISSION],
+            ...organizationId
+              ? { resource: { type: "organization", id: organizationId } }
+              : {},
+          });
+          assertEquals(reply.status, 200);
+          return (reply.body.results as Record<string, boolean>)[
+            APP_PERMISSION
+          ];
+        }
+
+        async function offersOf(accessToken: string): Promise<string[]> {
+          const reply = await call<Offers>(
+            accessToken,
+            "GET",
+            "/api/organizations/offers",
+          );
+          assertEquals(reply.status, 200);
+          return reply.body.offers.map((offer) => offer.id).sort();
+        }
+
+        it("names a tenant-wide role in member-roles by the id a grant takes, and no built-in tier by any", async () => {
+          assertEquals(option.id, roleId);
+          assert(option.slug, "the role is listed by its slug");
+          assert(option.name, "the role is listed by its name");
+          const listed = await call<{ id?: string; slug: string }[]>(
+            seats.owner.token,
+            "GET",
+            `/api/organizations/${organization.id}/member-roles`,
+          );
+          for (const slug of ["owner", "admin", "member"]) {
+            const tier = listed.body.find((entry) => entry.slug === slug);
+            assert(tier, `the built-in ${slug} tier is listed`);
+            assertFalse("id" in tier, `the built-in ${slug} tier has an id`);
+          }
+        });
+
+        it("grants an accepted member a role that counts inside the organization only", async () => {
+          const member = await seated();
+          await seat(seats.rival.token, rival.id, member, "member");
+          assertFalse(await holds(member.token, organization.id));
+          const granted = await grantRole(seats.admin.token, member.id);
+          assertEquals(granted.status, 201, JSON.stringify(granted.body));
+          assertEquals(granted.body.subjectId, member.id);
+          assertEquals(granted.body.roleId, roleId);
+          assertEquals(granted.body.builtInRole, null);
+          assertEquals(granted.body.scopeType, "organization");
+          assertEquals(granted.body.scopeId, organization.id);
+          assertEquals(granted.body.created, true);
+          assert(await holds(member.token, organization.id));
+          assertFalse(
+            await holds(member.token),
+            "a role held in an organization answered at tenant scope",
+          );
+          assertFalse(
+            await holds(member.token, rival.id),
+            "a role held in one organization answered for another it belongs to",
+          );
+          assertEquals(await heldBy(member.id), [{
+            id: roleId,
+            builtInRole: null,
+            organizationId: null,
+            slug: option.slug,
+            name: option.name,
+            permissions: [APP_PERMISSION],
+          }]);
+          const again = await grantRole(seats.owner.token, member.id);
+          assertEquals(again.status, 201);
+          assertEquals(again.body.id, granted.body.id);
+          assertEquals(again.body.created, false);
+          assertEquals((await heldBy(member.id)).length, 1);
+        });
+
+        it("revokes a role, after which the permission stops answering and the role is not found", async () => {
+          const member = await seated();
+          assertEquals(
+            (await grantRole(seats.admin.token, member.id)).status,
+            201,
+          );
+          const revoked = await call(
+            seats.admin.token,
+            "DELETE",
+            `${rolesPath(member.id)}/${roleId}`,
+          );
+          assertEquals(revoked.status, 204);
+          assertFalse(await holds(member.token, organization.id));
+          assertEquals(await heldBy(member.id), []);
+          const again = await call(
+            seats.admin.token,
+            "DELETE",
+            `${rolesPath(member.id)}/${roleId}`,
+          );
+          assertEquals(again.status, 404);
+        });
+
+        it("refuses a plain member and a stranger every verb with the 404 an unknown organization gets, and changes nothing", async () => {
+          const member = await seated();
+          assertEquals(
+            (await grantRole(seats.admin.token, member.id)).status,
+            201,
+          );
+          const unknown = crypto.randomUUID();
+          const verbs: [string, (organizationId: string) => string, unknown][] =
+            [
+              ["GET", (id) => rolesPath(member.id, id), undefined],
+              ["POST", (id) => rolesPath(member.id, id), { roleId }],
+              [
+                "DELETE",
+                (id) => `${rolesPath(member.id, id)}/${roleId}`,
+                undefined,
+              ],
+            ];
+          for (const [method, path, body] of verbs) {
+            const onUnknown = await call<{ detail?: string }>(
+              seats.owner.token,
+              method,
+              path(unknown),
+              body,
+            );
+            assertEquals(onUnknown.status, 404, `${method} on an unknown id`);
+            for (const caller of [seats.member, seats.outsider]) {
+              const refused = await call<{ detail?: string }>(
+                caller.token,
+                method,
+                path(organization.id),
+                body,
+              );
+              assertEquals(
+                refused.status,
+                404,
+                `${method} below the manager tier`,
+              );
+              assertEquals(refused.body.detail, onUnknown.body.detail);
+            }
+          }
+          assert(
+            await holds(member.token, organization.id),
+            "a refused revoke took the role away",
+          );
+        });
+
+        it("answers a pending member, a non-member and an unknown user with one 404, granting nothing", async () => {
+          const pending = await person();
+          const offered = await invite(
+            seats.admin.token,
+            organization.id,
+            pending.email,
+            "member",
+          );
+          assert(offered.body.status === "membership", offered.body.status);
+          const details = new Set<string | undefined>();
+          for (
+            const userId of [
+              pending.id,
+              seats.outsider.id,
+              crypto.randomUUID(),
+            ]
+          ) {
+            const read = await call<{ detail?: string }>(
+              seats.admin.token,
+              "GET",
+              rolesPath(userId),
+            );
+            const granted = await grantRole(seats.admin.token, userId);
+            assertEquals([read.status, granted.status], [404, 404], userId);
+            details.add(read.body.detail);
+            details.add((granted.body as { detail?: string }).detail);
+          }
+          assertEquals(details.size, 1, [...details].join(" | "));
+          assertEquals(
+            (await accept(pending.token, offered.body.membership.id)).status,
+            "accepted",
+          );
+          assertEquals(await heldBy(pending.id), []);
+          assertFalse(await holds(pending.token, organization.id));
+        });
+
+        it("refuses a role the tenant does not know with 404, and a grant that names no role with 400", async () => {
+          const member = await seated();
+          const unknown = await grantRole(
+            seats.admin.token,
+            member.id,
+            crypto.randomUUID(),
+          );
+          assertEquals(unknown.status, 404);
+          const unnamed = await call(
+            seats.admin.token,
+            "POST",
+            rolesPath(member.id),
+            {},
+          );
+          assertEquals(unnamed.status, 400);
+          assertEquals(await heldBy(member.id), []);
+        });
+
+        it("refuses a manager revoking a built-in role they do not hold there, and answers any other name with 404", async () => {
+          const member = await seated();
+          const asAdmin = await call(
+            seats.admin.token,
+            "DELETE",
+            `${rolesPath(member.id)}/owner`,
+          );
+          assertEquals(asAdmin.status, 403);
+          const asOwner = await call(
+            seats.owner.token,
+            "DELETE",
+            `${rolesPath(member.id)}/member`,
+          );
+          assertEquals(
+            asOwner.status,
+            403,
+            "an owner membership is not a built-in role held there",
+          );
+          const unnamed = await call(
+            seats.owner.token,
+            "DELETE",
+            `${rolesPath(member.id)}/not-a-role`,
+          );
+          assertEquals(unnamed.status, 404);
+        });
+
+        it("ends the roles and open offers a person's last membership carried, so rejoining restores nothing", async () => {
+          const address = newEmail();
+          const invited = await invite(
+            seats.owner.token,
+            organization.id,
+            address,
+            "admin",
+          );
+          assert(invited.body.status === "invitation", invited.body.status);
+          const invitationId = invited.body.invitation.id;
+          const leaver = await person({ email: address });
+          await seat(seats.owner.token, organization.id, leaver, "member");
+          const ownerOffer = await invite(
+            seats.owner.token,
+            organization.id,
+            address,
+            "owner",
+          );
+          assert(
+            ownerOffer.body.status === "membership",
+            ownerOffer.body.status,
+          );
+          assertEquals(
+            (await grantRole(seats.admin.token, leaver.id)).status,
+            201,
+          );
+          assertEquals(
+            await offersOf(leaver.token),
+            [invitationId, ownerOffer.body.membership.id].sort(),
+          );
+
+          const revoked = await call(
+            seats.admin.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${leaver.id}/member`,
+          );
+          assertEquals(revoked.status, 204);
+          assertEquals(await offersOf(leaver.token), []);
+          assertFalse(
+            (await invitationIdsOf(seats.owner.token, organization.id))
+              .includes(invitationId),
+            "an invitation to the leaver's address outlived their membership",
+          );
+          const read = await call(
+            seats.admin.token,
+            "GET",
+            rolesPath(leaver.id),
+          );
+          assertEquals(read.status, 404);
+
+          await seat(seats.owner.token, organization.id, leaver, "member");
+          assertEquals(await heldBy(leaver.id), []);
+          assertFalse(
+            await holds(leaver.token, organization.id),
+            "rejoining restored a role the last membership carried",
+          );
+        });
+
+        it("keeps a role revoke and a membership's end to the person and organization they name", async () => {
+          const address = newEmail();
+          const elsewhere = await invite(
+            seats.rival.token,
+            rival.id,
+            address,
+            "member",
+          );
+          assert(elsewhere.body.status === "invitation", elsewhere.body.status);
+          const leaver = await person({ email: address });
+          await seat(seats.owner.token, organization.id, leaver, "member");
+          const bystander = await seated();
+          await seat(seats.rival.token, rival.id, bystander, "member");
+          for (const userId of [leaver.id, bystander.id]) {
+            assertEquals(
+              (await grantRole(seats.admin.token, userId)).status,
+              201,
+            );
+          }
+          assertEquals(
+            (await grantRole(seats.rival.token, bystander.id, roleId, rival.id))
+              .status,
+            201,
+          );
+
+          const revoked = await call(
+            seats.admin.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${leaver.id}/member`,
+          );
+          assertEquals(revoked.status, 204);
+          assertEquals(
+            (await heldBy(bystander.id)).map((role) => role.id),
+            [roleId],
+            "one person's membership ending took another's role",
+          );
+          assert(
+            (await invitationIdsOf(seats.rival.token, rival.id)).includes(
+              elsewhere.body.invitation.id,
+            ),
+            "a membership ending here withdrew an invitation elsewhere",
+          );
+
+          for (const status of [204, 404]) {
+            const taken = await call(
+              seats.admin.token,
+              "DELETE",
+              `${rolesPath(bystander.id)}/${roleId}`,
+            );
+            assertEquals(taken.status, status);
+          }
+          assertEquals(
+            (await heldBy(bystander.id, seats.rival.token, rival.id)).map(
+              (role) => role.id,
+            ),
+            [roleId],
+            "a revoke here took the role held in another organization",
+          );
+        });
+
+        it("withdraws only the offer named from someone who is not a member", async () => {
+          const invitee = await person();
+          const offers: string[] = [];
+          for (const role of ["member", "admin"]) {
+            const offered = await invite(
+              seats.owner.token,
+              organization.id,
+              invitee.email,
+              role,
+            );
+            assert(offered.body.status === "membership", offered.body.status);
+            offers.push(offered.body.membership.id);
+          }
+          const withdrawn = await call(
+            seats.owner.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${invitee.id}/member`,
+          );
+          assertEquals(withdrawn.status, 204);
+          assertEquals(await offersOf(invitee.token), [offers[1]]);
+        });
+
+        it("ends nothing while the person keeps another accepted role there", async () => {
+          const stayer = await seated();
+          await seat(seats.owner.token, organization.id, stayer, "admin");
+          const ownerOffer = await invite(
+            seats.owner.token,
+            organization.id,
+            stayer.email,
+            "owner",
+          );
+          assert(
+            ownerOffer.body.status === "membership",
+            ownerOffer.body.status,
+          );
+          assertEquals(
+            (await grantRole(seats.owner.token, stayer.id)).status,
+            201,
+          );
+          const revoked = await call(
+            seats.owner.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${stayer.id}/member`,
+          );
+          assertEquals(revoked.status, 204);
+          assertEquals((await heldBy(stayer.id)).map((role) => role.id), [
+            roleId,
+          ]);
+          assert(await holds(stayer.token, organization.id));
+          assertEquals(await offersOf(stayer.token), [
+            ownerOffer.body.membership.id,
+          ]);
+
+          const withdrawn = await call(
+            seats.owner.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${stayer.id}/owner`,
+          );
+          assertEquals(withdrawn.status, 204);
+          assertEquals(await offersOf(stayer.token), []);
+          assert(
+            await holds(stayer.token, organization.id),
+            "withdrawing a pending offer ended a role",
+          );
+        });
+      });
     });
 
     describe("the account API", () => {
@@ -1507,6 +2006,22 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           listed.map((session) => session.id).sort(),
         );
         assertEquals(currentOf(fromFirst), [listed[1].id]);
+      });
+
+      it("leaves an earlier sign-in's credential live when another browser signs in", async () => {
+        const id = await tenant.addUser([], { email: newEmail() });
+        const first = await tenant.signIn(id);
+        const second = await tenant.signIn(id);
+        assertEquals((await introspect(first.access_token)).active, true);
+        assertEquals((await introspect(second.access_token)).active, true);
+        const fromFirst = await sessionsOf(first.access_token);
+        const fromSecond = await sessionsOf(second.access_token);
+        assertEquals(fromFirst.length, 2);
+        assertEquals(currentOf(fromFirst).length, 1);
+        assertFalse(
+          currentOf(fromFirst)[0] === currentOf(fromSecond)[0],
+          "two browsers' sign-ins shared one login session",
+        );
       });
 
       it("keeps a refreshed credential on the session it was issued from", async () => {
