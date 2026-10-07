@@ -1,3 +1,30 @@
+## [0.14.0](https://github.com/udibo/oauth2/compare/0.13.0...0.14.0) (2026-10-07)
+
+### ⚠ BREAKING CHANGES
+
+- Login sessions follow the browser, not `signInAs`. Repeated authorization
+  requests after one `signInAs` no longer share a session; each starts its own
+  unless it sends back the session cookie the tenant set, so a test that relied
+  on a second sign-in revoking the first credential must carry that cookie.
+  Conversely, calling `signInAs` again no longer starts a new browser: a browser
+  that carries the cookie continues its session for the same person, so a test
+  modelling two devices needs two cookie jars (browser contexts). Revoking
+  someone's last accepted role in an organization through
+  `DELETE
+…/members/:userId/:role` now also withdraws their pending memberships
+  and unaccepted invitations there and drops the permissions `addMember` seeded,
+  so a later accept of such an offer answers `invalid` and rejoining restores
+  nothing. `TenantContractFixture` requires a new `addRole(permissions)` hook
+  that defines a tenant-wide role and returns its id.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Features
+
+- mirror member roles and per-sign-in sessions in the fake tenant
+  ([#84](https://github.com/udibo/oauth2/issues/84))
+  ([e94a8d7](https://github.com/udibo/oauth2/commit/e94a8d7e1cc602e0c0b85edee3cc6eae9c27f472))
+
 ## [0.13.0](https://github.com/udibo/oauth2/compare/0.12.2...0.13.0) (2026-10-07)
 
 ### ⚠ BREAKING CHANGES
