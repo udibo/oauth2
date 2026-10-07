@@ -1201,10 +1201,19 @@ describe("createFakeTenant's organization and account APIs", () => {
     );
   });
 
-  it("defines a role under the id it is given, and refuses an id another role holds", () => {
+  it("defines a role under the id it is given, and refuses an id another role holds or a new id for a defined slug", () => {
     const id = crypto.randomUUID();
     assertEquals(
       tenant.defineOrganizationRole({ slug: `given-${id}`, id }),
+      id,
+    );
+    assertThrows(
+      () =>
+        tenant.defineOrganizationRole({
+          slug: `given-${id}`,
+          id: crypto.randomUUID(),
+        }),
+      Error,
       id,
     );
     assertThrows(

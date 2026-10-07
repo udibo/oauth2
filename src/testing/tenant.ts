@@ -301,8 +301,9 @@ export interface FakeTenant {
   /**
    * Defines a tenant-wide role beside the built-in tiers, so invitations may
    * offer it, `member-roles` lists it, and an organization's manager may grant
-   * it to a member. Returns its id. Throws on a built-in slug, or on an id
-   * another role holds.
+   * it to a member. Returns its id. Defining a slug again changes its name
+   * and permissions and keeps its id. Throws on a built-in slug, on an id
+   * another role holds, and on a new id for a slug already defined.
    */
   defineOrganizationRole(role: FakeTenantOrganizationRole): string;
   /** Registers a resource type, so `/api/check` accepts it. */
@@ -2439,7 +2440,11 @@ export async function createFakeTenant(
       if (BUILT_IN_ROLES.some((role) => role.slug === slug)) {
         throw new Error(`"${slug}" is a built-in organization role`);
       }
-      const roleId = id ?? definedRoles.get(slug)?.id ?? crypto.randomUUID();
+      const existing = definedRoles.get(slug)?.id;
+      if (id !== undefined && existing !== undefined && id !== existing) {
+        throw new Error(`Role "${slug}" already has the id "${existing}"`);
+      }
+      const roleId = id ?? existing ?? crypto.randomUUID();
       const holder = definedRoleById(roleId);
       if (holder && holder.slug !== slug) {
         throw new Error(`Role id "${roleId}" belongs to "${holder.slug}"`);

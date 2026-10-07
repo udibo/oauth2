@@ -1388,6 +1388,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           builtInRole: string | null;
           scopeType: string;
           scopeId: string;
+          created: boolean;
         }
 
         beforeAll(async () => {
@@ -1423,20 +1424,25 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           managerToken: string,
           userId: string,
           id = roleId,
+          organizationId = organization.id,
         ): Promise<Reply<Assignment>> {
           return await call<Assignment>(
             managerToken,
             "POST",
-            rolesPath(userId),
+            rolesPath(userId, organizationId),
             { roleId: id },
           );
         }
 
-        async function heldBy(userId: string): Promise<HeldRole[]> {
+        async function heldBy(
+          userId: string,
+          managerToken = seats.admin.token,
+          organizationId = organization.id,
+        ): Promise<HeldRole[]> {
           const reply = await call<HeldRole[]>(
-            seats.admin.token,
+            managerToken,
             "GET",
-            rolesPath(userId),
+            rolesPath(userId, organizationId),
           );
           assertEquals(reply.status, 200, JSON.stringify(reply.body));
           return reply.body;
@@ -1486,6 +1492,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
 
         it("grants an accepted member a role that counts inside the organization only", async () => {
           const member = await seated();
+          await seat(seats.rival.token, rival.id, member, "member");
           assertFalse(await holds(member.token, organization.id));
           const granted = await grantRole(seats.admin.token, member.id);
           assertEquals(granted.status, 201, JSON.stringify(granted.body));
@@ -1494,6 +1501,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           assertEquals(granted.body.builtInRole, null);
           assertEquals(granted.body.scopeType, "organization");
           assertEquals(granted.body.scopeId, organization.id);
+          assertEquals(granted.body.created, true);
           assert(await holds(member.token, organization.id));
           assertFalse(
             await holds(member.token),
@@ -1501,7 +1509,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           );
           assertFalse(
             await holds(member.token, rival.id),
-            "a role held in one organization answered for another",
+            "a role held in one organization answered for another it belongs to",
           );
           assertEquals(await heldBy(member.id), [{
             id: roleId,
@@ -1514,6 +1522,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           const again = await grantRole(seats.owner.token, member.id);
           assertEquals(again.status, 201);
           assertEquals(again.body.id, granted.body.id);
+          assertEquals(again.body.created, false);
           assertEquals((await heldBy(member.id)).length, 1);
         });
 
@@ -1720,6 +1729,66 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           assertFalse(
             await holds(leaver.token, organization.id),
             "rejoining restored a role the last membership carried",
+          );
+        });
+
+        it("keeps a role revoke and a membership's end to the person and organization they name", async () => {
+          const address = newEmail();
+          const elsewhere = await invite(
+            seats.rival.token,
+            rival.id,
+            address,
+            "member",
+          );
+          assert(elsewhere.body.status === "invitation", elsewhere.body.status);
+          const leaver = await person({ email: address });
+          await seat(seats.owner.token, organization.id, leaver, "member");
+          const bystander = await seated();
+          await seat(seats.rival.token, rival.id, bystander, "member");
+          for (const userId of [leaver.id, bystander.id]) {
+            assertEquals(
+              (await grantRole(seats.admin.token, userId)).status,
+              201,
+            );
+          }
+          assertEquals(
+            (await grantRole(seats.rival.token, bystander.id, roleId, rival.id))
+              .status,
+            201,
+          );
+
+          const revoked = await call(
+            seats.admin.token,
+            "DELETE",
+            `/api/organizations/${organization.id}/members/${leaver.id}/member`,
+          );
+          assertEquals(revoked.status, 204);
+          assertEquals(
+            (await heldBy(bystander.id)).map((role) => role.id),
+            [roleId],
+            "one person's membership ending took another's role",
+          );
+          assert(
+            (await invitationIdsOf(seats.rival.token, rival.id)).includes(
+              elsewhere.body.invitation.id,
+            ),
+            "a membership ending here withdrew an invitation elsewhere",
+          );
+
+          for (const status of [204, 404]) {
+            const taken = await call(
+              seats.admin.token,
+              "DELETE",
+              `${rolesPath(bystander.id)}/${roleId}`,
+            );
+            assertEquals(taken.status, status);
+          }
+          assertEquals(
+            (await heldBy(bystander.id, seats.rival.token, rival.id)).map(
+              (role) => role.id,
+            ),
+            [roleId],
+            "a revoke here took the role held in another organization",
           );
         });
 
