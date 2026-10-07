@@ -139,6 +139,14 @@ const authServer = new HonoAuthorizationServer<AppClient, AppUser>({
 });
 ```
 
+For machine-to-machine callers, add
+`client_credentials: new ClientCredentialsGrant({ resolve: () => ({ clientService, tokenService }) })`.
+RFC 6749 §4.4 limits that grant to confidential clients, so it refuses any
+request that presents no client secret with `401 invalid_client` — a public
+client, or a confidential client that left its secret out. Register each machine
+client with a secret and have it send that secret with HTTP Basic or as
+`client_secret` in the body.
+
 Any endpoint you omit defaults to `${issuer}${path}` (e.g. `${issuer}/token`),
 so a server whose endpoints sit at the issuer root needs only `issuer`. The
 explicit URLs above exist because this guide mounts everything under `/oauth2`.
@@ -559,10 +567,12 @@ authenticate with `none` is still decided per client, by whether it has a
 secret; discovery describes the endpoint, not which clients you registered. A
 public client that presents a non-empty `client_secret` anyway is refused with
 `invalid_client` rather than authenticated as public — it was issued no secret,
-so the request is misconfigured — and the contract suite pins that answer.
-Clients that discover — including this package's `DirectClient` via `discover()`
-— configure themselves from it, so keep the advertised endpoints matching where
-you actually mounted the routes.
+so the request is misconfigured — and the contract suite pins that answer. The
+one grant that refuses `none` is `client_credentials`: RFC 6749 §4.4 limits it
+to confidential clients, so a request for it that presents no secret is refused
+with `invalid_client`. Clients that discover — including this package's
+`DirectClient` via `discover()` — configure themselves from it, so keep the
+advertised endpoints matching where you actually mounted the routes.
 
 ## Turning on OIDC issuance
 

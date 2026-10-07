@@ -453,20 +453,23 @@ describe("AuthorizationServer", () => {
     it("answers invalid_client when a public client presents a secret it was never issued", async () => {
       const publicClient: TestClient = {
         id: "stray-secret-client",
-        grants: ["client_credentials"],
+        grants: ["refresh_token"],
       };
       await clientService.add(publicClient);
 
       const asPublic = await server.handleTokenRequest(tokenRequest({
-        grant_type: "client_credentials",
+        grant_type: "refresh_token",
         client_id: publicClient.id,
+        refresh_token: "unknown",
       }));
-      assertStrictEquals(asPublic.status, 200);
+      assertStrictEquals(asPublic.status, 400);
+      assertStrictEquals((await asPublic.json()).error, "invalid_grant");
 
       const response = await server.handleTokenRequest(tokenRequest({
-        grant_type: "client_credentials",
+        grant_type: "refresh_token",
         client_id: publicClient.id,
         client_secret: "never-issued",
+        refresh_token: "unknown",
       }));
 
       assertStrictEquals(response.status, 401);

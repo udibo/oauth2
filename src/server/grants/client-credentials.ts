@@ -7,6 +7,8 @@
 import type { ClientInterface } from "../../models/client.ts";
 import type { Token } from "../../models/token.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
+import { InvalidClientError } from "../../errors.ts";
+import { authenticateClientCredentials } from "../client-authentication.ts";
 import {
   AbstractGrant,
   type GrantOptions,
@@ -45,6 +47,14 @@ export type ClientCredentialsGrantOptions<
  * Used for machine-to-machine authentication where the client itself
  * is the resource owner. Does not support refresh tokens.
  *
+ * **Only confidential clients may use it.** RFC 6749 §4.4 restricts this grant
+ * to confidential clients, so a request that presents no client secret — a
+ * public client, or a confidential client leaving its secret out — is refused
+ * with 401 `invalid_client`. Register a machine client with a secret and send
+ * that secret with HTTP Basic or as `client_secret` in the body. The grant
+ * relies on `ClientServiceInterface.getAuthenticated` refusing a public client
+ * that presents a secret, which `runClientServiceContractTests` pins.
+ *
  * **The token need not carry a user.** RFC 6749 §4.4 has no resource owner, so
  * a `ClientServiceInterface.getUser` that resolves nothing is the conformant
  * case, not an error: the grant issues a token whose {@linkcode Token.user} is
@@ -72,6 +82,31 @@ export class ClientCredentialsGrant<
   /** Creates the grant from its {@linkcode ClientCredentialsGrantOptions}. */
   constructor(options: ClientCredentialsGrantOptions<Client, User, S>) {
     super({ ...options, allowRefreshToken: false });
+  }
+
+  /**
+   * Authenticates the client from a request that must carry its client
+   * secret, by HTTP Basic or in the body. Credentials are read through
+   * {@linkcode getClientCredentials} and checked by the grant's
+   * `clientService.getAuthenticated`.
+   *
+   * A subclass that authenticates clients by other means, such as a signed
+   * client assertion, overrides this method and must itself admit only
+   * confidential clients.
+   *
+   * @throws {InvalidClientError} If the request presents no non-empty client
+   * secret, or authentication fails.
+   */
+  override async getAuthenticatedClient(
+    request: Request,
+    body: FormData,
+  ): Promise<Client> {
+    const credentials = this.getClientCredentials(request, body);
+    if (!credentials.clientSecret) {
+      throw new InvalidClientError("client authentication failed");
+    }
+    const { clientService } = await this.resolveServices(request);
+    return await authenticateClientCredentials(credentials, clientService);
   }
 
   /**
