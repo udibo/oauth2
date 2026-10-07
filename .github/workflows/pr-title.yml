@@ -44,6 +44,9 @@ jobs:
             Examples:
               feat: add server-side caching
               fix(router): handle undefined params
-              feat!: breaking change
+              feat!: remove the deprecated option
+              fix(server)!: reject an unsupported grant type
 
-            See CONTRIBUTING.md for details.
+            A ! after the type or scope marks a breaking change, which cuts
+            a minor release while the package is 0.x. See CONTRIBUTING.md
+            for details.

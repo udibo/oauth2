@@ -133,8 +133,13 @@ that, and a change that erodes one is a change to the positioning.
 releases and the changelog:
 
 - `feat:` new feature (minor), `fix:`/`perf:` (patch)
-- `feat!:` or a `BREAKING CHANGE:` footer (minor while 0.x; see
-  [docs/stability.md](docs/stability.md) for what qualifies pre-1.0)
+- A breaking change is marked with `!` after the type or scope (`feat!:`,
+  `fix(testing)!:`) or a `BREAKING CHANGE:` footer. Either cuts a minor while
+  0.x (see [docs/stability.md](docs/stability.md) for what qualifies pre-1.0)
+  and lists the change under **⚠ BREAKING CHANGES** in the release notes. The
+  notes quote the subject unless a footer is present; PRs are squash-merged with
+  the PR body as the commit body, so to put a migration note there, start a line
+  of the PR body with `BREAKING CHANGE:` followed by the note.
 - `chore(deps):` / `build(deps):` dependency bumps (patch — the `deps` scope is
   required for a release to be cut)
 - Present tense, lowercase, subject under 72 characters.
