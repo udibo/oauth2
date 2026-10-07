@@ -142,7 +142,11 @@ export interface FakeTenantMembership {
    * holds a role. An empty list is also read as `["member"]`.
    */
   roles?: string[];
-  /** Permissions held inside this organization only. */
+  /**
+   * Permissions held inside this organization only, apart from any
+   * application role a manager grants the person there. They end with the
+   * membership.
+   */
   permissions?: string[];
 }
 
@@ -171,12 +175,27 @@ export interface FakeTenantGrant {
   role?: string;
 }
 
-/** An organization role your tenant defines beside the built-in tiers. */
+/**
+ * A tenant-wide role your tenant defines beside the built-in tiers. A
+ * membership or an invitation may name it by slug, and an organization's
+ * manager may grant it to a member as an application role by id.
+ */
 export interface FakeTenantOrganizationRole {
   /** The role a membership, an invitation or `org_roles` names. */
   slug: string;
   /** How the role is named to people. Defaults to the slug. */
   name?: string;
+  /**
+   * The id `member-roles` lists and `POST …/members/:userId/roles` takes.
+   * Defaults to a new UUID, or to the id the slug already has when it is
+   * defined again.
+   */
+  id?: string;
+  /**
+   * What the role confers inside an organization on a member it is granted
+   * to there, through `POST …/members/:userId/roles`. Defaults to none.
+   */
+  permissions?: string[];
 }
 
 /** An external account a person can sign in with. */
@@ -201,9 +220,9 @@ export interface FakeTenantSignIn {
    * `invalid_request` when the person is not a member.
    */
   organizationId?: string;
-  /** The browser `GET /api/account/sessions` reports for this sign-in. */
+  /** The browser `GET /api/account/sessions` reports for a new login session. */
   userAgent?: string;
-  /** The address `GET /api/account/sessions` reports for this sign-in. */
+  /** The address `GET /api/account/sessions` reports for a new login session. */
   ipAddress?: string;
 }
 
@@ -270,8 +289,9 @@ export interface FakeTenant {
     membership?: FakeTenantMembership,
   ): void;
   /**
-   * Ends a membership and removes the person's pending membership grants.
-   * Email-address invitations remain. From then on introspection and
+   * Ends a membership, with the application roles it held there, and removes
+   * the person's pending membership grants. Email-address invitations remain.
+   * From then on introspection and
    * `/api/check` stop answering for that
    * organization on credentials issued in it, and UserInfo drops its `org_*`
    * claims; a JWT access token or id_token already minted keeps its claims
@@ -279,10 +299,12 @@ export interface FakeTenant {
    */
   removeMember(organizationId: string, userId: string): void;
   /**
-   * Defines an organization role beside the built-in tiers, so invitations
-   * may offer it and `member-roles` lists it. Throws on a built-in slug.
+   * Defines a tenant-wide role beside the built-in tiers, so invitations may
+   * offer it, `member-roles` lists it, and an organization's manager may grant
+   * it to a member. Returns its id. Throws on a built-in slug, or on an id
+   * another role holds.
    */
-  defineOrganizationRole(role: FakeTenantOrganizationRole): void;
+  defineOrganizationRole(role: FakeTenantOrganizationRole): string;
   /** Registers a resource type, so `/api/check` accepts it. */
   registerResourceType(type: string): void;
   /**
@@ -299,10 +321,12 @@ export interface FakeTenant {
    * Chooses who the next authorization requests authenticate as, until
    * called again. With nobody chosen, authorize answers `access_denied`.
    *
-   * Each call is a new browser: the first authorization after it starts a
-   * login session, which the account API lists, and later ones reuse it until
-   * that session is ended. When a first-party application signs in again in
-   * that browser, the credentials the session issued before are revoked.
+   * Each authorization request is a sign-in that starts a new login session,
+   * which the account API lists, and sets a cookie naming it on the tenant's
+   * origin. A request that sends that cookie back, as the same browser does,
+   * continues the session instead while it is live and belongs to the person
+   * chosen. When a first-party application signs in again in a session it
+   * continues, the credentials the session issued before are revoked.
    */
   signInAs(userId: string | null, signIn?: FakeTenantSignIn): void;
   /**
@@ -364,8 +388,16 @@ const MACHINE_TOKEN_REFUSAL = "A machine credential has no self to answer for.";
 const OWNER = "owner";
 const MANAGER_ROLES: readonly string[] = ["owner", "admin"];
 const DEFAULT_ROLES: readonly string[] = ["member"];
+const BUILT_IN_APP_ROLES: readonly string[] = [
+  "owner",
+  "admin",
+  "support",
+  "member",
+];
+const LOGIN_SESSION_COOKIE = "fake_tenant_session";
 
 const ORGANIZATION_NOT_FOUND = "Organization not found";
+const MEMBER_NOT_FOUND = "organization member not found";
 
 interface Issuance {
   organizationId?: string;
@@ -384,7 +416,20 @@ interface Credential extends Issuance {
 
 interface ChosenSignIn extends FakeTenantSignIn {
   userId: string;
-  sessionId?: string;
+}
+
+interface DefinedRole {
+  id: string;
+  slug: string;
+  name: string;
+  permissions: string[];
+}
+
+interface AppRoleAssignment {
+  id: string;
+  organizationId: string;
+  userId: string;
+  roleId: string;
 }
 
 interface MembershipGrant {
@@ -427,6 +472,7 @@ interface Invitation {
 
 interface LoginSession {
   id: string;
+  secret: string;
   userId: string;
   createdAt: Date;
   lastActiveAt: Date;
@@ -719,6 +765,17 @@ function page<T extends { id: string }>(
   };
 }
 
+function cookieValue(request: Request, name: string): string | undefined {
+  for (const pair of (request.headers.get("cookie") ?? "").split(";")) {
+    const separator = pair.indexOf("=");
+    if (separator === -1) continue;
+    if (pair.slice(0, separator).trim() === name) {
+      return pair.slice(separator + 1).trim();
+    }
+  }
+  return undefined;
+}
+
 function noStore(response: Response): Response {
   response.headers.set("cache-control", "no-store");
   return response;
@@ -752,7 +809,8 @@ export async function createFakeTenant(
   const users = new Map<string, FakeTenantUser>();
   const userMetadata = new Map<string, Record<string, unknown>>();
   const organizations = new Map<string, Organization>();
-  const definedRoles = new Map<string, string>();
+  const definedRoles = new Map<string, DefinedRole>();
+  const appRoles: AppRoleAssignment[] = [];
   const invitations = new Map<string, Invitation>();
   const resourceTypes = new Set<string>();
   const grants: ResourceGrant[] = [];
@@ -782,11 +840,29 @@ export async function createFakeTenant(
   ) =>
     acceptedRoles(organizationId, userId).some((role) => roles.includes(role));
 
+  const definedRoleById = (roleId: string) =>
+    [...definedRoles.values()].find((role) => role.id === roleId);
+
+  const appRolesHeld = (organizationId: string, userId: string) =>
+    appRoles.filter((assignment) =>
+      assignment.organizationId === organizationId &&
+      assignment.userId === userId
+    );
+
+  const appRolePermissions = (organizationId: string, userId: string) =>
+    appRolesHeld(organizationId, userId).flatMap((assignment) =>
+      definedRoleById(assignment.roleId)?.permissions ?? []
+    );
+
   const permissionsIn = (userId: string, organizationId?: string) =>
     new Set([
       ...users.get(userId)?.permissions ?? [],
       ...isMember(organizationId, userId)
-        ? organizations.get(organizationId!)!.permissions.get(userId) ?? []
+        ? [
+          ...organizations.get(organizationId!)!.permissions.get(userId) ??
+            [],
+          ...appRolePermissions(organizationId!, userId),
+        ]
         : [],
     ]);
 
@@ -1086,17 +1162,19 @@ export async function createFakeTenant(
     });
   };
 
-  const liveSessionOf = (chosen: ChosenSignIn): string => {
+  const continuedSession = (request: Request, userId: string) => {
+    const secret = cookieValue(request, LOGIN_SESSION_COOKIE);
+    if (!secret) return undefined;
+    return [...loginSessions.values()].find((session) =>
+      session.secret === secret && session.userId === userId
+    );
+  };
+
+  const startSession = (chosen: ChosenSignIn): LoginSession => {
     const now = new Date();
-    const existing = chosen.sessionId
-      ? loginSessions.get(chosen.sessionId)
-      : undefined;
-    if (existing) {
-      existing.lastActiveAt = now;
-      return existing.id;
-    }
     const session: LoginSession = {
       id: crypto.randomUUID(),
+      secret: crypto.randomUUID(),
       userId: chosen.userId,
       createdAt: now,
       lastActiveAt: now,
@@ -1104,14 +1182,23 @@ export async function createFakeTenant(
       userAgent: chosen.userAgent ?? null,
     };
     loginSessions.set(session.id, session);
-    chosen.sessionId = session.id;
-    return session.id;
+    return session;
   };
+
+  const sessionCookie = (session: LoginSession) =>
+    [
+      `${LOGIN_SESSION_COOKIE}=${session.secret}`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      ...issuer.startsWith("https:") ? ["Secure"] : [],
+    ].join("; ");
 
   const authorize = async (request: Request): Promise<Response> => {
     const chosen = signedIn;
     const requested = new URL(request.url).searchParams.get("organization");
     let issued: SignIn | undefined;
+    let started: LoginSession | undefined;
     const response = await server.handleAuthorizeRequest(
       request,
       () => {
@@ -1120,10 +1207,13 @@ export async function createFakeTenant(
         const organizationId = requested
           ? requestedOrganization(requested, user.id)
           : chosen.organizationId ?? soleOrganizationOf(user.id);
+        const continued = continuedSession(request, user.id);
+        if (continued) continued.lastActiveAt = new Date();
+        else started = startSession(chosen);
         issued = {
           userId: user.id,
           organizationId,
-          sessionId: liveSessionOf(chosen),
+          sessionId: (continued ?? started)!.id,
         };
         return Promise.resolve({ user });
       },
@@ -1131,7 +1221,14 @@ export async function createFakeTenant(
     const location = response.headers.get("location");
     const code = location ? new URL(location).searchParams.get("code") : null;
     if (code && issued) signInOfCode.set(code, issued);
-    return response;
+    if (!started) return response;
+    const headers = new Headers(response.headers);
+    headers.append("set-cookie", sessionCookie(started));
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   };
 
   const isLive = async (accessToken: string) =>
@@ -1290,9 +1387,13 @@ export async function createFakeTenant(
     deletedAt: iso(invitation.deletedAt),
   });
 
-  const roleVocabulary = () => [
+  const roleVocabulary = (): { id?: string; slug: string; name: string }[] => [
     ...BUILT_IN_ROLES,
-    ...[...definedRoles].map(([slug, name]) => ({ slug, name })),
+    ...[...definedRoles.values()].map(({ id, slug, name }) => ({
+      id,
+      slug,
+      name,
+    })),
   ];
 
   const roleName = (slug: string) =>
@@ -1408,6 +1509,41 @@ export async function createFakeTenant(
 
   const userByEmail = (email: string) =>
     [...users.values()].find((user) => user.email?.toLowerCase() === email);
+
+  const endAppRoles = (organizationId: string, userId?: string) => {
+    for (const assignment of [...appRoles]) {
+      if (
+        assignment.organizationId === organizationId &&
+        (userId === undefined || assignment.userId === userId)
+      ) {
+        appRoles.splice(appRoles.indexOf(assignment), 1);
+      }
+    }
+  };
+
+  const endMembershipStanding = (
+    organization: Organization,
+    userId: string,
+  ) => {
+    endAppRoles(organization.id, userId);
+    organization.permissions.delete(userId);
+    organization.grants = organization.grants.filter((grant) =>
+      grant.userId !== userId || grant.acceptedAt
+    );
+    const email = users.get(userId)?.email?.toLowerCase();
+    if (!email) return;
+    const now = new Date();
+    for (const invitation of invitations.values()) {
+      if (
+        invitation.organizationId === organization.id &&
+        invitation.email === email && !invitation.acceptedAt &&
+        !invitation.deletedAt
+      ) {
+        invitation.deletedAt = now;
+        invitation.updatedAt = now;
+      }
+    }
+  };
 
   const holdsGrantOnResource = (organizationId: string) =>
     grants.filter((grant) =>
@@ -1526,6 +1662,7 @@ export async function createFakeTenant(
       );
     }
     organizations.delete(organization.id);
+    endAppRoles(organization.id);
     return new Response(null, { status: 204 });
   });
 
@@ -1573,6 +1710,94 @@ export async function createFakeTenant(
       }
       if (!grant) return problem(404, "Organization membership not found");
       organization.grants.splice(organization.grants.indexOf(grant), 1);
+      if (grant.acceptedAt && !isMember(organization.id, userId)) {
+        endMembershipStanding(organization, userId);
+      }
+      return new Response(null, { status: 204 });
+    },
+  );
+
+  const heldRoleJson = (role: DefinedRole) => ({
+    id: role.id,
+    builtInRole: null,
+    organizationId: null,
+    slug: role.slug,
+    name: role.name,
+    permissions: [...role.permissions],
+  });
+
+  const listMemberAppRoles = organizationApi(
+    (caller, _request, [id, userId]) => {
+      const organization = managedOrganization(caller, id);
+      if (organization instanceof Response) return organization;
+      if (!isMember(organization.id, userId)) {
+        return problem(404, MEMBER_NOT_FOUND);
+      }
+      return Response.json(
+        appRolesHeld(organization.id, userId)
+          .flatMap((assignment) => {
+            const role = definedRoleById(assignment.roleId);
+            return role ? [heldRoleJson(role)] : [];
+          })
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    },
+  );
+
+  const grantMemberAppRole = organizationApi(
+    async (caller, request, [id, userId]) => {
+      const organization = managedOrganization(caller, id);
+      if (organization instanceof Response) return organization;
+      const body = await jsonBody(request);
+      if (
+        !isRecord(body) || typeof body.roleId !== "string" ||
+        body.roleId.length === 0
+      ) {
+        return invalid("roleId", "A role id is required");
+      }
+      if (!isMember(organization.id, userId)) {
+        return problem(404, MEMBER_NOT_FOUND);
+      }
+      const role = definedRoleById(body.roleId);
+      if (!role) return problem(404, "organization role not found");
+      const held = appRolesHeld(organization.id, userId).find((assignment) =>
+        assignment.roleId === role.id
+      );
+      const assignment = held ?? {
+        id: crypto.randomUUID(),
+        organizationId: organization.id,
+        userId,
+        roleId: role.id,
+      };
+      if (!held) appRoles.push(assignment);
+      return Response.json({
+        id: assignment.id,
+        subjectId: userId,
+        subjectRole: null,
+        roleId: role.id,
+        builtInRole: null,
+        scopeType: "organization",
+        scopeId: organization.id,
+        created: !held,
+      }, { status: 201 });
+    },
+  );
+
+  const revokeMemberAppRole = organizationApi(
+    (caller, _request, [id, userId, roleId]) => {
+      const organization = managedOrganization(caller, id);
+      if (organization instanceof Response) return organization;
+      if (BUILT_IN_APP_ROLES.includes(roleId)) {
+        const who = roleId === OWNER
+          ? "Only an owner"
+          : "Only an admin or owner";
+        return problem(403, `${who} can grant or revoke ${roleId} access.`);
+      }
+      const held = appRolesHeld(organization.id, userId).find((assignment) =>
+        assignment.roleId === roleId
+      );
+      if (!held) return problem(404, "role assignment not found");
+      appRoles.splice(appRoles.indexOf(held), 1);
       return new Response(null, { status: 204 });
     },
   );
@@ -2056,6 +2281,23 @@ export async function createFakeTenant(
       listMemberRoles,
     ],
     [
+      "GET",
+      new RegExp(`^/api/organizations/${segment}/members/${segment}/roles$`),
+      listMemberAppRoles,
+    ],
+    [
+      "POST",
+      new RegExp(`^/api/organizations/${segment}/members/${segment}/roles$`),
+      grantMemberAppRole,
+    ],
+    [
+      "DELETE",
+      new RegExp(
+        `^/api/organizations/${segment}/members/${segment}/roles/${segment}$`,
+      ),
+      revokeMemberAppRole,
+    ],
+    [
       "DELETE",
       new RegExp(
         `^/api/organizations/${segment}/members/${segment}/${segment}$`,
@@ -2191,19 +2433,33 @@ export async function createFakeTenant(
         grant.userId !== userId
       );
       organization.permissions.delete(userId);
+      endAppRoles(organizationId, userId);
     },
-    defineOrganizationRole: ({ slug, name }) => {
+    defineOrganizationRole: ({ slug, name, id, permissions }) => {
       if (BUILT_IN_ROLES.some((role) => role.slug === slug)) {
         throw new Error(`"${slug}" is a built-in organization role`);
       }
-      definedRoles.set(slug, name ?? slug);
+      const roleId = id ?? definedRoles.get(slug)?.id ?? crypto.randomUUID();
+      const holder = definedRoleById(roleId);
+      if (holder && holder.slug !== slug) {
+        throw new Error(`Role id "${roleId}" belongs to "${holder.slug}"`);
+      }
+      definedRoles.set(slug, {
+        id: roleId,
+        slug,
+        name: name ?? slug,
+        permissions: [...permissions ?? []],
+      });
+      return roleId;
     },
     registerResourceType: (type) => {
       resourceTypes.add(type);
     },
     grant: (grant) => {
       const role = grant.role ?? roleSlugOf(grant.permissions);
-      let roleId = isBuiltInRole(role) ? null : resourceRoleIds.get(role);
+      let roleId = isBuiltInRole(role)
+        ? null
+        : definedRoles.get(role)?.id ?? resourceRoleIds.get(role);
       if (roleId === undefined) {
         roleId = crypto.randomUUID();
         resourceRoleIds.set(role, roleId);
