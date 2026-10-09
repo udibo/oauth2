@@ -6233,9 +6233,14 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 - **`EncryptedCookieSessionStore` cannot genuinely revoke a session.**
   `destroy()` is a no-op — statelessness is the whole point — so sign-out clears
   the browser's cookie and nothing else, and a captured copy stays valid until
-  it either expires or ages out. Revoke the refresh token at the authorization
-  server, or use a database-backed `SessionStore` where revocation is real and
-  immediate. Two options shrink the window without making `destroy` real:
+  it either expires or ages out. The same holds when a new sign-in in the same
+  browser (an organization switch, a step-up) replaces the session: the browser
+  receives the new cookie, but a copy of the earlier one still reads as signed
+  in, and the BFF does not revoke its refresh token because an authorization
+  server may extend that revocation to the new tokens (RFC 7009 §2.1). Revoke
+  the refresh token at the authorization server, or use a database-backed
+  `SessionStore` where revocation is real and immediate. Two options shrink the
+  window without making `destroy` real:
   - **Secret rotation with a grace window.** `secret` accepts an ordered list:
     the first entry seals every new cookie and `read` tries each in turn, so
     rotating `SESSION_SECRET` is a `[new, old]` deploy that keeps existing
@@ -6251,6 +6256,12 @@ fetch redirects. A trusted provider configuration is part of that boundary.
     window; `HonoBff`'s `sessionMaxAgeMs` (also 14 days) is the absolute one,
     and the constructor throws if the two are configured to disagree. Genuine
     revocation still requires a DB-backed store.
+- **A token refresh in flight on a replaced session can clear the new cookie.**
+  When a request on the earlier cookie starts a refresh just before a new
+  sign-in in the same browser replaces that session, the refresh then fails as
+  revoked and its response clears the session cookie, which by then names the
+  new session. The browser is signed out and signs in again; the new session's
+  record stays until it expires.
 - Back-channel logout is unavailable on any store that cannot enumerate
   sessions, and `HonoBff` throws at construction rather than degrading silently.
 - **`attachToken()` overwrites an inbound bearer; `protect()` lets it win.** The

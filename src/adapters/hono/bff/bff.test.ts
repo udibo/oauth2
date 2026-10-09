@@ -38,6 +38,7 @@ import { HonoBff } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
   MemorySessionStore,
+  type SessionData,
 } from "./session-store.ts";
 import {
   createAuthenticatedTestSession,
@@ -2277,6 +2278,221 @@ describe("HonoBff", () => {
         `/auth/login?return_to=${encodeURIComponent("https://evil.example/x")}`,
       );
       assertStrictEquals(res.headers.get("Location"), "/home");
+    });
+  });
+
+  describe("a sign-in in a browser that already holds a session", () => {
+    class LiveSessionStore extends MemorySessionStore {
+      readonly live = new Set<string>();
+      failCreate = false;
+      failDestroy = false;
+
+      override async create(data: SessionData): Promise<string> {
+        if (this.failCreate) throw new Error("store unavailable");
+        const cookieValue = await super.create(data);
+        this.live.add(cookieValue);
+        return cookieValue;
+      }
+
+      override async destroy(cookieValue: string): Promise<void> {
+        if (this.failDestroy) throw new Error("store unavailable");
+        await super.destroy(cookieValue);
+        this.live.delete(cookieValue);
+      }
+    }
+
+    async function signInAgain(
+      app: Hono,
+      earlier: string,
+      loginPath = "/auth/login",
+    ): Promise<Response> {
+      return await completeLogin(app, loginPath, {
+        headers: { cookie: `oauth2_session=${earlier}` },
+      });
+    }
+
+    async function probe(app: Hono, value: string): Promise<boolean> {
+      const res = await app.request("/auth/session", {
+        headers: { cookie: `oauth2_session=${value}` },
+      });
+      return (await res.json()).isAuthenticated;
+    }
+
+    it("destroys the session it replaces, so the earlier cookie reads as signed out", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 302);
+      const current = cookieValue(res, "oauth2_session")!;
+
+      assertNotStrictEquals(current, earlier);
+      assertStrictEquals(await store.read(earlier), null);
+      assertFalse(await probe(app, earlier));
+      assert(await probe(app, current));
+      assertEquals([...store.live], [current]);
+    });
+
+    it("leaves no session behind once the replacing session signs out", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      const current = cookieValue(
+        await signInAgain(app, earlier, "/auth/login?return_to=/switched"),
+        "oauth2_session",
+      )!;
+
+      const out = await app.request("/auth/logout", {
+        headers: { cookie: `oauth2_session=${current}` },
+      });
+      assertStrictEquals(out.status, 302);
+
+      assertEquals(store.live.size, 0);
+      assertFalse(await probe(app, earlier));
+      assertFalse(await probe(app, current));
+    });
+
+    it("does not revoke the replaced session's refresh token, which can share the new session's sign-in at the authorization server", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      const refreshToken = (await store.read(earlier))!.refreshToken!;
+
+      await (await signInAgain(app, earlier)).body?.cancel();
+
+      assert(await fixture.tokenService.getRefreshToken(refreshToken));
+    });
+
+    it("keeps the session when the authorization server returns an error instead of a code", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      const { state, cookies } = await beginLogin(app);
+
+      const res = await app.request(
+        `/auth/callback?error=invalid_request&state=${state}`,
+        withCookies(
+          { headers: { cookie: `oauth2_session=${earlier}` } },
+          cookies,
+        ),
+      );
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assert(await probe(app, earlier));
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps the session when the code exchange fails", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      const { state, cookies } = await beginLogin(app);
+
+      const res = await app.request(
+        `/auth/callback?code=nope&state=${state}`,
+        withCookies(
+          { headers: { cookie: `oauth2_session=${earlier}` } },
+          cookies,
+        ),
+      );
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assert(await probe(app, earlier));
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps the session when the callback's state was not started in this browser", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      const { callbackPath } = await beginLogin(app);
+
+      const res = await app.request(callbackPath, {
+        headers: { cookie: `oauth2_session=${earlier}` },
+      });
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assert(await probe(app, earlier));
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps the session when resolveUser fails", async () => {
+      const store = new LiveSessionStore();
+      let directoryDown = false;
+      const app = makeApp(makeBff({
+        sessionStore: store,
+        resolveUser: (_tokens, user) => {
+          if (directoryDown) throw new Error("directory unavailable");
+          return user;
+        },
+      }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      directoryDown = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assert(await probe(app, earlier));
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps only the earlier session when destroying it fails, never two", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      store.failDestroy = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("leaves the browser signed out when creating the replacement fails", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      store.failCreate = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assertFalse(await probe(app, earlier));
+      assertEquals(store.live.size, 0);
+    });
+
+    it("signs in when the cookie the browser brings names no session", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+
+      const res = await signInAgain(app, "not-a-session");
+      assertStrictEquals(res.status, 302);
+      const current = cookieValue(res, "oauth2_session")!;
+
+      assert(await probe(app, current));
+      assertEquals([...store.live], [current]);
+    });
+
+    it("signs in over a stateless session, replacing the cookie that carried it", async () => {
+      const store = new EncryptedCookieSessionStore({
+        secret: crypto.getRandomValues(new Uint8Array(32)),
+      });
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 302);
+      const current = cookieValue(res, "oauth2_session")!;
+
+      assertNotStrictEquals(current, earlier);
+      assert(await probe(app, current));
     });
   });
 

@@ -442,10 +442,20 @@ export interface HonoBffOptions {
    * Who owns the BFF's session record. Defaults to `"own"`.
    *
    * - `"own"` (default): the BFF creates and owns its session at
-   *   `/auth/callback` — it always mints a fresh id (`sessionStore.create`)
-   *   and ignores any inbound cookie. Use when the app has no session here
-   *   until the OAuth flow completes: standalone BFFs, or apps whose login
-   *   lives on a separate / external IDP.
+   *   `/auth/callback` — it always mints a fresh id (`sessionStore.create`).
+   *   A session the inbound cookie names is replaced: once the code exchange
+   *   and `resolveUser` succeed, the BFF destroys it (`sessionStore.destroy`)
+   *   before creating the new one, so signing in again in the same browser —
+   *   switching organization, a step-up — never leaves the earlier session
+   *   readable beside the new one. Its refresh token is not revoked: an
+   *   authorization server may extend a revocation to other tokens of the
+   *   same grant or sign-in (RFC 7009 §2.1), the new ones included.
+   *   A callback the authorization server refuses, or whose state check,
+   *   code exchange or `resolveUser` fails, leaves the existing session as
+   *   it was; a store failure while creating the replacement leaves the
+   *   browser signed out. Use when the app has no session here until the
+   *   OAuth flow completes: standalone BFFs, or apps whose login lives on a
+   *   separate / external IDP.
    * - `"shared"`: the app already created the session at its own login step,
    *   and the BFF **attaches** tokens to that existing session at
    *   `/auth/callback` (via `sessionStore.update`) instead of creating its
@@ -1441,9 +1451,9 @@ export class HonoBff {
           createdAt: now,
           updatedAt: now,
         };
-        const existing = this.#sessionMode === "shared"
-          ? getCookie(c, this.#cookieName)
-          : undefined;
+        const inbound = getCookie(c, this.#cookieName);
+        const existing = this.#sessionMode === "shared" ? inbound : undefined;
+        if (inbound && !existing) await this.#store.destroy(inbound);
         const cookieValue = existing
           ? await this.#store.update(existing, data)
           : await this.#store.create(data);
