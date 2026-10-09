@@ -6233,9 +6233,14 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 - **`EncryptedCookieSessionStore` cannot genuinely revoke a session.**
   `destroy()` is a no-op — statelessness is the whole point — so sign-out clears
   the browser's cookie and nothing else, and a captured copy stays valid until
-  it either expires or ages out. Revoke the refresh token at the authorization
-  server, or use a database-backed `SessionStore` where revocation is real and
-  immediate. Two options shrink the window without making `destroy` real:
+  it either expires or ages out. The same holds when a new sign-in in the same
+  browser (an organization switch, a step-up) replaces the session: the browser
+  receives the new cookie, but a copy of the earlier one still reads as signed
+  in, and the BFF does not revoke its refresh token because the authorization
+  server may end the sign-in the new tokens share. Revoke the refresh token at
+  the authorization server, or use a database-backed `SessionStore` where
+  revocation is real and immediate. Two options shrink the window without making
+  `destroy` real:
   - **Secret rotation with a grace window.** `secret` accepts an ordered list:
     the first entry seals every new cookie and `read` tries each in turn, so
     rotating `SESSION_SECRET` is a `[new, old]` deploy that keeps existing
