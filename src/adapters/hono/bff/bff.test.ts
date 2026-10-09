@@ -2284,14 +2284,18 @@ describe("HonoBff", () => {
   describe("a sign-in in a browser that already holds a session", () => {
     class LiveSessionStore extends MemorySessionStore {
       readonly live = new Set<string>();
+      failCreate = false;
+      failDestroy = false;
 
       override async create(data: SessionData): Promise<string> {
+        if (this.failCreate) throw new Error("store unavailable");
         const cookieValue = await super.create(data);
         this.live.add(cookieValue);
         return cookieValue;
       }
 
       override async destroy(cookieValue: string): Promise<void> {
+        if (this.failDestroy) throw new Error("store unavailable");
         await super.destroy(cookieValue);
         this.live.delete(cookieValue);
       }
@@ -2414,6 +2418,54 @@ describe("HonoBff", () => {
 
       assert(await probe(app, earlier));
       assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps the session when resolveUser fails", async () => {
+      const store = new LiveSessionStore();
+      let directoryDown = false;
+      const app = makeApp(makeBff({
+        sessionStore: store,
+        resolveUser: (_tokens, user) => {
+          if (directoryDown) throw new Error("directory unavailable");
+          return user;
+        },
+      }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      directoryDown = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assert(await probe(app, earlier));
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("keeps only the earlier session when destroying it fails, never two", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      store.failDestroy = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assertEquals([...store.live], [earlier]);
+    });
+
+    it("leaves the browser signed out when creating the replacement fails", async () => {
+      const store = new LiveSessionStore();
+      const app = makeApp(makeBff({ sessionStore: store }));
+      const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
+      store.failCreate = true;
+
+      const res = await signInAgain(app, earlier);
+      assertStrictEquals(res.status, 400);
+      await res.body?.cancel();
+
+      assertFalse(await probe(app, earlier));
+      assertEquals(store.live.size, 0);
     });
 
     it("signs in when the cookie the browser brings names no session", async () => {
