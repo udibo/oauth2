@@ -1,3 +1,11 @@
+## [0.14.1](https://github.com/udibo/oauth2/compare/0.14.0...0.14.1) (2026-10-09)
+
+### Bug Fixes
+
+- **bff:** destroy the session a new sign-in replaces
+  ([#85](https://github.com/udibo/oauth2/issues/85))
+  ([224995c](https://github.com/udibo/oauth2/commit/224995cd0b324c6601a0f8b025018747e4ae0a01))
+
 ## [0.14.0](https://github.com/udibo/oauth2/compare/0.13.0...0.14.0) (2026-10-07)
 
 ### ⚠ BREAKING CHANGES
