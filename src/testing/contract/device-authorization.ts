@@ -1,3 +1,10 @@
+/**
+ * Contract test suite for {@link DeviceAuthorizationServiceInterface}
+ * implementations (RFC 8628).
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { DeviceAuthorization } from "../../models/device-authorization.ts";

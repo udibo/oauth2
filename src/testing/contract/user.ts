@@ -1,3 +1,34 @@
+/**
+ * Contract test suite for {@link UserServiceInterface} implementations.
+ *
+ * Apps that swap a `MemoryUserService` for a DB-backed implementation
+ * can run this suite against their factory to verify they satisfy what
+ * the framework expects.
+ *
+ * @example
+ * ```ts
+ * import { runUserServiceContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { UserServiceInterface } from "@udibo/oauth2/server/authorization";
+ *
+ * interface AppUser {
+ *   id: string;
+ *   username: string;
+ * }
+ * interface DrizzleUserService extends UserServiceInterface<AppUser> {
+ *   register(user: AppUser, password: string): Promise<void>;
+ * }
+ * declare function freshUserService(): Promise<DrizzleUserService>;
+ *
+ * runUserServiceContractTests<AppUser>({
+ *   makeService: freshUserService,
+ *   addUser: (svc, user, password) =>
+ *     (svc as DrizzleUserService).register(user, password),
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserServiceInterface } from "../../server/services/user.ts";
 import type { MemoryUserShape } from "../services.ts";

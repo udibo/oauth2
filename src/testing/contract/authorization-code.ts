@@ -1,3 +1,10 @@
+/**
+ * Contract test suite for {@link AuthorizationCodeServiceInterface}
+ * implementations.
+ *
+ * @module
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { AuthorizationCode } from "../../models/authorization-code.ts";

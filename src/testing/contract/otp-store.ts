@@ -1,3 +1,28 @@
+/**
+ * Contract test suite for {@link OtpStore} implementations — the storage behind
+ * emailed one-time codes.
+ *
+ * A six-digit code is guessable online, so the attempt budget is the only thing
+ * standing between an attacker and a one-in-a-million draw. `recordAttempt` is
+ * what enforces it, and it only enforces it when concurrent guesses cannot
+ * share a count — which is what this suite checks.
+ *
+ * @example Verify a database-backed store
+ * ```ts
+ * import { runOtpStoreContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { OtpStore } from "@udibo/oauth2/identity";
+ *
+ * declare function freshOtpStore(): Promise<OtpStore>;
+ *
+ * runOtpStoreContractTests({
+ *   describeName: "DrizzleOtpStore satisfies OtpStore contract",
+ *   makeStore: freshOtpStore,
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { OtpRecord, OtpStore } from "../../identity/otp.ts";
 import { CONCURRENT_CALLERS, race } from "./_race.ts";

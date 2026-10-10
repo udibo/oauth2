@@ -1,3 +1,54 @@
+/**
+ * Contract test suite for {@link ClientServiceInterface} implementations.
+ *
+ * `getUser` is contract-conformant either way: resolving a user and resolving
+ * nothing are both required to pass. A client that resolves nothing is a
+ * machine client whose token carries no resource owner (RFC 6749 §4.4), not a
+ * misconfiguration — the client credentials grant issues it a user-less token.
+ * Resolve a user only when that user is a principal of its own, such as a
+ * per-application service account; resolving a human owner hands the machine
+ * that person's identity (RFC 9700 §4.15).
+ *
+ * @example
+ * ```ts
+ * import { runClientServiceContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { ClientInterface } from "@udibo/oauth2/server";
+ * import type {
+ *   ClientServiceInterface,
+ *   UserServiceInterface,
+ * } from "@udibo/oauth2/server/authorization";
+ *
+ * interface AppUser {
+ *   id: string;
+ *   username: string;
+ * }
+ * interface DrizzleUserService extends UserServiceInterface<AppUser> {
+ *   register(user: AppUser, password: string): Promise<void>;
+ * }
+ * interface DrizzleClientService
+ *   extends ClientServiceInterface<ClientInterface, AppUser> {
+ *   register(
+ *     client: ClientInterface,
+ *     secret?: string,
+ *     ownerUserId?: string,
+ *   ): Promise<void>;
+ * }
+ * declare function freshServices(): Promise<{
+ *   userService: DrizzleUserService;
+ *   clientService: DrizzleClientService;
+ * }>;
+ *
+ * runClientServiceContractTests<ClientInterface, AppUser>({
+ *   makeServices: freshServices,
+ *   addUser: (svc, user, pw) => (svc as DrizzleUserService).register(user, pw),
+ *   addClient: (svc, client, secret, ownerUserId) =>
+ *     (svc as DrizzleClientService).register(client, secret, ownerUserId),
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { ClientServiceInterface } from "../../server/services/client.ts";

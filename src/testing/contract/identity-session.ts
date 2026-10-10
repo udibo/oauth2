@@ -1,3 +1,9 @@
+/**
+ * Contract checks for app-owned identity-session revocation and display lists.
+ * These are distinct from the Hono BFF SessionStore contract.
+ * @module
+ */
+
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   ListableSessionService,

@@ -1,3 +1,20 @@
+/**
+ * Contract test suite for {@link TokenServiceInterface} implementations.
+ *
+ * Verifies the methods the framework actually calls during the OAuth2
+ * flows: token persistence, refresh-token lookup, revocation by token
+ * value or by authorization code, and per-(client, user) lifetime/scope
+ * generation.
+ *
+ * Both a token with a user and a token without one are exercised. The client
+ * credentials grant (RFC 6749 §4.4) has no resource owner, so the framework
+ * calls `acceptedScope`, `generateAccessToken`, and `accessTokenExpiresAt`
+ * with `user: undefined` and persists a token whose `user` is unset — a store
+ * that requires a user cannot hold a machine token.
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import { BasicScope } from "../../models/scope.ts";

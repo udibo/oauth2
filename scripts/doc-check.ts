@@ -68,7 +68,7 @@ export type { PublicSymbol };
  * both markdown fences and JSDoc `@example` blocks. Ratchet it down as opt-outs
  * are removed.
  */
-export const DEFAULT_IGNORE_BUDGET = 13;
+export const DEFAULT_IGNORE_BUDGET = 10;
 
 /** Where a snippet came from, which decides how strictly it is judged. */
 export type SnippetOrigin = "markdown" | "jsdoc";

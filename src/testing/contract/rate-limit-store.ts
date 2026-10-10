@@ -1,3 +1,28 @@
+/**
+ * Contract test suite for {@link RateLimitStore} implementations — the shared
+ * counter behind `RateLimiter`.
+ *
+ * The limiter allows or denies on the count `increment` returns, so a store
+ * that lets two concurrent attempts read the same count raises the effective
+ * threshold by exactly the burst the limiter exists to catch. That is the case
+ * this suite exists for.
+ *
+ * @example Verify a Redis-backed store
+ * ```ts
+ * import { runRateLimitStoreContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { RateLimitStore } from "@udibo/oauth2/identity";
+ *
+ * declare function freshRateLimitStore(): Promise<RateLimitStore>;
+ *
+ * runRateLimitStoreContractTests({
+ *   describeName: "RedisRateLimitStore satisfies RateLimitStore contract",
+ *   makeStore: freshRateLimitStore,
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { RateLimitStore } from "../../identity/rate-limit.ts";
 

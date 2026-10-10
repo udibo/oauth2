@@ -1,3 +1,10 @@
+/**
+ * Reusable checks for app-owned identity users and password credentials.
+ * Optional capabilities are selected explicitly so an omitted implementation
+ * cannot silently pass a capability the application intends to provide.
+ * @module
+ */
+
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   IdentityUser,

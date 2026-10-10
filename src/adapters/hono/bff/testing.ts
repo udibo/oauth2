@@ -1,3 +1,20 @@
+/**
+ * Testing helpers for the Hono BFF adapter.
+ *
+ * Lets a consumer's tests drive protected endpoints without walking
+ * through the full login → authorize → callback flow, and ages the
+ * access token in the underlying {@link SessionStore} so a follow-up
+ * request through `attachToken()` exercises the refresh path
+ * deterministically (no `setTimeout` required).
+ *
+ * The runner-style helper {@link runSessionStoreContractTests} is
+ * available for verifying custom {@link SessionStore} implementations
+ * (Postgres, Redis, DynamoDB, …) satisfy the create / read / update /
+ * destroy contract.
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import { delay } from "../../../utils/_delay.ts";
 import type { ClientInterface } from "../../../models/client.ts";

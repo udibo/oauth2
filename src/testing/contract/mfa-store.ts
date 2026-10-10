@@ -1,3 +1,29 @@
+/**
+ * Contract test suite for {@link MfaStore} implementations.
+ *
+ * `MfaService` leans on three store methods for its concurrency guarantees —
+ * `activateTotp` (compare-and-swap on the pending secret), `advanceLastStep`
+ * (monotonic replay guard), and `consumeRecoveryHash` (single-use recovery
+ * codes). This suite checks each of them with concurrent calls, so a
+ * read-modify-write implementation fails here instead of silently letting two
+ * requests spend one recovery code.
+ *
+ * @example Verify a database-backed store
+ * ```ts
+ * import { runMfaStoreContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { MfaStore } from "@udibo/oauth2/identity/mfa";
+ *
+ * declare function freshMfaStore(): Promise<MfaStore>;
+ *
+ * runMfaStoreContractTests({
+ *   describeName: "DrizzleMfaStore satisfies MfaStore contract",
+ *   makeStore: freshMfaStore,
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { MfaStore } from "../../identity/mfa/service.ts";
 import { CONCURRENT_CALLERS, race } from "./_race.ts";

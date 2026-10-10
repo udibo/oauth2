@@ -1,3 +1,44 @@
+/**
+ * Contract test suite for {@link AuthRequestStorage} implementations — the
+ * short-lived map from an authorization request's `state` to the PKCE verifier
+ * it was built with.
+ *
+ * The load-bearing method is the optional `take`: `DirectClient` claims the
+ * record with it before calling the token endpoint, so of two callbacks racing
+ * on one `state` only one reaches it. Only an atomic read-and-remove survives
+ * concurrent callers taking one record. This suite races eight of them on one
+ * record.
+ *
+ * @example Verify a Redis-backed store
+ * ```ts
+ * import { runAuthRequestStorageContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { AuthRequestStorage } from "@udibo/oauth2/client";
+ *
+ * declare function freshAuthRequestStorage(): Promise<AuthRequestStorage>;
+ *
+ * runAuthRequestStorageContractTests({
+ *   describeName: "RedisAuthRequestStorage satisfies AuthRequestStorage contract",
+ *   makeStore: freshAuthRequestStorage,
+ * });
+ * ```
+ *
+ * @example Verify a store shared between users, whose `clear()` removes only expired records
+ * ```ts
+ * import { runAuthRequestStorageContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { AuthRequestStorage } from "@udibo/oauth2/client";
+ *
+ * declare function freshSharedAuthRequestStorage(): Promise<AuthRequestStorage>;
+ *
+ * runAuthRequestStorageContractTests({
+ *   describeName: "SharedAuthRequestStorage satisfies AuthRequestStorage contract",
+ *   makeStore: freshSharedAuthRequestStorage,
+ *   clear: "scoped",
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   AuthRequestRecord,

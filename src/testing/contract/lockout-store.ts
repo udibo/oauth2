@@ -1,3 +1,28 @@
+/**
+ * Contract test suite for {@link LockoutStore} implementations — the
+ * per-account failure counter behind `AccountLockout`.
+ *
+ * `AccountLockout` locks on the failure count `increment` returns, so a store
+ * that lets concurrent failed sign-ins share a count undershoots the threshold:
+ * the brute-force floor the lockout is meant to be moves up by however many
+ * attempts an attacker can land at once.
+ *
+ * @example Verify a database-backed store
+ * ```ts
+ * import { runLockoutStoreContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { LockoutStore } from "@udibo/oauth2/identity";
+ *
+ * declare function freshLockoutStore(): Promise<LockoutStore>;
+ *
+ * runLockoutStoreContractTests({
+ *   describeName: "DrizzleLockoutStore satisfies LockoutStore contract",
+ *   makeStore: freshLockoutStore,
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { LockoutStore } from "../../identity/lockout.ts";
 

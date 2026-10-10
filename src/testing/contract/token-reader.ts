@@ -1,3 +1,42 @@
+/**
+ * Contract test suite for {@link TokenReaderInterface} implementations.
+ *
+ * A resource server only ever calls `getToken`, so the contract is small
+ * and strict: an accepted token comes back with the same access-token
+ * string and a projected client, and anything the reader cannot validate
+ * resolves to `undefined` rather than throwing — `undefined` is what the
+ * resource server turns into `invalid_token`. Thrown errors are reserved
+ * for transport and misconfiguration.
+ *
+ * Run it against the shipped readers, or against your own reader when your
+ * API validates tokens out of a shared database.
+ *
+ * @example
+ * ```ts
+ * import { runTokenReaderContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { ClientInterface, TokenReaderInterface } from "@udibo/oauth2/server";
+ *
+ * interface AppUser {
+ *   id: string;
+ *   username: string;
+ * }
+ * declare function freshTokenReader(): Promise<
+ *   TokenReaderInterface<ClientInterface, AppUser>
+ * >;
+ *
+ * runTokenReaderContractTests<ClientInterface, AppUser>({
+ *   setup: async () => ({
+ *     reader: await freshTokenReader(),
+ *     validAccessToken: "seeded-token",
+ *     expected: { clientId: "my-client", userId: "u1", scope: "read" },
+ *     invalidAccessTokens: ["unknown-token", "revoked-token"],
+ *   }),
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";

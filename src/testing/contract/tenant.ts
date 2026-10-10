@@ -1,3 +1,32 @@
+/**
+ * Contract test suite for what a Udibo Identity tenant answers an application
+ * about its signed-in people: what introspection reports, what
+ * `GET /api/memberships` lists, what `POST /api/check` and
+ * `POST /api/check/batch` answer, the organization API under
+ * `/api/organizations`, and the account API under `/api/account` — and what it
+ * answers the application itself: the `client_credentials` grant, and
+ * `GET /api/resource-grants` under the application's own machine token.
+ *
+ * It runs against `createFakeTenant` from `@udibo/oauth2/testing` and against the
+ * real identity service in Udibo's own repository, so the fake an app tests
+ * with answers the way the tenant it ships against does. Run it against
+ * another stand-in to hold it to the same answers.
+ *
+ * @example
+ * ```ts
+ * import {
+ *   runTenantContractTests,
+ *   type TenantContractFixture,
+ * } from "@udibo/oauth2/testing/contract";
+ *
+ * declare function startSeededTenant(): Promise<TenantContractFixture>;
+ *
+ * runTenantContractTests({ setup: startSeededTenant });
+ * ```
+ *
+ * @module
+ */
+
 import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import { encodeBasicAuth } from "../../utils/basic-auth.ts";
 

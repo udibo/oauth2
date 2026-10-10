@@ -1,3 +1,27 @@
+/**
+ * Contract test suite for {@link TokenFlowStore} implementations — the storage
+ * behind verification links, password-reset links, and magic links.
+ *
+ * The load-bearing method is `markConsumed`: it is what makes a link
+ * single-use, and only a conditional write survives concurrent requests
+ * redeeming one link. This suite races eight of them on one link.
+ *
+ * @example Verify a database-backed store
+ * ```ts
+ * import { runTokenFlowStoreContractTests } from "@udibo/oauth2/testing/contract";
+ * import type { TokenFlowStore } from "@udibo/oauth2/identity";
+ *
+ * declare function freshTokenFlowStore(): Promise<TokenFlowStore>;
+ *
+ * runTokenFlowStoreContractTests({
+ *   describeName: "DrizzleTokenFlowStore satisfies TokenFlowStore contract",
+ *   makeStore: freshTokenFlowStore,
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   TokenFlowRecord,
