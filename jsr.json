@@ -1,6 +1,6 @@
 {
   "name": "@udibo/oauth2",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "exports": {
     "./server": "./src/server/mod.ts",
     "./server/authorization": "./src/server/authorization-server.ts",

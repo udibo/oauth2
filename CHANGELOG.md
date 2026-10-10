@@ -1,3 +1,13 @@
+## [0.15.0](https://github.com/udibo/oauth2/compare/0.14.1...0.15.0) (2026-10-10)
+
+### Features
+
+* run on Node and publish to npm and JSR from one TypeScript source ([ec64cc5](https://github.com/udibo/oauth2/commit/ec64cc546f3e093c1fe1b5d87fd24c0e8614144f))
+
+### Bug Fixes
+
+* **release:** push the release commit over the deploy key's SSH remote ([#88](https://github.com/udibo/oauth2/issues/88)) ([1744d2f](https://github.com/udibo/oauth2/commit/1744d2fce3a007a0502edc20c653fbebc57b3b4f))
+
 ## [0.14.1](https://github.com/udibo/oauth2/compare/0.14.0...0.14.1) (2026-10-09)
 
 ### Bug Fixes
