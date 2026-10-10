@@ -26,8 +26,8 @@ const app = new Hono();
 
 app.get("/", async (c) => {
   const token = c.req.query("token") ?? "";
-  const valid = token &&
-    await tokens.validate(TokenPurpose.PasswordReset, token);
+  const valid =
+    token && (await tokens.validate(TokenPurpose.PasswordReset, token));
   if (!valid) return c.html(invalidPage(), 400);
   return c.html(resetPage({ token }));
 });

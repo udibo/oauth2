@@ -32,6 +32,7 @@ import {
   TokenFlowService,
 } from "@udibo/oauth2/identity";
 
+import { config } from "../config.ts";
 import { revokeUserSessions } from "../sessions.ts";
 import {
   ADMIN_USER,
@@ -114,6 +115,6 @@ export const identity = new IdentityService<DemoUser>({
       Promise.resolve(revokeUserSessions(userId, keepSessionId)),
   },
   delivery,
-  baseUrl: "http://localhost:8001",
+  baseUrl: config.publicUrl,
   passwordPolicy: { minLength: 8 },
 });

@@ -69,11 +69,35 @@ see exactly what delegated auth drops.
 
 ## Running it
 
+This example is a pnpm workspace member that depends on the package through
+`@udibo/oauth2: workspace:*`, which resolves to the package's built `dist/`.
+From the repository root, install and build once, then start it:
+
 ```bash
-deno task serve:app-with-own-auth
+pnpm install
+pnpm build
+pnpm --filter example-app-with-own-auth start
 ```
 
-Then open <http://localhost:8001/>.
+Then open <http://localhost:8001/>. Use
+`pnpm --filter example-app-with-own-auth dev` to restart on file changes
+(`node --watch`). The `api-service` and `app-with-external-auth` examples use
+this app as their identity provider.
+
+Configuration is read from the environment by `config.ts`, which validates it
+at startup and lists every invalid variable at once. Every variable is optional.
+
+| Variable              | Default                 | Meaning                                                              |
+| --------------------- | ----------------------- | -------------------------------------------------------------------- |
+| `PORT`                | `8001`                  | Port to listen on (`0` picks a free one)                             |
+| `PUBLIC_URL`          | `http://localhost:PORT` | Origin of this app; it is the OAuth2 issuer and base of emailed links |
+| `API_SERVICE_ORIGIN`  | `http://localhost:8002` | Origin of `api-service`, whose `/dev/callback` redirect is registered  |
+| `EXTERNAL_APP_ORIGIN` | `http://localhost:8003` | Origin of `app-with-external-auth`, whose `/auth/callback` is registered |
+
+Run the tests with `pnpm --filter example-app-with-own-auth test`. The main
+suite drives the whole sign-in, consent, device, reset and verify flows
+in-process through `app.request()`; `serve.test.ts` starts the real Node server
+on a free port.
 
 ## What to change to make this production-ready
 
@@ -93,9 +117,10 @@ Then open <http://localhost:8001/>.
   production should always be HTTPS. (The in-memory `sessions` Map in
   `sessions.ts` is also a demo store — replace it alongside
   `MemorySessionStore`.)
-- **Move `issuer` and all endpoint URLs out of `oauth2/server.ts` into env
-  config.** Hardcoded URLs ship with the demo because the example must stand up
-  without setup.
+- **Set `PUBLIC_URL` (the issuer) to your deployed HTTPS origin** and register
+  your real clients' redirect URIs in place of the companion-example origins in
+  `oauth2/server.ts`. The localhost defaults ship with the demo because the
+  example must stand up without setup.
 - **Persist consent decisions per `(userId, clientId, scope)`** so users aren't
   re-prompted on every login. The example always shows the consent screen for
   visibility.
@@ -141,13 +166,12 @@ first-party you can skip consent two ways:
 
 - **Omit `handleConsent` entirely.** With no handler the framework treats the
   request as consented and grants the accepted scope without a prompt — the
-  simplest path when you don't need to narrow scope at the consent step. (The
-  Juniper `app-with-own-auth` example does exactly this.)
+  simplest path when you don't need to narrow scope at the consent step.
 - **Auto-approve inside `handleConsent`** when you still want to cap scope per
   user. Replace the `if (decision === null)` branch in `main.ts`'s
   `handleConsent` with:
 
-  ```ts ignore
+  ```ts
   return Promise.resolve({
     approved: true,
     scope: BasicScope.intersection(requestedScope.toString(), u.maxScope),

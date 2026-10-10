@@ -43,7 +43,6 @@
     "dist",
     "coverage",
     "node_modules",
-    "examples",
     "templates",
     "scripts/doc-*.ts",
     "scripts/llms.ts",

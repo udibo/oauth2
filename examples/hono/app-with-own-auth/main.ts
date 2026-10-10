@@ -26,7 +26,7 @@
  * refreshes route through `localAuthServerFetch`, also in-process.
  *
  * Run:
- *   deno task serve    # or: deno task dev (auto-reload)
+ *   pnpm start    # or: pnpm dev (restarts on file changes)
  *
  * Then visit http://localhost:8001/ and click "Sign in".
  *
@@ -102,8 +102,10 @@ app.route(
       );
       if (decision === undefined) {
         const displayScope = requestedScope
-          ? BasicScope.intersection(requestedScope.toString(), u.maxScope)
-            .toString() || undefined
+          ? BasicScope.intersection(
+              requestedScope.toString(),
+              u.maxScope,
+            ).toString() || undefined
           : undefined;
         return Promise.resolve(
           renderConsentPage(c, client, displayScope, u, url.search),

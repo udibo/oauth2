@@ -23,6 +23,7 @@
     "src",
     "scripts/npm-smoke.ts",
     "vitest.config.ts",
+    "vitest.global-setup.ts",
     "playwright.config.ts"
   ]
 }

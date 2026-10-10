@@ -28,6 +28,8 @@
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
 import { IntrospectionTokenReader } from "@udibo/oauth2/server/resource";
 
+import { config } from "../config.ts";
+
 /** Client identity returned by the authorization server. */
 export interface ExampleClient {
   id: string;
@@ -39,10 +41,10 @@ export interface ExampleUser {
   username?: string;
 }
 
-export const AUTH_SERVER_URL = "http://localhost:8001";
-export const CLIENT_ID = "spa";
-export const CLIENT_SECRET = "spa-secret";
-export const REDIRECT_URI = "http://localhost:8002/dev/callback";
+export const AUTH_SERVER_URL = config.authServerUrl;
+export const CLIENT_ID = config.clientId;
+export const CLIENT_SECRET = config.clientSecret;
+export const REDIRECT_URI = `${config.publicUrl}/dev/callback`;
 /**
  * Cookie the authorization-code demo stashes its PKCE `code_verifier` in
  * between `/` (which builds the authorize URL with the S256 challenge) and

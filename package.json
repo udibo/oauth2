@@ -131,7 +131,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check": "pnpm lint && pnpm fmt:check && tsc --noEmit",
+    "check": "pnpm lint && pnpm fmt:check && tsc --noEmit && pnpm typecheck:examples",
+    "typecheck:examples": "pnpm -r --filter \"./examples/**\" typecheck",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --type-aware --type-check",
