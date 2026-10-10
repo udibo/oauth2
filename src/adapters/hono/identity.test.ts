@@ -1,5 +1,4 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
 import type { DeliveryMessage } from "../../identity/delivery.ts";
@@ -131,21 +130,21 @@ describe("honoIdentityRoutes", () => {
       password: "hunter2hunter2",
       email: "a@b.co",
     });
-    assertEquals(signup.status, 200);
-    assertEquals((await signup.json()).action, "signUp");
+    expect(signup.status).toStrictEqual(200);
+    expect((await signup.json()).action).toStrictEqual("signUp");
 
     const ok = await postJson(app, "/auth/signin", {
       identifier: "a@b.co",
       password: "hunter2hunter2",
     });
-    assertEquals(ok.status, 200);
-    assertEquals((await ok.json()).action, "signIn");
+    expect(ok.status).toStrictEqual(200);
+    expect((await ok.json()).action).toStrictEqual("signIn");
 
     const bad = await postJson(app, "/auth/signin", {
       identifier: "a@b.co",
       password: "wrong",
     });
-    assertEquals(bad.status, 401);
+    expect(bad.status).toStrictEqual(401);
     await bad.body?.cancel();
   });
 
@@ -159,34 +158,34 @@ describe("honoIdentityRoutes", () => {
     const unknown = await postJson(app, "/auth/password/reset-request", {
       email: "ghost@b.co",
     });
-    assertEquals(unknown.status, 200);
-    assertEquals(sent.length, 0);
+    expect(unknown.status).toStrictEqual(200);
+    expect(sent.length).toStrictEqual(0);
 
     const known = await postJson(app, "/auth/password/reset-request", {
       email: "a@b.co",
     });
-    assertEquals(known.status, 200);
-    assertEquals(sent.length, 1);
+    expect(known.status).toStrictEqual(200);
+    expect(sent.length).toStrictEqual(1);
 
     const token = sent[0].token;
     const reset = await postJson(app, "/auth/password/reset", {
       token,
       password: "newpassword1",
     });
-    assertEquals(reset.status, 200);
+    expect(reset.status).toStrictEqual(200);
 
     const ok = await postJson(app, "/auth/signin", {
       identifier: "a@b.co",
       password: "newpassword1",
     });
-    assertEquals(ok.status, 200);
+    expect(ok.status).toStrictEqual(200);
     await ok.body?.cancel();
 
     const replay = await postJson(app, "/auth/password/reset", {
       token,
       password: "again12345",
     });
-    assertEquals(replay.status, 400);
+    expect(replay.status).toStrictEqual(400);
     await replay.body?.cancel();
   });
 
@@ -203,11 +202,11 @@ describe("honoIdentityRoutes", () => {
     const token = sent[0].token;
 
     const ok = await postJson(app, "/auth/email/verify", { token });
-    assertEquals(ok.status, 200);
-    assertEquals((await ok.json()).userId, user.id);
+    expect(ok.status).toStrictEqual(200);
+    expect((await ok.json()).userId).toStrictEqual(user.id);
 
     const bad = await postJson(app, "/auth/email/verify", { token: "nope" });
-    assertEquals(bad.status, 400);
+    expect(bad.status).toStrictEqual(400);
     await bad.body?.cancel();
   });
 
@@ -225,10 +224,10 @@ describe("honoIdentityRoutes", () => {
     const res = await postJson(app, "/auth/email/verify", {
       token: sent[0].token,
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
 
-    assertEquals(verifiedCalls, [{ userId: user.id, email: "a@b.co" }]);
+    expect(verifiedCalls).toStrictEqual([{ userId: user.id, email: "a@b.co" }]);
   });
 
   it("accepts form-encoded bodies too", async () => {
@@ -237,7 +236,7 @@ describe("honoIdentityRoutes", () => {
       password: "hunter2hunter2",
       email: "f@b.co",
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
@@ -267,8 +266,8 @@ describe("honoIdentityRoutes", () => {
       password: "hunter2hunter2",
       email: "dupe@b.co",
     });
-    assertEquals(res.status, 409);
-    assertEquals((await res.json()).error, "identifier_taken");
+    expect(res.status).toStrictEqual(409);
+    expect((await res.json()).error).toStrictEqual("identifier_taken");
   });
 
   it("coerces a numeric JSON password so the length policy applies to it", async () => {
@@ -277,41 +276,43 @@ describe("honoIdentityRoutes", () => {
       password: 12345,
       email: "n@b.co",
     });
-    assertEquals(res.status, 422);
-    assertEquals((await res.json()).error, "weak_password");
+    expect(res.status).toStrictEqual(422);
+    expect((await res.json()).error).toStrictEqual("weak_password");
 
     const signin = await postJson(app, "/auth/signin", {
       identifier: "n@b.co",
       password: "12345",
     });
-    assertEquals(signin.status, 401);
+    expect(signin.status).toStrictEqual(401);
     await signin.body?.cancel();
   });
 
   it("hands the policy the same string the credential is hashed from", async () => {
     const seen: unknown[] = [];
     const { app } = build(true, {
-      validators: [(password) => {
-        seen.push(password);
-        return undefined;
-      }],
+      validators: [
+        (password) => {
+          seen.push(password);
+          return undefined;
+        },
+      ],
     });
     const res = await postJson(app, "/auth/signup", {
       password: { length: 12 },
       email: "o@b.co",
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
 
-    assertEquals(seen.length, 1);
-    assertEquals(typeof seen[0], "string");
-    assertEquals(seen[0], String({ length: 12 }));
+    expect(seen.length).toStrictEqual(1);
+    expect(typeof seen[0]).toStrictEqual("string");
+    expect(seen[0]).toStrictEqual(String({ length: 12 }));
 
     const signin = await postJson(app, "/auth/signin", {
       identifier: "o@b.co",
       password: seen[0],
     });
-    assertEquals(signin.status, 200);
+    expect(signin.status).toStrictEqual(200);
     await signin.body?.cancel();
   });
 
@@ -321,14 +322,14 @@ describe("honoIdentityRoutes", () => {
       password: Array.from({ length: 10 }, () => "a".repeat(100_000)),
       email: "arr@b.co",
     });
-    assertEquals(res.status, 422);
-    assertEquals((await res.json()).error, "weak_password");
+    expect(res.status).toStrictEqual(422);
+    expect((await res.json()).error).toStrictEqual("weak_password");
 
     const signin = await postJson(app, "/auth/signin", {
       identifier: "arr@b.co",
       password: "whatever",
     });
-    assertEquals(signin.status, 401);
+    expect(signin.status).toStrictEqual(401);
     await signin.body?.cancel();
   });
 
@@ -343,11 +344,11 @@ describe("honoIdentityRoutes", () => {
       address: { city: "Portland" },
       tags: ["a", "b"],
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
 
-    assertEquals(profiles.length, 1);
-    assertEquals(profiles[0], {
+    expect(profiles.length).toStrictEqual(1);
+    expect(profiles[0]).toStrictEqual({
       email: "p@b.co",
       emailVerified: false,
       age: 41,
@@ -361,23 +362,23 @@ describe("honoIdentityRoutes", () => {
     const { app } = build(true, {});
     for (const body of [["password"], "password", 42, null]) {
       const res = await postJson(app, "/auth/signup", body);
-      assertEquals(res.status, 400);
-      assertEquals((await res.json()).error, "invalid_request");
+      expect(res.status).toStrictEqual(400);
+      expect((await res.json()).error).toStrictEqual("invalid_request");
     }
   });
 
   it("does not mount signup/signin without an onAuthenticated hook", async () => {
     const { app } = build(false);
     const signup = await postJson(app, "/auth/signup", { password: "x" });
-    assertEquals(signup.status, 404);
+    expect(signup.status).toStrictEqual(404);
     await signup.body?.cancel();
     const signin = await postJson(app, "/auth/signin", { identifier: "a" });
-    assertEquals(signin.status, 404);
+    expect(signin.status).toStrictEqual(404);
     await signin.body?.cancel();
     const reset = await postJson(app, "/auth/password/reset-request", {
       email: "x@y.co",
     });
-    assertEquals(reset.status, 200);
+    expect(reset.status).toStrictEqual(200);
   });
 });
 
@@ -390,8 +391,8 @@ describe("honoIdentityRoutes cross-site protection", () => {
       origin: "https://evil.example",
       "sec-fetch-site": "cross-site",
     });
-    assertEquals(res.status, 403);
-    assertEquals((await res.json()).error, "forbidden_origin");
+    expect(res.status).toStrictEqual(403);
+    expect((await res.json()).error).toStrictEqual("forbidden_origin");
   });
 
   it("refuses a request from a sibling site of the same registrable domain", async () => {
@@ -400,8 +401,8 @@ describe("honoIdentityRoutes cross-site protection", () => {
       origin: "https://other.localhost",
       "sec-fetch-site": "same-site",
     });
-    assertEquals(res.status, 403);
-    assertEquals((await res.json()).error, "forbidden_origin");
+    expect(res.status).toStrictEqual(403);
+    expect((await res.json()).error).toStrictEqual("forbidden_origin");
   });
 
   it("accepts a request the browser reports as same-origin", async () => {
@@ -410,23 +411,28 @@ describe("honoIdentityRoutes cross-site protection", () => {
       origin: "http://localhost",
       "sec-fetch-site": "same-origin",
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
   it("accepts a directly navigated request, which carries no other site", async () => {
     const { app } = build();
-    const res = await postForm(app, "/auth/password/reset-request", {
-      email: "c@b.co",
-    }, { "sec-fetch-site": "none" });
-    assertEquals(res.status, 200);
+    const res = await postForm(
+      app,
+      "/auth/password/reset-request",
+      {
+        email: "c@b.co",
+      },
+      { "sec-fetch-site": "none" },
+    );
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
   it("accepts a caller that sends neither header, since forgery needs a browser", async () => {
     const { app } = build();
     const res = await postJson(app, "/auth/signup", credentials);
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
@@ -435,13 +441,13 @@ describe("honoIdentityRoutes cross-site protection", () => {
     const refused = await postForm(app, "/auth/signup", credentials, {
       origin: "https://evil.example",
     });
-    assertEquals(refused.status, 403);
-    assertEquals((await refused.json()).error, "forbidden_origin");
+    expect(refused.status).toStrictEqual(403);
+    expect((await refused.json()).error).toStrictEqual("forbidden_origin");
 
     const accepted = await postForm(app, "/auth/signup", credentials, {
       origin: "https://localhost",
     });
-    assertEquals(accepted.status, 200);
+    expect(accepted.status).toStrictEqual(200);
     await accepted.body?.cancel();
   });
 
@@ -450,7 +456,7 @@ describe("honoIdentityRoutes cross-site protection", () => {
     const res = await postForm(app, "/auth/signup", credentials, {
       origin: "null",
     });
-    assertEquals(res.status, 403);
+    expect(res.status).toStrictEqual(403);
     await res.body?.cancel();
   });
 
@@ -462,7 +468,7 @@ describe("honoIdentityRoutes cross-site protection", () => {
       origin: "https://app.example",
       "sec-fetch-site": "cross-site",
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
@@ -472,7 +478,7 @@ describe("honoIdentityRoutes cross-site protection", () => {
       origin: "https://evil.example",
       "sec-fetch-site": "cross-site",
     });
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
   });
 
@@ -481,7 +487,7 @@ describe("honoIdentityRoutes cross-site protection", () => {
     const res = await app.request("http://localhost/auth/signup", {
       headers: { "sec-fetch-site": "cross-site" },
     });
-    assertEquals(res.status, 404);
+    expect(res.status).toStrictEqual(404);
     await res.body?.cancel();
   });
 });

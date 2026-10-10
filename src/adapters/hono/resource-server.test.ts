@@ -1,11 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertStrictEquals,
-} from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { BasicScope } from "../../models/scope.ts";
@@ -75,9 +68,12 @@ describe("HonoResourceServer", () => {
         headers: { Authorization: "Bearer valid" },
       });
 
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      assertEquals(body, { userId: testUser.id, clientId: testClient.id });
+      expect(body).toStrictEqual({
+        userId: testUser.id,
+        clientId: testClient.id,
+      });
     });
 
     it("should return 401 with WWW-Authenticate when no token is present", async () => {
@@ -87,10 +83,10 @@ describe("HonoResourceServer", () => {
 
       const res = await app.request("/api/me");
 
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
       // RFC 6750 §3.1: no credentials → bare challenge (realm only, no error code).
       const www = res.headers.get("WWW-Authenticate");
-      assertStrictEquals(www, 'Bearer realm="Service"');
+      expect(www).toBe('Bearer realm="Service"');
     });
 
     it("should return 401 with invalid_token for bad bearer tokens", async () => {
@@ -102,11 +98,11 @@ describe("HonoResourceServer", () => {
         headers: { Authorization: "Bearer nonsense" },
       });
 
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
       const www = res.headers.get("WWW-Authenticate");
-      assertEquals(www?.includes("invalid_token"), true);
+      expect(www?.includes("invalid_token")).toStrictEqual(true);
       const body = await res.json();
-      assertStrictEquals(body.error, "invalid_token");
+      expect(body.error).toBe("invalid_token");
     });
 
     it("should return 403 with insufficient_scope including required scope", async () => {
@@ -126,10 +122,10 @@ describe("HonoResourceServer", () => {
         headers: { Authorization: "Bearer limited" },
       });
 
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       const www = res.headers.get("WWW-Authenticate");
-      assertEquals(www?.includes("insufficient_scope"), true);
-      assertEquals(www?.includes('scope="write"'), true);
+      expect(www?.includes("insufficient_scope")).toStrictEqual(true);
+      expect(www?.includes('scope="write"')).toStrictEqual(true);
     });
 
     it("should not set WWW-Authenticate for non-401/403 failures", async () => {
@@ -143,7 +139,7 @@ describe("HonoResourceServer", () => {
         headers: { Authorization: "Bearer anything" },
       });
 
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
     });
 
     it("should rethrow when throwOnError is true", async () => {
@@ -169,10 +165,10 @@ describe("HonoResourceServer", () => {
 
       const res = await app.request("/api/me");
 
-      assertStrictEquals(res.status, 500);
+      expect(res.status).toBe(500);
       const body = await res.json();
-      assertStrictEquals(body.handled, true);
-      assertStrictEquals(body.error, "access_denied");
+      expect(body.handled).toBe(true);
+      expect(body.error).toBe("access_denied");
     });
   });
 
@@ -198,14 +194,13 @@ describe("HonoResourceServer", () => {
       const ok = await app.request("/api/me", {
         headers: { Authorization: "Bearer manual" },
       });
-      assertStrictEquals(ok.status, 200);
+      expect(ok.status).toBe(200);
       const okBody = await ok.json();
-      assertStrictEquals(okBody.userId, testUser.id);
+      expect(okBody.userId).toBe(testUser.id);
 
       const bad = await app.request("/api/me");
-      assertStrictEquals(bad.status, 401);
-      assertStrictEquals(
-        bad.headers.get("WWW-Authenticate"),
+      expect(bad.status).toBe(401);
+      expect(bad.headers.get("WWW-Authenticate")).toBe(
         'Bearer realm="Service"',
       );
     });
@@ -216,10 +211,8 @@ describe("HonoResourceServer", () => {
       const app = new Hono<{ Variables: Vars }>();
       app.use("/api/*", server.protect());
       app.get("/api/items", server.requireScope("read"), (c) => c.text("list"));
-      app.post(
-        "/api/items",
-        server.requireScope("write"),
-        (c) => c.text("create"),
+      app.post("/api/items", server.requireScope("write"), (c) =>
+        c.text("create"),
       );
       return app;
     }
@@ -240,8 +233,8 @@ describe("HonoResourceServer", () => {
         method: "POST",
         headers: { Authorization: "Bearer tok" },
       });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(await res.text(), "create");
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("create");
     });
 
     it("returns 403 insufficient_scope (with the required scope) when the token lacks it", async () => {
@@ -250,10 +243,10 @@ describe("HonoResourceServer", () => {
         method: "POST",
         headers: { Authorization: "Bearer tok" },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       const www = res.headers.get("WWW-Authenticate");
-      assertEquals(www?.includes("insufficient_scope"), true);
-      assertEquals(www?.includes('scope="write"'), true);
+      expect(www?.includes("insufficient_scope")).toStrictEqual(true);
+      expect(www?.includes('scope="write"')).toStrictEqual(true);
     });
 
     it("enforces different scopes per verb on one authenticated mount", async () => {
@@ -263,26 +256,26 @@ describe("HonoResourceServer", () => {
       const get = await app.request("/api/items", {
         headers: { Authorization: "Bearer tok" },
       });
-      assertStrictEquals(get.status, 200);
+      expect(get.status).toBe(200);
 
       const post = await app.request("/api/items", {
         method: "POST",
         headers: { Authorization: "Bearer tok" },
       });
-      assertStrictEquals(post.status, 403);
+      expect(post.status).toBe(403);
     });
 
     it("does not re-validate the token — protect() looks it up once, the guard reuses the context", async () => {
       await withToken("read write");
-      using getTokenSpy = spy(tokenService, "getToken");
+      using getTokenSpy = vi.spyOn(tokenService, "getToken");
 
       const res = await scopedApp().request("/api/items", {
         method: "POST",
         headers: { Authorization: "Bearer tok" },
       });
 
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(getTokenSpy.calls.length, 1);
+      expect(res.status).toBe(200);
+      expect(getTokenSpy.mock.calls.length).toBe(1);
     });
 
     it("throws a clear developer error when protect did not run first", async () => {
@@ -291,12 +284,11 @@ describe("HonoResourceServer", () => {
       app.onError((err, c) => c.json({ message: err.message }, 500));
 
       const res = await app.request("/api/items", { method: "POST" });
-      assertStrictEquals(res.status, 500);
+      expect(res.status).toBe(500);
       const body = await res.json();
-      assertEquals(
+      expect(
         typeof body.message === "string" && body.message.includes("protect"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
   });
 
@@ -310,12 +302,11 @@ describe("HonoResourceServer", () => {
       app.onError((err, c) => c.json({ message: err.message }, 500));
 
       const res = await app.request("/api/me");
-      assertStrictEquals(res.status, 500);
+      expect(res.status).toBe(500);
       const body = await res.json();
-      assertEquals(
+      expect(
         typeof body.message === "string" && body.message.includes("protect"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
   });
 });
@@ -350,7 +341,7 @@ describe("HonoResourceServer require middleware", () => {
           getToken: (accessToken: string) =>
             Promise.resolve(
               tokens[accessToken as keyof typeof tokens] as
-                | typeof tokens[keyof typeof tokens]
+                | (typeof tokens)[keyof typeof tokens]
                 | undefined,
             ),
         },
@@ -376,7 +367,7 @@ describe("HonoResourceServer require middleware", () => {
     const res = await app.request("/api/guarded", {
       headers: { Authorization: "Bearer claimed" },
     });
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
   });
 
   it("answers a scope failure with the insufficient_scope challenge", async () => {
@@ -384,8 +375,8 @@ describe("HonoResourceServer require middleware", () => {
     const res = await app.request("/api/guarded", {
       headers: { Authorization: "Bearer claimed" },
     });
-    assertStrictEquals(res.status, 403);
-    assertEquals((await res.json()).error, "insufficient_scope");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toStrictEqual("insufficient_scope");
     const challenge = res.headers.get("WWW-Authenticate") ?? "";
     assert(challenge.includes('error="insufficient_scope"'));
   });
@@ -395,10 +386,10 @@ describe("HonoResourceServer require middleware", () => {
     const res = await app.request("/api/guarded", {
       headers: { Authorization: "Bearer claimed" },
     });
-    assertStrictEquals(res.status, 403);
-    assertEquals((await res.json()).error, "insufficient_permissions");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toStrictEqual("insufficient_permissions");
     const challenge = res.headers.get("WWW-Authenticate") ?? "";
-    assertFalse(challenge.includes("error="));
+    expect(challenge.includes("error=")).toBeFalsy();
   });
 
   it("refuses the wrong organization", async () => {
@@ -406,29 +397,29 @@ describe("HonoResourceServer require middleware", () => {
     const res = await app.request("/api/guarded", {
       headers: { Authorization: "Bearer claimed" },
     });
-    assertStrictEquals(res.status, 403);
-    assertEquals((await res.json()).error, "insufficient_permissions");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toStrictEqual("insufficient_permissions");
   });
 
   it("refuses a machine token every non-scope condition", async () => {
-    for (
-      const conditions of [
-        { permission: "posts:write" },
-        { role: "editor" },
-        { orgRole: "admin" },
-        { organization: true as const },
-      ]
-    ) {
+    for (const conditions of [
+      { permission: "posts:write" },
+      { role: "editor" },
+      { orgRole: "admin" },
+      { organization: true as const },
+    ]) {
       const res = await appRequiring(conditions).request("/api/guarded", {
         headers: { Authorization: "Bearer machine" },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
     }
-    const scoped = await appRequiring({ scope: "identity:users:read" })
-      .request("/api/guarded", {
+    const scoped = await appRequiring({ scope: "identity:users:read" }).request(
+      "/api/guarded",
+      {
         headers: { Authorization: "Bearer machine" },
-      });
-    assertStrictEquals(scoped.status, 200);
+      },
+    );
+    expect(scoped.status).toBe(200);
   });
 
   it("exposes the same authorization on the context", async () => {
@@ -445,6 +436,10 @@ describe("HonoResourceServer require middleware", () => {
     const res = await app.request("/api/me", {
       headers: { Authorization: "Bearer claimed" },
     });
-    assertEquals(await res.json(), { can: true, inOrg: true, hasScope: true });
+    expect(await res.json()).toStrictEqual({
+      can: true,
+      inOrg: true,
+      hasScope: true,
+    });
   });
 });

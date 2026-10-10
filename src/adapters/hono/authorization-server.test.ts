@@ -1,5 +1,4 @@
-import { assertEquals, assertExists, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
 import { BasicScope } from "../../models/scope.ts";
@@ -109,29 +108,26 @@ describe("HonoAuthorizationServer", () => {
       });
       const expected = Object.entries(ENDPOINT_PATHS)
         .flatMap(([key, path]) =>
-          ENDPOINT_METHODS[key as keyof typeof ENDPOINT_PATHS].map((method) =>
-            `${method} ${path}`
-          )
+          ENDPOINT_METHODS[key as keyof typeof ENDPOINT_PATHS].map(
+            (method) => `${method} ${path}`,
+          ),
         )
         .sort();
-      assertEquals(
+      expect(
         app.routes.map(({ method, path }) => `${method} ${path}`).sort(),
-        expected,
-      );
+      ).toStrictEqual(expected);
     });
 
     it("tables the discovery documents' paths and each endpoint's verbs", () => {
-      assertStrictEquals(
-        ENDPOINT_PATHS.metadata,
+      expect(ENDPOINT_PATHS.metadata).toBe(
         "/.well-known/oauth-authorization-server",
       );
-      assertStrictEquals(
-        ENDPOINT_PATHS.oidcMetadata,
+      expect(ENDPOINT_PATHS.oidcMetadata).toBe(
         "/.well-known/openid-configuration",
       );
-      assertEquals([...ENDPOINT_METHODS.metadata], ["GET"]);
-      assertEquals([...ENDPOINT_METHODS.token], ["POST"]);
-      assertEquals([...ENDPOINT_METHODS.userinfo], ["GET", "POST"]);
+      expect([...ENDPOINT_METHODS.metadata]).toStrictEqual(["GET"]);
+      expect([...ENDPOINT_METHODS.token]).toStrictEqual(["POST"]);
+      expect([...ENDPOINT_METHODS.userinfo]).toStrictEqual(["GET", "POST"]);
     });
 
     it("mounts all standard endpoints under the configured base path", async () => {
@@ -150,13 +146,12 @@ describe("HonoAuthorizationServer", () => {
       const metadata = await app.request(
         "/oauth2/.well-known/oauth-authorization-server",
       );
-      assertStrictEquals(metadata.status, 200);
+      expect(metadata.status).toBe(200);
       const body = await metadata.json();
-      assertStrictEquals(body.issuer, "https://auth.example.com");
-      assertEquals(
+      expect(body.issuer).toBe("https://auth.example.com");
+      expect(
         body.grant_types_supported.includes("client_credentials"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
 
     it("tokenHandler: issues an access token via client credentials", async () => {
@@ -176,11 +171,11 @@ describe("HonoAuthorizationServer", () => {
         ),
       );
 
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(res.headers.get("Cache-Control"), "no-store");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
       const body = await res.json();
-      assertStrictEquals(body.token_type, "Bearer");
-      assertStrictEquals(typeof body.access_token, "string");
+      expect(body.token_type).toBe("Bearer");
+      expect(typeof body.access_token).toBe("string");
     });
 
     it("authorizeHandler: passes the Hono context to authenticateUser", async () => {
@@ -190,7 +185,8 @@ describe("HonoAuthorizationServer", () => {
         "/oauth2",
         server.routes({
           authenticateUser: (c) => {
-            contextSeen = typeof c.req.url === "string" &&
+            contextSeen =
+              typeof c.req.url === "string" &&
               c.req.url.includes("/oauth2/authorize");
             return Promise.resolve({
               user: testUser,
@@ -209,12 +205,14 @@ describe("HonoAuthorizationServer", () => {
 
       const res = await app.request(url.pathname + url.search);
 
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const location = res.headers.get("Location");
-      assertEquals(location?.startsWith("https://example.com/callback?"), true);
-      assertEquals(location?.includes("code="), true);
-      assertEquals(location?.includes("state=xyz"), true);
-      assertStrictEquals(contextSeen, true);
+      expect(
+        location?.startsWith("https://example.com/callback?"),
+      ).toStrictEqual(true);
+      expect(location?.includes("code=")).toStrictEqual(true);
+      expect(location?.includes("state=xyz")).toStrictEqual(true);
+      expect(contextSeen).toBe(true);
     });
 
     it("authorizeHandler: passes the Hono context to handleConsent", async () => {
@@ -243,8 +241,8 @@ describe("HonoAuthorizationServer", () => {
       url.searchParams.set("redirect_uri", "https://example.com/callback");
 
       const res = await app.request(url.pathname + url.search);
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(consentContextSeen, true);
+      expect(res.status).toBe(302);
+      expect(consentContextSeen).toBe(true);
     });
 
     it("authorizeHandler: returns Response from authenticateUser as-is", async () => {
@@ -267,9 +265,8 @@ describe("HonoAuthorizationServer", () => {
       url.searchParams.set("redirect_uri", "https://example.com/callback");
 
       const res = await app.request(url.pathname + url.search);
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(
-        res.headers.get("Location"),
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe(
         "/login?return_to=%2Foauth2%2Fauthorize",
       );
     });
@@ -296,12 +293,11 @@ describe("HonoAuthorizationServer", () => {
       url.searchParams.set("redirect_uri", "https://example.com/callback");
 
       const res = await app.request(url.pathname + url.search);
-      assertStrictEquals(res.status, 200);
-      assertEquals(
+      expect(res.status).toBe(200);
+      expect(
         res.headers.get("Content-Type")?.startsWith("text/html"),
-        true,
-      );
-      assertStrictEquals(await res.text(), "<h1>Consent</h1>");
+      ).toStrictEqual(true);
+      expect(await res.text()).toBe("<h1>Consent</h1>");
     });
 
     it("revocationHandler: returns 200 for unknown token per RFC 7009", async () => {
@@ -321,7 +317,7 @@ describe("HonoAuthorizationServer", () => {
         ),
       );
 
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
     });
 
     it("introspectionHandler: returns active=false for unknown token", async () => {
@@ -341,9 +337,9 @@ describe("HonoAuthorizationServer", () => {
         ),
       );
 
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      assertStrictEquals(body.active, false);
+      expect(body.active).toBe(false);
     });
   });
 
@@ -377,11 +373,7 @@ describe("HonoAuthorizationServer", () => {
     }
 
     async function saveTokens(
-      tokenService: MemoryTokenService<
-        TestClient,
-        TestUser,
-        BasicScope
-      >,
+      tokenService: MemoryTokenService<TestClient, TestUser, BasicScope>,
       client: TestClient,
       prefix: string,
     ) {
@@ -407,8 +399,8 @@ describe("HonoAuthorizationServer", () => {
         "secret",
       );
 
-      assertStrictEquals(res.status, 200);
-      assertExists(await tokenService.getToken("victim-access"));
+      expect(res.status).toBe(200);
+      assert.exists(await tokenService.getToken("victim-access"));
     });
 
     it("leaves another client's refresh token alone and still answers 200", async () => {
@@ -422,8 +414,8 @@ describe("HonoAuthorizationServer", () => {
         "secret",
       );
 
-      assertStrictEquals(res.status, 200);
-      assertExists(await tokenService.getRefreshToken("victim-refresh"));
+      expect(res.status).toBe(200);
+      assert.exists(await tokenService.getRefreshToken("victim-refresh"));
     });
 
     it("revokes the authenticated client's own access token", async () => {
@@ -437,8 +429,8 @@ describe("HonoAuthorizationServer", () => {
         "secret",
       );
 
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(await tokenService.getToken("mine-access"), undefined);
+      expect(res.status).toBe(200);
+      expect(await tokenService.getToken("mine-access")).toBe(undefined);
     });
 
     it("revokes a refresh token presented with the wrong token_type_hint", async () => {
@@ -452,9 +444,8 @@ describe("HonoAuthorizationServer", () => {
         "secret",
       );
 
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(
-        await tokenService.getRefreshToken("mine-refresh"),
+      expect(res.status).toBe(200);
+      expect(await tokenService.getRefreshToken("mine-refresh")).toBe(
         undefined,
       );
     });
@@ -503,15 +494,12 @@ describe("HonoAuthorizationServer", () => {
         token_type_hint: "refresh_token",
       });
 
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      assertStrictEquals(body.active, true);
-      assertStrictEquals(body.client_id, "client-1");
-      assertStrictEquals(body.scope, "read");
-      assertStrictEquals(
-        body.exp,
-        Math.floor(refreshTokenExpiresAt.getTime() / 1000),
-      );
+      expect(body.active).toBe(true);
+      expect(body.client_id).toBe("client-1");
+      expect(body.scope).toBe("read");
+      expect(body.exp).toBe(Math.floor(refreshTokenExpiresAt.getTime() / 1000));
     });
 
     it("resolves a refresh token whose token_type_hint names the other type", async () => {
@@ -522,7 +510,7 @@ describe("HonoAuthorizationServer", () => {
         token_type_hint: "access_token",
       });
 
-      assertStrictEquals((await res.json()).active, true);
+      expect((await res.json()).active).toBe(true);
     });
 
     it("omits token_type for a refresh token and names Bearer for an access token", async () => {
@@ -537,11 +525,11 @@ describe("HonoAuthorizationServer", () => {
 
       const refresh = await introspect(app, { token: "live-refresh" });
       const refreshBody = await refresh.json();
-      assertStrictEquals(refreshBody.active, true);
-      assertStrictEquals(refreshBody.token_type, undefined);
+      expect(refreshBody.active).toBe(true);
+      expect(refreshBody.token_type).toBe(undefined);
 
       const access = await introspect(app, { token: "live-access" });
-      assertStrictEquals((await access.json()).token_type, "Bearer");
+      expect((await access.json()).token_type).toBe("Bearer");
     });
 
     it("reports a revoked refresh token as inactive", async () => {
@@ -553,7 +541,7 @@ describe("HonoAuthorizationServer", () => {
         token_type_hint: "refresh_token",
       });
 
-      assertStrictEquals((await res.json()).active, false);
+      expect((await res.json()).active).toBe(false);
     });
 
     it("reports an expired access token as inactive", async () => {
@@ -561,7 +549,7 @@ describe("HonoAuthorizationServer", () => {
 
       const res = await introspect(app, { token: "expired-access" });
 
-      assertStrictEquals((await res.json()).active, false);
+      expect((await res.json()).active).toBe(false);
     });
   });
 
@@ -604,10 +592,10 @@ describe("HonoAuthorizationServer", () => {
         }),
       );
 
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const location = new URL(res.headers.get("Location")!);
-      assertStrictEquals(location.searchParams.get("error"), "invalid_request");
-      assertStrictEquals(location.searchParams.get("code"), null);
+      expect(location.searchParams.get("error")).toBe("invalid_request");
+      expect(location.searchParams.get("code")).toBe(null);
     });
 
     it("accepts an S256 code_challenge of the length RFC 7636 fixes", async () => {
@@ -618,8 +606,8 @@ describe("HonoAuthorizationServer", () => {
         }),
       );
 
-      assertStrictEquals(res.status, 302);
-      assertExists(
+      expect(res.status).toBe(302);
+      assert.exists(
         new URL(res.headers.get("Location")!).searchParams.get("code"),
       );
     });
@@ -657,8 +645,8 @@ describe("HonoAuthorizationServer", () => {
         }),
       );
 
-      assertStrictEquals(res.status, 302);
-      assertExists(
+      expect(res.status).toBe(302);
+      assert.exists(
         new URL(res.headers.get("Location")!).searchParams.get("code"),
       );
     });
@@ -702,10 +690,9 @@ describe("HonoAuthorizationServer", () => {
         ),
       );
 
-      assertEquals((await res.json()).code_challenge_methods_supported, [
-        "S256",
-        "S256-alt",
-      ]);
+      expect((await res.json()).code_challenge_methods_supported).toStrictEqual(
+        ["S256", "S256-alt"],
+      );
     });
 
     it("omits code_challenge_methods_supported without an authorization code grant", async () => {
@@ -734,8 +721,7 @@ describe("HonoAuthorizationServer", () => {
         ),
       );
 
-      assertStrictEquals(
-        (await res.json()).code_challenge_methods_supported,
+      expect((await res.json()).code_challenge_methods_supported).toBe(
         undefined,
       );
     });
@@ -748,9 +734,9 @@ describe("HonoAuthorizationServer", () => {
       app.get("/custom/meta", server.metadataHandler());
 
       const metaRes = await app.request("/custom/meta");
-      assertStrictEquals(metaRes.status, 200);
+      expect(metaRes.status).toBe(200);
       const meta = await metaRes.json();
-      assertStrictEquals(meta.issuer, "https://auth.example.com");
+      expect(meta.issuer).toBe("https://auth.example.com");
 
       const tokenRes = await app.request(
         "/custom/token",
@@ -759,7 +745,7 @@ describe("HonoAuthorizationServer", () => {
           basicAuthHeader("client-1", "secret"),
         ),
       );
-      assertStrictEquals(tokenRes.status, 200);
+      expect(tokenRes.status).toBe(200);
     });
   });
 
@@ -791,9 +777,9 @@ describe("HonoAuthorizationServer", () => {
         headers: { Authorization: `Bearer ${access_token}` },
       });
 
-      assertStrictEquals(apiRes.status, 200);
+      expect(apiRes.status).toBe(200);
       const body = await apiRes.json();
-      assertStrictEquals(body.clientId, "client-1");
+      expect(body.clientId).toBe("client-1");
     });
   });
 
@@ -812,27 +798,29 @@ describe("HonoAuthorizationServer", () => {
 
       const tokenRes = await app.request(
         "/oauth2/token",
-        formRequestInit({
-          grant_type: "client_credentials",
-          scope: "read",
-        }, basicAuthHeader("client-1", "secret")),
+        formRequestInit(
+          {
+            grant_type: "client_credentials",
+            scope: "read",
+          },
+          basicAuthHeader("client-1", "secret"),
+        ),
       );
       const { access_token } = await tokenRes.json();
 
       const read = await app.request("/api/read", {
         headers: { Authorization: `Bearer ${access_token}` },
       });
-      assertStrictEquals(read.status, 200);
+      expect(read.status).toBe(200);
 
       const write = await app.request("/api/write", {
         method: "POST",
         headers: { Authorization: `Bearer ${access_token}` },
       });
-      assertStrictEquals(write.status, 403);
-      assertEquals(
+      expect(write.status).toBe(403);
+      expect(
         write.headers.get("WWW-Authenticate")?.includes("insufficient_scope"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
   });
 });

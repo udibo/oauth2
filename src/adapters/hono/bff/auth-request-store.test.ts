@@ -1,11 +1,5 @@
-import {
-  assert,
-  assertEquals,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-import { assertSpyCalls, spy } from "@std/testing/mock";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { thrown } from "../../../_test_assert.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -59,9 +53,7 @@ function cookieHeader(response: Response, name: string): string | undefined {
 }
 
 /** An app exposing the storage's operations, driven over real cookies. */
-function storageApp(
-  options: EncryptedCookieAuthRequestStorageOptions,
-) {
+function storageApp(options: EncryptedCookieAuthRequestStorageOptions) {
   const store = new EncryptedCookieAuthRequestStorage(options);
   const app = new Hono();
   app.post("/set", async (c) => {
@@ -76,8 +68,8 @@ function storageApp(
     await store.forRequest(c).delete(c.req.query("state")!);
     return c.body(null, 204);
   });
-  app.post("/clear", (c) => {
-    store.forRequest(c).clear();
+  app.post("/clear", async (c) => {
+    await store.forRequest(c).clear();
     return c.body(null, 204);
   });
   return app;
@@ -97,7 +89,7 @@ async function seal(
       },
       body: JSON.stringify({ state, value }),
     });
-    assertStrictEquals(response.status, 204);
+    expect(response.status).toBe(204);
     cookie = cookieHeader(response, COOKIE_NAME) ?? cookie;
   }
   return cookie;
@@ -127,7 +119,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
   it("round-trips a record through the cookie", async () => {
     const value = record();
     const cookie = await seal(app, [["state-1", value]]);
-    assertEquals(await readBack(app, cookie, "state-1"), value);
+    expect(await readBack(app, cookie, "state-1")).toStrictEqual(value);
   });
 
   it("marks the cookie HttpOnly and SameSite=Lax so it survives the IdP redirect", async () => {
@@ -137,8 +129,8 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       body: JSON.stringify({ state: "state-1", value: record() }),
     });
     const setCookie = response.headers.get("set-cookie") ?? "";
-    assertStrictEquals(/HttpOnly/i.test(setCookie), true);
-    assertStrictEquals(/SameSite=Lax/i.test(setCookie), true);
+    expect(/HttpOnly/i.test(setCookie)).toBe(true);
+    expect(/SameSite=Lax/i.test(setCookie)).toBe(true);
   });
 
   it("reads nothing from a cookie sealed with a different secret", async () => {
@@ -147,15 +139,14 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       secret: OTHER_SECRET,
       cookie: { secure: false },
     });
-    assertEquals(await readBack(other, cookie, "state-1"), null);
+    expect(await readBack(other, cookie, "state-1")).toStrictEqual(null);
   });
 
   it("drops records older than the ttl", async () => {
-    const cookie = await seal(app, [[
-      "state-1",
-      record({ createdAt: Date.now() - 11 * 60 * 1000 }),
-    ]]);
-    assertEquals(await readBack(app, cookie, "state-1"), null);
+    const cookie = await seal(app, [
+      ["state-1", record({ createdAt: Date.now() - 11 * 60 * 1000 })],
+    ]);
+    expect(await readBack(app, cookie, "state-1")).toStrictEqual(null);
   });
 
   it("keeps concurrent sign-ins up to maxPending, evicting the oldest", async () => {
@@ -167,24 +158,18 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       ["newest", record({ createdAt: now })],
     ]);
 
-    assertEquals(await readBack(app, cookie, "oldest"), null);
-    assertStrictEquals(
-      (await readBack(app, cookie, "older"))?.createdAt,
-      now - 2000,
-    );
-    assertStrictEquals(
-      (await readBack(app, cookie, "newest"))?.createdAt,
-      now,
-    );
+    expect(await readBack(app, cookie, "oldest")).toStrictEqual(null);
+    expect((await readBack(app, cookie, "older"))?.createdAt).toBe(now - 2000);
+    expect((await readBack(app, cookie, "newest"))?.createdAt).toBe(now);
   });
 
   it("starts no key derivation until a request touches the storage", async () => {
-    using digest = spy(crypto.subtle, "digest");
+    using digest = vi.spyOn(crypto.subtle, "digest");
     const lazy = storageApp({ secret: SECRET, cookie: { secure: false } });
-    assertSpyCalls(digest, 0);
+    expect(digest).toHaveBeenCalledTimes(0);
 
     await seal(lazy, [["state-1", record()]]);
-    assertSpyCalls(digest, 1);
+    expect(digest).toHaveBeenCalledTimes(1);
   });
 
   it("forgets a record after delete", async () => {
@@ -193,11 +178,10 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       method: "POST",
       headers: cookie ? { cookie } : {},
     });
-    assertStrictEquals(response.status, 204);
-    assertEquals(
+    expect(response.status).toBe(204);
+    expect(
       await readBack(app, cookieHeader(response, COOKIE_NAME), "state-1"),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("clears every pending record at once", async () => {
@@ -209,10 +193,9 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       method: "POST",
       headers: cookie ? { cookie } : {},
     });
-    assertEquals(
+    expect(
       await readBack(app, cookieHeader(response, COOKIE_NAME), "state-1"),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   describe("cookie name", () => {
@@ -229,13 +212,10 @@ describe("EncryptedCookieAuthRequestStorage", () => {
 
     it("defaults to __Host- + Secure + Path=/ with no Domain", async () => {
       const setCookie = await setCookieHeader({ secret: SECRET });
-      assertStrictEquals(
-        setCookie.includes("__Host-oauth2_auth_request="),
-        true,
-      );
-      assertStrictEquals(setCookie.includes("Secure"), true);
-      assertStrictEquals(setCookie.includes("Path=/"), true);
-      assertStrictEquals(setCookie.includes("Domain="), false);
+      expect(setCookie.includes("__Host-oauth2_auth_request=")).toBe(true);
+      expect(setCookie.includes("Secure")).toBe(true);
+      expect(setCookie.includes("Path=/")).toBe(true);
+      expect(setCookie.includes("Domain=")).toBe(false);
     });
 
     it("drops the __Host- prefix when Secure is disabled (local HTTP)", async () => {
@@ -243,8 +223,8 @@ describe("EncryptedCookieAuthRequestStorage", () => {
         secret: SECRET,
         cookie: { secure: false },
       });
-      assertStrictEquals(setCookie.includes("__Host-"), false);
-      assertStrictEquals(/(^|[^-])oauth2_auth_request=/.test(setCookie), true);
+      expect(setCookie.includes("__Host-")).toBe(false);
+      expect(/(^|[^-])oauth2_auth_request=/.test(setCookie)).toBe(true);
     });
 
     it("drops the __Host- prefix when a domain is set", async () => {
@@ -252,8 +232,8 @@ describe("EncryptedCookieAuthRequestStorage", () => {
         secret: SECRET,
         cookie: { domain: "example.com" },
       });
-      assertStrictEquals(setCookie.includes("__Host-"), false);
-      assertStrictEquals(setCookie.includes("Domain=example.com"), true);
+      expect(setCookie.includes("__Host-")).toBe(false);
+      expect(setCookie.includes("Domain=example.com")).toBe(true);
     });
 
     it("drops the __Host- prefix when the path is not /", async () => {
@@ -261,8 +241,8 @@ describe("EncryptedCookieAuthRequestStorage", () => {
         secret: SECRET,
         cookie: { path: "/auth" },
       });
-      assertStrictEquals(setCookie.includes("__Host-"), false);
-      assertStrictEquals(setCookie.includes("Path=/auth"), true);
+      expect(setCookie.includes("__Host-")).toBe(false);
+      expect(setCookie.includes("Path=/auth")).toBe(true);
     });
 
     it("round-trips under the prefixed default name", async () => {
@@ -274,7 +254,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
         body: JSON.stringify({ state: "state-1", value }),
       });
       const cookie = cookieHeader(response, "__Host-oauth2_auth_request");
-      assertEquals(await readBack(secureApp, cookie, "state-1"), value);
+      expect(await readBack(secureApp, cookie, "state-1")).toStrictEqual(value);
     });
 
     it("honors an explicit unprefixed name alongside a domain", async () => {
@@ -282,12 +262,12 @@ describe("EncryptedCookieAuthRequestStorage", () => {
         secret: SECRET,
         cookie: { name: "pending", domain: "example.com" },
       });
-      assertStrictEquals(setCookie.includes("pending="), true);
-      assertStrictEquals(setCookie.includes("__Host-"), false);
+      expect(setCookie.includes("pending=")).toBe(true);
+      expect(setCookie.includes("__Host-")).toBe(false);
     });
 
     it("throws when an explicit __Host- name is combined with secure: false", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -299,7 +279,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     });
 
     it("throws when an explicit __Host- name is combined with a domain", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -311,7 +291,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     });
 
     it("throws when an explicit __Host- name is combined with a non-/ path", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -323,7 +303,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     });
 
     it("throws when an explicit __Secure- name is combined with secure: false", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -335,7 +315,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     });
 
     it("matches the prefixes case-insensitively, as browsers do", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -347,7 +327,7 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     });
 
     it("names the lost pending request in the error", () => {
-      assertThrows(
+      thrown(
         () =>
           new EncryptedCookieAuthRequestStorage({
             secret: SECRET,
@@ -419,11 +399,11 @@ async function buildFixture() {
       sessionStore: new EncryptedCookieSessionStore({ secret: SECRET }),
       ...(options.statelessAuthRequests
         ? {
-          authRequestStorage: new EncryptedCookieAuthRequestStorage({
-            secret: SECRET,
-            cookie: { secure: false },
-          }),
-        }
+            authRequestStorage: new EncryptedCookieAuthRequestStorage({
+              secret: SECRET,
+              cookie: { secure: false },
+            }),
+          }
         : {}),
     });
     const app = new Hono();
@@ -442,7 +422,7 @@ async function followAuthorize(
     new Request(authorizeUrl),
     () => Promise.resolve({ user: testUser }),
   );
-  assertStrictEquals(response.status, 302);
+  expect(response.status).toBe(302);
   return response.headers.get("Location")!;
 }
 
@@ -453,39 +433,40 @@ describe("BFF sign-in across isolates", () => {
     fixture = await buildFixture();
   });
 
-  async function signIn(
-    statelessAuthRequests: boolean,
-  ): Promise<Response> {
-    const login = await fixture.isolate({ statelessAuthRequests })
+  async function signIn(statelessAuthRequests: boolean): Promise<Response> {
+    const login = await fixture
+      .isolate({ statelessAuthRequests })
       .request("/auth/login");
-    assertStrictEquals(login.status, 302);
+    expect(login.status).toBe(302);
     await login.body?.cancel();
 
     const callbackUrl = await followAuthorize(
       fixture.authServer,
       login.headers.get("location")!,
     );
-    const browser = login.headers.getSetCookie()
+    const browser = login.headers
+      .getSetCookie()
       .map((cookie) => cookie.split(";")[0])
       .filter((pair) => !pair.endsWith("="));
 
     // A different instance than the one that started the flow.
-    return await fixture.isolate({ statelessAuthRequests }).request(
-      new URL(callbackUrl).pathname + new URL(callbackUrl).search,
-      { headers: { cookie: browser.join("; ") } },
-    );
+    return await fixture
+      .isolate({ statelessAuthRequests })
+      .request(new URL(callbackUrl).pathname + new URL(callbackUrl).search, {
+        headers: { cookie: browser.join("; ") },
+      });
   }
 
   it("completes when the pending request rides in a cookie", async () => {
     const response = await signIn(true);
-    assertStrictEquals(response.status, 302);
-    assertStrictEquals(response.headers.get("location"), "/home");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/home");
     await response.body?.cancel();
   });
 
   it("fails when the pending request lives in the starting isolate's memory", async () => {
     const response = await signIn(false);
-    assertStrictEquals(response.status, 400);
-    assertStrictEquals((await response.json()).error, "invalid_grant");
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("invalid_grant");
   });
 });

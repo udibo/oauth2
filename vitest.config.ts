@@ -4,7 +4,7 @@ const config: ViteUserConfig = defineConfig({
   test: {
     testTimeout: 30_000,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    exclude: ["src/cli/**", "src/adapters/**", "src/react/**", "node_modules"],
+    exclude: ["src/cli/**", "src/react/**", "node_modules"],
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "lcov"],

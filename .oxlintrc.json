@@ -49,7 +49,6 @@
     "src/react/**/*.test.tsx",
     "src/react/_test_*.ts",
     "src/react/**/*.e2e.ts",
-    "src/adapters/**/*.test.ts",
     "scripts/doc-*.ts",
     "scripts/llms.ts",
     "scripts/prepare-*.ts",

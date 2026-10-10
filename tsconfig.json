@@ -23,7 +23,6 @@
   "exclude": [
     "src/cli",
     "src/**/*.e2e.ts",
-    "src/adapters/**/*.test.ts",
     "src/react/**/*.test.tsx",
     "src/react/_test_*.ts"
   ]

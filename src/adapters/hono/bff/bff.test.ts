@@ -1,15 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertMatch,
-  assertNotStrictEquals,
-  assertStrictEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { serve } from "../../../_test_server.ts";
+import { thrown } from "../../../_test_assert.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -156,7 +147,7 @@ async function performAuthorizeRedirect(
     new Request(authorizeUrl),
     () => Promise.resolve({ user: testUser }),
   );
-  assertStrictEquals(response.status, 302);
+  expect(response.status).toBe(302);
   return response.headers.get("Location")!;
 }
 
@@ -178,10 +169,7 @@ function withCookies(
 ): RequestInit {
   const headers = new Headers(init?.headers);
   const existing = headers.get("cookie");
-  headers.set(
-    "cookie",
-    [...(existing ? [existing] : []), ...pairs].join("; "),
-  );
+  headers.set("cookie", [...(existing ? [existing] : []), ...pairs].join("; "));
   return { ...init, headers };
 }
 
@@ -234,10 +222,7 @@ describe("HonoBff", () => {
     callbackInit?: RequestInit,
   ): Promise<Response> {
     const { callbackPath, cookies } = await beginLogin(app, loginPath);
-    return await app.request(
-      callbackPath,
-      withCookies(callbackInit, cookies),
-    );
+    return await app.request(callbackPath, withCookies(callbackInit, cookies));
   }
 
   /**
@@ -288,21 +273,19 @@ describe("HonoBff", () => {
       const bff = makeBff();
       const authorizeUrl =
         "/authorize?response_type=code&client_id=bff-client&state=abc";
-      assertStrictEquals(bff.loginContinuation(authorizeUrl), authorizeUrl);
+      expect(bff.loginContinuation(authorizeUrl)).toBe(authorizeUrl);
     });
 
     it("starts a fresh login for a normal path", () => {
       const bff = makeBff();
-      assertStrictEquals(
-        bff.loginContinuation("/dashboard"),
+      expect(bff.loginContinuation("/dashboard")).toBe(
         "/auth/login?return_to=%2Fdashboard",
       );
     });
 
     it("falls back to defaultReturnTo when returnTo is missing", () => {
       const bff = makeBff();
-      assertStrictEquals(
-        bff.loginContinuation(undefined),
+      expect(bff.loginContinuation(undefined)).toBe(
         "/auth/login?return_to=%2Fhome",
       );
     });
@@ -310,8 +293,7 @@ describe("HonoBff", () => {
     it("guards against open redirects (off-site → fresh login to default)", () => {
       const bff = makeBff();
       for (const evil of ["https://evil.example/x", "//evil.example", "/\\e"]) {
-        assertStrictEquals(
-          bff.loginContinuation(evil),
+        expect(bff.loginContinuation(evil)).toBe(
           "/auth/login?return_to=%2Fhome",
         );
       }
@@ -319,18 +301,14 @@ describe("HonoBff", () => {
 
     it("matches the authorize path exactly (not by prefix)", () => {
       const bff = makeBff();
-      assertStrictEquals(
-        bff.loginContinuation("/authorized-devices"),
+      expect(bff.loginContinuation("/authorized-devices")).toBe(
         "/auth/login?return_to=%2Fauthorized-devices",
       );
     });
 
     it("honors a custom login path", () => {
       const bff = makeBff({ paths: { login: "/auth/signin" } });
-      assertStrictEquals(
-        bff.loginContinuation("/x"),
-        "/auth/signin?return_to=%2Fx",
-      );
+      expect(bff.loginContinuation("/x")).toBe("/auth/signin?return_to=%2Fx");
     });
   });
 
@@ -351,28 +329,28 @@ describe("HonoBff", () => {
     it("completes the callback without the CSRF header (state, not the header, guards it)", async () => {
       const { bff, app } = csrfApp();
       const cbRes = await completeLogin(app);
-      assertStrictEquals(cbRes.status, 302);
+      expect(cbRes.status).toBe(302);
 
       const cookie = `oauth2_session=${cookieValue(cbRes, "oauth2_session")}`;
       assert(await readTestSession(bff, cookie));
       const res = await app.request("/auth/session", {
         headers: { cookie, ...CSRF },
       });
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("allows an anonymous /auth/session probe (no cookie, no header)", async () => {
       const { app } = csrfApp();
       const res = await app.request("/auth/session");
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals((await res.json()).isAuthenticated, false);
+      expect(res.status).toBe(200);
+      expect((await res.json()).isAuthenticated).toBe(false);
     });
 
     it("rejects a credentialed /auth/session without the header (403)", async () => {
       const { bff, app } = csrfApp();
       const cookie = await seedSession(bff);
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
     });
 
@@ -382,8 +360,8 @@ describe("HonoBff", () => {
       const res = await app.request("/auth/session", {
         headers: { cookie, ...CSRF },
       });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect(res.status).toBe(200);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("enriches the authenticated payload with sessionExpiresIn + logoutUrl (no tokens)", async () => {
@@ -393,18 +371,21 @@ describe("HonoBff", () => {
         headers: { cookie, ...CSRF },
       });
       const body = await res.json();
-      assertStrictEquals(body.isAuthenticated, true);
-      assertStrictEquals(body.logoutUrl, "/auth/logout");
-      assertEquals(typeof body.sessionExpiresIn, "number");
-      assertEquals(body.sessionExpiresIn >= 0, true);
-      assertEquals("tokens" in body, false);
-      assertEquals("accessToken" in body, false);
+      expect(body.isAuthenticated).toBe(true);
+      expect(body.logoutUrl).toBe("/auth/logout");
+      expect(typeof body.sessionExpiresIn).toStrictEqual("number");
+      expect(body.sessionExpiresIn >= 0).toStrictEqual(true);
+      expect("tokens" in body).toStrictEqual(false);
+      expect("accessToken" in body).toStrictEqual(false);
     });
 
     it("keeps the anonymous payload minimal (backward compatible)", async () => {
       const { app } = csrfApp();
       const res = await app.request("/auth/session");
-      assertEquals(await res.json(), { isAuthenticated: false, user: null });
+      expect(await res.json()).toStrictEqual({
+        isAuthenticated: false,
+        user: null,
+      });
     });
 
     it("rejects POST /auth/logout without the header and keeps the session", async () => {
@@ -414,7 +395,7 @@ describe("HonoBff", () => {
         method: "POST",
         headers: { cookie },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
       assert(await readTestSession(bff, cookie));
     });
@@ -426,9 +407,9 @@ describe("HonoBff", () => {
         method: "POST",
         headers: { cookie, ...CSRF },
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
-      assertStrictEquals(await readTestSession(bff, cookie), null);
+      expect(await readTestSession(bff, cookie)).toBe(null);
     });
 
     it("rejects a cross-origin GET /auth/logout (same-origin guard)", async () => {
@@ -437,7 +418,7 @@ describe("HonoBff", () => {
       const res = await app.request("http://localhost/auth/logout", {
         headers: { cookie, origin: "https://evil.example" },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
       assert(await readTestSession(bff, cookie));
     });
@@ -450,7 +431,7 @@ describe("HonoBff", () => {
           origin: "http://localhost",
         },
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
     });
 
@@ -462,7 +443,7 @@ describe("HonoBff", () => {
           referer: "http://localhost/dashboard",
         },
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
     });
 
@@ -472,7 +453,7 @@ describe("HonoBff", () => {
       const res = await app.request("http://localhost/auth/logout", {
         headers: { cookie },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
       assert(await readTestSession(bff, cookie));
     });
@@ -485,7 +466,7 @@ describe("HonoBff", () => {
           "sec-fetch-site": "same-origin",
         },
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
     });
 
@@ -497,7 +478,7 @@ describe("HonoBff", () => {
           "sec-fetch-site": "none",
         },
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
     });
 
@@ -508,7 +489,7 @@ describe("HonoBff", () => {
         const res = await app.request("http://localhost/auth/logout", {
           headers: { cookie, "sec-fetch-site": site },
         });
-        assertStrictEquals(res.status, 403, `${site} should be rejected`);
+        expect(res.status, `${site} should be rejected`).toBe(403);
         await res.body?.cancel();
         assert(
           await readTestSession(bff, cookie),
@@ -527,7 +508,7 @@ describe("HonoBff", () => {
           "sec-fetch-site": "cross-site",
         },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
       assert(await readTestSession(bff, cookie));
     });
@@ -538,7 +519,7 @@ describe("HonoBff", () => {
       const res = await app.request("http://localhost/auth/logout", {
         headers: { cookie, "sec-fetch-site": "Same-Origin" },
       });
-      assertStrictEquals(res.status, 403);
+      expect(res.status).toBe(403);
       await res.body?.cancel();
       assert(await readTestSession(bff, cookie));
     });
@@ -546,7 +527,7 @@ describe("HonoBff", () => {
     it("leaves an anonymous GET /auth/logout unguarded (no session to abuse)", async () => {
       const { app } = csrfApp();
       const res = await app.request("http://localhost/auth/logout");
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       await res.body?.cancel();
     });
 
@@ -566,16 +547,16 @@ describe("HonoBff", () => {
 
       const cookie = await protectedSession(bff);
       const denied = await app.request("/api/me", { headers: { cookie } });
-      assertStrictEquals(denied.status, 403);
+      expect(denied.status).toBe(403);
       await denied.body?.cancel();
-      assertStrictEquals(served, 0);
+      expect(served).toBe(0);
 
       const allowed = await app.request("/api/me", {
         headers: { cookie, ...CSRF },
       });
-      assertStrictEquals(allowed.status, 200);
+      expect(allowed.status).toBe(200);
       await allowed.body?.cancel();
-      assertStrictEquals(served, 1);
+      expect(served).toBe(1);
     });
 
     it("protect() lets an inbound bearer past the header requirement and authenticates it, not the session", async () => {
@@ -600,8 +581,8 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { cookie, authorization: "Bearer inbound-token" },
       });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals((await res.json()).id, bearerUser.id);
+      expect(res.status).toBe(200);
+      expect((await res.json()).id).toBe(bearerUser.id);
     });
 
     it("attachToken() rejects the cookie path without the header and attaches nothing", async () => {
@@ -618,16 +599,16 @@ describe("HonoBff", () => {
         tokens: { accessToken: "session-token" },
       });
       const denied = await app.request("/api/echo", { headers: { cookie } });
-      assertStrictEquals(denied.status, 403);
+      expect(denied.status).toBe(403);
       await denied.body?.cancel();
-      assertEquals(seen, []);
+      expect(seen).toStrictEqual([]);
 
       const allowed = await app.request("/api/echo", {
         headers: { cookie, ...CSRF },
       });
-      assertStrictEquals(allowed.status, 200);
+      expect(allowed.status).toBe(200);
       await allowed.body?.cancel();
-      assertEquals(seen, ["Bearer session-token"]);
+      expect(seen).toStrictEqual(["Bearer session-token"]);
     });
 
     it("attachToken() lets an inbound bearer past the header requirement, then overwrites it with the session token", async () => {
@@ -646,9 +627,9 @@ describe("HonoBff", () => {
       const res = await app.request("/api/echo", {
         headers: { cookie, authorization: "Bearer inbound-token" },
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       await res.body?.cancel();
-      assertEquals(seen, ["Bearer session-token"]);
+      expect(seen).toStrictEqual(["Bearer session-token"]);
     });
 
     it("proxy() refuses a bearer token on the cookie path (no bearer bypass there)", async () => {
@@ -672,9 +653,9 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { cookie, authorization: "Bearer inbound-token" },
       });
-      assertStrictEquals(res.status, 403);
-      assertStrictEquals((await res.json()).error, "csrf_validation_failed");
-      assertStrictEquals(upstreamCalls, 0);
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("csrf_validation_failed");
+      expect(upstreamCalls).toBe(0);
     });
 
     it("supports a custom header name + value", async () => {
@@ -685,12 +666,12 @@ describe("HonoBff", () => {
       const bad = await app.request("/auth/session", {
         headers: { cookie, "x-token-handler": "no" },
       });
-      assertStrictEquals(bad.status, 403);
+      expect(bad.status).toBe(403);
       await bad.body?.cancel();
       const ok = await app.request("/auth/session", {
         headers: { cookie, "x-token-handler": "v1" },
       });
-      assertStrictEquals(ok.status, 200);
+      expect(ok.status).toBe(200);
       await ok.body?.cancel();
     });
 
@@ -701,7 +682,7 @@ describe("HonoBff", () => {
         user: { sub: testUser.id },
       });
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
     });
   });
 
@@ -721,18 +702,18 @@ describe("HonoBff", () => {
         csrf: false,
       });
       const setCookie = await setCookieAfterLogin(bff);
-      assertEquals(setCookie.includes("__Host-oauth2_session="), true);
-      assertEquals(setCookie.includes("SameSite=Strict"), true);
-      assertEquals(setCookie.includes("Secure"), true);
-      assertEquals(setCookie.includes("Path=/"), true);
-      assertEquals(setCookie.includes("HttpOnly"), true);
+      expect(setCookie.includes("__Host-oauth2_session=")).toStrictEqual(true);
+      expect(setCookie.includes("SameSite=Strict")).toStrictEqual(true);
+      expect(setCookie.includes("Secure")).toStrictEqual(true);
+      expect(setCookie.includes("Path=/")).toStrictEqual(true);
+      expect(setCookie.includes("HttpOnly")).toStrictEqual(true);
     });
 
     it("drops the __Host- prefix when Secure is disabled (local HTTP)", async () => {
       const bff = makeBff();
       const setCookie = await setCookieAfterLogin(bff);
-      assertEquals(setCookie.includes("__Host-"), false);
-      assertEquals(/(^|[^-])oauth2_session=/.test(setCookie), true);
+      expect(setCookie.includes("__Host-")).toStrictEqual(false);
+      expect(/(^|[^-])oauth2_session=/.test(setCookie)).toStrictEqual(true);
     });
 
     it("honors an explicit name and SameSite override", async () => {
@@ -743,8 +724,8 @@ describe("HonoBff", () => {
         cookie: { name: "sess", sameSite: "Lax", secure: true },
       });
       const setCookie = await setCookieAfterLogin(bff);
-      assertEquals(setCookie.includes("sess="), true);
-      assertEquals(setCookie.includes("SameSite=Lax"), true);
+      expect(setCookie.includes("sess=")).toStrictEqual(true);
+      expect(setCookie.includes("SameSite=Lax")).toStrictEqual(true);
     });
 
     it("drops the __Host- prefix when cookie.domain is set without a name", () => {
@@ -754,7 +735,7 @@ describe("HonoBff", () => {
         csrf: false,
         cookie: { domain: "example.com" },
       });
-      assertStrictEquals(bff.cookieName, "oauth2_session");
+      expect(bff.cookieName).toBe("oauth2_session");
     });
 
     it("drops the __Host- prefix when cookie.path is not / without a name", () => {
@@ -764,7 +745,7 @@ describe("HonoBff", () => {
         csrf: false,
         cookie: { path: "/app" },
       });
-      assertStrictEquals(bff.cookieName, "oauth2_session");
+      expect(bff.cookieName).toBe("oauth2_session");
     });
 
     it("emits a Domain-scoped cookie with no prefix for a domain deployment", async () => {
@@ -775,11 +756,11 @@ describe("HonoBff", () => {
         cookie: { domain: "example.com" },
       });
       const setCookie = await setCookieAfterLogin(bff);
-      assertEquals(setCookie.includes("__Host-"), false);
-      assertEquals(setCookie.includes("__Secure-"), false);
-      assertEquals(/(^|[^-])oauth2_session=/.test(setCookie), true);
-      assertEquals(setCookie.includes("Domain=example.com"), true);
-      assertEquals(setCookie.includes("Secure"), true);
+      expect(setCookie.includes("__Host-")).toStrictEqual(false);
+      expect(setCookie.includes("__Secure-")).toStrictEqual(false);
+      expect(/(^|[^-])oauth2_session=/.test(setCookie)).toStrictEqual(true);
+      expect(setCookie.includes("Domain=example.com")).toStrictEqual(true);
+      expect(setCookie.includes("Secure")).toStrictEqual(true);
     });
 
     it("keeps the __Host- prefix when only SameSite and Max-Age are customized", () => {
@@ -790,11 +771,11 @@ describe("HonoBff", () => {
         sessionMaxAgeMs: 3600 * 1000,
         cookie: { sameSite: "Lax", maxAge: 3600 },
       });
-      assertStrictEquals(bff.cookieName, "__Host-oauth2_session");
+      expect(bff.cookieName).toBe("__Host-oauth2_session");
     });
 
     it("throws when an explicit __Host- name is combined with a domain", () => {
-      assertThrows(
+      thrown(
         () =>
           new HonoBff({
             client: fixture.oauthClient,
@@ -808,7 +789,7 @@ describe("HonoBff", () => {
     });
 
     it("throws when an explicit __Host- name is combined with a non-/ path", () => {
-      assertThrows(
+      thrown(
         () =>
           new HonoBff({
             client: fixture.oauthClient,
@@ -822,7 +803,7 @@ describe("HonoBff", () => {
     });
 
     it("throws when an explicit __Host- name is combined with secure: false", () => {
-      assertThrows(
+      thrown(
         () =>
           new HonoBff({
             client: fixture.oauthClient,
@@ -836,7 +817,7 @@ describe("HonoBff", () => {
     });
 
     it("throws when an explicit __Secure- name is combined with secure: false", () => {
-      assertThrows(
+      thrown(
         () =>
           new HonoBff({
             client: fixture.oauthClient,
@@ -850,7 +831,7 @@ describe("HonoBff", () => {
     });
 
     it("matches the prefixes case-insensitively, as browsers do", () => {
-      assertThrows(
+      thrown(
         () =>
           new HonoBff({
             client: fixture.oauthClient,
@@ -870,7 +851,7 @@ describe("HonoBff", () => {
         csrf: false,
         cookie: { name: "__Host-sess", secure: true, path: "/" },
       });
-      assertStrictEquals(bff.cookieName, "__Host-sess");
+      expect(bff.cookieName).toBe("__Host-sess");
     });
 
     it("accepts an unprefixed explicit name alongside a domain", () => {
@@ -880,7 +861,7 @@ describe("HonoBff", () => {
         csrf: false,
         cookie: { name: "sess", domain: "example.com" },
       });
-      assertStrictEquals(bff.cookieName, "sess");
+      expect(bff.cookieName).toBe("sess");
     });
   });
 
@@ -891,16 +872,16 @@ describe("HonoBff", () => {
     async function sessionSetCookie(bff: HonoBff): Promise<string> {
       const app = makeApp(bff);
       const cbRes = await completeLogin(app);
-      const setCookie = cbRes.headers.getSetCookie().find((cookie) =>
-        cookie.startsWith(`${bff.cookieName}=`)
-      )!;
+      const setCookie = cbRes.headers
+        .getSetCookie()
+        .find((cookie) => cookie.startsWith(`${bff.cookieName}=`))!;
       await cbRes.body?.cancel();
       return setCookie;
     }
 
     it("gives a BFF configured with no cookie or session options a Max-Age", async () => {
       const setCookie = await sessionSetCookie(makeBff());
-      assertStringIncludes(setCookie, `Max-Age=${DEFAULT_SECONDS}`);
+      expect(setCookie).toContain(`Max-Age=${DEFAULT_SECONDS}`);
     });
 
     it("matches the cookie's Max-Age to the stateless store's default bound", async () => {
@@ -910,14 +891,14 @@ describe("HonoBff", () => {
       const setCookie = await sessionSetCookie(
         makeBff({ sessionStore: store }),
       );
-      assertStringIncludes(setCookie, `Max-Age=${store.maxAgeMs / 1000}`);
+      expect(setCookie).toContain(`Max-Age=${store.maxAgeMs / 1000}`);
     });
 
     it("derives the cookie's Max-Age from sessionMaxAgeMs", async () => {
       const setCookie = await sessionSetCookie(
         makeBff({ sessionMaxAgeMs: 3 * DAY_SECONDS * 1000 }),
       );
-      assertStringIncludes(setCookie, `Max-Age=${3 * DAY_SECONDS}`);
+      expect(setCookie).toContain(`Max-Age=${3 * DAY_SECONDS}`);
     });
 
     it("re-stamps the Max-Age when a refresh rotates the cookie, not only at the callback", async () => {
@@ -943,17 +924,19 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { cookie: `oauth2_session=${sess}`, "x-csrf": "1" },
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       await res.body?.cancel();
-      const rotated = res.headers.getSetCookie().find((cookie) =>
-        cookie.startsWith("oauth2_session=")
-      )!;
-      assertEquals(rotated.startsWith(`oauth2_session=${sess};`), false);
-      assertStringIncludes(rotated, `Max-Age=${DEFAULT_SECONDS}`);
+      const rotated = res.headers
+        .getSetCookie()
+        .find((cookie) => cookie.startsWith("oauth2_session="))!;
+      expect(rotated.startsWith(`oauth2_session=${sess};`)).toStrictEqual(
+        false,
+      );
+      expect(rotated).toContain(`Max-Age=${DEFAULT_SECONDS}`);
     });
 
     it("throws when cookie.maxAge is shorter than the session lifetime", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ cookie: { secure: false, maxAge: 3600 } }),
         Error,
         "the browser drops the cookie while the session stays active and listed",
@@ -961,7 +944,7 @@ describe("HonoBff", () => {
     });
 
     it("throws when a store outlives the cookie the BFF would write", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             sessionStore: new EncryptedCookieSessionStore({
@@ -975,7 +958,7 @@ describe("HonoBff", () => {
     });
 
     it("points a store/cookie mismatch at sessionMaxAgeMs, the knob that was never set", () => {
-      const error = assertThrows(
+      const error = thrown(
         () =>
           makeBff({
             sessionStore: new EncryptedCookieSessionStore({
@@ -985,16 +968,14 @@ describe("HonoBff", () => {
           }),
         Error,
       );
-      assertStringIncludes(
+      expect(
         error.message,
-        "taken from sessionMaxAgeMs",
         "naming cookie.maxAge sends the reader to an option they never set",
-      );
-      assertStringIncludes(
+      ).toContain("taken from sessionMaxAgeMs");
+      expect(
         error.message,
-        `Set sessionMaxAgeMs to ${30 * DAY_SECONDS * 1000}`,
         "the remedy must name the knob and the value that resolves it",
-      );
+      ).toContain(`Set sessionMaxAgeMs to ${30 * DAY_SECONDS * 1000}`);
     });
 
     it("accepts a cookie that outlives the session, which ends first", async () => {
@@ -1004,11 +985,11 @@ describe("HonoBff", () => {
           cookie: { secure: false, maxAge: 2 * DAY_SECONDS },
         }),
       );
-      assertStringIncludes(setCookie, `Max-Age=${2 * DAY_SECONDS}`);
+      expect(setCookie).toContain(`Max-Age=${2 * DAY_SECONDS}`);
     });
 
     it("rejects a lifetime past the 400-day cookie cap at construction, not at the first response", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ sessionMaxAgeMs: 401 * DAY_SECONDS * 1000 }),
         Error,
         "must not exceed 400 days",
@@ -1023,14 +1004,14 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const setCookie = await sessionSetCookie(bff);
-      assertEquals(setCookie.includes("Max-Age"), false);
+      expect(setCookie.includes("Max-Age")).toStrictEqual(false);
 
       const cookie = await createTestSession(bff, {
         user: { sub: testUser.id },
         createdAt: Date.now() - (DAY_SECONDS * 1000 + 1),
       });
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals((await res.json()).isAuthenticated, false);
+      expect((await res.json()).isAuthenticated).toBe(false);
     });
 
     it("destroys a session older than sessionMaxAgeMs and clears its cookie", async () => {
@@ -1044,12 +1025,9 @@ describe("HonoBff", () => {
 
       const res = await app.request("/auth/session", { headers: { cookie } });
 
-      assertStrictEquals((await res.json()).isAuthenticated, false);
-      assertStringIncludes(
-        res.headers.getSetCookie().join("\n"),
-        "Max-Age=0",
-      );
-      assertStrictEquals(await store.read(cookie.split("=")[1]), null);
+      expect((await res.json()).isAuthenticated).toBe(false);
+      expect(res.headers.getSetCookie().join("\n")).toContain("Max-Age=0");
+      expect(await store.read(cookie.split("=")[1])).toBe(null);
     });
 
     it("keeps a session younger than sessionMaxAgeMs", async () => {
@@ -1061,7 +1039,7 @@ describe("HonoBff", () => {
       });
 
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("leaves the session's age to the app in sessionMode: shared", async () => {
@@ -1079,7 +1057,7 @@ describe("HonoBff", () => {
       });
 
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("does not age out a session whose createdAt a store failed to preserve", async () => {
@@ -1091,7 +1069,7 @@ describe("HonoBff", () => {
       });
 
       const res = await app.request("/auth/session", { headers: { cookie } });
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("never re-stamps the app's session cookie in shared mode (#726)", async () => {
@@ -1122,22 +1100,20 @@ describe("HonoBff", () => {
         headers: { cookie: `session_id=${appSessionId}` },
       });
       await cbRes.body?.cancel();
-      assertStrictEquals(
+      expect(
         cookieValue(cbRes, "session_id"),
-        undefined,
         "the callback must not replace the attributes the app chose",
-      );
+      ).toBe(undefined);
 
       const refreshed = await app.request("/api/me", {
         headers: { cookie: `session_id=${appSessionId}`, "x-csrf": "1" },
       });
       await refreshed.body?.cancel();
-      assertStrictEquals(refreshed.status, 200);
-      assertStrictEquals(
+      expect(refreshed.status).toBe(200);
+      expect(
         refreshed.headers.get("set-cookie"),
-        null,
         "the refresh re-stamp must not replace them either",
-      );
+      ).toBe(null);
     });
 
     it("mints an ephemeral cookie in shared mode, leaving the lifetime to the app", async () => {
@@ -1151,20 +1127,22 @@ describe("HonoBff", () => {
       const res = await completeLogin(app, "/auth/login");
       await res.body?.cancel();
 
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       assert(
         cookieValue(res, "session_id") !== undefined,
         "the BFF still writes the session it created",
       );
-      const sessionCookie = res.headers.getSetCookie().find((line) =>
-        line.startsWith("session_id=") && !line.startsWith("session_id=;")
-      );
+      const sessionCookie = res.headers
+        .getSetCookie()
+        .find(
+          (line) =>
+            line.startsWith("session_id=") && !line.startsWith("session_id=;"),
+        );
       assert(sessionCookie, "the BFF wrote the session cookie");
-      assertEquals(
+      expect(
         /Max-Age/i.test(sessionCookie),
-        false,
         "the app owns the lifetime, so the BFF stamps no Max-Age of its own",
-      );
+      ).toStrictEqual(false);
     });
 
     it("uses an explicit cookie.maxAge for the cookie it mints in shared mode", async () => {
@@ -1179,7 +1157,7 @@ describe("HonoBff", () => {
       await res.body?.cancel();
 
       assert(cookieValue(res, "session_id") !== undefined);
-      assertMatch(res.headers.get("set-cookie") ?? "", /Max-Age=60\b/);
+      expect(res.headers.get("set-cookie") ?? "").toMatch(/Max-Age=60\b/);
     });
   });
 
@@ -1226,18 +1204,16 @@ describe("HonoBff", () => {
         "http://localhost/auth/logout?return_to=/done",
         { method: "POST", headers: { cookie: `oauth2_session=${cookie}` } },
       );
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const loc = new URL(res.headers.get("Location")!);
-      assertStrictEquals(loc.origin + loc.pathname, `${ISSUER}/end_session`);
-      assertStrictEquals(loc.searchParams.get("id_token_hint"), "the-id-token");
-      assertStrictEquals(
-        loc.searchParams.get("post_logout_redirect_uri"),
+      expect(loc.origin + loc.pathname).toBe(`${ISSUER}/end_session`);
+      expect(loc.searchParams.get("id_token_hint")).toBe("the-id-token");
+      expect(loc.searchParams.get("post_logout_redirect_uri")).toBe(
         `${ISSUER}/done`,
       );
-      assertEquals(
+      expect(
         (res.headers.get("set-cookie") ?? "").includes("oauth2_session="),
-        true,
-      );
+      ).toStrictEqual(true);
     });
 
     it("omits id_token_hint when the session has no id_token", async () => {
@@ -1249,10 +1225,9 @@ describe("HonoBff", () => {
         headers: { cookie: `oauth2_session=${cookie}` },
       });
       const loc = new URL(res.headers.get("Location")!);
-      assertStrictEquals(loc.origin + loc.pathname, `${ISSUER}/end_session`);
-      assertStrictEquals(loc.searchParams.has("id_token_hint"), false);
-      assertStrictEquals(
-        loc.searchParams.get("post_logout_redirect_uri"),
+      expect(loc.origin + loc.pathname).toBe(`${ISSUER}/end_session`);
+      expect(loc.searchParams.has("id_token_hint")).toBe(false);
+      expect(loc.searchParams.get("post_logout_redirect_uri")).toBe(
         `${ISSUER}/`,
       );
       await res.body?.cancel();
@@ -1267,8 +1242,7 @@ describe("HonoBff", () => {
         { method: "POST", headers: { cookie: `oauth2_session=${cookie}` } },
       );
       const loc = new URL(res.headers.get("Location")!);
-      assertStrictEquals(
-        loc.searchParams.get("post_logout_redirect_uri"),
+      expect(loc.searchParams.get("post_logout_redirect_uri")).toBe(
         `${ISSUER}/`,
       );
       await res.body?.cancel();
@@ -1278,11 +1252,11 @@ describe("HonoBff", () => {
       const bff = makeBff({ rpInitiatedLogout: true });
       const app = makeApp(bff);
       const warnings: string[] = [];
-      using _warn = stub(
-        console,
-        "warn",
-        (...args: unknown[]) => void warnings.push(String(args[0])),
-      );
+      using _warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(
+          (...args: unknown[]) => void warnings.push(String(args[0])),
+        );
 
       for (const _attempt of [1, 2]) {
         const cookie = await bff.sessionStore.create({
@@ -1294,18 +1268,17 @@ describe("HonoBff", () => {
           method: "POST",
           headers: { cookie: `oauth2_session=${cookie}` },
         });
-        assertStrictEquals(res.status, 302);
-        assertStrictEquals(res.headers.get("Location"), "/done");
+        expect(res.status).toBe(302);
+        expect(res.headers.get("Location")).toBe("/done");
         await res.body?.cancel();
       }
 
-      assertStrictEquals(
+      expect(
         warnings.length,
-        1,
         "the operator is told the logout is local-only — once, not per request",
-      );
-      assertStringIncludes(warnings[0], "rpInitiatedLogout is enabled");
-      assertStringIncludes(warnings[0], "endpoints.endSession");
+      ).toBe(1);
+      expect(warnings[0]).toContain("rpInitiatedLogout is enabled");
+      expect(warnings[0]).toContain("endpoints.endSession");
     });
 
     it("default (off) does a plain local redirect even with an end-session endpoint", async () => {
@@ -1316,17 +1289,15 @@ describe("HonoBff", () => {
         method: "POST",
         headers: { cookie: `oauth2_session=${cookie}` },
       });
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(res.headers.get("Location"), "/done");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/done");
       await res.body?.cancel();
     });
   });
 
   describe("Back-Channel Logout", () => {
     function makeBcBff(
-      verify: (
-        t: string,
-      ) => { sub?: string; sid?: string } | null,
+      verify: (t: string) => { sub?: string; sid?: string } | null,
       maxBodyBytes?: number,
     ) {
       const store = new MemorySessionStore();
@@ -1368,7 +1339,7 @@ describe("HonoBff", () => {
       const res = await makeApp(makeBff()).request("/auth/backchannel", {
         method: "POST",
       });
-      assertStrictEquals(res.status, 404);
+      expect(res.status).toBe(404);
       await res.body?.cancel();
     });
 
@@ -1380,12 +1351,12 @@ describe("HonoBff", () => {
       const other = await seed(store, { user: { sub: "user-2" } });
 
       const res = await post(app, { logout_token: "tok" });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(res.headers.get("cache-control"), "no-store");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
       await res.body?.cancel();
-      assertStrictEquals(await store.read(a), null);
-      assertStrictEquals(await store.read(b), null);
-      assertEquals((await store.read(other)) !== null, true);
+      expect(await store.read(a)).toBe(null);
+      expect(await store.read(b)).toBe(null);
+      expect((await store.read(other)) !== null).toStrictEqual(true);
     });
 
     it("destroys only the matching session for a sid logout_token", async () => {
@@ -1395,16 +1366,16 @@ describe("HonoBff", () => {
       const kept = await seed(store, { user: { sub: "user-1" }, sid: "S2" });
 
       const res = await post(app, { logout_token: "tok" });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       await res.body?.cancel();
-      assertStrictEquals(await store.read(target), null);
-      assertEquals((await store.read(kept)) !== null, true);
+      expect(await store.read(target)).toBe(null);
+      expect((await store.read(kept)) !== null).toStrictEqual(true);
     });
 
     it("rejects a missing logout_token (400)", async () => {
       const { bff } = makeBcBff(() => ({ sub: "x" }));
       const res = await post(makeApp(bff), {});
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
     });
 
@@ -1413,12 +1384,12 @@ describe("HonoBff", () => {
         throw new Error("bad signature");
       });
       const resT = await post(makeApp(thrower.bff), { logout_token: "tok" });
-      assertStrictEquals(resT.status, 400);
+      expect(resT.status).toBe(400);
       await resT.body?.cancel();
 
       const nuller = makeBcBff(() => null);
       const resN = await post(makeApp(nuller.bff), { logout_token: "tok" });
-      assertStrictEquals(resN.status, 400);
+      expect(resN.status).toBe(400);
       await resN.body?.cancel();
     });
 
@@ -1465,26 +1436,16 @@ describe("HonoBff", () => {
         app: Hono,
         fn: (url: string) => Promise<void>,
       ): Promise<void> {
-        const http = Deno.serve(
-          { hostname: "127.0.0.1", port: 0, onListen: () => {} },
-          app.fetch,
-        );
-        try {
-          await fn(`http://127.0.0.1:${http.addr.port}/auth/backchannel`);
-        } finally {
-          await http.shutdown();
-        }
+        await using http = await serve(app.fetch);
+        await fn(`${http.origin}/auth/backchannel`);
       }
 
       async function assertRefused(res: Response): Promise<void> {
-        assertStrictEquals(res.status, 400);
-        assertStrictEquals(res.headers.get("cache-control"), "no-store");
+        expect(res.status).toBe(400);
+        expect(res.headers.get("cache-control")).toBe("no-store");
         const body = await res.json();
-        assertStrictEquals(body.error, "invalid_request");
-        assertStrictEquals(
-          body.error_description,
-          "request body is too large",
-        );
+        expect(body.error).toBe("invalid_request");
+        expect(body.error_description).toBe("request body is too large");
       }
 
       const formHeaders = {
@@ -1500,8 +1461,8 @@ describe("HonoBff", () => {
             body: paddedLogout(DEFAULT_LIMIT),
           });
           await res.body?.cancel();
-          assertStrictEquals(res.status, 200);
-          assertEquals(verified, ["tok"]);
+          expect(res.status).toBe(200);
+          expect(verified).toStrictEqual(["tok"]);
         });
       });
 
@@ -1514,7 +1475,7 @@ describe("HonoBff", () => {
             body: paddedLogout(DEFAULT_LIMIT + 1),
           });
           await assertRefused(res);
-          assertEquals(verified, []);
+          expect(verified).toStrictEqual([]);
         });
       });
 
@@ -1526,29 +1487,29 @@ describe("HonoBff", () => {
             method: "POST",
             headers: formHeaders,
             body: stream,
-          });
+            duplex: "half",
+          } as RequestInit);
           await assertRefused(res);
-          assertEquals(verified, []);
+          expect(verified).toStrictEqual([]);
         });
       });
 
       it("stops reading at the limit when Content-Length understates the body", async () => {
         const { app, verified } = makeCountingBff();
-        const { stream, state } = countingStream(
-          paddedLogout(4 * 1024 * 1024),
-        );
+        const { stream, state } = countingStream(paddedLogout(4 * 1024 * 1024));
         const res = await app.request("/auth/backchannel", {
           method: "POST",
           headers: { ...formHeaders, "content-length": "64" },
           body: stream,
-        });
+          duplex: "half",
+        } as RequestInit);
         await assertRefused(res);
         assert(
           state.pulled <= DEFAULT_LIMIT + CHUNK_BYTES,
           `read ${state.pulled} bytes past a ${DEFAULT_LIMIT}-byte limit`,
         );
         assert(state.cancelled, "the request body stream was not cancelled");
-        assertEquals(verified, []);
+        expect(verified).toStrictEqual([]);
       });
 
       it("refuses a body whose Content-Length declares more than the limit without reading it", async () => {
@@ -1558,10 +1519,11 @@ describe("HonoBff", () => {
           method: "POST",
           headers: { ...formHeaders, "content-length": `${1024 * 1024}` },
           body: stream,
-        });
+          duplex: "half",
+        } as RequestInit);
         await assertRefused(res);
-        assertStrictEquals(state.pulled, 0);
-        assertEquals(verified, []);
+        expect(state.pulled).toBe(0);
+        expect(verified).toStrictEqual([]);
       });
 
       it("applies a configured maxBodyBytes", async () => {
@@ -1573,7 +1535,7 @@ describe("HonoBff", () => {
             body: paddedLogout(512),
           });
           await atLimit.body?.cancel();
-          assertStrictEquals(atLimit.status, 200);
+          expect(atLimit.status).toBe(200);
 
           const overLimit = await fetch(url, {
             method: "POST",
@@ -1581,7 +1543,7 @@ describe("HonoBff", () => {
             body: paddedLogout(513),
           });
           await assertRefused(overLimit);
-          assertEquals(verified, ["tok"]);
+          expect(verified).toStrictEqual(["tok"]);
         });
       });
 
@@ -1597,13 +1559,13 @@ describe("HonoBff", () => {
 
         const res = await post(app, { logout_token: "tok" });
         await res.body?.cancel();
-        assertStrictEquals(res.status, 200);
-        assertStrictEquals(await store.read(session), null);
+        expect(res.status).toBe(200);
+        expect(await store.read(session)).toBe(null);
       });
 
       it("rejects a maxBodyBytes that is not a positive integer", () => {
         for (const maxBodyBytes of [0, -1, 1.5, Number.NaN, Infinity]) {
-          assertThrows(
+          thrown(
             () => makeBcBff(() => null, maxBodyBytes),
             RangeError,
             "maxBodyBytes",
@@ -1613,14 +1575,15 @@ describe("HonoBff", () => {
     });
 
     it("throws at construction with a stateless (incapable) store", () => {
-      assertThrows(() =>
-        new HonoBff({
-          client: fixture.oauthClient,
-          sessionStore: new EncryptedCookieSessionStore({
-            secret: crypto.getRandomValues(new Uint8Array(32)),
+      thrown(
+        () =>
+          new HonoBff({
+            client: fixture.oauthClient,
+            sessionStore: new EncryptedCookieSessionStore({
+              secret: crypto.getRandomValues(new Uint8Array(32)),
+            }),
+            backchannelLogout: { verifyLogoutToken: () => ({ sub: "x" }) },
           }),
-          backchannelLogout: { verifyLogoutToken: () => ({ sub: "x" }) },
-        })
       );
     });
   });
@@ -1648,8 +1611,7 @@ describe("HonoBff", () => {
 
       const loginRes = await app.request("http://localhost/auth/login");
       const authorizeUrl = loginRes.headers.get("Location")!;
-      assertStrictEquals(
-        new URL(authorizeUrl).searchParams.get("redirect_uri"),
+      expect(new URL(authorizeUrl).searchParams.get("redirect_uri")).toBe(
         "http://localhost/auth/callback",
       );
 
@@ -1661,8 +1623,10 @@ describe("HonoBff", () => {
         callback.slice(ISSUER.length),
         withCookies(undefined, jar(loginRes)),
       );
-      assertStrictEquals(cbRes.status, 302);
-      assertEquals(typeof cookieValue(cbRes, "oauth2_session"), "string");
+      expect(cbRes.status).toBe(302);
+      expect(typeof cookieValue(cbRes, "oauth2_session")).toStrictEqual(
+        "string",
+      );
     });
   });
 
@@ -1670,7 +1634,7 @@ describe("HonoBff", () => {
     /** The authorize URL `/auth/login` produces, and its query parameters. */
     async function authorizeUrl(app: Hono, path = "/auth/login"): Promise<URL> {
       const res = await app.request(path);
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const location = res.headers.get("Location")!;
       await res.body?.cancel();
       return new URL(location);
@@ -1682,26 +1646,22 @@ describe("HonoBff", () => {
 
     it("sends only the client's own parameters when neither option is set", async () => {
       const url = await authorizeUrl(makeApp(makeBff()));
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("adds a configured extraParams entry to the authorize request", async () => {
       const app = makeApp(makeBff({ extraParams: { organization: "acme" } }));
       const url = await authorizeUrl(app);
-      assertEquals(url.searchParams.get("organization"), "acme");
-      assertEquals(
-        paramNames(url),
-        [
-          ...BASE_AUTHORIZE_PARAMS,
-          "organization",
-        ].sort(),
+      expect(url.searchParams.get("organization")).toStrictEqual("acme");
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "organization"].sort(),
       );
     });
 
     it("keeps a configured extraParams entry out of the browser's reach", async () => {
       const app = makeApp(makeBff({ extraParams: { organization: "acme" } }));
       const url = await authorizeUrl(app, "/auth/login?organization=evil");
-      assertEquals(url.searchParams.getAll("organization"), ["acme"]);
+      expect(url.searchParams.getAll("organization")).toStrictEqual(["acme"]);
     });
 
     it("drops a query parameter no option named", async () => {
@@ -1709,32 +1669,28 @@ describe("HonoBff", () => {
         makeApp(makeBff()),
         "/auth/login?organization=acme",
       );
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("drops a query parameter when a different name is forwarded", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["ui_locales"] }));
       const url = await authorizeUrl(app, "/auth/login?organization=acme");
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("forwards a query parameter forwardedParams names", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["organization"] }));
       const url = await authorizeUrl(app, "/auth/login?organization=acme");
-      assertEquals(url.searchParams.get("organization"), "acme");
-      assertEquals(
-        paramNames(url),
-        [
-          ...BASE_AUTHORIZE_PARAMS,
-          "organization",
-        ].sort(),
+      expect(url.searchParams.get("organization")).toStrictEqual("acme");
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "organization"].sort(),
       );
     });
 
     it("omits a forwarded parameter the request did not carry", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["organization"] }));
       const url = await authorizeUrl(app, "/auth/login?return_to=/dashboard");
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("sends one value for a forwarded parameter the request repeats", async () => {
@@ -1743,7 +1699,7 @@ describe("HonoBff", () => {
         app,
         "/auth/login?organization=acme&organization=evil",
       );
-      assertEquals(url.searchParams.getAll("organization"), ["acme"]);
+      expect(url.searchParams.getAll("organization")).toStrictEqual(["acme"]);
     });
 
     it("reads a forwarded parameter from the query string, not a POST body", async () => {
@@ -1753,10 +1709,10 @@ describe("HonoBff", () => {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: "organization=acme",
       });
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const url = new URL(res.headers.get("Location")!);
       await res.body?.cancel();
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("percent-encodes a forwarded value instead of breaking the Location header", async () => {
@@ -1765,13 +1721,12 @@ describe("HonoBff", () => {
       const res = await app.request(
         `/auth/login?organization=${encodeURIComponent(injection)}`,
       );
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const location = res.headers.get("Location")!;
       await res.body?.cancel();
-      assertFalse(/[\r\n]/.test(location));
-      assertStrictEquals(res.headers.get("x-injected"), null);
-      assertEquals(
-        new URL(location).searchParams.get("organization"),
+      expect(/[\r\n]/.test(location)).toBeFalsy();
+      expect(res.headers.get("x-injected")).toBe(null);
+      expect(new URL(location).searchParams.get("organization")).toStrictEqual(
         injection,
       );
     });
@@ -1787,13 +1742,13 @@ describe("HonoBff", () => {
         app,
         "/auth/login?organization=acme&return_to=/welcome",
       );
-      assertStrictEquals(res.headers.get("Location"), "/welcome");
-      assertEquals(typeof cookieValue(res, "oauth2_session"), "string");
+      expect(res.headers.get("Location")).toBe("/welcome");
+      expect(typeof cookieValue(res, "oauth2_session")).toStrictEqual("string");
     });
 
     for (const name of ["acr_values", "ACR_VALUES", "max_age", "MAX_AGE"]) {
       it(`refuses browser-chosen authentication control ${name}`, () => {
-        assertThrows(() => makeBff({ forwardedParams: [name] }), Error);
+        thrown(() => makeBff({ forwardedParams: [name] }), Error);
       });
     }
 
@@ -1805,13 +1760,13 @@ describe("HonoBff", () => {
       );
       const location = new URL(response.headers.get("location")!);
       await response.body?.cancel();
-      assertEquals(location.searchParams.get("acr_values"), "mfa");
-      assertEquals(location.searchParams.get("max_age"), "0");
+      expect(location.searchParams.get("acr_values")).toStrictEqual("mfa");
+      expect(location.searchParams.get("max_age")).toStrictEqual("0");
     });
 
     for (const reserved of RESERVED_AUTHORIZE_PARAMS) {
       it(`refuses "${reserved}" in extraParams at construction`, () => {
-        assertThrows(
+        thrown(
           () => makeBff({ extraParams: { [reserved]: "x" } }),
           Error,
           `extraParams may not name the authorize parameter "${reserved}"`,
@@ -1819,7 +1774,7 @@ describe("HonoBff", () => {
       });
 
       it(`refuses "${reserved}" in forwardedParams at construction`, () => {
-        assertThrows(
+        thrown(
           () => makeBff({ forwardedParams: [reserved] }),
           Error,
           `forwardedParams may not name the authorize parameter "${reserved}"`,
@@ -1828,12 +1783,12 @@ describe("HonoBff", () => {
     }
 
     it("matches a reserved name whatever its case", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ forwardedParams: ["Redirect_URI"] }),
         Error,
         `forwardedParams may not name the authorize parameter "Redirect_URI"`,
       );
-      assertThrows(
+      thrown(
         () => makeBff({ extraParams: { CODE_CHALLENGE_METHOD: "plain" } }),
         Error,
         "may not name the authorize parameter",
@@ -1841,12 +1796,12 @@ describe("HonoBff", () => {
     });
 
     it("refuses a blank parameter name", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ extraParams: { "": "x" } }),
         Error,
         'extraParams may not use "" as an authorize-parameter name',
       );
-      assertThrows(
+      thrown(
         () => makeBff({ forwardedParams: ["  "] }),
         Error,
         'forwardedParams may not use "  " as an authorize-parameter name',
@@ -1855,7 +1810,7 @@ describe("HonoBff", () => {
 
     it("refuses a reserved name padded with whitespace", () => {
       for (const padded of [" state", "state\n", "STATE\t", "redirect_uri "]) {
-        assertThrows(
+        thrown(
           () => makeBff({ forwardedParams: [padded] }),
           Error,
           `forwardedParams may not use ${JSON.stringify(padded)} as an ` +
@@ -1865,7 +1820,7 @@ describe("HonoBff", () => {
     });
 
     it("refuses a padded name that is not reserved at all", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ forwardedParams: [" organization"] }),
         Error,
         'forwardedParams may not use " organization" as an ' +
@@ -1874,7 +1829,7 @@ describe("HonoBff", () => {
     });
 
     it("refuses a name that is both pinned and forwarded", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             extraParams: { organization: "acme" },
@@ -1887,7 +1842,7 @@ describe("HonoBff", () => {
     });
 
     it("refuses a forwarded name that only differs in case from a pinned one", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             extraParams: { organization: "acme" },
@@ -1908,14 +1863,10 @@ describe("HonoBff", () => {
         "/auth/login?organization=acme&redirect_uri=" +
           encodeURIComponent("https://evil.example.com/steal"),
       );
-      assertStrictEquals(url.searchParams.get("redirect_uri"), REDIRECT_URI);
-      assertEquals(url.searchParams.get("organization"), "acme");
-      assertEquals(
-        paramNames(url),
-        [
-          ...BASE_AUTHORIZE_PARAMS,
-          "organization",
-        ].sort(),
+      expect(url.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+      expect(url.searchParams.get("organization")).toStrictEqual("acme");
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "organization"].sort(),
       );
     });
 
@@ -1924,13 +1875,9 @@ describe("HonoBff", () => {
       const app = makeApp(makeBff({ extraParams: pinned }));
       pinned.redirect_uri = "https://evil.example.com/steal";
       const url = await authorizeUrl(app);
-      assertStrictEquals(url.searchParams.get("redirect_uri"), REDIRECT_URI);
-      assertEquals(
-        paramNames(url),
-        [
-          ...BASE_AUTHORIZE_PARAMS,
-          "organization",
-        ].sort(),
+      expect(url.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "organization"].sort(),
       );
     });
 
@@ -1940,26 +1887,28 @@ describe("HonoBff", () => {
         app,
         "/auth/login?organization=attacker-org",
       );
-      assertEquals(attacker.searchParams.get("organization"), "attacker-org");
+      expect(attacker.searchParams.get("organization")).toStrictEqual(
+        "attacker-org",
+      );
 
       const victim = await authorizeUrl(app, "/auth/login");
-      assertFalse(victim.searchParams.has("organization"));
-      assertEquals(paramNames(victim), BASE_AUTHORIZE_PARAMS);
+      expect(victim.searchParams.has("organization")).toBeFalsy();
+      expect(paramNames(victim)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("gives a second request its own value for the same forwarded name", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["organization"] }));
       const first = await authorizeUrl(app, "/auth/login?organization=first");
-      assertEquals(first.searchParams.getAll("organization"), ["first"]);
+      expect(first.searchParams.getAll("organization")).toStrictEqual([
+        "first",
+      ]);
 
       const second = await authorizeUrl(app, "/auth/login?organization=second");
-      assertEquals(second.searchParams.getAll("organization"), ["second"]);
-      assertEquals(
-        paramNames(second),
-        [
-          ...BASE_AUTHORIZE_PARAMS,
-          "organization",
-        ].sort(),
+      expect(second.searchParams.getAll("organization")).toStrictEqual([
+        "second",
+      ]);
+      expect(paramNames(second)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "organization"].sort(),
       );
     });
 
@@ -1969,8 +1918,12 @@ describe("HonoBff", () => {
         authorizeUrl(app, "/auth/login?organization=alice-org"),
         authorizeUrl(app, "/auth/login?organization=bob-org"),
       ]);
-      assertEquals(alice.searchParams.getAll("organization"), ["alice-org"]);
-      assertEquals(bob.searchParams.getAll("organization"), ["bob-org"]);
+      expect(alice.searchParams.getAll("organization")).toStrictEqual([
+        "alice-org",
+      ]);
+      expect(bob.searchParams.getAll("organization")).toStrictEqual([
+        "bob-org",
+      ]);
     });
 
     it("does not confuse an inherited property name for a pinned one", async () => {
@@ -1978,27 +1931,35 @@ describe("HonoBff", () => {
         makeBff({ extraParams: {}, forwardedParams: ["toString"] }),
       );
       const url = await authorizeUrl(app, "/auth/login?toString=ok");
-      assertEquals(url.searchParams.get("toString"), "ok");
+      expect(url.searchParams.get("toString")).toStrictEqual("ok");
     });
 
     it("forwards an explicitly allowed prototype setter name", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["__proto__"] }));
       const url = await authorizeUrl(app, "/auth/login?__proto__=configured");
-      assertEquals(url.searchParams.getAll("__proto__"), ["configured"]);
+      expect(url.searchParams.getAll("__proto__")).toStrictEqual([
+        "configured",
+      ]);
     });
 
     it("preserves a pinned prototype setter name", async () => {
-      const app = makeApp(makeBff({
-        extraParams: { ["__proto__"]: "configured" },
-      }));
+      const app = makeApp(
+        makeBff({
+          extraParams: { ["__proto__"]: "configured" },
+        }),
+      );
       const url = await authorizeUrl(app, "/auth/login?__proto__=untrusted");
-      assertEquals(url.searchParams.getAll("__proto__"), ["configured"]);
+      expect(url.searchParams.getAll("__proto__")).toStrictEqual([
+        "configured",
+      ]);
     });
 
     it("ignores a scope the browser puts on the login URL", async () => {
       const app = makeApp(makeBff({ scope: "openid profile" }));
       const url = await authorizeUrl(app, "/auth/login?scope=openid+admin");
-      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+      expect(url.searchParams.getAll("scope")).toStrictEqual([
+        "openid profile",
+      ]);
     });
 
     it("requests no scope when the browser asks for one and none is configured", async () => {
@@ -2006,7 +1967,7 @@ describe("HonoBff", () => {
         makeApp(makeBff()),
         "/auth/login?scope=admin",
       );
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("ignores a prompt the browser puts on the login URL", async () => {
@@ -2014,14 +1975,16 @@ describe("HonoBff", () => {
         makeApp(makeBff()),
         "/auth/login?prompt=none",
       );
-      assertFalse(url.searchParams.has("prompt"));
-      assertEquals(paramNames(url), BASE_AUTHORIZE_PARAMS);
+      expect(url.searchParams.has("prompt")).toBeFalsy();
+      expect(paramNames(url)).toStrictEqual(BASE_AUTHORIZE_PARAMS);
     });
 
     it("sends the configured scope when the browser asks for none", async () => {
       const app = makeApp(makeBff({ scope: "openid profile" }));
       const url = await authorizeUrl(app, "/auth/login?return_to=/dashboard");
-      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+      expect(url.searchParams.getAll("scope")).toStrictEqual([
+        "openid profile",
+      ]);
     });
 
     it("forwards a scope when forwardedParams names it", async () => {
@@ -2029,8 +1992,10 @@ describe("HonoBff", () => {
         makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
       );
       const url = await authorizeUrl(app, "/auth/login?scope=openid+email");
-      assertEquals(url.searchParams.getAll("scope"), ["openid email"]);
-      assertEquals(paramNames(url), [...BASE_AUTHORIZE_PARAMS, "scope"].sort());
+      expect(url.searchParams.getAll("scope")).toStrictEqual(["openid email"]);
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "scope"].sort(),
+      );
     });
 
     it("falls back to the configured scope when a forwarding request omits it", async () => {
@@ -2038,7 +2003,9 @@ describe("HonoBff", () => {
         makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
       );
       const url = await authorizeUrl(app, "/auth/login?return_to=/dashboard");
-      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
+      expect(url.searchParams.getAll("scope")).toStrictEqual([
+        "openid profile",
+      ]);
     });
 
     it("keeps the configured scope when a forwarding request sends an empty scope", async () => {
@@ -2046,8 +2013,12 @@ describe("HonoBff", () => {
         makeBff({ scope: "openid profile", forwardedParams: ["scope"] }),
       );
       const url = await authorizeUrl(app, "/auth/login?scope=");
-      assertEquals(url.searchParams.getAll("scope"), ["openid profile"]);
-      assertEquals(paramNames(url), [...BASE_AUTHORIZE_PARAMS, "scope"].sort());
+      expect(url.searchParams.getAll("scope")).toStrictEqual([
+        "openid profile",
+      ]);
+      expect(paramNames(url)).toStrictEqual(
+        [...BASE_AUTHORIZE_PARAMS, "scope"].sort(),
+      );
     });
 
     it("records the configured scope when a forwarding request sends an empty scope", async () => {
@@ -2073,7 +2044,7 @@ describe("HonoBff", () => {
       );
       const url = await authorizeUrl(app, "/auth/login?scope=");
       const state = url.searchParams.get("state")!;
-      assertEquals(records.get(state)?.scope, "openid profile");
+      expect(records.get(state)?.scope).toStrictEqual("openid profile");
     });
 
     it("records a forwarded scope as the scope the authorization requested", async () => {
@@ -2099,7 +2070,7 @@ describe("HonoBff", () => {
       );
       const url = await authorizeUrl(app, "/auth/login?scope=openid+email");
       const state = url.searchParams.get("state")!;
-      assertEquals(records.get(state)?.scope, "openid email");
+      expect(records.get(state)?.scope).toStrictEqual("openid email");
     });
 
     it("sends one scope when a forwarded name differs from it only in case", async () => {
@@ -2107,31 +2078,31 @@ describe("HonoBff", () => {
         makeBff({ scope: "openid profile", forwardedParams: ["Scope"] }),
       );
       const url = await authorizeUrl(app, "/auth/login?Scope=openid+email");
-      assertEquals(url.searchParams.getAll("scope"), ["openid email"]);
-      assertFalse(url.searchParams.has("Scope"));
+      expect(url.searchParams.getAll("scope")).toStrictEqual(["openid email"]);
+      expect(url.searchParams.has("Scope")).toBeFalsy();
     });
 
     it("forwards a prompt when forwardedParams names it", async () => {
       const app = makeApp(makeBff({ forwardedParams: ["prompt"] }));
       const url = await authorizeUrl(app, "/auth/login?prompt=login");
-      assertEquals(url.searchParams.getAll("prompt"), ["login"]);
+      expect(url.searchParams.getAll("prompt")).toStrictEqual(["login"]);
     });
 
     it("keeps a pinned prompt out of the browser's reach", async () => {
       const app = makeApp(makeBff({ extraParams: { prompt: "consent" } }));
       const url = await authorizeUrl(app, "/auth/login?prompt=none");
-      assertEquals(url.searchParams.getAll("prompt"), ["consent"]);
+      expect(url.searchParams.getAll("prompt")).toStrictEqual(["consent"]);
     });
 
     it("sends one prompt when a pinned name differs from it only in case", async () => {
       const app = makeApp(makeBff({ extraParams: { Prompt: "consent" } }));
       const url = await authorizeUrl(app, "/auth/login?prompt=none");
-      assertEquals(url.searchParams.getAll("prompt"), ["consent"]);
-      assertFalse(url.searchParams.has("Prompt"));
+      expect(url.searchParams.getAll("prompt")).toStrictEqual(["consent"]);
+      expect(url.searchParams.has("Prompt")).toBeFalsy();
     });
 
     it("refuses a pinned scope beside the scope option", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             scope: "openid",
@@ -2143,7 +2114,7 @@ describe("HonoBff", () => {
     });
 
     it("refuses a pinned scope that differs from the option only in case", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             scope: "openid",
@@ -2160,9 +2131,9 @@ describe("HonoBff", () => {
       const bff = makeBff({ forwardedParams: ["prompt"] });
       const app = makeApp(bff);
       const res = await app.request("/auth/login?prompt=none&return_to=/x");
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const url = new URL(res.headers.get("Location")!);
-      assertStrictEquals(url.searchParams.get("prompt"), "none");
+      expect(url.searchParams.get("prompt")).toBe("none");
       await res.body?.cancel();
     });
 
@@ -2171,18 +2142,14 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const res = await app.request("/auth/login?return_to=/dashboard");
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const location = new URL(res.headers.get("Location")!);
-      assertStrictEquals(location.origin + location.pathname, AUTHORIZE_URL);
-      assertStrictEquals(location.searchParams.get("response_type"), "code");
-      assertStrictEquals(location.searchParams.get("client_id"), testClient.id);
-      assertStrictEquals(
-        location.searchParams.get("code_challenge_method"),
-        "S256",
-      );
-      assertEquals(typeof location.searchParams.get("state"), "string");
-      assertEquals(
-        typeof location.searchParams.get("code_challenge"),
+      expect(location.origin + location.pathname).toBe(AUTHORIZE_URL);
+      expect(location.searchParams.get("response_type")).toBe("code");
+      expect(location.searchParams.get("client_id")).toBe(testClient.id);
+      expect(location.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(typeof location.searchParams.get("state")).toStrictEqual("string");
+      expect(typeof location.searchParams.get("code_challenge")).toStrictEqual(
         "string",
       );
     });
@@ -2194,11 +2161,11 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const res = await completeLogin(app, "/auth/login?return_to=/welcome");
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(res.headers.get("Location"), "/welcome");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/welcome");
 
       const sess = cookieValue(res, "oauth2_session");
-      assertEquals(typeof sess, "string");
+      expect(typeof sess).toStrictEqual("string");
     });
 
     it("falls back to defaultReturnTo when the authorize request didn't carry one", async () => {
@@ -2206,7 +2173,7 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const res = await completeLogin(app);
-      assertStrictEquals(res.headers.get("Location"), "/home");
+      expect(res.headers.get("Location")).toBe("/home");
     });
 
     it("returns a JSON error when the callback URL carries ?error=...", async () => {
@@ -2216,9 +2183,9 @@ describe("HonoBff", () => {
       const res = await app.request(
         "/auth/callback?error=access_denied&error_description=nope&state=x",
       );
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       const body = await res.json();
-      assertStrictEquals(body.error, "access_denied");
+      expect(body.error).toBe("access_denied");
     });
 
     it("returns a friendly 400 (not an unhandled 500) when the code exchange fails", async () => {
@@ -2229,8 +2196,8 @@ describe("HonoBff", () => {
         `/auth/callback?code=nope&state=${state}`,
         withCookies(undefined, cookies),
       );
-      assertStrictEquals(res.status, 400);
-      assertStrictEquals((await res.json()).error, "invalid_grant");
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
     });
 
     it("routes callback failures through onCallbackError when provided", async () => {
@@ -2248,26 +2215,27 @@ describe("HonoBff", () => {
         `/auth/callback?code=nope&state=${state}`,
         withCookies(undefined, cookies),
       );
-      assertStrictEquals(grantRes.status, 302);
-      assertStrictEquals(
-        grantRes.headers.get("Location"),
+      expect(grantRes.status).toBe(302);
+      expect(grantRes.headers.get("Location")).toBe(
         "/sign-in?error=invalid_grant",
       );
 
       const idpRes = await app.request(
         "/auth/callback?error=access_denied&state=x",
       );
-      assertStrictEquals(
-        idpRes.headers.get("Location"),
+      expect(idpRes.headers.get("Location")).toBe(
         "/sign-in?error=access_denied",
       );
       const missingRes = await app.request("/auth/callback");
-      assertStrictEquals(
-        missingRes.headers.get("Location"),
+      expect(missingRes.headers.get("Location")).toBe(
         "/sign-in?error=invalid_request",
       );
 
-      assertEquals(seen, ["invalid_grant", "access_denied", "invalid_request"]);
+      expect(seen).toStrictEqual([
+        "invalid_grant",
+        "access_denied",
+        "invalid_request",
+      ]);
     });
 
     it("ignores an external return_to and falls back (open-redirect guard)", async () => {
@@ -2277,7 +2245,7 @@ describe("HonoBff", () => {
         app,
         `/auth/login?return_to=${encodeURIComponent("https://evil.example/x")}`,
       );
-      assertStrictEquals(res.headers.get("Location"), "/home");
+      expect(res.headers.get("Location")).toBe("/home");
     });
   });
 
@@ -2324,14 +2292,14 @@ describe("HonoBff", () => {
       const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
 
       const res = await signInAgain(app, earlier);
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const current = cookieValue(res, "oauth2_session")!;
 
-      assertNotStrictEquals(current, earlier);
-      assertStrictEquals(await store.read(earlier), null);
-      assertFalse(await probe(app, earlier));
+      expect(current).not.toBe(earlier);
+      expect(await store.read(earlier)).toBe(null);
+      expect(await probe(app, earlier)).toBeFalsy();
       assert(await probe(app, current));
-      assertEquals([...store.live], [current]);
+      expect([...store.live]).toStrictEqual([current]);
     });
 
     it("leaves no session behind once the replacing session signs out", async () => {
@@ -2346,11 +2314,11 @@ describe("HonoBff", () => {
       const out = await app.request("/auth/logout", {
         headers: { cookie: `oauth2_session=${current}` },
       });
-      assertStrictEquals(out.status, 302);
+      expect(out.status).toBe(302);
 
-      assertEquals(store.live.size, 0);
-      assertFalse(await probe(app, earlier));
-      assertFalse(await probe(app, current));
+      expect(store.live.size).toStrictEqual(0);
+      expect(await probe(app, earlier)).toBeFalsy();
+      expect(await probe(app, current)).toBeFalsy();
     });
 
     it("does not revoke the replaced session's refresh token, which can share the new session's sign-in at the authorization server", async () => {
@@ -2377,11 +2345,11 @@ describe("HonoBff", () => {
           cookies,
         ),
       );
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
       assert(await probe(app, earlier));
-      assertEquals([...store.live], [earlier]);
+      expect([...store.live]).toStrictEqual([earlier]);
     });
 
     it("keeps the session when the code exchange fails", async () => {
@@ -2397,11 +2365,11 @@ describe("HonoBff", () => {
           cookies,
         ),
       );
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
       assert(await probe(app, earlier));
-      assertEquals([...store.live], [earlier]);
+      expect([...store.live]).toStrictEqual([earlier]);
     });
 
     it("keeps the session when the callback's state was not started in this browser", async () => {
@@ -2413,32 +2381,34 @@ describe("HonoBff", () => {
       const res = await app.request(callbackPath, {
         headers: { cookie: `oauth2_session=${earlier}` },
       });
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
       assert(await probe(app, earlier));
-      assertEquals([...store.live], [earlier]);
+      expect([...store.live]).toStrictEqual([earlier]);
     });
 
     it("keeps the session when resolveUser fails", async () => {
       const store = new LiveSessionStore();
       let directoryDown = false;
-      const app = makeApp(makeBff({
-        sessionStore: store,
-        resolveUser: (_tokens, user) => {
-          if (directoryDown) throw new Error("directory unavailable");
-          return user;
-        },
-      }));
+      const app = makeApp(
+        makeBff({
+          sessionStore: store,
+          resolveUser: (_tokens, user) => {
+            if (directoryDown) throw new Error("directory unavailable");
+            return user;
+          },
+        }),
+      );
       const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
       directoryDown = true;
 
       const res = await signInAgain(app, earlier);
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
       assert(await probe(app, earlier));
-      assertEquals([...store.live], [earlier]);
+      expect([...store.live]).toStrictEqual([earlier]);
     });
 
     it("keeps only the earlier session when destroying it fails, never two", async () => {
@@ -2448,10 +2418,10 @@ describe("HonoBff", () => {
       store.failDestroy = true;
 
       const res = await signInAgain(app, earlier);
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
-      assertEquals([...store.live], [earlier]);
+      expect([...store.live]).toStrictEqual([earlier]);
     });
 
     it("leaves the browser signed out when creating the replacement fails", async () => {
@@ -2461,11 +2431,11 @@ describe("HonoBff", () => {
       store.failCreate = true;
 
       const res = await signInAgain(app, earlier);
-      assertStrictEquals(res.status, 400);
+      expect(res.status).toBe(400);
       await res.body?.cancel();
 
-      assertFalse(await probe(app, earlier));
-      assertEquals(store.live.size, 0);
+      expect(await probe(app, earlier)).toBeFalsy();
+      expect(store.live.size).toStrictEqual(0);
     });
 
     it("signs in when the cookie the browser brings names no session", async () => {
@@ -2473,11 +2443,11 @@ describe("HonoBff", () => {
       const app = makeApp(makeBff({ sessionStore: store }));
 
       const res = await signInAgain(app, "not-a-session");
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const current = cookieValue(res, "oauth2_session")!;
 
       assert(await probe(app, current));
-      assertEquals([...store.live], [current]);
+      expect([...store.live]).toStrictEqual([current]);
     });
 
     it("signs in over a stateless session, replacing the cookie that carried it", async () => {
@@ -2488,10 +2458,10 @@ describe("HonoBff", () => {
       const earlier = cookieValue(await completeLogin(app), "oauth2_session")!;
 
       const res = await signInAgain(app, earlier);
-      assertStrictEquals(res.status, 302);
+      expect(res.status).toBe(302);
       const current = cookieValue(res, "oauth2_session")!;
 
-      assertNotStrictEquals(current, earlier);
+      expect(current).not.toBe(earlier);
       assert(await probe(app, current));
     });
   });
@@ -2516,15 +2486,14 @@ describe("HonoBff", () => {
       const cbRes = await completeLogin(app, "/auth/login?return_to=/welcome", {
         headers: { cookie: `session_id=${loginSessionId}` },
       });
-      assertStrictEquals(cbRes.status, 302);
+      expect(cbRes.status).toBe(302);
 
-      assertStrictEquals(
+      expect(
         cookieValue(cbRes, "session_id"),
-        undefined,
         "the app's cookie is unchanged, so re-stamping it would only replace the app's attributes",
-      );
+      ).toBe(undefined);
       const stored = await sharedStore.read(loginSessionId);
-      assertEquals((stored?.tokens.accessToken?.length ?? 0) > 0, true);
+      expect((stored?.tokens.accessToken?.length ?? 0) > 0).toStrictEqual(true);
     });
 
     it("keeps a remember-me cookie's attributes by never re-setting an unchanged value", async () => {
@@ -2556,14 +2525,13 @@ describe("HonoBff", () => {
       const refreshed = await app.request("/api/me", {
         headers: { cookie: `session_id=${loginSessionId}`, "x-csrf": "1" },
       });
-      assertStrictEquals(refreshed.status, 200);
-      assertStrictEquals(
+      expect(refreshed.status).toBe(200);
+      expect(
         refreshed.headers.get("set-cookie"),
-        null,
         "a token refresh that keeps the cookie value must not re-stamp the cookie either",
-      );
+      ).toBe(null);
       const stored = await sharedStore.read(loginSessionId);
-      assertEquals((stored?.tokens.accessToken?.length ?? 0) > 0, true);
+      expect((stored?.tokens.accessToken?.length ?? 0) > 0).toStrictEqual(true);
     });
 
     it("falls back to creating a session when no cookie is present at callback", async () => {
@@ -2577,8 +2545,8 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const cbRes = await completeLogin(app);
-      assertStrictEquals(cbRes.status, 302);
-      assertEquals(typeof cookieValue(cbRes, "session_id"), "string");
+      expect(cbRes.status).toBe(302);
+      expect(typeof cookieValue(cbRes, "session_id")).toStrictEqual("string");
     });
   });
 
@@ -2588,9 +2556,9 @@ describe("HonoBff", () => {
       const app = makeApp(bff);
 
       const res = await app.request("/auth/session");
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      assertEquals(body, { isAuthenticated: false, user: null });
+      expect(body).toStrictEqual({ isAuthenticated: false, user: null });
     });
 
     it("returns isAuthenticated=true and the user claims after login", async () => {
@@ -2606,8 +2574,8 @@ describe("HonoBff", () => {
         headers: { cookie: `oauth2_session=${sess}` },
       });
       const body = await res.json();
-      assertStrictEquals(body.isAuthenticated, true);
-      assertEquals(body.user, { id: "user-1", plan: "enterprise" });
+      expect(body.isAuthenticated).toBe(true);
+      expect(body.user).toStrictEqual({ id: "user-1", plan: "enterprise" });
     });
   });
 
@@ -2623,13 +2591,13 @@ describe("HonoBff", () => {
 
       const res = await app.request("/page");
 
-      assertEquals(await res.json(), {
+      expect(await res.json()).toStrictEqual({
         isAuthenticated: false,
         user: null,
         sessionExpiresIn: null,
         logoutUrl: null,
       });
-      assertStrictEquals(res.headers.get("set-cookie"), null);
+      expect(res.headers.get("set-cookie")).toBe(null);
     });
 
     it("reports the signed-in user, when the token expires and how to sign out, and no token", async () => {
@@ -2642,15 +2610,18 @@ describe("HonoBff", () => {
       const res = await app.request("/page", { headers: { cookie } });
 
       const session = await res.json();
-      assertEquals(Object.keys(session).sort(), [
+      expect(Object.keys(session).sort()).toStrictEqual([
         "isAuthenticated",
         "logoutUrl",
         "sessionExpiresIn",
         "user",
       ]);
-      assertStrictEquals(session.isAuthenticated, true);
-      assertEquals(session.user, { sub: testUser.id, plan: "enterprise" });
-      assertStrictEquals(session.logoutUrl, "/auth/logout");
+      expect(session.isAuthenticated).toBe(true);
+      expect(session.user).toStrictEqual({
+        sub: testUser.id,
+        plan: "enterprise",
+      });
+      expect(session.logoutUrl).toBe("/auth/logout");
       assert(
         session.sessionExpiresIn > 0,
         `sessionExpiresIn was ${session.sessionExpiresIn}`,
@@ -2662,13 +2633,16 @@ describe("HonoBff", () => {
       const app = makeRenderingApp(bff);
       const cookie = await loginCookie(app);
 
-      const probed = await (await app.request("/auth/session", {
-        headers: { cookie },
-      })).json();
-      const read = await (await app.request("/page", { headers: { cookie } }))
-        .json();
+      const probed = await (
+        await app.request("/auth/session", {
+          headers: { cookie },
+        })
+      ).json();
+      const read = await (
+        await app.request("/page", { headers: { cookie } })
+      ).json();
 
-      assertEquals(read, probed);
+      expect(read).toStrictEqual(probed);
     });
 
     it("needs no CSRF header, because it never answers a browser directly", async () => {
@@ -2680,9 +2654,9 @@ describe("HonoBff", () => {
 
       const probe = await app.request("/auth/session", { headers: { cookie } });
       await probe.body?.cancel();
-      assertStrictEquals(probe.status, 403);
+      expect(probe.status).toBe(403);
       const res = await app.request("/page", { headers: { cookie } });
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("reports nobody signed in for a cookie the store no longer holds", async () => {
@@ -2692,7 +2666,7 @@ describe("HonoBff", () => {
         headers: { cookie: "oauth2_session=forgotten" },
       });
 
-      assertStrictEquals((await res.json()).isAuthenticated, false);
+      expect((await res.json()).isAuthenticated).toBe(false);
     });
 
     it("destroys a session older than sessionMaxAgeMs and clears its cookie", async () => {
@@ -2706,12 +2680,9 @@ describe("HonoBff", () => {
 
       const res = await app.request("/page", { headers: { cookie } });
 
-      assertStrictEquals((await res.json()).isAuthenticated, false);
-      assertStringIncludes(
-        res.headers.getSetCookie().join("\n"),
-        "Max-Age=0",
-      );
-      assertStrictEquals(await store.read(cookie.split("=")[1]), null);
+      expect((await res.json()).isAuthenticated).toBe(false);
+      expect(res.headers.getSetCookie().join("\n")).toContain("Max-Age=0");
+      expect(await store.read(cookie.split("=")[1])).toBe(null);
     });
 
     it("keeps a session younger than sessionMaxAgeMs without touching its cookie", async () => {
@@ -2724,8 +2695,8 @@ describe("HonoBff", () => {
 
       const res = await app.request("/page", { headers: { cookie } });
 
-      assertStrictEquals((await res.json()).isAuthenticated, true);
-      assertStrictEquals(res.headers.get("set-cookie"), null);
+      expect((await res.json()).isAuthenticated).toBe(true);
+      expect(res.headers.get("set-cookie")).toBe(null);
     });
 
     it("leaves the session's age to the app in sessionMode: shared", async () => {
@@ -2742,7 +2713,7 @@ describe("HonoBff", () => {
 
       const res = await app.request("/page", { headers: { cookie } });
 
-      assertStrictEquals((await res.json()).isAuthenticated, true);
+      expect((await res.json()).isAuthenticated).toBe(true);
     });
 
     it("sets no caching policy, leaving the page's own to the app", async () => {
@@ -2753,7 +2724,7 @@ describe("HonoBff", () => {
       const res = await app.request("/page", { headers: { cookie } });
       await res.body?.cancel();
 
-      assertStrictEquals(res.headers.get("cache-control"), null);
+      expect(res.headers.get("cache-control")).toBe(null);
     });
   });
 
@@ -2770,14 +2741,14 @@ describe("HonoBff", () => {
         method: "POST",
         headers: { cookie },
       });
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(res.headers.get("Location"), "/home");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/home");
       const cleared = res.headers.get("set-cookie") ?? "";
-      assertEquals(cleared.includes("oauth2_session="), true);
-      assertStrictEquals(await readTestSession(bff, cookie), null);
+      expect(cleared.includes("oauth2_session=")).toStrictEqual(true);
+      expect(await readTestSession(bff, cookie)).toBe(null);
 
       const probe = await app.request("/auth/session", { headers: { cookie } });
-      assertEquals(await probe.json(), {
+      expect(await probe.json()).toStrictEqual({
         isAuthenticated: false,
         user: null,
       });
@@ -2792,15 +2763,14 @@ describe("HonoBff", () => {
       });
 
       const res = await app.request("/auth/logout", { headers: { cookie } });
-      assertStrictEquals(res.status, 302);
-      assertEquals(
+      expect(res.status).toBe(302);
+      expect(
         (res.headers.get("set-cookie") ?? "").includes("oauth2_session="),
-        true,
-      );
-      assertStrictEquals(await readTestSession(bff, cookie), null);
+      ).toStrictEqual(true);
+      expect(await readTestSession(bff, cookie)).toBe(null);
 
       const probe = await app.request("/auth/session", { headers: { cookie } });
-      assertEquals(await probe.json(), {
+      expect(await probe.json()).toStrictEqual({
         isAuthenticated: false,
         user: null,
       });
@@ -2809,18 +2779,16 @@ describe("HonoBff", () => {
     it("ignores an external return_to (open-redirect guard)", async () => {
       const bff = makeBff();
       const app = makeApp(bff);
-      for (
-        const evil of [
-          "https://evil.example/x",
-          "//evil.example",
-          "/\\evil.example",
-        ]
-      ) {
+      for (const evil of [
+        "https://evil.example/x",
+        "//evil.example",
+        "/\\evil.example",
+      ]) {
         const res = await app.request(
           `/auth/logout?return_to=${encodeURIComponent(evil)}`,
         );
-        assertStrictEquals(res.status, 302);
-        assertStrictEquals(res.headers.get("Location"), "/home");
+        expect(res.status).toBe(302);
+        expect(res.headers.get("Location")).toBe("/home");
       }
     });
   });
@@ -2828,8 +2796,8 @@ describe("HonoBff", () => {
   describe("routes mounting", () => {
     it("registers under the default /auth base", async () => {
       const app = makeApp(makeBff());
-      assertStrictEquals((await app.request("/auth/session")).status, 200);
-      assertStrictEquals((await app.request("/session")).status, 404);
+      expect((await app.request("/auth/session")).status).toBe(200);
+      expect((await app.request("/session")).status).toBe(404);
     });
 
     it("registers under a configured basePath", async () => {
@@ -2846,11 +2814,8 @@ describe("HonoBff", () => {
       const app = new Hono();
       app.route("/session", bff.routes());
 
-      assertStrictEquals((await app.request("/session/whoami")).status, 200);
-      assertStrictEquals(
-        (await app.request("/session/session/whoami")).status,
-        404,
-      );
+      expect((await app.request("/session/whoami")).status).toBe(200);
+      expect((await app.request("/session/session/whoami")).status).toBe(404);
     });
 
     it("mounts the configured paths verbatim when basePath is empty", async () => {
@@ -2858,20 +2823,20 @@ describe("HonoBff", () => {
       const app = new Hono();
       app.route("", bff.routes());
 
-      assertStrictEquals((await app.request("/auth/session")).status, 200);
-      assertStrictEquals((await app.request("/session")).status, 404);
+      expect((await app.request("/auth/session")).status).toBe(200);
+      expect((await app.request("/session")).status).toBe(404);
     });
 
     it("ignores a trailing slash on basePath instead of double-prefixing", async () => {
       const app = makeApp(makeBff({ paths: { basePath: "/auth/" } }));
-      assertStrictEquals((await app.request("/auth/session")).status, 200);
-      assertStrictEquals((await app.request("/auth/auth/session")).status, 404);
+      expect((await app.request("/auth/session")).status).toBe(200);
+      expect((await app.request("/auth/auth/session")).status).toBe(404);
     });
   });
 
   describe("path validation", () => {
     it("rejects a path that falls outside a non-empty basePath", () => {
-      const error = assertThrows(
+      const error = thrown(
         () =>
           makeBff({
             paths: {
@@ -2886,11 +2851,11 @@ describe("HonoBff", () => {
         Error,
         'session ("/whoami")',
       );
-      assertStringIncludes(error.message, 'basePath "/session"');
+      expect(error.message).toContain('basePath "/session"');
     });
 
     it("rejects a path equal to basePath", () => {
-      assertThrows(
+      thrown(
         () => makeBff({ paths: { basePath: "/auth", session: "/auth" } }),
         Error,
         'session ("/auth")',
@@ -2901,12 +2866,12 @@ describe("HonoBff", () => {
       const app = makeApp(
         makeBff({ paths: { basePath: "/auth", backchannel: "/elsewhere" } }),
       );
-      assertStrictEquals((await app.request("/auth/session")).status, 200);
-      assertStrictEquals((await app.request("/elsewhere")).status, 404);
+      expect((await app.request("/auth/session")).status).toBe(200);
+      expect((await app.request("/elsewhere")).status).toBe(404);
     });
 
     it("checks the backchannel path once back-channel logout is on", () => {
-      assertThrows(
+      thrown(
         () =>
           makeBff({
             backchannelLogout: {
@@ -2934,9 +2899,9 @@ describe("HonoBff", () => {
       const cookie = await protectedSession(bff);
 
       const res = await app.request("/api/me", { headers: { cookie } });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const user = await res.json();
-      assertStrictEquals(user.id, testUser.id);
+      expect(user.id).toBe(testUser.id);
     });
 
     it("attaches Authorization even when raw request headers are immutable", async () => {
@@ -2959,9 +2924,9 @@ describe("HonoBff", () => {
       };
 
       const res = await app.fetch(req);
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const user = await res.json();
-      assertStrictEquals(user.id, testUser.id);
+      expect(user.id).toBe(testUser.id);
     });
 
     it("refreshes the access token when it's near expiry and updates the session", async () => {
@@ -2989,15 +2954,16 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { cookie: `oauth2_session=${sess}`, "x-csrf": "1" },
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
 
-      assertStrictEquals(
+      expect(
         res.headers.get("set-cookie"),
-        null,
         "a stateful store keeps the cookie value, so nothing needs re-setting",
-      );
+      ).toBe(null);
       const refreshed = await bff.sessionStore.read(sess);
-      assertEquals((refreshed?.tokens.accessToken?.length ?? 0) > 0, true);
+      expect((refreshed?.tokens.accessToken?.length ?? 0) > 0).toStrictEqual(
+        true,
+      );
     });
 
     it("re-sets the cookie when a stateless store rotates its value on refresh", async () => {
@@ -3027,10 +2993,10 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { cookie: `oauth2_session=${sess}`, "x-csrf": "1" },
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const rotated = cookieValue(res, "oauth2_session");
-      assertEquals(typeof rotated, "string");
-      assertEquals(rotated !== sess, true);
+      expect(typeof rotated).toStrictEqual("string");
+      expect(rotated !== sess).toStrictEqual(true);
     });
 
     it("keeps the session's sid across a refresh so back-channel logout still matches", async () => {
@@ -3065,12 +3031,11 @@ describe("HonoBff", () => {
       const apiRes = await app.request("/api/me", {
         headers: { cookie: `oauth2_session=${sess}` },
       });
-      assertStrictEquals(apiRes.status, 200);
+      expect(apiRes.status).toBe(200);
       await apiRes.body?.cancel();
 
       const afterRefresh = (await store.read(sess))!;
-      assertNotStrictEquals(
-        afterRefresh.tokens.accessToken,
+      expect(afterRefresh.tokens.accessToken).not.toBe(
         seeded.tokens.accessToken,
       );
 
@@ -3079,10 +3044,10 @@ describe("HonoBff", () => {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ logout_token: "tok" }),
       });
-      assertStrictEquals(logoutRes.status, 200);
+      expect(logoutRes.status).toBe(200);
       await logoutRes.body?.cancel();
 
-      assertStrictEquals(await store.read(sess), null);
+      expect(await store.read(sess)).toBe(null);
     });
   });
 
@@ -3101,9 +3066,9 @@ describe("HonoBff", () => {
       const cookie = await protectedSession(bff);
 
       const res = await app.request("/api/me", { headers: { cookie } });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const user = await res.json();
-      assertStrictEquals(user.id, testUser.id);
+      expect(user.id).toBe(testUser.id);
     });
 
     it("composes against a HonoAuthorizationServer (own-issuer topology)", async () => {
@@ -3129,8 +3094,8 @@ describe("HonoBff", () => {
       const cookie = await protectedSession(bff);
 
       const res = await app.request("/api/whoami", { headers: { cookie } });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals(await res.text(), "ok");
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("ok");
     });
 
     it("authenticates the session against a resolve-configured resource server using the real host", async () => {
@@ -3143,9 +3108,10 @@ describe("HonoBff", () => {
       const resourceServer = new HonoResourceServer({
         resolve: (request) => ({
           services: {
-            tokenService: new URL(request.url).hostname === "tenant-ok.local"
-              ? fixture.tokenService
-              : emptyTokenService,
+            tokenService:
+              new URL(request.url).hostname === "tenant-ok.local"
+                ? fixture.tokenService
+                : emptyTokenService,
           },
         }),
       });
@@ -3160,13 +3126,13 @@ describe("HonoBff", () => {
       const ok = await app.request("http://tenant-ok.local/api/me", {
         headers: { cookie },
       });
-      assertStrictEquals(ok.status, 200);
-      assertStrictEquals((await ok.json()).id, testUser.id);
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).id).toBe(testUser.id);
 
       const bad = await app.request("http://tenant-bad.local/api/me", {
         headers: { cookie },
       });
-      assertStrictEquals(bad.status, 401);
+      expect(bad.status).toBe(401);
       await bad.body?.cancel();
     });
 
@@ -3199,10 +3165,10 @@ describe("HonoBff", () => {
         headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({ hello: "world" }),
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const body = await res.json();
-      assertEquals(body.sub, testUser.id);
-      assertEquals(body.received, { hello: "world" });
+      expect(body.sub).toStrictEqual(testUser.id);
+      expect(body.received).toStrictEqual({ hello: "world" });
     });
 
     it("returns 401 when no session cookie is attached", async () => {
@@ -3215,7 +3181,7 @@ describe("HonoBff", () => {
       app.get("/api/me", (c) => c.text("forbidden zone"));
 
       const res = await app.request("/api/me");
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
     });
 
     it("accepts a direct Authorization: Bearer token (machine-to-machine) with no session cookie", async () => {
@@ -3234,8 +3200,8 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { authorization: `Bearer ${accessToken}` },
       });
-      assertStrictEquals(res.status, 200);
-      assertStrictEquals((await res.json()).id, testUser.id);
+      expect(res.status).toBe(200);
+      expect((await res.json()).id).toBe(testUser.id);
     });
 
     it("rejects an invalid inbound bearer token with 401", async () => {
@@ -3250,7 +3216,7 @@ describe("HonoBff", () => {
       const res = await app.request("/api/me", {
         headers: { authorization: "Bearer not-a-real-token" },
       });
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
     });
 
     it("rejects with a clear error when constructed without resourceServer", () => {
@@ -3261,11 +3227,10 @@ describe("HonoBff", () => {
       } catch (err) {
         thrown = err;
       }
-      assertEquals(thrown instanceof Error, true);
-      assertEquals(
+      expect(thrown instanceof Error).toStrictEqual(true);
+      expect(
         (thrown as Error).message.includes("resourceServer"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
 
     it("requireScope rejects with a clear error when constructed without resourceServer", () => {
@@ -3276,11 +3241,10 @@ describe("HonoBff", () => {
       } catch (err) {
         thrown = err;
       }
-      assertEquals(thrown instanceof Error, true);
-      assertEquals(
+      expect(thrown instanceof Error).toStrictEqual(true);
+      expect(
         (thrown as Error).message.includes("resourceServer"),
-        true,
-      );
+      ).toStrictEqual(true);
     });
 
     it("requireScope delegates to the configured resource server's guard", () => {
@@ -3288,10 +3252,7 @@ describe("HonoBff", () => {
         resolve: () => ({ services: { tokenService: fixture.tokenService } }),
       });
       const bff = makeBff({ resourceServer });
-      assertStrictEquals(
-        typeof bff.requireScope("read"),
-        "function",
-      );
+      expect(typeof bff.requireScope("read")).toBe("function");
     });
   });
 
@@ -3303,19 +3264,19 @@ describe("HonoBff", () => {
       const res = await app.request("/auth/login");
       await res.body?.cancel();
 
-      const cookie = res.headers.getSetCookie().find((c) =>
-        c.startsWith(`${bff.loginStateCookieName}=`)
-      )!;
-      assertEquals(typeof cookie, "string");
-      assertStringIncludes(cookie, "HttpOnly");
-      assertStringIncludes(cookie, "SameSite=Lax");
-      assertStringIncludes(cookie, "Max-Age=600");
-      assertStringIncludes(cookie, "Path=/");
+      const cookie = res.headers
+        .getSetCookie()
+        .find((c) => c.startsWith(`${bff.loginStateCookieName}=`))!;
+      expect(typeof cookie).toStrictEqual("string");
+      expect(cookie).toContain("HttpOnly");
+      expect(cookie).toContain("SameSite=Lax");
+      expect(cookie).toContain("Max-Age=600");
+      expect(cookie).toContain("Path=/");
     });
 
     it("names the login-state cookie __Host- and marks it Secure by default", () => {
       const bff = new HonoBff({ client: fixture.oauthClient });
-      assertStrictEquals(bff.loginStateCookieName, "__Host-oauth2_login_state");
+      expect(bff.loginStateCookieName).toBe("__Host-oauth2_login_state");
     });
 
     it("honors loginStateTtlMs as the login-state cookie's Max-Age", async () => {
@@ -3325,10 +3286,7 @@ describe("HonoBff", () => {
       const res = await app.request("/auth/login");
       await res.body?.cancel();
 
-      assertStringIncludes(
-        res.headers.getSetCookie().join("\n"),
-        "Max-Age=90",
-      );
+      expect(res.headers.getSetCookie().join("\n")).toContain("Max-Age=90");
     });
 
     it("rejects a callback whose browser carries no login-state cookie", async () => {
@@ -3338,9 +3296,9 @@ describe("HonoBff", () => {
       const { callbackPath } = await beginLogin(app);
       const res = await app.request(callbackPath);
 
-      assertStrictEquals(res.status, 400);
-      assertStrictEquals((await res.json()).error, "invalid_request");
-      assertStrictEquals(cookieValue(res, "oauth2_session"), undefined);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_request");
+      expect(cookieValue(res, "oauth2_session")).toBe(undefined);
     });
 
     it("rejects a callback whose login-state cookie is for a different browser's sign-in", async () => {
@@ -3355,13 +3313,12 @@ describe("HonoBff", () => {
         withCookies(undefined, victim.cookies),
       );
 
-      assertStrictEquals(res.status, 400);
-      assertStrictEquals((await res.json()).error, "invalid_request");
-      assertStrictEquals(
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_request");
+      expect(
         cookieValue(res, "oauth2_session"),
-        undefined,
         "a login the victim's browser never started must not open a session",
-      );
+      ).toBe(undefined);
     });
 
     it("attaches nothing to an existing shared session when the state is unvouched", async () => {
@@ -3384,12 +3341,11 @@ describe("HonoBff", () => {
         headers: { cookie: `session_id=${appSessionId}` },
       });
 
-      assertStrictEquals(res.status, 400);
-      assertStrictEquals(
+      expect(res.status).toBe(400);
+      expect(
         (await sharedStore.read(appSessionId))?.tokens.accessToken,
-        "",
         "the attacker's grant must never land on the victim's session row",
-      );
+      ).toBe("");
     });
 
     it("clears the login-state cookie once the callback completes", async () => {
@@ -3399,11 +3355,11 @@ describe("HonoBff", () => {
       const res = await completeLogin(app);
       await res.body?.cancel();
 
-      assertStrictEquals(res.status, 302);
-      const cleared = res.headers.getSetCookie().find((c) =>
-        c.startsWith(`${bff.loginStateCookieName}=`)
-      )!;
-      assertStringIncludes(cleared, "Max-Age=0");
+      expect(res.status).toBe(302);
+      const cleared = res.headers
+        .getSetCookie()
+        .find((c) => c.startsWith(`${bff.loginStateCookieName}=`))!;
+      expect(cleared).toContain("Max-Age=0");
     });
 
     it("refuses to replay a state the callback already consumed", async () => {
@@ -3416,14 +3372,14 @@ describe("HonoBff", () => {
         withCookies(undefined, cookies),
       );
       await first.body?.cancel();
-      assertStrictEquals(first.status, 302);
+      expect(first.status).toBe(302);
 
       const replay = await app.request(
         callbackPath,
         withCookies(undefined, jar(first)),
       );
-      assertStrictEquals(replay.status, 400);
-      assertStrictEquals((await replay.json()).error, "invalid_request");
+      expect(replay.status).toBe(400);
+      expect((await replay.json()).error).toBe("invalid_request");
     });
 
     it("keeps sign-ins started in several tabs completable", async () => {
@@ -3447,18 +3403,17 @@ describe("HonoBff", () => {
         withCookies(undefined, browser),
       );
       await second.body?.cancel();
-      assertStrictEquals(second.headers.get("Location"), "/second");
+      expect(second.headers.get("Location")).toBe("/second");
 
       const first = await app.request(
         firstTab.callbackPath,
         withCookies(undefined, jar(second)),
       );
       await first.body?.cancel();
-      assertStrictEquals(
+      expect(
         first.headers.get("Location"),
-        "/first",
         "the tab that started first must still be able to finish",
-      );
+      ).toBe("/first");
     });
   });
 
@@ -3479,12 +3434,11 @@ describe("HonoBff", () => {
 
       for (const [route, res] of Object.entries(responses)) {
         await res.body?.cancel();
-        assertStrictEquals(
+        expect(
           res.headers.get("cache-control"),
-          "no-store",
           `${route} must not be cached`,
-        );
-        assertStrictEquals(res.headers.get("vary"), "Cookie", route);
+        ).toBe("no-store");
+        expect(res.headers.get("vary"), route).toBe("Cookie");
       }
     });
   });
@@ -3525,14 +3479,13 @@ describe("HonoBff", () => {
 
       const res = await app.request("/api/me", { headers: { cookie } });
 
-      assertStrictEquals(res.status, 502);
-      assertStrictEquals((await res.json()).error, "temporarily_unavailable");
-      assertStrictEquals(res.headers.get("set-cookie"), null);
-      assertEquals(
-        await store.read(cookie.split("=")[1]) !== null,
-        true,
+      expect(res.status).toBe(502);
+      expect((await res.json()).error).toBe("temporarily_unavailable");
+      expect(res.headers.get("set-cookie")).toBe(null);
+      expect(
+        (await store.read(cookie.split("=")[1])) !== null,
         "one bad minute at the IdP must not end the session",
-      );
+      ).toStrictEqual(true);
     });
 
     it("answers 502 from protect instead of signing the user out", async () => {
@@ -3548,9 +3501,11 @@ describe("HonoBff", () => {
 
       const res = await app.request("/api/me", { headers: { cookie } });
 
-      assertStrictEquals(res.status, 502);
-      assertStrictEquals((await res.json()).error, "temporarily_unavailable");
-      assertEquals(await store.read(cookie.split("=")[1]) !== null, true);
+      expect(res.status).toBe(502);
+      expect((await res.json()).error).toBe("temporarily_unavailable");
+      expect((await store.read(cookie.split("=")[1])) !== null).toStrictEqual(
+        true,
+      );
     });
   });
 
@@ -3566,7 +3521,7 @@ describe("HonoBff", () => {
         headers: { cookie: await loginCookie(app) },
       });
       const body = await probe.json();
-      assertStrictEquals(body.isAuthenticated, true);
+      expect(body.isAuthenticated).toBe(true);
     });
   });
 });

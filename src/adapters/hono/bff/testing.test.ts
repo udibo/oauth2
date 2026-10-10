@@ -1,5 +1,4 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
 import { DirectClient } from "../../../client/mod.ts";
@@ -30,15 +29,17 @@ async function buildBff(
   const oauth = await createMemoryAuthorizationServer<TestClient, TestUser>({
     issuer: ISSUER,
     users: [{ user: { id: "u1", username: "alice" }, password: "pw" }],
-    clients: [{
-      client: {
-        id: "spa",
-        grants: ["authorization_code", "refresh_token"],
-        redirectUris: [`${ISSUER}/auth/callback`],
+    clients: [
+      {
+        client: {
+          id: "spa",
+          grants: ["authorization_code", "refresh_token"],
+          redirectUris: [`${ISSUER}/auth/callback`],
+        },
+        secret: "shh",
+        ownerUserId: "u1",
       },
-      secret: "shh",
-      ownerUserId: "u1",
-    }],
+    ],
   });
   const oauthClient = new DirectClient({
     clientId: "spa",
@@ -90,8 +91,8 @@ describe("createTestSession", () => {
     const res = await app.request("/api/me", {
       headers: { cookie, [bff.csrfHeaderName!]: "1" },
     });
-    assertStrictEquals(res.status, 200);
-    assertEquals(await res.json(), { ok: true, sub: "u1" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toStrictEqual({ ok: true, sub: "u1" });
   });
 
   it("readTestSession returns the data we just stored", async () => {
@@ -102,9 +103,9 @@ describe("createTestSession", () => {
       user: { sub: "u9" },
     });
     const data = await readTestSession(bff, cookie);
-    assertEquals(data?.tokens.accessToken, "tok-1");
-    assertEquals(data?.refreshToken, "ref-1");
-    assertEquals(data?.user, { sub: "u9" });
+    expect(data?.tokens.accessToken).toStrictEqual("tok-1");
+    expect(data?.refreshToken).toStrictEqual("ref-1");
+    expect(data?.user).toStrictEqual({ sub: "u9" });
   });
 });
 
@@ -128,8 +129,8 @@ describe("createAuthenticatedTestSession", () => {
     const res = await app.request("/api/me", {
       headers: { cookie, [bff.csrfHeaderName!]: "1" },
     });
-    assertStrictEquals(res.status, 200);
-    assertEquals(await res.json(), { ok: true, sub: "u1" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toStrictEqual({ ok: true, sub: "u1" });
   });
 });
 
@@ -162,10 +163,9 @@ describe("forceTokenExpiry", () => {
 
     const aged = await forceTokenExpiry(bff, cookie);
     const sessionAfterAging = await readTestSession(bff, aged);
-    assertEquals(
+    expect(
       sessionAfterAging!.tokens.accessTokenExpiresAt! < Date.now(),
-      true,
-    );
+    ).toStrictEqual(true);
 
     const app = new Hono();
     const inboundTokensSeen: string[] = [];
@@ -178,15 +178,14 @@ describe("forceTokenExpiry", () => {
     const res = await app.request("/api/probe", {
       headers: { cookie: aged, [bff.csrfHeaderName!]: "1" },
     });
-    assertStrictEquals(res.status, 200);
-    assertStrictEquals(inboundTokensSeen.length, 1);
+    expect(res.status).toBe(200);
+    expect(inboundTokensSeen.length).toBe(1);
     const authHeader = inboundTokensSeen[0];
-    assertEquals(authHeader.startsWith("Bearer "), true);
-    assertEquals(
+    expect(authHeader.startsWith("Bearer ")).toStrictEqual(true);
+    expect(
       authHeader === `Bearer ${accessToken}`,
-      false,
       "expected attachToken to swap the expired token for the refreshed one",
-    );
+    ).toStrictEqual(false);
   });
 });
 
