@@ -5,3 +5,5 @@ coverage
 test-results/
 playwright-report/
 scripts/doc-check/
+.react-router
+build

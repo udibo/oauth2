@@ -6,7 +6,7 @@
  *
  *   - `app.route("/", home)` — interactive walkthrough at `GET /`
  *     that drives every OAuth2 grant against the companion
- *     authorization server (port 8001) and tests the resulting tokens
+ *     authorization server (port 8001 by default) and tests the resulting tokens
  *     against this server's `/api/*` endpoints (`routes/home.ts`).
  *   - `app.route("/api", api)` — protected API endpoints
  *     (`routes/api.ts`). Each route demonstrates a different scope
@@ -21,8 +21,8 @@
  *     with an auth server; included so the example is self-contained.
  *
  * Run:
- *   Terminal 1: (in the app-with-own-auth example) deno task serve
- *   Terminal 2: deno task serve
+ *   Terminal 1: (in the app-with-own-auth example) pnpm start
+ *   Terminal 2: pnpm start
  *
  * @module
  */
@@ -44,8 +44,3 @@ app.route("/api", api);
 app.route("/dev", dev);
 
 export default app;
-
-if (import.meta.main) {
-  console.log("Open http://localhost:8002/ for the endpoint walkthrough.");
-  console.log("Make sure app-with-own-auth is running on port 8001.");
-}

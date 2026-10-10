@@ -127,20 +127,20 @@ export function renderConsentPage(
   return c.html(consentPage({ client, scope, user, authorizeQuery }));
 }
 
-function consentPage(
-  options: {
-    client: DemoClient;
-    scope: string | undefined;
-    user: DemoUser;
-    authorizeQuery: string;
-  },
-): string {
+function consentPage(options: {
+  client: DemoClient;
+  scope: string | undefined;
+  user: DemoUser;
+  authorizeQuery: string;
+}): string {
   const clientName = escapeHtml(options.client.name);
   const username = escapeHtml(options.user.username);
   const scope = options.scope ?? "(default)";
-  const scopeList = scope.split(/\s+/).filter(Boolean).map((s) =>
-    `<li><code>${escapeHtml(s)}</code></li>`
-  ).join("");
+  const scopeList = scope
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => `<li><code>${escapeHtml(s)}</code></li>`)
+    .join("");
   const returnTo = `/oauth2/authorize${options.authorizeQuery}`;
   return `<!doctype html>
 <title>Authorize ${clientName}</title>
@@ -155,9 +155,9 @@ function consentPage(
 <p>${clientName} is requesting access to:</p>
 <ul>${scopeList}</ul>
 <form method="post" action="/consent">
-  <input type="hidden" name="authorize_query" value="${
-    escapeHtml(options.authorizeQuery)
-  }">
+  <input type="hidden" name="authorize_query" value="${escapeHtml(
+    options.authorizeQuery,
+  )}">
   <button name="decision" value="approve" type="submit">Approve</button>
   <button name="decision" value="deny" type="submit">Deny</button>
 </form>`;

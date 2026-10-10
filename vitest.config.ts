@@ -3,6 +3,7 @@ import { defineConfig, type ViteUserConfig } from "vitest/config";
 const config: ViteUserConfig = defineConfig({
   test: {
     testTimeout: 30_000,
+    globalSetup: ["vitest.global-setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "lcov"],
@@ -10,6 +11,8 @@ const config: ViteUserConfig = defineConfig({
       exclude: ["**/*.test.ts", "**/*.test.tsx", "**/_test_*", "**/*.e2e.ts"],
     },
     projects: [
+      "examples/hono/*",
+      "templates/*/vitest.*.config.ts",
       {
         extends: true,
         test: {

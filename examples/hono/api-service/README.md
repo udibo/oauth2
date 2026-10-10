@@ -31,27 +31,54 @@ endpoint) that needs to accept tokens but has no frontend of its own.
 
 ## Running it
 
+This example is a pnpm workspace member that depends on the package through
+`@udibo/oauth2: workspace:*`, which resolves to the package's built `dist/`.
+From the repository root, install and build once:
+
+```bash
+pnpm install
+pnpm build
+```
+
 By default this example points at `app-with-own-auth/` on port 8001 as its IDP.
 Start both:
 
 ```bash
 # Terminal 1 — the IDP
-deno task serve:app-with-own-auth
+pnpm --filter example-app-with-own-auth start
 
 # Terminal 2 — this service
-deno task serve:api-service
+pnpm --filter example-api-service start
 ```
 
-Then open <http://localhost:8002/>.
+Then open <http://localhost:8002/>. `pnpm --filter example-api-service dev`
+restarts the service when a file changes (`node --watch`).
+
+Configuration is read from the environment by `config.ts`, which validates it
+at startup and lists every invalid variable at once. Every variable is optional;
+the defaults pair this service with the local `app-with-own-auth` example.
+
+| Variable          | Default                 | Meaning                                              |
+| ----------------- | ----------------------- | ---------------------------------------------------- |
+| `PORT`            | `8002`                  | Port to listen on (`0` picks a free one)             |
+| `PUBLIC_URL`      | `http://localhost:PORT` | Origin of this service, used to build `redirect_uri` |
+| `AUTH_SERVER_URL` | `http://localhost:8001` | Origin of the identity provider                      |
+| `CLIENT_ID`       | `spa`                   | Client this service introspects tokens as            |
+| `CLIENT_SECRET`   | `spa-secret`            | Secret for `CLIENT_ID`                               |
+
+Run the tests with `pnpm --filter example-api-service test`. They stub
+`tokenReader.getToken` and call the app in-process; `serve.test.ts` also starts
+the real Node server on a free port.
 
 ## What to change to make this production-ready
 
 The example deliberately skips operational concerns to keep the OAuth2 wiring
 readable. When you copy this to a real project:
 
-- **Move `AUTH_SERVER_URL`, `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI` out of
-  `oauth2/server.ts` into env config.** Hardcoded credentials ship with the demo
-  because the example must stand up without setup.
+- **Replace the demo credential defaults in `config.ts`.** `CLIENT_ID` and
+  `CLIENT_SECRET` fall back to the demo client so the example stands up without
+  setup; a real deployment sets them from your secret store and drops the
+  fallbacks so a missing value fails at startup.
 - **Register this service as a client with the external IDP** (e.g. Udibo,
   Auth0, Cognito). The `CLIENT_ID` / `CLIENT_SECRET` here authenticate the
   _introspection request_ — the IDP gates who can introspect tokens.

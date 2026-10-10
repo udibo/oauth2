@@ -24,7 +24,7 @@
  * username answers measurably faster than a wrong password — a **username
  * enumeration oracle**. `IdentityService.signIn` is the answer (it throttles
  * before the lookup and does the password work on every failure branch);
- * `templates/juniper` wires it that way. This example keeps the direct call so
+ * `templates/react-router` wires it that way. This example keeps the direct call so
  * the OAuth2 wiring stays the only thing on screen.
  *
  * @module
@@ -65,9 +65,7 @@ app.post("/", async (c) => {
 
 export default app;
 
-function loginPage(
-  options: { returnTo: string; error?: string },
-): string {
+function loginPage(options: { returnTo: string; error?: string }): string {
   const returnTo = escapeHtml(options.returnTo);
   const error = options.error
     ? `<p style="color:red">${escapeHtml(options.error)}</p>`

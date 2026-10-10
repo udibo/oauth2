@@ -27,10 +27,9 @@ app.get("/", async (c) => {
 
   switch (result.status) {
     case "success":
-      return c.html(outcomePage(
-        "Email verified",
-        "Your email address is confirmed.",
-      ));
+      return c.html(
+        outcomePage("Email verified", "Your email address is confirmed."),
+      );
     case "expired":
       return c.html(
         outcomePage(

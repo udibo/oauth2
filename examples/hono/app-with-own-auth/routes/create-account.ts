@@ -104,9 +104,10 @@ app.post("/", async (c) => {
 
 export default app;
 
-function createAccountPage(
-  options: { returnTo: string; error?: string },
-): string {
+function createAccountPage(options: {
+  returnTo: string;
+  error?: string;
+}): string {
   const returnTo = escapeHtml(options.returnTo);
   const error = options.error
     ? `<p style="color:red">${escapeHtml(options.error)}</p>`

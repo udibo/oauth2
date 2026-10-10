@@ -27,9 +27,8 @@ const app = new Hono<{
   Variables: HonoResourceServerVariables<ExampleClient, ExampleUser>;
 }>();
 
-app.get(
-  "/public",
-  (c) => c.json({ message: "Public endpoint — no token required." }),
+app.get("/public", (c) =>
+  c.json({ message: "Public endpoint — no token required." }),
 );
 
 app.use("/private", resourceServer.protect());

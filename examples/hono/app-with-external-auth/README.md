@@ -62,22 +62,52 @@ migration as a real patch.
 
 ## Running it
 
+This example is a pnpm workspace member that depends on the package through
+`@udibo/oauth2: workspace:*`, which resolves to the package's built `dist/`.
+From the repository root, install and build once:
+
+```bash
+pnpm install
+pnpm build
+```
+
 By default this example points at `app-with-own-auth/` on port 8001 as its IDP.
 Start both:
 
 ```bash
 # Terminal 1 — the IDP
-deno task serve:app-with-own-auth
+pnpm --filter example-app-with-own-auth start
 
 # Terminal 2 — this app
-deno task serve:app-with-external-auth
+pnpm --filter example-app-with-external-auth start
 
 # Terminal 3 (optional) — the separate API behind /remote-api/*
-deno task serve:api-service
+pnpm --filter example-api-service start
 ```
 
 Then open <http://localhost:8003/>. Without terminal 3 the page works normally;
-only the `/remote-api/private` button returns `502`.
+only the `/remote-api/private` button returns `502`. Use
+`pnpm --filter example-app-with-external-auth dev` to restart on file changes
+(`node --watch`).
+
+Configuration is read from the environment by `config.ts`, which validates it
+at startup and lists every invalid variable at once. Every variable is optional;
+the defaults pair this app with the local examples.
+
+| Variable            | Default                     | Meaning                                                 |
+| ------------------- | --------------------------- | ------------------------------------------------------- |
+| `PORT`              | `8003`                      | Port to listen on (`0` picks a free one)                |
+| `PUBLIC_URL`        | `http://localhost:PORT`     | Origin of this app; `${PUBLIC_URL}/auth/callback` is the redirect URI |
+| `IDP_BASE_URL`      | `http://localhost:8001`     | Origin of the identity provider                         |
+| `IDP_CLIENT_ID`     | `spa`                       | Client this app is registered as                        |
+| `IDP_CLIENT_SECRET` | `spa-secret`                | Secret for `IDP_CLIENT_ID`                              |
+| `API_SERVICE_URL`   | `http://localhost:8002/api` | Separate API that `/remote-api/*` proxies to            |
+
+Run the tests with `pnpm --filter example-app-with-external-auth test`. They
+stub `tokenReader.getToken` and call the app in-process. `serve.test.ts` starts
+the real Node server on a free port, and `remote-api.test.ts` points
+`/remote-api/*` at a local upstream on a free port to show the access token
+being forwarded.
 
 Configuring this app for local development, preview deployments, and production
 — including what to do about preview URLs that change every deploy — is covered
@@ -86,15 +116,15 @@ in
 
 ## What to change to make this production-ready
 
-- **Move `IDP_BASE_URL`, `APP_BASE_URL`, `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET`,
-  `API_SERVICE_URL` out of `oauth2/server.ts` into env config.** These are the
-  production swap points. In production:
+- **Set `IDP_BASE_URL`, `PUBLIC_URL`, `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET`,
+  `API_SERVICE_URL` in the environment and drop the demo fallbacks in
+  `config.ts`.** These are the production swap points. In production:
   - `IDP_BASE_URL` points at Udibo (or whichever IDP you're using).
-  - `APP_BASE_URL` is your deployed app URL.
+  - `PUBLIC_URL` is your deployed app URL.
   - `IDP_CLIENT_ID` / `IDP_CLIENT_SECRET` come from registering this app as a
     client in the IDP's admin UI.
 - **Register your `redirect_uri` with the IDP**. The default is
-  `${APP_BASE_URL}/auth/callback`. The IDP rejects any redirect URI not in its
+  `${PUBLIC_URL}/auth/callback`. The IDP rejects any redirect URI not in its
   registered list.
 - **Replace `MemorySessionStore`** with a persistent store: the included
   `EncryptedCookieSessionStore` (stateless, in `@udibo/oauth2/hono/bff`), or

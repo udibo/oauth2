@@ -1,8 +1,4 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
-
-import type { DeliveryMessage } from "@udibo/oauth2/identity";
+import { describe, expect, it, vi } from "vitest";
 
 import app from "./main.ts";
 import { delivery } from "./oauth2/identity.ts";
@@ -47,17 +43,17 @@ async function signInThroughLoginForm(opts: {
     `/auth/login?return_to=${encodeURIComponent(returnTo)}`,
     { method: "POST" },
   );
-  assertStrictEquals(loginRes.status, 302);
+  expect(loginRes.status).toBe(302);
   const authorizeUrl = loginRes.headers.get("Location")!;
   const loginState = setCookieValue(loginRes, bff.loginStateCookieName)!;
-  assertEquals(typeof loginState, "string");
+  expect(typeof loginState).toBe("string");
 
-  const authorizePath = new URL(authorizeUrl).pathname +
-    new URL(authorizeUrl).search;
+  const authorizePath =
+    new URL(authorizeUrl).pathname + new URL(authorizeUrl).search;
   const loginRedirectRes = await app.request(authorizePath);
-  assertStrictEquals(loginRedirectRes.status, 302);
+  expect(loginRedirectRes.status).toBe(302);
   const loginUrl = loginRedirectRes.headers.get("Location")!;
-  assertEquals(loginUrl.startsWith("/login?return_to="), true);
+  expect(loginUrl).toMatch(/^\/login\?return_to=/);
 
   const loginParam = new URL(loginUrl, "http://localhost").searchParams.get(
     "return_to",
@@ -71,17 +67,18 @@ async function signInThroughLoginForm(opts: {
       return_to: loginParam,
     }),
   });
-  assertStrictEquals(submitRes.status, 302);
+  expect(submitRes.status).toBe(302);
   const idpSession = setCookieValue(submitRes, "idp_session")!;
-  assertEquals(typeof idpSession, "string");
+  expect(typeof idpSession).toBe("string");
   const resumedAuthorize = submitRes.headers.get("Location")!;
-  const resumedPath = new URL(resumedAuthorize, "http://localhost").pathname +
+  const resumedPath =
+    new URL(resumedAuthorize, "http://localhost").pathname +
     new URL(resumedAuthorize, "http://localhost").search;
 
   const consentPageRes = await app.request(resumedPath, {
     headers: { cookie: `idp_session=${idpSession}` },
   });
-  assertStrictEquals(consentPageRes.status, 200);
+  expect(consentPageRes.status).toBe(200);
   const consentHtml = await consentPageRes.text();
   const queryMatch = consentHtml.match(
     /name="authorize_query" value="([^"]*)"/,
@@ -102,9 +99,9 @@ async function signInThroughLoginForm(opts: {
       authorize_query: authorizeQuery,
     }),
   });
-  assertStrictEquals(consentRes.status, 302);
+  expect(consentRes.status).toBe(302);
   const consentId = setCookieValue(consentRes, "consent_id")!;
-  assertEquals(typeof consentId, "string");
+  expect(typeof consentId).toBe("string");
   const postConsentAuthorize = consentRes.headers.get("Location")!;
   const postConsentPath =
     new URL(postConsentAuthorize, "http://localhost").pathname +
@@ -113,19 +110,19 @@ async function signInThroughLoginForm(opts: {
   const authorizeRes = await app.request(postConsentPath, {
     headers: { cookie: `idp_session=${idpSession}; consent_id=${consentId}` },
   });
-  assertStrictEquals(authorizeRes.status, 302);
+  expect(authorizeRes.status).toBe(302);
   const callbackUrl = authorizeRes.headers.get("Location")!;
-  assertEquals(callbackUrl.includes("/auth/callback"), true);
-  assertEquals(callbackUrl.includes("code="), true);
+  expect(callbackUrl).toContain("/auth/callback");
+  expect(callbackUrl).toContain("code=");
 
-  const callbackPath = new URL(callbackUrl).pathname +
-    new URL(callbackUrl).search;
+  const callbackPath =
+    new URL(callbackUrl).pathname + new URL(callbackUrl).search;
   const callbackRes = await app.request(callbackPath, {
     headers: { cookie: `${bff.loginStateCookieName}=${loginState}` },
   });
-  assertStrictEquals(callbackRes.status, 302);
+  expect(callbackRes.status).toBe(302);
   const session = setCookieValue(callbackRes, "oauth2_session")!;
-  assertEquals(typeof session, "string");
+  expect(typeof session).toBe("string");
   return {
     session,
     idpSession,
@@ -158,16 +155,16 @@ async function approveConsentToSession(
     const res = await app.request(toPath(authorizeUrl), {
       headers: { cookie },
     });
-    assertStrictEquals(res.status, 302);
+    expect(res.status).toBe(302);
     authorizeUrl = res.headers.get("Location")!;
     loginState = setCookieValue(res, bff.loginStateCookieName);
-    assertEquals(typeof loginState, "string");
+    expect(typeof loginState).toBe("string");
   }
 
   const consentPageRes = await app.request(toPath(authorizeUrl), {
     headers: { cookie },
   });
-  assertStrictEquals(consentPageRes.status, 200);
+  expect(consentPageRes.status).toBe(200);
   const authorizeQuery = (await consentPageRes.text())
     .match(/name="authorize_query" value="([^"]*)"/)![1]
     .replaceAll("&amp;", "&");
@@ -180,69 +177,69 @@ async function approveConsentToSession(
       authorize_query: authorizeQuery,
     }),
   });
-  assertStrictEquals(consentRes.status, 302);
+  expect(consentRes.status).toBe(302);
   const consentId = setCookieValue(consentRes, "consent_id")!;
 
   const authorizeRes = await app.request(
     toPath(consentRes.headers.get("Location")!),
     { headers: { cookie: `${cookie}; consent_id=${consentId}` } },
   );
-  assertStrictEquals(authorizeRes.status, 302);
+  expect(authorizeRes.status).toBe(302);
   const callbackUrl = authorizeRes.headers.get("Location")!;
-  assertEquals(callbackUrl.includes("/auth/callback"), true);
+  expect(callbackUrl).toContain("/auth/callback");
 
   const callbackRes = await app.request(toPath(callbackUrl), {
     headers: loginState
       ? { cookie: `${bff.loginStateCookieName}=${loginState}` }
       : {},
   });
-  assertStrictEquals(callbackRes.status, 302);
+  expect(callbackRes.status).toBe(302);
   const session = setCookieValue(callbackRes, "oauth2_session")!;
-  assertEquals(typeof session, "string");
+  expect(typeof session).toBe("string");
   return session;
 }
 
 describe("app-with-own-auth example", () => {
   it("GET / returns the SPA index page", async () => {
     const res = await app.request("/");
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const body = await res.text();
-    assertEquals(body.includes("App with own auth"), true);
-    assertEquals(body.includes(`action="/auth/login"`), true);
-    assertEquals(body.includes(">Sign in<"), true);
+    expect(body).toContain("App with own auth");
+    expect(body).toContain(`action="/auth/login"`);
+    expect(body).toContain(">Sign in<");
   });
 
   it("GET / lists the seeded user credentials", async () => {
     const res = await app.request("/");
     const body = await res.text();
-    assertEquals(body.includes("<code>admin</code>"), true);
-    assertEquals(body.includes("<code>user</code>"), true);
-    assertEquals(body.includes("<code>password</code>"), true);
+    expect(body).toContain("<code>admin</code>");
+    expect(body).toContain("<code>user</code>");
+    expect(body).toContain("<code>password</code>");
   });
 
   it("GET / links to create-account", async () => {
     const body = await (await app.request("/")).text();
-    assertEquals(body.includes(`href="/create-account"`), true);
+    expect(body).toContain(`href="/create-account"`);
   });
 
   it("login form links to create-account (with return_to) and forgot-password", async () => {
     const res = await app.request(
-      `/login?return_to=${
-        encodeURIComponent("/oauth2/authorize?client_id=spa")
-      }`,
+      `/login?return_to=${encodeURIComponent(
+        "/oauth2/authorize?client_id=spa",
+      )}`,
     );
     const html = await res.text();
-    assertEquals(html.includes("/create-account?return_to="), true);
-    assertEquals(html.includes(`href="/forgot-password"`), true);
+    expect(html).toContain("/create-account?return_to=");
+    expect(html).toContain(`href="/forgot-password"`);
   });
 
   it("GET /create-account renders the sign-up form", async () => {
     const res = await app.request("/create-account");
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const html = await res.text();
-    assertEquals(html.includes("Create your account"), true);
-    assertEquals(html.includes('name="username"'), true);
-    assertEquals(html.includes('name="password"'), true);
+    expect(html).toContain("Create your account");
+    expect(html).toContain('name="username"');
+    expect(html).toContain('name="password"');
   });
 
   it("create-account (from scratch) starts a fresh login and lands authenticated", async () => {
@@ -255,19 +252,19 @@ describe("app-with-own-auth example", () => {
         password: "hunter2hunter2",
       }),
     });
-    assertStrictEquals(createRes.status, 302);
+    expect(createRes.status).toBe(302);
     const idpSession = setCookieValue(createRes, "idp_session")!;
-    assertEquals(typeof idpSession, "string");
+    expect(typeof idpSession).toBe("string");
     const location = createRes.headers.get("Location")!;
-    assertEquals(location.startsWith("/auth/login?return_to="), true);
+    expect(location).toMatch(/^\/auth\/login\?return_to=/);
 
     const session = await approveConsentToSession(location, idpSession);
     const probe = await app.request("/auth/session", {
       headers: { cookie: `oauth2_session=${session}` },
     });
     const body = await probe.json();
-    assertStrictEquals(body.isAuthenticated, true);
-    assertEquals(body.user?.username, "newbie");
+    expect(body.isAuthenticated).toBe(true);
+    expect(body.user?.username).toBe("newbie");
   });
 
   it("create-account (mid-authorize) resumes the in-flight authorize URL", async () => {
@@ -282,8 +279,8 @@ describe("app-with-own-auth example", () => {
         return_to: authorizeUrl,
       }),
     });
-    assertStrictEquals(res.status, 302);
-    assertStrictEquals(res.headers.get("Location"), authorizeUrl);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe(authorizeUrl);
     await res.body?.cancel();
   });
 
@@ -293,8 +290,8 @@ describe("app-with-own-auth example", () => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username: "admin", password: "whatever12" }),
     });
-    assertStrictEquals(res.status, 409);
-    assertEquals((await res.text()).includes("taken"), true);
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain("taken");
   });
 
   it("create-account rejects a too-short password", async () => {
@@ -306,8 +303,8 @@ describe("app-with-own-auth example", () => {
         password: "short",
       }),
     });
-    assertStrictEquals(res.status, 422);
-    assertEquals((await res.text()).includes("at least 8 characters"), true);
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("at least 8 characters");
   });
 
   it("create-account refuses an off-site return_to (open-redirect guard)", async () => {
@@ -320,20 +317,17 @@ describe("app-with-own-auth example", () => {
         return_to: "https://evil.example/phish",
       }),
     });
-    assertStrictEquals(res.status, 302);
-    assertStrictEquals(
-      res.headers.get("Location"),
-      "/auth/login?return_to=%2F",
-    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/auth/login?return_to=%2F");
     await res.body?.cancel();
   });
 
   it("GET /forgot-password renders the request form", async () => {
     const res = await app.request("/forgot-password");
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const html = await res.text();
-    assertEquals(html.includes("Reset your password"), true);
-    assertEquals(html.includes('name="email"'), true);
+    expect(html).toContain("Reset your password");
+    expect(html).toContain('name="email"');
   });
 
   it("POST /forgot-password is enumeration-safe (identical response for any email)", async () => {
@@ -347,28 +341,31 @@ describe("app-with-own-auth example", () => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ email: "nobody@example.test" }),
     });
-    assertStrictEquals(known.status, 200);
-    assertStrictEquals(unknown.status, 200);
+    expect(known.status).toBe(200);
+    expect(unknown.status).toBe(200);
     const knownBody = await known.text();
     const unknownBody = await unknown.text();
-    assertEquals(knownBody, unknownBody);
-    assertEquals(knownBody.includes("If an account exists"), true);
+    expect(knownBody).toStrictEqual(unknownBody);
+    expect(knownBody).toContain("If an account exists");
   });
 
   it("GET /auth/session returns isAuthenticated=false without a cookie", async () => {
     const res = await app.request("/auth/session");
-    assertStrictEquals(res.status, 200);
-    assertEquals(await res.json(), { isAuthenticated: false, user: null });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toStrictEqual({
+      isAuthenticated: false,
+      user: null,
+    });
   });
 
   it("GET /api/me returns 401 without a session cookie", async () => {
     const res = await app.request("/api/me");
-    assertStrictEquals(res.status, 401);
+    expect(res.status).toBe(401);
   });
 
   it("GET /api/admin returns 401 without a session cookie", async () => {
     const res = await app.request("/api/admin");
-    assertStrictEquals(res.status, 401);
+    expect(res.status).toBe(401);
   });
 
   it("GET /oauth2/authorize redirects to /login when no IDP session exists", async () => {
@@ -376,16 +373,10 @@ describe("app-with-own-auth example", () => {
     url.searchParams.set("response_type", "code");
     url.searchParams.set("client_id", "spa");
     url.searchParams.set("state", "xyz");
-    url.searchParams.set(
-      "redirect_uri",
-      "http://localhost:8001/auth/callback",
-    );
+    url.searchParams.set("redirect_uri", "http://localhost:8001/auth/callback");
     const res = await app.request(url.pathname + url.search);
-    assertStrictEquals(res.status, 302);
-    assertEquals(
-      res.headers.get("Location")?.startsWith("/login?return_to="),
-      true,
-    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toMatch(/^\/login\?return_to=/);
   });
 
   it("POST /login with bad credentials returns 401 and re-renders the form", async () => {
@@ -397,9 +388,9 @@ describe("app-with-own-auth example", () => {
         password: "wrong",
       }),
     });
-    assertStrictEquals(res.status, 401);
+    expect(res.status).toBe(401);
     const html = await res.text();
-    assertEquals(html.includes("Invalid username or password"), true);
+    expect(html).toContain("Invalid username or password");
   });
 
   it("POST /login refuses an off-site return_to (open-redirect guard)", async () => {
@@ -413,8 +404,8 @@ describe("app-with-own-auth example", () => {
           return_to: evil,
         }),
       });
-      assertStrictEquals(res.status, 302);
-      assertStrictEquals(res.headers.get("Location"), "/");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/");
       await res.body?.cancel();
     }
 
@@ -427,9 +418,8 @@ describe("app-with-own-auth example", () => {
         return_to: "/oauth2/authorize?response_type=code",
       }),
     });
-    assertStrictEquals(ok.status, 302);
-    assertStrictEquals(
-      ok.headers.get("Location"),
+    expect(ok.status).toBe(302);
+    expect(ok.headers.get("Location")).toBe(
       "/oauth2/authorize?response_type=code",
     );
     await ok.body?.cancel();
@@ -444,49 +434,48 @@ describe("app-with-own-auth example", () => {
       headers: { cookie: `oauth2_session=${session}` },
     });
     const probeBody = await probeRes.json();
-    assertStrictEquals(probeBody.isAuthenticated, true);
-    assertEquals(probeBody.user?.sub, "user-1");
-    assertEquals(probeBody.user?.username, "user");
+    expect(probeBody.isAuthenticated).toBe(true);
+    expect(probeBody.user?.sub).toBe("user-1");
+    expect(probeBody.user?.username).toBe("user");
 
     const apiRes = await app.request("/api/me", {
       headers: { cookie: `oauth2_session=${session}` },
     });
-    assertStrictEquals(apiRes.status, 200);
+    expect(apiRes.status).toBe(200);
     const apiBody = await apiRes.json();
-    assertEquals(apiBody.sub, "user-1");
-    assertEquals(apiBody.client, "spa");
+    expect(apiBody.sub).toBe("user-1");
+    expect(apiBody.client).toBe("spa");
 
     const adminRes = await app.request("/api/admin", {
       headers: { cookie: `oauth2_session=${session}` },
     });
-    assertStrictEquals(adminRes.status, 403);
-    assertEquals(
-      adminRes.headers.get("WWW-Authenticate")?.includes("insufficient_scope"),
-      true,
+    expect(adminRes.status).toBe(403);
+    expect(adminRes.headers.get("WWW-Authenticate")).toContain(
+      "insufficient_scope",
     );
 
     const writeRes = await app.request("/api/write", {
       headers: { cookie: `oauth2_session=${session}` },
     });
-    assertStrictEquals(writeRes.status, 200);
+    expect(writeRes.status).toBe(200);
 
     const logoutRes = await app.request("/auth/logout", {
       method: "POST",
       headers: { cookie: `oauth2_session=${session}` },
     });
-    assertStrictEquals(logoutRes.status, 302);
+    expect(logoutRes.status).toBe(302);
 
     const postLogoutProbe = await app.request("/auth/session", {
       headers: { cookie: `oauth2_session=${session}` },
     });
     const postLogoutBody = await postLogoutProbe.json();
-    assertStrictEquals(postLogoutBody.isAuthenticated, false);
+    expect(postLogoutBody.isAuthenticated).toBe(false);
 
     const idpLogoutRes = await app.request("/logout", {
       method: "POST",
       headers: { cookie: `idp_session=${idpSession}` },
     });
-    assertStrictEquals(idpLogoutRes.status, 204);
+    expect(idpLogoutRes.status).toBe(204);
   });
 
   it("POST /logout honors return_to (consent 'switch user'), else 204", async () => {
@@ -511,21 +500,20 @@ describe("app-with-own-auth example", () => {
         return_to: "/oauth2/authorize?client_id=spa",
       }),
     });
-    assertStrictEquals(switchRes.status, 302);
-    assertStrictEquals(
-      switchRes.headers.get("Location"),
+    expect(switchRes.status).toBe(302);
+    expect(switchRes.headers.get("Location")).toBe(
       "/oauth2/authorize?client_id=spa",
     );
 
     const plainRes = await app.request("/logout", { method: "POST" });
-    assertStrictEquals(plainRes.status, 204);
+    expect(plainRes.status).toBe(204);
 
     const evilRes = await app.request("/logout", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ return_to: "https://evil.example/" }),
     });
-    assertStrictEquals(evilRes.status, 204);
+    expect(evilRes.status).toBe(204);
   });
 
   it("end-to-end: admin user gets the admin scope and /api/admin succeeds", async () => {
@@ -533,10 +521,10 @@ describe("app-with-own-auth example", () => {
     const adminRes = await app.request("/api/admin", {
       headers: { cookie: `oauth2_session=${session}` },
     });
-    assertStrictEquals(adminRes.status, 200);
+    expect(adminRes.status).toBe(200);
     const body = await adminRes.json();
-    assertEquals(body.sub, "user-admin");
-    assertEquals(body.scope?.includes("admin"), true);
+    expect(body.sub).toBe("user-admin");
+    expect(body.scope).toContain("admin");
   });
 
   it("consent page narrows the displayed scope to what the user can grant", async () => {
@@ -544,8 +532,8 @@ describe("app-with-own-auth example", () => {
       method: "POST",
     });
     const authorizeUrl = loginRes.headers.get("Location")!;
-    const authorizePath = new URL(authorizeUrl).pathname +
-      new URL(authorizeUrl).search;
+    const authorizePath =
+      new URL(authorizeUrl).pathname + new URL(authorizeUrl).search;
     const loginRedirectRes = await app.request(authorizePath);
     const loginUrl = loginRedirectRes.headers.get("Location")!;
     const loginParam = new URL(loginUrl, "http://localhost").searchParams.get(
@@ -562,22 +550,24 @@ describe("app-with-own-auth example", () => {
     });
     const idpSession = setCookieValue(submitRes, "idp_session")!;
     const resumed = submitRes.headers.get("Location")!;
-    const resumedPath = new URL(resumed, "http://localhost").pathname +
+    const resumedPath =
+      new URL(resumed, "http://localhost").pathname +
       new URL(resumed, "http://localhost").search;
     const consentPage = await app.request(resumedPath, {
       headers: { cookie: `idp_session=${idpSession}` },
     });
     const html = await consentPage.text();
-    assertEquals(html.includes("<code>read</code>"), true);
-    assertEquals(html.includes("<code>write</code>"), true);
-    assertEquals(html.includes("<code>admin</code>"), false);
+    expect(html).toContain("<code>read</code>");
+    expect(html).toContain("<code>write</code>");
+    expect(html).not.toContain("<code>admin</code>");
   });
 
   it("denying consent redirects the client with error=access_denied", async () => {
     const loginRes = await app.request("/auth/login?return_to=/welcome", {
       method: "POST",
     });
-    const authorizePath = new URL(loginRes.headers.get("Location")!).pathname +
+    const authorizePath =
+      new URL(loginRes.headers.get("Location")!).pathname +
       new URL(loginRes.headers.get("Location")!).search;
     const loginRedirectRes = await app.request(authorizePath);
     const loginParam = new URL(
@@ -594,18 +584,14 @@ describe("app-with-own-auth example", () => {
       }),
     });
     const idpSession = setCookieValue(submitRes, "idp_session")!;
-    const resumedPath = new URL(
-      submitRes.headers.get("Location")!,
-      "http://localhost",
-    ).pathname +
+    const resumedPath =
+      new URL(submitRes.headers.get("Location")!, "http://localhost").pathname +
       new URL(submitRes.headers.get("Location")!, "http://localhost").search;
     const consentPage = await app.request(resumedPath, {
       headers: { cookie: `idp_session=${idpSession}` },
     });
     const html = await consentPage.text();
-    const queryMatch = html.match(
-      /name="authorize_query" value="([^"]*)"/,
-    )!;
+    const queryMatch = html.match(/name="authorize_query" value="([^"]*)"/)!;
     const authorizeQuery = queryMatch[1].replaceAll("&amp;", "&");
 
     const denyRes = await app.request("/consent", {
@@ -619,21 +605,22 @@ describe("app-with-own-auth example", () => {
         authorize_query: authorizeQuery,
       }),
     });
-    assertStrictEquals(denyRes.status, 302);
+    expect(denyRes.status).toBe(302);
     const back = denyRes.headers.get("Location")!;
-    assertEquals(back.includes("consent="), false);
+    expect(back).not.toContain("consent=");
     const denyConsentId = setCookieValue(denyRes, "consent_id")!;
 
-    const backPath = new URL(back, "http://localhost").pathname +
+    const backPath =
+      new URL(back, "http://localhost").pathname +
       new URL(back, "http://localhost").search;
     const followRes = await app.request(backPath, {
       headers: {
         cookie: `idp_session=${idpSession}; consent_id=${denyConsentId}`,
       },
     });
-    assertStrictEquals(followRes.status, 302);
+    expect(followRes.status).toBe(302);
     const errorLocation = followRes.headers.get("Location")!;
-    assertEquals(errorLocation.includes("error=access_denied"), true);
+    expect(errorLocation).toContain("error=access_denied");
   });
 
   it("a forged ?consent=approve on the authorize URL cannot skip the prompt", async () => {
@@ -657,9 +644,9 @@ describe("app-with-own-auth example", () => {
       headers: { cookie: `idp_session=${idpSession}` },
     });
 
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const html = await res.text();
-    assertEquals(html.includes('action="/consent"'), true);
+    expect(html).toContain('action="/consent"');
   });
 
   it("POST /consent without an IDP session is rejected (cross-site POST can't mint a decision)", async () => {
@@ -671,16 +658,16 @@ describe("app-with-own-auth example", () => {
         authorize_query: "?client_id=spa",
       }),
     });
-    assertStrictEquals(res.status, 403);
+    expect(res.status).toBe(403);
     await res.body?.cancel();
   });
 
   it("GET /device redirects to /login when no IDP session is set", async () => {
     const res = await app.request("/device?user_code=ABCD-EFGH");
-    assertStrictEquals(res.status, 302);
+    expect(res.status).toBe(302);
     const loc = res.headers.get("Location")!;
-    assertEquals(loc.startsWith("/login?return_to="), true);
-    assertEquals(loc.includes(encodeURIComponent("/device?user_code=")), true);
+    expect(loc).toMatch(/^\/login\?return_to=/);
+    expect(loc).toContain(encodeURIComponent("/device?user_code="));
   });
 
   it("GET /device renders the code-entry form when signed in", async () => {
@@ -697,10 +684,10 @@ describe("app-with-own-auth example", () => {
     const res = await app.request("/device", {
       headers: { cookie: `idp_session=${idpSession}` },
     });
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const html = await res.text();
-    assertEquals(html.includes("Authorize a device"), true);
-    assertEquals(html.includes('name="user_code"'), true);
+    expect(html).toContain("Authorize a device");
+    expect(html).toContain('name="user_code"');
   });
 
   it("device flow: request → enter code → approve issues a token", async () => {
@@ -713,14 +700,14 @@ describe("app-with-own-auth example", () => {
         scope: "read write",
       }),
     });
-    assertStrictEquals(deviceRes.status, 200);
-    const codes = await deviceRes.json() as {
+    expect(deviceRes.status).toBe(200);
+    const codes = (await deviceRes.json()) as {
       device_code: string;
       user_code: string;
       verification_uri: string;
     };
-    assertEquals(typeof codes.device_code, "string");
-    assertEquals(typeof codes.user_code, "string");
+    expect(typeof codes.device_code).toBe("string");
+    expect(typeof codes.user_code).toBe("string");
 
     const submitRes = await app.request("/login", {
       method: "POST",
@@ -741,9 +728,9 @@ describe("app-with-own-auth example", () => {
       },
       body: new URLSearchParams({ user_code: codes.user_code }),
     });
-    assertStrictEquals(approvalPageRes.status, 200);
+    expect(approvalPageRes.status).toBe(200);
     const approvalHtml = await approvalPageRes.text();
-    assertEquals(approvalHtml.includes("Authorize <em>spa</em>"), true);
+    expect(approvalHtml).toContain("Authorize <em>spa</em>");
 
     const approveRes = await app.request("/device", {
       method: "POST",
@@ -756,8 +743,8 @@ describe("app-with-own-auth example", () => {
         decision: "approve",
       }),
     });
-    assertStrictEquals(approveRes.status, 200);
-    assertEquals((await approveRes.text()).includes("Device approved"), true);
+    expect(approveRes.status).toBe(200);
+    expect(await approveRes.text()).toContain("Device approved");
 
     const tokenRes = await app.request("/oauth2/token", {
       method: "POST",
@@ -769,16 +756,18 @@ describe("app-with-own-auth example", () => {
         client_secret: "spa-secret",
       }),
     });
-    assertStrictEquals(tokenRes.status, 200);
+    expect(tokenRes.status).toBe(200);
     const tokens = await tokenRes.json();
-    assertEquals(typeof tokens.access_token, "string");
+    expect(typeof tokens.access_token).toBe("string");
   });
 });
 
 describe("password reset flow", () => {
-  async function createAccount(
-    options: { username: string; email?: string; password?: string },
-  ): Promise<void> {
+  async function createAccount(options: {
+    username: string;
+    email?: string;
+    password?: string;
+  }): Promise<void> {
     const res = await app.request("/create-account", {
       method: "POST",
       body: new URLSearchParams({
@@ -789,7 +778,7 @@ describe("password reset flow", () => {
         return_to: "/",
       }),
     });
-    assertStrictEquals(res.status, 302);
+    expect(res.status).toBe(302);
   }
 
   it("resets a password end to end with a single-use emailed link", async () => {
@@ -798,31 +787,29 @@ describe("password reset flow", () => {
     await createAccount({ username, email });
 
     let resetUrl = "";
-    using _hook = stub(
-      delivery,
-      "sendPasswordReset",
-      (...args: unknown[]) => {
-        resetUrl = (args[0] as DeliveryMessage).url!;
-      },
-    );
+    using _hook = vi
+      .spyOn(delivery, "sendPasswordReset")
+      .mockImplementation((message) => {
+        resetUrl = message.url!;
+      });
 
     const requestRes = await app.request("/forgot-password", {
       method: "POST",
       body: new URLSearchParams({ email }),
     });
-    assertStrictEquals(requestRes.status, 200);
-    assertEquals(resetUrl.includes("/reset-password?token="), true);
+    expect(requestRes.status).toBe(200);
+    expect(resetUrl).toContain("/reset-password?token=");
 
     const token = new URL(resetUrl).searchParams.get("token")!;
     const formRes = await app.request(`/reset-password?token=${token}`);
-    assertStrictEquals(formRes.status, 200);
+    expect(formRes.status).toBe(200);
 
     const resetRes = await app.request("/reset-password", {
       method: "POST",
       body: new URLSearchParams({ token, password: "new-password-12" }),
     });
-    assertStrictEquals(resetRes.status, 200);
-    assertEquals((await resetRes.text()).includes("Password reset"), true);
+    expect(resetRes.status).toBe(200);
+    expect(await resetRes.text()).toContain("Password reset");
 
     const oldLogin = await app.request("/login", {
       method: "POST",
@@ -832,7 +819,7 @@ describe("password reset flow", () => {
         return_to: "/",
       }),
     });
-    assertStrictEquals(oldLogin.status, 401);
+    expect(oldLogin.status).toBe(401);
 
     const newLogin = await app.request("/login", {
       method: "POST",
@@ -842,13 +829,13 @@ describe("password reset flow", () => {
         return_to: "/",
       }),
     });
-    assertStrictEquals(newLogin.status, 302);
+    expect(newLogin.status).toBe(302);
 
     const reuseRes = await app.request("/reset-password", {
       method: "POST",
       body: new URLSearchParams({ token, password: "again-password-1" }),
     });
-    assertStrictEquals(reuseRes.status, 400);
+    expect(reuseRes.status).toBe(400);
   });
 
   it("rejects a too-short new password without burning the token", async () => {
@@ -857,13 +844,11 @@ describe("password reset flow", () => {
     await createAccount({ username, email });
 
     let resetUrl = "";
-    using _hook = stub(
-      delivery,
-      "sendPasswordReset",
-      (...args: unknown[]) => {
-        resetUrl = (args[0] as DeliveryMessage).url!;
-      },
-    );
+    using _hook = vi
+      .spyOn(delivery, "sendPasswordReset")
+      .mockImplementation((message) => {
+        resetUrl = message.url!;
+      });
     await app.request("/forgot-password", {
       method: "POST",
       body: new URLSearchParams({ email }),
@@ -874,34 +859,35 @@ describe("password reset flow", () => {
       method: "POST",
       body: new URLSearchParams({ token, password: "short" }),
     });
-    assertStrictEquals(weakRes.status, 422);
-    assertEquals(
-      (await weakRes.text()).includes("at least 8 characters"),
-      true,
-    );
+    expect(weakRes.status).toBe(422);
+    expect(await weakRes.text()).toContain("at least 8 characters");
 
     const retryRes = await app.request("/reset-password", {
       method: "POST",
       body: new URLSearchParams({ token, password: "long-enough-12" }),
     });
-    assertStrictEquals(retryRes.status, 200);
+    expect(retryRes.status).toBe(200);
   });
 
   it("matches reset emails case-insensitively", async () => {
     let sent = false;
-    using _hook = stub(delivery, "sendPasswordReset", () => {
-      sent = true;
-    });
+    using _hook = vi
+      .spyOn(delivery, "sendPasswordReset")
+      .mockImplementation(() => {
+        sent = true;
+      });
     const res = await app.request("/forgot-password", {
       method: "POST",
       body: new URLSearchParams({ email: "ADMIN@Example.com" }),
     });
-    assertStrictEquals(res.status, 200);
-    assertEquals(sent, true);
+    expect(res.status).toBe(200);
+    expect(sent).toBe(true);
   });
 
   it("responds identically for unknown and known emails", async () => {
-    using _hook = stub(delivery, "sendPasswordReset", () => {});
+    using _hook = vi
+      .spyOn(delivery, "sendPasswordReset")
+      .mockImplementation(() => {});
     const known = await app.request("/forgot-password", {
       method: "POST",
       body: new URLSearchParams({ email: "admin@example.com" }),
@@ -910,13 +896,13 @@ describe("password reset flow", () => {
       method: "POST",
       body: new URLSearchParams({ email: "nobody@example.com" }),
     });
-    assertStrictEquals(known.status, unknown.status);
-    assertEquals(await known.text(), await unknown.text());
+    expect(known.status).toBe(unknown.status);
+    expect(await known.text()).toStrictEqual(await unknown.text());
   });
 
   it("rejects an invalid reset link", async () => {
     const res = await app.request("/reset-password?token=garbage");
-    assertStrictEquals(res.status, 400);
+    expect(res.status).toBe(400);
   });
 });
 
@@ -926,13 +912,11 @@ describe("email verification flow", () => {
     const email = `${username}@example.com`;
 
     let verifyUrl = "";
-    using _hook = stub(
-      delivery,
-      "sendEmailVerification",
-      (...args: unknown[]) => {
-        verifyUrl = (args[0] as DeliveryMessage).url!;
-      },
-    );
+    using _hook = vi
+      .spyOn(delivery, "sendEmailVerification")
+      .mockImplementation((message) => {
+        verifyUrl = message.url!;
+      });
 
     const createRes = await app.request("/create-account", {
       method: "POST",
@@ -944,29 +928,28 @@ describe("email verification flow", () => {
         return_to: "/",
       }),
     });
-    assertStrictEquals(createRes.status, 302);
-    assertEquals(verifyUrl.includes("/verify-email?token="), true);
+    expect(createRes.status).toBe(302);
+    expect(verifyUrl).toContain("/verify-email?token=");
 
     const user = await userService.findByUsername(username);
-    assertEquals(user?.emailVerified, false);
+    expect(user?.emailVerified).toBe(false);
 
     const token = new URL(verifyUrl).searchParams.get("token")!;
     const verifyRes = await app.request(`/verify-email?token=${token}`);
-    assertStrictEquals(verifyRes.status, 200);
-    assertEquals((await verifyRes.text()).includes("Email verified"), true);
-    assertEquals(
-      (await userService.findByUsername(username))?.emailVerified,
+    expect(verifyRes.status).toBe(200);
+    expect(await verifyRes.text()).toContain("Email verified");
+    expect((await userService.findByUsername(username))?.emailVerified).toBe(
       true,
     );
 
     const reuse = await app.request(`/verify-email?token=${token}`);
-    assertStrictEquals(reuse.status, 400);
+    expect(reuse.status).toBe(400);
   });
 
   it("rejects a missing or garbage token", async () => {
     const missing = await app.request("/verify-email");
-    assertStrictEquals(missing.status, 400);
+    expect(missing.status).toBe(400);
     const garbage = await app.request("/verify-email?token=garbage");
-    assertStrictEquals(garbage.status, 400);
+    expect(garbage.status).toBe(400);
   });
 });

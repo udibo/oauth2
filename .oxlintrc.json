@@ -43,8 +43,8 @@
     "dist",
     "coverage",
     "node_modules",
-    "examples",
-    "templates",
+    "templates/*/build",
+    "templates/*/.react-router",
     "scripts/doc-check",
     "scripts/npm-smoke"
   ]

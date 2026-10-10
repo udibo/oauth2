@@ -7,7 +7,7 @@
  * - Every fenced `ts` / `tsx` block in `README.md` and `docs/**\/*.md`. These
  *   are whole programs and are held to the compiler's full strictness.
  * - Every `@example` block on the JSDoc of a file that is part of the API
- *   reference — the entrypoints in `src/deno.json` and the files whose symbols
+ *   reference — the entrypoints in `jsr.json` and the files whose symbols
  *   they export. This is what JSR renders, and it is the first code most
  *   adopters copy.
  *

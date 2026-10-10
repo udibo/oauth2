@@ -42,6 +42,8 @@ import {
   MemoryUserService,
 } from "@udibo/oauth2/testing";
 
+import { config } from "../config.ts";
+
 export interface DemoUser {
   id: string;
   username: string;
@@ -66,7 +68,7 @@ export interface DemoClient {
   name: string;
 }
 
-const issuer = "http://localhost:8001";
+const issuer = config.publicUrl;
 
 export const ADMIN_USER: DemoUser = {
   id: "user-admin",
@@ -94,8 +96,8 @@ export const DEMO_CLIENT: DemoClient = {
   ],
   redirectUris: [
     `${issuer}/auth/callback`,
-    "http://localhost:8002/dev/callback",
-    "http://localhost:8003/auth/callback",
+    `${config.apiServiceOrigin}/dev/callback`,
+    `${config.externalAppOrigin}/auth/callback`,
   ],
   name: "Example SPA",
 };
