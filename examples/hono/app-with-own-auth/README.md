@@ -171,7 +171,7 @@ first-party you can skip consent two ways:
   user. Replace the `if (decision === null)` branch in `main.ts`'s
   `handleConsent` with:
 
-  ```ts
+  ```ts ignore
   return Promise.resolve({
     approved: true,
     scope: BasicScope.intersection(requestedScope.toString(), u.maxScope),
