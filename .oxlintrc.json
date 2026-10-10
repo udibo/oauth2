@@ -45,7 +45,6 @@
     "node_modules",
     "examples",
     "templates",
-    "src/cli",
     "src/react/**/*.test.tsx",
     "src/react/_test_*.ts",
     "src/react/**/*.e2e.ts",

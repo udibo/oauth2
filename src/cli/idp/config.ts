@@ -6,6 +6,8 @@
  * @module
  */
 
+import { readFile } from "node:fs/promises";
+
 /** Grant types the development identity provider will serve. */
 export interface DevIdpGrantsConfig {
   /** Authorization code grant with PKCE. */
@@ -117,13 +119,7 @@ const CONFIG_FIELDS = [
   "clients",
 ];
 const USER_FIELDS = ["id", "username", "password", "claims"];
-const CLIENT_FIELDS = [
-  "id",
-  "secret",
-  "redirectUris",
-  "grants",
-  "ownerUserId",
-];
+const CLIENT_FIELDS = ["id", "secret", "redirectUris", "grants", "ownerUserId"];
 
 /**
  * The configuration used when `idp dev` runs without `--config`: one
@@ -138,26 +134,24 @@ export function defaultDevIdpConfig(): DevIdpConfig {
     scopesSupported: [...DEFAULT_SCOPES],
     accessTokenLifetime: DEFAULT_ACCESS_TOKEN_LIFETIME,
     grants: { ...DEFAULT_GRANTS },
-    users: [{
-      id: "user-alice",
-      username: "alice@example.com",
-      password: "password",
-      claims: {
-        name: "Alice Example",
-        email: "alice@example.com",
-        email_verified: true,
+    users: [
+      {
+        id: "user-alice",
+        username: "alice@example.com",
+        password: "password",
+        claims: {
+          name: "Alice Example",
+          email: "alice@example.com",
+          email_verified: true,
+        },
       },
-    }],
+    ],
     clients: [
       {
         id: "dev-client",
         secret: "dev-secret",
         redirectUris: [...DEFAULT_REDIRECT_URIS],
-        grants: [
-          "authorization_code",
-          "refresh_token",
-          "client_credentials",
-        ],
+        grants: ["authorization_code", "refresh_token", "client_credentials"],
         ownerUserId: "user-alice",
       },
       {
@@ -232,9 +226,9 @@ function parseGrants(value: unknown, path: string): DevIdpGrantsConfig {
   const source = record(value, path);
   rejectUnknown(source, path, Object.keys(DEFAULT_GRANTS));
   const grants = { ...DEFAULT_GRANTS };
-  for (
-    const key of Object.keys(DEFAULT_GRANTS) as (keyof DevIdpGrantsConfig)[]
-  ) {
+  for (const key of Object.keys(
+    DEFAULT_GRANTS,
+  ) as (keyof DevIdpGrantsConfig)[]) {
     if (source[key] !== undefined) {
       grants[key] = boolean(source[key], `${path}.${key}`);
     }
@@ -250,21 +244,24 @@ function parseUser(value: unknown, path: string): DevIdpUserConfig {
     id: optionalString(source.id, `${path}.id`) ?? username,
     username,
     password: string(source.password, `${path}.password`),
-    claims: source.claims === undefined
-      ? {}
-      : record(source.claims, `${path}.claims`),
+    claims:
+      source.claims === undefined
+        ? {}
+        : record(source.claims, `${path}.claims`),
   };
 }
 
 function parseClient(value: unknown, path: string): DevIdpClientConfig {
   const source = record(value, path);
   rejectUnknown(source, path, CLIENT_FIELDS);
-  const grants = source.grants === undefined
-    ? [...DEFAULT_CLIENT_GRANTS]
-    : stringArray(source.grants, `${path}.grants`);
-  const redirectUris = source.redirectUris === undefined
-    ? []
-    : stringArray(source.redirectUris, `${path}.redirectUris`);
+  const grants =
+    source.grants === undefined
+      ? [...DEFAULT_CLIENT_GRANTS]
+      : stringArray(source.grants, `${path}.grants`);
+  const redirectUris =
+    source.redirectUris === undefined
+      ? []
+      : stringArray(source.redirectUris, `${path}.redirectUris`);
   if (grants.includes("authorization_code") && redirectUris.length === 0) {
     fail(
       `${path}.redirectUris`,
@@ -313,16 +310,18 @@ export function parseDevIdpConfig(value: unknown): DevIdpConfig {
   rejectUnknown(source, "config", CONFIG_FIELDS);
   const defaults = defaultDevIdpConfig();
 
-  const users = source.users === undefined
-    ? defaults.users
-    : array(source.users, "config.users").map((entry, index) =>
-      parseUser(entry, `users[${index}]`)
-    );
-  const clients = source.clients === undefined
-    ? defaults.clients
-    : array(source.clients, "config.clients").map((entry, index) =>
-      parseClient(entry, `clients[${index}]`)
-    );
+  const users =
+    source.users === undefined
+      ? defaults.users
+      : array(source.users, "config.users").map((entry, index) =>
+          parseUser(entry, `users[${index}]`),
+        );
+  const clients =
+    source.clients === undefined
+      ? defaults.clients
+      : array(source.clients, "config.clients").map((entry, index) =>
+          parseClient(entry, `clients[${index}]`),
+        );
 
   const seenUserIds = new Set<string>();
   for (const user of users) {
@@ -341,26 +340,32 @@ export function parseDevIdpConfig(value: unknown): DevIdpConfig {
 
   return {
     issuer: optionalString(source.issuer, "config.issuer"),
-    hostname: optionalString(source.hostname, "config.hostname") ??
-      defaults.hostname,
-    port: source.port === undefined
-      ? defaults.port
-      : integer(source.port, "config.port", 0),
-    consent: source.consent === undefined
-      ? defaults.consent
-      : parseConsent(source.consent, "config.consent"),
-    scopesSupported: source.scopesSupported === undefined
-      ? defaults.scopesSupported
-      : stringArray(source.scopesSupported, "config.scopesSupported"),
-    accessTokenLifetime: source.accessTokenLifetime === undefined
-      ? defaults.accessTokenLifetime
-      : integer(source.accessTokenLifetime, "config.accessTokenLifetime", 1),
-    grants: source.grants === undefined
-      ? defaults.grants
-      : parseGrants(source.grants, "config.grants"),
-    signingKey: source.signingKey === undefined
-      ? undefined
-      : parseSigningKey(source.signingKey, "config.signingKey"),
+    hostname:
+      optionalString(source.hostname, "config.hostname") ?? defaults.hostname,
+    port:
+      source.port === undefined
+        ? defaults.port
+        : integer(source.port, "config.port", 0),
+    consent:
+      source.consent === undefined
+        ? defaults.consent
+        : parseConsent(source.consent, "config.consent"),
+    scopesSupported:
+      source.scopesSupported === undefined
+        ? defaults.scopesSupported
+        : stringArray(source.scopesSupported, "config.scopesSupported"),
+    accessTokenLifetime:
+      source.accessTokenLifetime === undefined
+        ? defaults.accessTokenLifetime
+        : integer(source.accessTokenLifetime, "config.accessTokenLifetime", 1),
+    grants:
+      source.grants === undefined
+        ? defaults.grants
+        : parseGrants(source.grants, "config.grants"),
+    signingKey:
+      source.signingKey === undefined
+        ? undefined
+        : parseSigningKey(source.signingKey, "config.signingKey"),
     users,
     clients,
   };
@@ -375,7 +380,7 @@ export function parseDevIdpConfig(value: unknown): DevIdpConfig {
 export async function loadDevIdpConfig(path: string): Promise<DevIdpConfig> {
   let text: string;
   try {
-    text = await Deno.readTextFile(path);
+    text = await readFile(path, "utf8");
   } catch (error) {
     throw new Error(
       `cannot read config ${path}: ${

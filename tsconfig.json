@@ -21,7 +21,6 @@
   },
   "include": ["src", "scripts/npm-smoke.ts", "vitest.config.ts"],
   "exclude": [
-    "src/cli",
     "src/**/*.e2e.ts",
     "src/react/**/*.test.tsx",
     "src/react/_test_*.ts"

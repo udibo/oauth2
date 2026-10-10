@@ -1,18 +1,15 @@
 /**
- * Command-line entrypoint for `@udibo/oauth2`: the one-off operator commands a
- * deployment needs, so generating key material never means pasting a scratch
- * script into a terminal.
+ * Command table for the `udibo-oauth2` executable: the one-off operator
+ * commands a deployment needs, so generating key material never means pasting
+ * a scratch script into a terminal.
  *
  * ```sh
- * deno run jsr:@udibo/oauth2/cli oidc keygen
- * deno run --allow-net --allow-read --allow-env jsr:@udibo/oauth2/cli idp dev
+ * npx udibo-oauth2 oidc keygen
+ * npx udibo-oauth2 idp dev
  * ```
  *
- * No command writes to disk. `oidc keygen` needs no permissions at all — run
- * it without `-A`, because a permission prompt from a key generator is a
- * reason to stop and look. `idp dev` serves a socket, so it needs `--allow-net`
- * plus `--allow-read` for its config file and `--allow-env` to pick up
- * `OIDC_SIGNING_KEY`.
+ * No command writes to disk. `idp dev` serves a socket and reads its config
+ * file and `OIDC_SIGNING_KEY` from the environment.
  *
  * @module
  */
@@ -26,14 +23,20 @@ interface Command {
 }
 
 const commands = new Map<string, Command>([
-  ["oidc keygen", {
-    summary: "Generate an ES256 OIDC signing key for OIDC_SIGNING_KEY.",
-    run: oidcKeygen,
-  }],
-  ["idp dev", {
-    summary: "Run a local identity provider for development and CI.",
-    run: idpDev,
-  }],
+  [
+    "oidc keygen",
+    {
+      summary: "Generate an ES256 OIDC signing key for OIDC_SIGNING_KEY.",
+      run: oidcKeygen,
+    },
+  ],
+  [
+    "idp dev",
+    {
+      summary: "Run a local identity provider for development and CI.",
+      run: idpDev,
+    },
+  ],
 ]);
 
 function usage(): string {
@@ -42,18 +45,15 @@ function usage(): string {
     "@udibo/oauth2 — operator commands for OAuth2/OIDC deployments.",
     "",
     "Usage:",
-    "  deno run jsr:@udibo/oauth2/cli <command>",
+    "  udibo-oauth2 <command>",
     "",
     "Commands:",
-    ...commands.entries().map(([name, { summary }]) =>
-      `  ${name.padEnd(width)}  ${summary}`
-    ),
+    ...commands
+      .entries()
+      .map(([name, { summary }]) => `  ${name.padEnd(width)}  ${summary}`),
     "",
     "Options:",
     `  ${"-h, --help".padEnd(width)}  Show this help.`,
-    "",
-    "oidc keygen needs no Deno permissions; run it without -A.",
-    "idp dev needs --allow-net --allow-read --allow-env.",
   ].join("\n");
 }
 
@@ -77,16 +77,8 @@ function matchCommand(
  * without help writes one JWK line on stdout and guidance on stderr. Use that
  * exact invocation and check its exit code before storing stdout as a secret.
  *
- * The `@udibo/oauth2/cli` entrypoint calls this with `Deno.args` when run as
- * the main module. Call it directly to mount these commands inside your own
- * CLI.
- *
- * @example
- * ```ts
- * import { runCli } from "@udibo/oauth2/cli";
- *
- * Deno.exit(await runCli(["oidc", "keygen"]));
- * ```
+ * The `udibo-oauth2` executable calls this with `process.argv.slice(2)` and
+ * sets `process.exitCode` to the result.
  */
 export async function runCli(args: string[]): Promise<number> {
   if (args.length === 0) {
@@ -112,5 +104,3 @@ export async function runCli(args: string[]): Promise<number> {
     return 1;
   }
 }
-
-if (import.meta.main) Deno.exit(await runCli(Deno.args));

@@ -55,14 +55,14 @@ function parseIdpDevArgs(args: string[]): IdpDevArgs {
     }
     if (!VALUE_FLAGS.includes(flag)) {
       throw new Error(
-        `unknown option "${argument}" (expected one of: ${
-          [...VALUE_FLAGS, ...BOOLEAN_FLAGS].join(", ")
-        })`,
+        `unknown option "${argument}" (expected one of: ${[
+          ...VALUE_FLAGS,
+          ...BOOLEAN_FLAGS,
+        ].join(", ")})`,
       );
     }
-    const value = separator === -1
-      ? args[++index]
-      : argument.slice(separator + 1);
+    const value =
+      separator === -1 ? args[++index] : argument.slice(separator + 1);
     if (value === undefined || value.length === 0) {
       throw new Error(`${flag} requires a value`);
     }
@@ -82,11 +82,7 @@ function parseIdpDevArgs(args: string[]): IdpDevArgs {
 }
 
 function readVariable(name: string): string | undefined {
-  try {
-    return Deno.env.get(name) || undefined;
-  } catch {
-    return undefined;
-  }
+  return process.env[name] || undefined;
 }
 
 async function resolveSigningKey(
@@ -165,41 +161,43 @@ export async function idpDev(args: string[]): Promise<void> {
   });
   const loopback = isLoopbackHostname(idp.hostname);
 
-  console.log([
-    "@udibo/oauth2 development identity provider",
-    "",
-    "  DEVELOPMENT AND CI ONLY. State is in memory and the /__admin/",
-    "  endpoints mint tokens for any seeded user without their password.",
-    "  Never expose this server to a network you do not control.",
-    "",
-    `Listening on ${idp.url}`,
-    `Reachable from: ${
-      loopback
-        ? "this machine only (loopback)"
-        : `ANY HOST THAT CAN REACH ${idp.hostname}:${idp.port} — remote access was enabled explicitly`
-    }`,
-    `Issuer: ${idp.issuer}${
-      config.issuer
-        ? ""
-        : " (derived from the bind address; pin it with --issuer)"
-    }`,
-    `Discovery: ${idp.url}/.well-known/openid-configuration`,
-    `JWKS: ${idp.url}/jwks`,
-    `Signing key: ${
-      source
-        ? `loaded from ${source} (kid ${key.kid})`
-        : `generated (kid ${key.kid})`
-    }`,
-    `Consent: ${
-      config.consent === "prompt" ? "prompted" : "granted automatically"
-    }`,
-    "",
-    `Admin token: ${idp.adminToken}`,
-    `  Send it as the ${ADMIN_TOKEN_HEADER} header on every /__admin/ request.`,
-    `  Set ${ADMIN_TOKEN_VARIABLE} or --admin-token to choose it yourself.`,
-    "",
-    ...describeSeed(config),
-  ].join("\n"));
+  console.log(
+    [
+      "@udibo/oauth2 development identity provider",
+      "",
+      "  DEVELOPMENT AND CI ONLY. State is in memory and the /__admin/",
+      "  endpoints mint tokens for any seeded user without their password.",
+      "  Never expose this server to a network you do not control.",
+      "",
+      `Listening on ${idp.url}`,
+      `Reachable from: ${
+        loopback
+          ? "this machine only (loopback)"
+          : `ANY HOST THAT CAN REACH ${idp.hostname}:${idp.port} — remote access was enabled explicitly`
+      }`,
+      `Issuer: ${idp.issuer}${
+        config.issuer
+          ? ""
+          : " (derived from the bind address; pin it with --issuer)"
+      }`,
+      `Discovery: ${idp.url}/.well-known/openid-configuration`,
+      `JWKS: ${idp.url}/jwks`,
+      `Signing key: ${
+        source
+          ? `loaded from ${source} (kid ${key.kid})`
+          : `generated (kid ${key.kid})`
+      }`,
+      `Consent: ${
+        config.consent === "prompt" ? "prompted" : "granted automatically"
+      }`,
+      "",
+      `Admin token: ${idp.adminToken}`,
+      `  Send it as the ${ADMIN_TOKEN_HEADER} header on every /__admin/ request.`,
+      `  Set ${ADMIN_TOKEN_VARIABLE} or --admin-token to choose it yourself.`,
+      "",
+      ...describeSeed(config),
+    ].join("\n"),
+  );
 
   if (!loopback) {
     console.error(
@@ -214,8 +212,7 @@ export async function idpDev(args: string[]): Promise<void> {
     console.error(
       `\nNo ${SIGNING_KEY_VARIABLE} and no "signingKey" in the config: this ` +
         `key exists only for this process, so tokens and JWKS change on ` +
-        `every restart. Pin one with "deno run jsr:@udibo/oauth2/cli oidc ` +
-        `keygen".`,
+        `every restart. Pin one with "udibo-oauth2 oidc keygen".`,
     );
   }
 

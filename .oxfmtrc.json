@@ -12,7 +12,6 @@
     "llms.txt",
     "llms-full.txt",
     "*.md",
-    "src/cli",
     "src/react/**/*.test.tsx",
     "src/react/_test_*.ts",
     "src/react/**/*.e2e.ts",

@@ -99,16 +99,20 @@ export interface LoginPageOptions {
  */
 export function loginPage(options: LoginPageOptions): string {
   const { returnTo, users, error } = options;
-  const quickSignIn = users.length === 0 ? "" : `
+  const quickSignIn =
+    users.length === 0
+      ? ""
+      : `
 <h2>Seeded users</h2>
 <div class="quick">
-${
-    users.map((user) =>
-      `  <button type="submit" name="as" value="${
-        escapeHtml(user.username)
-      }" form="sign-in-form">Sign in as ${escapeHtml(user.username)}</button>`
-    ).join("\n")
-  }
+${users
+  .map(
+    (user) =>
+      `  <button type="submit" name="as" value="${escapeHtml(
+        user.username,
+      )}" form="sign-in-form">Sign in as ${escapeHtml(user.username)}</button>`,
+  )
+  .join("\n")}
 </div>
 <p class="mono">Passwords are printed in the startup banner.</p>`;
 
@@ -183,22 +187,28 @@ export interface StatusPageOptions {
 /** The page served at `/`: what is seeded and where the endpoints are. */
 export function statusPage(options: StatusPageOptions): string {
   const { issuer, users, clients } = options;
-  const userList = users.map((user) =>
-    `  <li><span class="mono">${escapeHtml(user.username)}</span> · password
+  const userList = users
+    .map(
+      (user) =>
+        `  <li><span class="mono">${escapeHtml(user.username)}</span> · password
     <span class="mono">${escapeHtml(user.password)}</span> · sub
-    <span class="mono">${escapeHtml(user.id)}</span></li>`
-  ).join("\n");
-  const clientList = clients.map((client) =>
-    `  <li><span class="mono">${escapeHtml(client.id)}</span>${
-      client.secret
-        ? ` · secret <span class="mono">${escapeHtml(client.secret)}</span>`
-        : " · public client"
-    }<br>redirect URIs: <span class="mono">${
-      client.redirectUris.map(escapeHtml).join(", ") || "(none)"
-    }</span><br>grants: <span class="mono">${
-      client.grants.map(escapeHtml).join(", ")
-    }</span></li>`
-  ).join("\n");
+    <span class="mono">${escapeHtml(user.id)}</span></li>`,
+    )
+    .join("\n");
+  const clientList = clients
+    .map(
+      (client) =>
+        `  <li><span class="mono">${escapeHtml(client.id)}</span>${
+          client.secret
+            ? ` · secret <span class="mono">${escapeHtml(client.secret)}</span>`
+            : " · public client"
+        }<br>redirect URIs: <span class="mono">${
+          client.redirectUris.map(escapeHtml).join(", ") || "(none)"
+        }</span><br>grants: <span class="mono">${client.grants
+          .map(escapeHtml)
+          .join(", ")}</span></li>`,
+    )
+    .join("\n");
 
   return layout(
     "Development identity provider",
