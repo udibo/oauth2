@@ -4,3 +4,5 @@ coverage
 *.tgz
 test-results/
 playwright-report/
+.react-router
+build

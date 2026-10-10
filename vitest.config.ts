@@ -12,7 +12,7 @@ const config: ViteUserConfig = defineConfig({
     },
     projects: [
       "examples/hono/*",
-      "templates/*",
+      "templates/*/vitest.*.config.ts",
       {
         extends: true,
         test: {

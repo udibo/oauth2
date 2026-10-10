@@ -1,4 +1,5 @@
 .env
+.react-router
+build
 coverage
 node_modules
-public/build

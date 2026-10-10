@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": ["node", "vite/client", "@testing-library/jest-dom/vitest"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "rootDirs": [".", "./.react-router/types"],
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["app", "server", "test", "*.ts", ".react-router/types/**/*"]
+}

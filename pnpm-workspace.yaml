@@ -5,3 +5,6 @@ packages:
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@udibo/*"
+peerDependencyRules:
+  allowedVersions:
+    "@vitest/mocker>msw": "3"

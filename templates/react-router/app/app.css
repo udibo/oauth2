@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@layer base {
+  main {
+    @apply space-y-4;
+  }
+
+  h1 {
+    @apply text-2xl font-semibold;
+  }
+
+  a {
+    @apply text-blue-700 underline-offset-2 hover:underline;
+  }
+
+  form {
+    @apply space-y-3;
+  }
+
+  label {
+    @apply block text-sm font-medium;
+  }
+
+  input {
+    @apply mt-1 block w-full rounded border border-neutral-400 px-3 py-2;
+  }
+
+  button {
+    @apply cursor-pointer rounded bg-neutral-900 px-3 py-2 text-white;
+  }
+
+  [role="alert"] {
+    @apply text-red-700;
+  }
+
+  code,
+  pre {
+    @apply rounded bg-neutral-100 px-1;
+  }
+}
