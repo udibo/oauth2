@@ -32,6 +32,7 @@ const workflow = parse(workflowText) as Workflow;
 const release = workflow.jobs.release!;
 
 const releaseConfig = JSON.parse(read(".releaserc.json")) as {
+  repositoryUrl?: string;
   plugins: (string | [string, Record<string, unknown>])[];
 };
 const pluginNames = releaseConfig.plugins.map((plugin) =>
@@ -164,6 +165,10 @@ describe("release workflow", () => {
       step.uses?.startsWith("actions/checkout@"),
     );
     expect(checkout?.with?.["ssh-key"]).toBe("${{ secrets.DEPLOY_KEY }}");
+  });
+
+  it("pushes over the deploy key's SSH remote, not package.json's https URL", () => {
+    expect(releaseConfig.repositoryUrl).toBe("git@github.com:udibo/oauth2.git");
   });
 
   it("checks branch commits and proposed squash text before PR admission", () => {
