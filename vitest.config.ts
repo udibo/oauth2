@@ -21,6 +21,14 @@ const config: ViteUserConfig = defineConfig({
       {
         extends: true,
         test: {
+          name: "scripts",
+          include: ["scripts/**/*.test.ts"],
+          exclude: ["node_modules"],
+        },
+      },
+      {
+        extends: true,
+        test: {
           name: "dom",
           environment: "jsdom",
           include: ["src/**/*.test.tsx"],

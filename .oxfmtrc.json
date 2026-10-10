@@ -12,12 +12,8 @@
     "llms.txt",
     "llms-full.txt",
     "*.md",
-    "scripts/doc-*.ts",
-    "scripts/llms.ts",
-    "scripts/prepare-*.ts",
-    "scripts/public-suffix-list.ts",
-    "scripts/verify-release*.ts",
     ".releaserc.json",
-    ".github"
+    ".github",
+    "scripts/doc-check"
   ]
 }

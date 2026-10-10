@@ -5,9 +5,10 @@
  * type-checks a consumer that imports every subpath under NodeNext
  * resolution, and imports every subpath on Node.
  *
- * Run `pnpm build` first, then `pnpm smoke`. With `--release` the run also
- * fails when a runtime dependency resolves through JSR instead of npm, which
- * a published package must not do.
+ * Run `pnpm build` first, then `pnpm smoke`. With `--release` the consumer is
+ * given no JSR registry, so the install itself fails when a runtime dependency
+ * can only come from JSR, and the run also fails when one resolves through JSR
+ * at all, which a published package must not do.
  */
 import { execFileSync, spawn } from "node:child_process";
 import {
@@ -150,6 +151,18 @@ async function checkIdpDev(consumerDir: string): Promise<void> {
 
 async function main(): Promise<void> {
   const manifest = readManifest(join(packageDir, "package.json"));
+  if (releaseMode) {
+    const viaJsr = Object.entries(manifest.dependencies ?? {}).filter(
+      ([, spec]) => spec.includes("jsr"),
+    );
+    if (viaJsr.length > 0) {
+      fail(
+        `the package depends on JSR-resolved packages: ${viaJsr
+          .map(([name, spec]) => `${name}@${spec}`)
+          .join(", ")}; see PUBLISHING.md, "Before the first npm release"`,
+      );
+    }
+  }
   const workDir = mkdtempSync(join(tmpdir(), "oauth2-smoke-"));
   try {
     const packDir = join(workDir, "pack");
@@ -175,10 +188,12 @@ async function main(): Promise<void> {
         dependencies: exactVersions(manifest.devDependencies ?? {}),
       }),
     );
-    writeFileSync(
-      join(consumerDir, ".npmrc"),
-      "@jsr:registry=https://npm.jsr.io\n",
-    );
+    if (!releaseMode) {
+      writeFileSync(
+        join(consumerDir, ".npmrc"),
+        "@jsr:registry=https://npm.jsr.io\n",
+      );
+    }
     run(
       "npm",
       [

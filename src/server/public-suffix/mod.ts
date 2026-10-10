@@ -26,7 +26,7 @@
  * wildcard must not straddle (`github.io`, `vercel.app`, `blob.core.windows.net`)
  * is listed there and nowhere else.
  *
- * Regenerate it with `deno task psl:update`; `deno task psl:check` fails when
+ * Regenerate it with `pnpm psl:update`; `pnpm psl:check` fails when
  * the snapshot has drifted from publicsuffix.org and runs on a schedule in CI.
  *
  * @module

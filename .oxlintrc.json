@@ -45,10 +45,7 @@
     "node_modules",
     "examples",
     "templates",
-    "scripts/doc-*.ts",
-    "scripts/llms.ts",
-    "scripts/prepare-*.ts",
-    "scripts/public-suffix-list.ts",
-    "scripts/verify-release*.ts"
+    "scripts/doc-check",
+    "scripts/npm-smoke"
   ]
 }

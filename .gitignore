@@ -4,3 +4,4 @@ coverage
 *.tgz
 test-results/
 playwright-report/
+scripts/doc-check/

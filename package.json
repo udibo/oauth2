@@ -131,7 +131,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check": "pnpm lint && pnpm fmt:check && tsc --noEmit",
+    "check": "pnpm lint && pnpm fmt:check && tsc --noEmit && pnpm doc:lint && pnpm doc:check && pnpm doc:links && pnpm llms:check",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --type-aware --type-check",
@@ -139,7 +139,15 @@
     "test:coverage": "vitest run --coverage",
     "test:browser": "playwright test",
     "smoke": "node scripts/npm-smoke.ts",
-    "jsr:dry-run": "jsr publish --dry-run --allow-dirty"
+    "jsr:dry-run": "jsr publish --dry-run --allow-dirty",
+    "doc:lint": "node scripts/doc-lint.ts",
+    "doc:check": "node scripts/doc-check.ts",
+    "doc:links": "node scripts/doc-links.ts",
+    "llms:generate": "node scripts/llms.ts",
+    "llms:check": "node scripts/llms.ts --check",
+    "psl:update": "node scripts/public-suffix-list.ts",
+    "psl:check": "node scripts/public-suffix-list.ts --check",
+    "release:verify": "node scripts/verify-release.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
@@ -147,6 +155,12 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@sebbo2002/semantic-release-jsr": "3.2.1",
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "12.0.8",
+    "@semantic-release/npm": "13.1.5",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.4",
@@ -154,6 +168,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.3",
     "axe-core": "^4.14.0",
+    "conventional-changelog-conventionalcommits": "9.3.1",
     "hono": "^4.13.13",
     "jsdom": "^30.1.2",
     "jsr": "^0.14.3",
@@ -162,9 +177,11 @@
     "oxlint-tsgolint": "^7.0.2003",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "semantic-release": "25.0.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "yaml": "2.9.1"
   },
   "peerDependencies": {
     "@types/react": "^19.0.0",
