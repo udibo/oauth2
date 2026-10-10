@@ -1,21 +1,16 @@
 /**
- * The Node runtime half of the npm smoke test: imports every Node-supported
- * subpath of the installed `@udibo/oauth2` artifact under real Node module
- * resolution and probes one known export per subpath, so a subpath that
- * only type-checks but cannot load (a broken specifier, a Deno global, a
- * dependency Node cannot resolve) fails loudly.
+ * The runtime half of the npm smoke test: imports every subpath of the
+ * installed `@udibo/oauth2` package under real Node module resolution and
+ * probes one known export per subpath, so a subpath that type-checks but
+ * cannot load (a broken specifier, a missing dependency) fails loudly.
  *
- * The subpath list is read from the installed package's export map rather
- * than written out here, so a subpath added to the artifact is smoke-tested
- * automatically; `UNVERIFIED_ON_NODE` mirrors the README runtime table's
- * `/testing` row, the one group whose Node support stays an untested claim.
+ * The subpath list is read from the installed package's export map, so a
+ * subpath added to the package is smoke-tested automatically.
  *
  * @module
  */
 import { readFile } from "node:fs/promises";
 import { Hono } from "hono";
-
-export const UNVERIFIED_ON_NODE = ["./testing", "./testing/contract"];
 
 const KNOWN_EXPORTS = {
   "./server": "BasicScope",
@@ -36,6 +31,8 @@ const KNOWN_EXPORTS = {
   "./react": "OAuth2Provider",
   "./react/components": "SignInForm",
   "./react/testing": "MockOAuth2Provider",
+  "./testing": "createFakeTenant",
+  "./testing/contract": "runLockoutStoreContractTests",
   "./crypto": "sha256Hash",
   "./url": "safeReturnTo",
 };
@@ -48,8 +45,9 @@ const packageJson = JSON.parse(
 );
 
 const failures = [];
-const subpaths = Object.keys(packageJson.exports)
-  .filter((subpath) => !UNVERIFIED_ON_NODE.includes(subpath));
+const subpaths = Object.keys(packageJson.exports).filter(
+  (subpath) => subpath !== "./package.json",
+);
 
 for (const subpath of subpaths) {
   const specifier = `@udibo/oauth2${subpath.slice(1)}`;
@@ -63,9 +61,8 @@ for (const subpath of subpaths) {
   const known = KNOWN_EXPORTS[subpath];
   if (known === undefined) {
     failures.push(
-      `${subpath} has no KNOWN_EXPORTS entry in npm-smoke-consumer/main.mjs; ` +
-        `add one (new subpath?) or add it to UNVERIFIED_ON_NODE with a ` +
-        `README runtime-table row to match`,
+      `${subpath} has no KNOWN_EXPORTS entry in scripts/npm-smoke/main.mjs; ` +
+        `add one for the new subpath`,
     );
   } else if (module[known] === undefined) {
     failures.push(`${specifier} did not export ${known}`);
@@ -106,16 +103,19 @@ for (const options of [
   await response.body?.cancel();
   const location = response.headers.get("location");
   if (
-    response.status !== 302 || !location ||
+    response.status !== 302 ||
+    !location ||
     new URL(location).searchParams.get("__proto__") !== "configured"
   ) {
-    failures.push("HonoBff dropped an explicitly configured __proto__ parameter");
+    failures.push(
+      "HonoBff dropped an explicitly configured __proto__ parameter",
+    );
   }
 }
 const { redactedRequestTarget } = await import("@udibo/oauth2/hono/log");
 if (
   redactedRequestTarget("https://app.example.com/auth/callback?code=secret") !==
-    "/auth/callback?code=[redacted]"
+  "/auth/callback?code=[redacted]"
 ) {
   failures.push("request target did not redact the callback code");
 }

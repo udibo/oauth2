@@ -1,0 +1,51 @@
+{
+  "name": "@udibo/oauth2",
+  "version": "0.14.1",
+  "exports": {
+    "./server": "./src/server/mod.ts",
+    "./server/authorization": "./src/server/authorization-server.ts",
+    "./server/resource": "./src/server/resource-server.ts",
+    "./server/public-suffix": "./src/server/public-suffix/mod.ts",
+    "./client": "./src/client/mod.ts",
+    "./identity": "./src/identity/mod.ts",
+    "./identity/external": "./src/identity/external/mod.ts",
+    "./identity/mfa": "./src/identity/mfa/mod.ts",
+    "./identity/migration": "./src/identity/migration.ts",
+    "./hono/resource-server": "./src/adapters/hono/resource-server.ts",
+    "./hono/authorization-server": "./src/adapters/hono/authorization-server.ts",
+    "./hono/bff": "./src/adapters/hono/bff/mod.ts",
+    "./hono/bff/testing": "./src/adapters/hono/bff/testing.ts",
+    "./hono/identity": "./src/adapters/hono/identity.ts",
+    "./hono/log": "./src/adapters/hono/log.ts",
+    "./react": "./src/react/mod.ts",
+    "./react/components": "./src/react/components/mod.ts",
+    "./react/testing": "./src/react/testing.tsx",
+    "./testing": "./src/testing/mod.ts",
+    "./testing/contract": "./src/testing/contract/mod.ts",
+    "./crypto": "./src/utils/crypto.ts",
+    "./url": "./src/utils/url.ts"
+  },
+  "imports": {
+    "@udibo/http-error": "jsr:@udibo/http-error@^0.11.1"
+  },
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "README.md",
+      "LICENSE",
+      "SECURITY.md",
+      "CONTRIBUTING.md",
+      "llms.txt",
+      "llms-full.txt",
+      "docs/"
+    ],
+    "exclude": [
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+      "src/**/*.e2e.ts",
+      "src/**/_test_*",
+      "docs/migration-tests.md"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "pnpm-lock.yaml",
+    "node_modules",
+    "examples",
+    "templates",
+    "docs",
+    "llms.txt",
+    "llms-full.txt",
+    "*.md",
+    "src/cli",
+    "src/react/**/*.test.tsx",
+    "src/react/_test_*.ts",
+    "src/react/**/*.e2e.ts",
+    "src/adapters/**/*.test.ts",
+    "scripts/doc-*.ts",
+    "scripts/llms.ts",
+    "scripts/prepare-*.ts",
+    "scripts/public-suffix-list.ts",
+    "scripts/verify-release*.ts",
+    ".releaserc.json",
+    ".github"
+  ]
+}

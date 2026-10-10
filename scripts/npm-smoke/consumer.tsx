@@ -1,23 +1,10 @@
 /**
- * The Node type-resolution half of the npm smoke test: a consumer that
- * statically imports every subpath the README's runtime-support table marks
- * ✅ for Node, resolved from the locally built npm artifact under
- * `moduleResolution: "NodeNext"` — the way `tsc` in a Node project resolves
- * `npm install @udibo/oauth2`.
- *
- * `scripts/npm-smoke.ts` installs the packed tarball beside this file, runs
- * `tsc --noEmit` over it, and asserts this file's import list stays in step
- * with the artifact's export map, so a subpath cannot silently drop out of
+ * The type-resolution half of the npm smoke test: a consumer that statically
+ * imports every subpath of the packed `@udibo/oauth2` tarball under
+ * `moduleResolution: "NodeNext"`, the way `tsc` in a Node project resolves
+ * `npm install @udibo/oauth2`. `scripts/npm-smoke.ts` asserts this file imports
+ * every subpath in the export map, so a subpath cannot silently drop out of
  * type-check coverage. `main.mjs` is the runtime half.
- *
- * The `/testing`, `/testing/contract` (unverified on Node — they are only
- * exercised under Deno's test runner) and `/cli` (Deno-only) rows are the
- * deliberate exclusions, matching the README table.
- *
- * `skipLibCheck` stays off, so every declaration file reachable from these
- * imports is checked too. The vendored `@std/testing` declarations reference
- * the `Deno` namespace and would not pass that bar, but they are only
- * reachable from the `/testing` rows this file deliberately leaves out.
  *
  * @module
  */
@@ -66,11 +53,10 @@ import {
 import { BasicScope, isOAuth2Error } from "@udibo/oauth2/server";
 import { AuthorizationServer } from "@udibo/oauth2/server/authorization";
 import { isPublicSuffix } from "@udibo/oauth2/server/public-suffix";
-import {
-  BEARER_TOKEN,
-  ResourceServer,
-} from "@udibo/oauth2/server/resource";
+import { BEARER_TOKEN, ResourceServer } from "@udibo/oauth2/server/resource";
 import { loginContinuation, safeReturnTo } from "@udibo/oauth2/url";
+import { createFakeTenant } from "@udibo/oauth2/testing";
+import { runLockoutStoreContractTests } from "@udibo/oauth2/testing/contract";
 
 const client = new BffClient();
 const signedOut = SIGNED_OUT;
@@ -152,3 +138,7 @@ export const contextKey: string = OAUTH2_CONTEXT_KEY;
 
 export const continuation: typeof loginContinuation = loginContinuation;
 export const returnTo: typeof safeReturnTo = safeReturnTo;
+
+export const fakeTenantFactory: typeof createFakeTenant = createFakeTenant;
+export const lockoutContract: typeof runLockoutStoreContractTests =
+  runLockoutStoreContractTests;
