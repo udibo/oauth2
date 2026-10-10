@@ -255,6 +255,33 @@ describe("idp dev", () => {
   });
 });
 
+describe("oidc keygen in process", () => {
+  it("prints the private JWK on stdout and the guidance on stderr", async () => {
+    using log = vi.spyOn(console, "log").mockImplementation(() => {});
+    using error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await runCli(["oidc", "keygen"])).toStrictEqual(0);
+    expect(log).toHaveBeenCalledTimes(1);
+    const jwk = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect((await importSigningKeyJwk(jwk)).kid).toStrictEqual(jwk.kid);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain(`kid ${jwk.kid}`);
+    expect(String(error.mock.calls[0]?.[0])).not.toContain(jwk.d);
+  });
+
+  it("reports a command failure that is not an Error by its text", async () => {
+    using error = vi.spyOn(console, "error").mockImplementation(() => {});
+    using _ = vi
+      .spyOn(crypto.subtle, "generateKey")
+      .mockRejectedValue("entropy exhausted");
+
+    expect(await runCli(["oidc", "keygen"])).toStrictEqual(1);
+    expect(String(error.mock.calls[0]?.[0])).toStrictEqual(
+      "error: entropy exhausted",
+    );
+  });
+});
+
 describe("runCli", () => {
   it("prints usage to stderr and fails when no command is given", async () => {
     using log = vi.spyOn(console, "log").mockImplementation(() => {});

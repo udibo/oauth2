@@ -375,6 +375,52 @@ async function mintTokens(
   return await response.json();
 }
 
+describe("dev identity provider status page", () => {
+  it("lists the seeded users and clients, escaping their text", async () => {
+    await withIdp(
+      {
+        config: {
+          users: [
+            {
+              id: "u-1",
+              username: "<b>dev</b>",
+              password: "p&w",
+              claims: {},
+            },
+          ],
+          clients: [
+            {
+              id: "web",
+              redirectUris: ["http://localhost:4000/cb"],
+              grants: ["authorization_code"],
+            },
+            {
+              id: "api",
+              secret: "shh",
+              redirectUris: [],
+              grants: ["client_credentials"],
+            },
+          ],
+        },
+      },
+      async (idp) => {
+        const response = await fetch(`${idp.url}/`);
+        const html = await response.text();
+
+        expect(response.status).toStrictEqual(200);
+        expect(response.headers.get("content-type")!).toMatch(/text\/html/);
+        expect(html).toContain("&lt;b&gt;dev&lt;/b&gt;");
+        expect(html).toContain("p&amp;w");
+        expect(html).not.toContain("<b>dev</b>");
+        expect(html).toContain("public client");
+        expect(html).toContain("secret");
+        expect(html).toContain("http://localhost:4000/cb");
+        expect(html).toContain("(none)");
+      },
+    );
+  });
+});
+
 describe("dev identity provider admin surface", () => {
   it("mints tokens that validate without touching the sign-in page", async () => {
     await withIdp({}, async (idp) => {

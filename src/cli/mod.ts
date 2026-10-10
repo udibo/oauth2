@@ -19,7 +19,7 @@ import { oidcKeygen } from "./keygen.ts";
 
 interface Command {
   summary: string;
-  run(args: string[]): Promise<void>;
+  run(args: string[], signal?: AbortSignal): Promise<void>;
 }
 
 const commands = new Map<string, Command>([
@@ -67,6 +67,12 @@ function matchCommand(
   return undefined;
 }
 
+/** Options for {@link runCli}. */
+export interface RunCliOptions {
+  /** Stops a long-running command, such as `idp dev`, so the run resolves. */
+  signal?: AbortSignal;
+}
+
 /**
  * Runs one CLI invocation and resolves with the exit code the process should
  * use: `0` when the command succeeded or help was requested, `1` for no
@@ -80,7 +86,10 @@ function matchCommand(
  * The `udibo-oauth2` executable calls this with `process.argv.slice(2)` and
  * sets `process.exitCode` to the result.
  */
-export async function runCli(args: string[]): Promise<number> {
+export async function runCli(
+  args: string[],
+  options: RunCliOptions = {},
+): Promise<number> {
   if (args.length === 0) {
     console.error(usage());
     return 1;
@@ -95,7 +104,7 @@ export async function runCli(args: string[]): Promise<number> {
     return 1;
   }
   try {
-    await match.command.run(match.args);
+    await match.command.run(match.args, options.signal);
     return 0;
   } catch (error) {
     console.error(

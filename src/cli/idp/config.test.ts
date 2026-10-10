@@ -103,6 +103,29 @@ describe("parseDevIdpConfig", () => {
     );
   });
 
+  it("names the path of a grant flag or collection of the wrong type", () => {
+    thrown(
+      () => parseDevIdpConfig({ grants: { password: "yes" } }),
+      Error,
+      "config.grants.password must be true or false",
+    );
+    thrown(
+      () => parseDevIdpConfig({ grants: [] }),
+      Error,
+      "config.grants must be an object",
+    );
+    thrown(
+      () => parseDevIdpConfig({ users: {} }),
+      Error,
+      "config.users must be an array",
+    );
+    thrown(
+      () => parseDevIdpConfig({ accessTokenLifetime: 0 }),
+      Error,
+      "config.accessTokenLifetime must be an integer >= 1",
+    );
+  });
+
   it("requires a redirect URI for an authorization_code client", () => {
     thrown(
       () =>
@@ -192,7 +215,7 @@ describe("loadDevIdpConfig", () => {
     });
   });
 
-  it("reports a missing file without a stack of Deno internals", async () => {
+  it("reports a missing file by name", async () => {
     const error = await rejection(
       () => loadDevIdpConfig("/nonexistent/idp.json"),
       Error,

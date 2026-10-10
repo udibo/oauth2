@@ -8,6 +8,9 @@ extensions; `tsc` builds the npm package and the same files publish to JSR.
 - Run `pnpm test` for the package tests (Vitest) and `pnpm test:coverage` for
   coverage. Pass a path to run one file, for example
   `pnpm test src/utils/crypto.test.ts`.
+- Run `pnpm test:browser` after changing the React form components. It drives
+  them in headless Chromium through Playwright (`pnpm exec playwright install
+  chromium` once); jsdom cannot show where focus goes while a submit is pending.
 - Run `pnpm check` for lint (oxlint, type-aware), formatting (oxfmt) and types.
   Run `pnpm fmt` to format changes.
 - Run `pnpm build` then `pnpm smoke` to pack the package and prove it from a

@@ -140,10 +140,15 @@ function describeSeed(config: DevIdpConfig): string[] {
  * flags win over the config file, which wins over the built-in demo config.
  * `IDP_ADMIN_TOKEN` supplies the admin token when the flag is absent.
  *
+ * Aborting `signal` shuts the server down and resolves the returned promise.
+ *
  * @throws {Error} When an option or the config file is invalid, or when the
  * bind address is not loopback and `--unsafe-remote-access` was not passed.
  */
-export async function idpDev(args: string[]): Promise<void> {
+export async function idpDev(
+  args: string[],
+  signal?: AbortSignal,
+): Promise<void> {
   const options = parseIdpDevArgs(args);
   const config = options.configPath
     ? await loadDevIdpConfig(options.configPath)
@@ -160,6 +165,9 @@ export async function idpDev(args: string[]): Promise<void> {
     allowRemoteAccess: options.allowRemoteAccess,
   });
   const loopback = isLoopbackHostname(idp.hostname);
+  const stop = (): void => void idp.shutdown();
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
 
   console.log(
     [

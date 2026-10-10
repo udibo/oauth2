@@ -3,6 +3,7 @@ import { FakeTime } from "../_test_fake-time.ts";
 import { render, screen } from "@testing-library/react";
 import { act, type ReactNode, StrictMode } from "react";
 
+import { DirectClient } from "../client/direct-client.ts";
 import { OAuth2Callback } from "./callback.tsx";
 import { OAuth2Provider } from "./provider.tsx";
 import { RequireAuth } from "./require-auth.tsx";
@@ -357,6 +358,51 @@ describe("OAuth2Callback", () => {
   });
 });
 
+describe("OAuth2Callback defaults", () => {
+  it("shows the error message in a <pre> when no fallback is given", async () => {
+    await act(async () => {
+      render(
+        <MockOAuth2Provider client={createMockBffClient()}>
+          <OAuth2Callback />
+        </MockOAuth2Provider>,
+      );
+    });
+
+    const message = document.querySelector("pre");
+    assert(message, "the default fallback must render a <pre>");
+    expect(message.textContent).toContain("DirectClient");
+  });
+
+  it("replaces the history entry with returnTo once the exchange succeeds", async () => {
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: {
+        authorization: "http://idp.test/authorize",
+        token: "http://idp.test/token",
+      },
+    });
+    using _exchange = vi
+      .spyOn(client, "handleAuthorizationCallback")
+      .mockResolvedValue({ returnTo: "/dashboard" } as Awaited<
+        ReturnType<DirectClient["handleAuthorizationCallback"]>
+      >);
+    const originalHref = window.location.href;
+    try {
+      await act(async () => {
+        render(
+          <OAuth2Provider client={client} initialState={{ isLoading: false }}>
+            <OAuth2Callback />
+          </OAuth2Provider>,
+        );
+      });
+
+      expect(window.location.pathname).toBe("/dashboard");
+    } finally {
+      window.history.replaceState(null, "", originalHref);
+    }
+  });
+});
+
 describe("OAuth2Provider renew timer", () => {
   it("arms from the mount probe and renews before expiry", async () => {
     using time = new FakeTime();
@@ -608,6 +654,46 @@ describe("useOAuth2 navigation", () => {
         doLogin();
       });
       expect(assigned).toStrictEqual(["mock://login"]);
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      });
+    }
+  });
+
+  it("logout() navigates the browser to the returned url", async () => {
+    const client = createMockOAuth2Client();
+    using _logout = vi
+      .spyOn(client, "logout")
+      .mockResolvedValue({ url: "https://idp.test/end-session" });
+    const assigned: string[] = [];
+    const realLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        origin: realLocation.origin,
+        pathname: "/",
+        search: "",
+        assign: (url: string) => assigned.push(url),
+      },
+    });
+    try {
+      let doLogout: () => void = () => {};
+      const Caller = (): ReactNode => {
+        const { logout } = useOAuth2();
+        doLogout = () => void logout();
+        return null;
+      };
+      render(
+        <OAuth2Provider client={client} initialState={{ user: null }}>
+          <Caller />
+        </OAuth2Provider>,
+      );
+      await act(async () => {
+        doLogout();
+      });
+      expect(assigned).toStrictEqual(["https://idp.test/end-session"]);
     } finally {
       Object.defineProperty(window, "location", {
         configurable: true,
