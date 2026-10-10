@@ -1,5 +1,3 @@
-// deno-lint-ignore-file no-window -- browser-only; `window` used only after isBrowser() guards
-
 /**
  * `<RequireAuth>` — gate a subtree behind authentication. If the user is
  * not authenticated, calls `login({ returnTo })` (the {@link useOAuth2}

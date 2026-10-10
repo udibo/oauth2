@@ -22,6 +22,9 @@
     "type": "git",
     "url": "git+https://github.com/udibo/oauth2.git"
   },
+  "bin": {
+    "udibo-oauth2": "./dist/cli/bin.js"
+  },
   "files": [
     "dist",
     "!dist/**/*.test.*",
@@ -122,9 +125,6 @@
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "udibo-oauth2": "./dist/cli/bin.js"
-  },
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -137,6 +137,7 @@
     "lint": "oxlint --type-aware --type-check",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:browser": "playwright test",
     "smoke": "node scripts/npm-smoke.ts",
     "jsr:dry-run": "jsr publish --dry-run --allow-dirty"
   },
@@ -145,11 +146,16 @@
     "@udibo/http-error": "npm:@jsr/udibo__http-error@^0.11.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.3",
+    "axe-core": "^4.14.0",
     "hono": "^4.13.13",
+    "jsdom": "^30.1.2",
     "jsr": "^0.14.3",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
@@ -157,6 +163,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.3",
     "vitest": "^5.0.3"
   },
   "peerDependencies": {

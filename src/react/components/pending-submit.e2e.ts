@@ -6,22 +6,22 @@
  * becomes disabled. jsdom has no such focus fixup, so `pending-submit.test.tsx`
  * passes against either attribute; only a real engine shows the difference.
  *
- * Not `*.test.ts`, so `deno task test` does not pick it up — it runs as
- * `deno task test:browser`, which skips when no Chromium is found.
+ * Not `*.test.ts`, so `pnpm test` does not pick it up; it runs as
+ * `pnpm test:browser`.
  *
  * @module
  */
 
-import { assertEquals, assertFalse } from "@std/assert";
-import { delay } from "@std/async/delay";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-
+import { fileURLToPath } from "node:url";
 import {
-  type Browser,
-  chromiumPath,
-  launchBrowser,
+  expect,
+  type Locator,
   type Page,
-} from "../_test_cdp.ts";
+  test as base,
+} from "@playwright/test";
+import { build } from "vite";
+
+import { serve } from "../../_test_server.ts";
 
 const FORMS = [
   { name: "SignInForm", label: "Sign in", pendingLabel: "Signing in…" },
@@ -44,148 +44,139 @@ const FORMS = [
   { name: "MfaEnrollmentForm", label: "Confirm", pendingLabel: "Confirming…" },
 ] as const;
 
-const SUBMIT = "[data-oauth2-submit]";
-const BUTTON = `document.querySelector(${JSON.stringify(SUBMIT)})`;
-const CALLS = "globalThis.pendingSubmit.calls";
-const SUBMITS = "globalThis.pendingSubmit.submits";
-const FOCUSED = `(() => {
-  const active = document.activeElement;
-  return active === ${BUTTON} ? "the submit button" : active?.tagName ?? "nothing";
-})()`;
-const REPEAT_SETTLE_MS = 100;
-
-const chromium = await chromiumPath();
-if (chromium === null) {
-  console.warn(
-    "No Chromium found. Set CHROMIUM_PATH, or install one into " +
-      "~/.cache/ms-playwright. The React browser tests are skipped.",
-  );
-}
+const PAGE_ENTRY = fileURLToPath(
+  new URL("./_test_pending_submit_page.tsx", import.meta.url),
+);
+const HTML =
+  '<!doctype html><html lang="en"><body><div id="root"></div>' +
+  '<script type="module" src="/page.js"></script></body></html>';
 
 async function bundlePage(): Promise<string> {
-  const outDir = await Deno.makeTempDir({ prefix: "oauth2-e2e-" });
-  try {
-    const output = `${outDir}/page.js`;
-    const { success, stderr } = await new Deno.Command(Deno.execPath(), {
-      args: [
-        "bundle",
-        "--platform=browser",
-        "--quiet",
-        "-o",
-        output,
-        "react/components/_test_pending_submit_page.tsx",
-      ],
-      cwd: new URL("../../", import.meta.url),
-      stdout: "null",
-      stderr: "piped",
-    }).output();
-    if (!success) {
-      throw new Error(
-        `deno bundle failed:\n${new TextDecoder().decode(stderr)}`,
-      );
-    }
-    return await Deno.readTextFile(output);
-  } finally {
-    await Deno.remove(outDir, { recursive: true });
-  }
+  const result = await build({
+    configFile: false,
+    logLevel: "silent",
+    define: { "process.env.NODE_ENV": '"development"' },
+    oxc: { jsx: { runtime: "automatic" } },
+    build: {
+      write: false,
+      minify: false,
+      lib: { entry: PAGE_ENTRY, formats: ["es"], fileName: "page" },
+    },
+  });
+  const outputs = Array.isArray(result) ? result : [result];
+  const chunk = outputs
+    .flatMap((output) => ("output" in output ? output.output : []))
+    .find((file) => file.type === "chunk" && file.isEntry);
+  if (chunk?.type !== "chunk") throw new Error("the page bundle has no entry");
+  return chunk.code;
 }
 
-function servePage(script: string): Deno.HttpServer<Deno.NetAddr> {
-  const html = '<!doctype html><html lang="en"><body><div id="root"></div>' +
-    '<script type="module" src="/page.js"></script></body></html>';
-  return Deno.serve(
-    { hostname: "127.0.0.1", port: 0, onListen: () => {} },
-    (request) => {
-      const { pathname } = new URL(request.url);
-      if (pathname === "/page.js") {
-        return new Response(script, {
-          headers: { "content-type": "text/javascript" },
-        });
+const test = base.extend<object, { origin: string }>({
+  origin: [
+    // oxlint-disable-next-line no-empty-pattern -- Playwright reads the fixture dependencies from this pattern
+    async ({}, use) => {
+      const script = await bundlePage();
+      const server = await serve((request) => {
+        const { pathname } = new URL(request.url);
+        if (pathname === "/page.js") {
+          return new Response(script, {
+            headers: { "content-type": "text/javascript" },
+          });
+        }
+        if (pathname === "/") {
+          return new Response(HTML, {
+            headers: { "content-type": "text/html" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+      try {
+        await use(server.origin);
+      } finally {
+        await server.shutdown();
       }
-      if (pathname === "/") {
-        return new Response(html, {
-          headers: { "content-type": "text/html" },
-        });
-      }
-      return new Response("Not found", { status: 404 });
     },
+    { scope: "worker" },
+  ],
+});
+
+function submitButton(page: Page): Locator {
+  return page.locator("[data-oauth2-submit]");
+}
+
+function pendingSubmit<T>(page: Page, read: string): Promise<T> {
+  return page.evaluate(
+    (key) =>
+      (globalThis as unknown as Record<string, Record<string, T>>)
+        .pendingSubmit![key] as T,
+    read,
   );
 }
 
-describe("a pending submit in a real browser", {
-  ignore: chromium === null,
-}, () => {
-  let server: Deno.HttpServer<Deno.NetAddr>;
-  let browser: Browser;
-  let page: Page;
+async function afterNextPaint(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+}
 
-  beforeAll(async () => {
-    server = servePage(await bundlePage());
-    browser = await launchBrowser(chromium!);
-    page = await browser.newPage();
-  });
-
-  afterAll(async () => {
-    await browser?.[Symbol.asyncDispose]();
-    await server?.shutdown();
-  });
-
+test.describe("a pending submit in a real browser", () => {
   for (const form of FORMS) {
-    it(`${form.name} keeps focus on its pending button and submits once`, async () => {
-      const { port } = server.addr;
-      await page.navigate(
-        `http://127.0.0.1:${port}/?form=${form.name}`,
-        `${BUTTON}?.textContent === ${JSON.stringify(form.label)}`,
-      );
+    test(`${form.name} keeps focus on its pending button and submits once`, async ({
+      page,
+      origin,
+    }) => {
+      const button = submitButton(page);
+      await page.goto(`${origin}/?form=${form.name}`);
+      await expect(button).toHaveText(form.label);
 
-      await page.focus(SUBMIT);
-      await page.press("Enter");
-      await page.waitFor(
-        `${BUTTON}.textContent === ${JSON.stringify(form.pendingLabel)}`,
-      );
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await expect(button).toHaveText(form.pendingLabel);
 
-      assertEquals(
-        await page.evaluate<string>(FOCUSED),
-        "the submit button",
+      await expect(
+        button,
         "a pending submit must keep focus; a natively disabled one hands it to <body>",
-      );
-      assertEquals(
-        await page.evaluate<string | null>(
-          `${BUTTON}.getAttribute("aria-disabled")`,
-        ),
-        "true",
-      );
-      assertFalse(await page.evaluate<boolean>(`${BUTTON}.disabled`));
-      assertEquals(await page.evaluate<number>(CALLS), 1);
+      ).toBeFocused();
+      await expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(
+        await button.evaluate((el) => (el as HTMLButtonElement).disabled),
+      ).toBe(false);
+      expect(await pendingSubmit<number>(page, "calls")).toBe(1);
 
-      await page.press("Enter");
-      await page.press(" ");
-      await page.click(SUBMIT);
-      await delay(REPEAT_SETTLE_MS);
-      assertEquals(
-        await page.evaluate<number>(CALLS),
-        1,
+      await page.keyboard.press("Enter");
+      await page.keyboard.press(" ");
+      await button.click({ force: true });
+      await afterNextPaint(page);
+      expect(
+        await pendingSubmit<number>(page, "calls"),
         "Enter, Space and a click on a pending submit must not submit again",
-      );
-      assertEquals(
-        await page.evaluate<number>(SUBMITS),
-        1,
+      ).toBe(1);
+      expect(
+        await pendingSubmit<number>(page, "submits"),
         "the pending button must cancel activation, so its form never posts again",
-      );
-      assertEquals(await page.evaluate<string>(FOCUSED), "the submit button");
+      ).toBe(1);
+      await expect(button).toBeFocused();
 
-      await page.evaluate("globalThis.pendingSubmit.release()");
-      await page.waitFor(
-        `${BUTTON}.textContent === ${JSON.stringify(form.label)}`,
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as { pendingSubmit: { release(): void } }
+        ).pendingSubmit.release(),
       );
-      assertFalse(
-        await page.evaluate<boolean>(`${BUTTON}.hasAttribute("aria-disabled")`),
-      );
+      await expect(button).toHaveText(form.label);
+      await expect(button).not.toHaveAttribute("aria-disabled", /.*/);
 
-      await page.focus(SUBMIT);
-      await page.press(" ");
-      await page.waitFor(`${CALLS} === 2 && ${SUBMITS} === 2`);
-      await page.evaluate("globalThis.pendingSubmit.release()");
+      await button.focus();
+      await page.keyboard.press(" ");
+      await expect.poll(() => pendingSubmit<number>(page, "calls")).toBe(2);
+      expect(await pendingSubmit<number>(page, "submits")).toBe(2);
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as { pendingSubmit: { release(): void } }
+        ).pendingSubmit.release(),
+      );
     });
   }
 });

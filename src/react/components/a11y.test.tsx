@@ -1,8 +1,5 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import axe, { type Result } from "axe-core";
@@ -17,8 +14,6 @@ import { UserMenu } from "./user-menu.tsx";
 import { createMockOAuth2Client, MockOAuth2Provider } from "../testing.tsx";
 import { useAuthForm } from "./use-auth-form.ts";
 import { ErrorSummary, TextField, useFocusFirstError } from "./internal.tsx";
-
-cleanupAfterEach();
 
 const DISABLED_UNDER_JSDOM = [
   "color-contrast",
@@ -39,7 +34,7 @@ async function assertNoViolations(container: HTMLElement): Promise<void> {
   const summary = results.violations
     .map((violation: Result) => `${violation.id}: ${violation.help}`)
     .join("\n");
-  assertEquals(results.violations.length, 0, summary);
+  expect(results.violations.length, summary).toStrictEqual(0);
 }
 
 describe("auth component accessibility (axe-core)", () => {
@@ -108,13 +103,12 @@ describe("auth component accessibility (axe-core)", () => {
     await assertNoViolations(container);
 
     const trigger = screen.getByRole("button", { name: "Ada Lovelace" });
-    assertEquals(trigger.getAttribute("aria-expanded"), "false");
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("false");
     await act(async () => {
       fireEvent.click(trigger);
     });
-    assertEquals(trigger.getAttribute("aria-expanded"), "true");
-    assertEquals(
-      trigger.getAttribute("aria-controls"),
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("true");
+    expect(trigger.getAttribute("aria-controls")).toStrictEqual(
       container.querySelector("[data-oauth2-user-panel]")?.id,
     );
     await assertNoViolations(container);
@@ -164,14 +158,16 @@ describe("auth form error handling", () => {
       document.activeElement === summary,
       "focus should move to the error summary wrapper",
     );
-    assertEquals(summary.getAttribute("role"), null);
-    assertEquals(screen.getByRole("alert").textContent, "Invalid credentials");
+    expect(summary.getAttribute("role")).toStrictEqual(null);
+    expect(screen.getByRole("alert").textContent).toStrictEqual(
+      "Invalid credentials",
+    );
   });
 
   it("does not block paste on the MFA code field", () => {
     render(<MfaChallengeForm onSubmit={() => {}} />);
     const code = screen.getByLabelText("Authentication code");
-    assertEquals(fireEvent.paste(code), true);
+    expect(fireEvent.paste(code)).toStrictEqual(true);
   });
 
   it("composes the validate-throw trap with focus-first-error (announce, don't fight)", async () => {
@@ -212,7 +208,9 @@ describe("auth form error handling", () => {
       "[data-oauth2-error-summary]",
     );
     assert(summary, "the thrown validate error should surface as a form error");
-    assertEquals(screen.getByRole("alert").textContent, "validator blew up");
+    expect(screen.getByRole("alert").textContent).toStrictEqual(
+      "validator blew up",
+    );
     assert(
       document.activeElement === summary,
       "focus should rest on the error summary, not be stolen to a field",
@@ -222,6 +220,6 @@ describe("auth form error handling", () => {
       document.activeElement !== email,
       "focus-first-error must defer to the form-level error, not fight it",
     );
-    assertEquals(email.getAttribute("aria-invalid"), null);
+    expect(email.getAttribute("aria-invalid")).toStrictEqual(null);
   });
 });

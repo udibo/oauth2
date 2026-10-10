@@ -1,5 +1,3 @@
-// deno-lint-ignore-file no-window -- browser-only; `window` used only after isBrowser() guards
-
 /**
  * `<OAuth2Callback>` — mount on the SPA's callback route when the app runs a
  * `DirectClient`. Calls `client.handleAuthorizationCallback` with the current

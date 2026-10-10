@@ -1,23 +1,19 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { SignUpForm } from "./sign-up-form.tsx";
 import type { SignUpValues } from "./sign-up-form.tsx";
 
-cleanupAfterEach();
-
 describe("SignUpForm", () => {
   it("renders email + password with new-password autocomplete", () => {
     render(<SignUpForm onSubmit={() => {}} />);
-    assertEquals(screen.getByLabelText("Email").getAttribute("type"), "email");
-    assertEquals(
-      screen.getByLabelText("Password").getAttribute("autocomplete"),
-      "new-password",
+    expect(screen.getByLabelText("Email").getAttribute("type")).toStrictEqual(
+      "email",
     );
+    expect(
+      screen.getByLabelText("Password").getAttribute("autocomplete"),
+    ).toStrictEqual("new-password");
   });
 
   it("submits values and passes optional fields when enabled", async () => {
@@ -50,9 +46,9 @@ describe("SignUpForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(submitted[0].username, "neo");
-    assertEquals(submitted[0].firstName, "Thomas");
-    assertEquals(submitted[0].lastName, "Anderson");
+    expect(submitted[0].username).toStrictEqual("neo");
+    expect(submitted[0].firstName).toStrictEqual("Thomas");
+    expect(submitted[0].lastName).toStrictEqual("Anderson");
   });
 
   it("blocks submission and shows an error on password mismatch", async () => {
@@ -73,12 +69,11 @@ describe("SignUpForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(called, false);
+    expect(called).toStrictEqual(false);
     assert(screen.getByText("Passwords do not match."));
-    assertEquals(
+    expect(
       screen.getByLabelText("Confirm password").getAttribute("aria-invalid"),
-      "true",
-    );
+    ).toStrictEqual("true");
   });
 
   it("renders social buttons and omits them when empty", () => {
@@ -91,6 +86,6 @@ describe("SignUpForm", () => {
     );
     assert(screen.getByText("Continue with GitHub"));
     rerender(<SignUpForm onSubmit={() => {}} socialProviders={[]} />);
-    assertFalse(container.querySelector("[data-oauth2-social]"));
+    expect(container.querySelector("[data-oauth2-social]")).toBeFalsy();
   });
 });

@@ -19,10 +19,10 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "scripts/npm-smoke.ts", "vitest.config.ts"],
-  "exclude": [
-    "src/**/*.e2e.ts",
-    "src/react/**/*.test.tsx",
-    "src/react/_test_*.ts"
+  "include": [
+    "src",
+    "scripts/npm-smoke.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
   ]
 }

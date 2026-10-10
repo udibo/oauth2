@@ -1,8 +1,5 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render } from "@testing-library/react";
 import type { ReactNode, Ref } from "react";
 
@@ -12,8 +9,6 @@ import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
 import { ResetPasswordForm } from "./reset-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
-
-cleanupAfterEach();
 
 interface HostProps {
   onSubmit: () => void;
@@ -54,8 +49,8 @@ describe("server-rendered forms post without JavaScript", () => {
         renderForm({ onSubmit: () => {}, action: "/auth/go", method: "post" }),
       );
       const form = getForm(container);
-      assertEquals(form.getAttribute("action"), "/auth/go");
-      assertEquals(form.getAttribute("method"), "post");
+      expect(form.getAttribute("action")).toStrictEqual("/auth/go");
+      expect(form.getAttribute("method")).toStrictEqual("post");
     });
 
     it(`${name} hands the form element to formRef`, () => {
@@ -85,9 +80,10 @@ describe("server-rendered forms post without JavaScript", () => {
         method="post"
       />,
     );
-    const names = [...getForm(container).querySelectorAll("input")]
-      .map((input) => input.getAttribute("name"));
-    assertEquals(names, ["identifier", "password", "remember"]);
+    const names = [...getForm(container).querySelectorAll("input")].map(
+      (input) => input.getAttribute("name"),
+    );
+    expect(names).toStrictEqual(["identifier", "password", "remember"]);
   });
 
   it("suppresses the native post once JavaScript runs, so onSubmit wins", async () => {
@@ -105,12 +101,11 @@ describe("server-rendered forms post without JavaScript", () => {
     await act(async () => {
       notPrevented = fireEvent.submit(getForm(container));
     });
-    assertEquals(handled, 1);
-    assertEquals(
+    expect(handled).toStrictEqual(1);
+    expect(
       notPrevented,
-      false,
       "the submit event must be prevented so the browser does not also post",
-    );
+    ).toStrictEqual(false);
   });
 
   it("posts by default, so credentials never reach the URL a get form would build", () => {
@@ -118,8 +113,8 @@ describe("server-rendered forms post without JavaScript", () => {
       <SignInForm onSubmit={() => {}} action="/identity/signin" />,
     );
     const form = getForm(container);
-    assertEquals(form.getAttribute("method"), "post");
-    assertEquals(form.method, "post");
+    expect(form.getAttribute("method")).toStrictEqual("post");
+    expect(form.method).toStrictEqual("post");
   });
 
   it("still honours an explicit method", () => {
@@ -130,14 +125,14 @@ describe("server-rendered forms post without JavaScript", () => {
         method="get"
       />,
     );
-    assertEquals(getForm(container).getAttribute("method"), "get");
+    expect(getForm(container).getAttribute("method")).toStrictEqual("get");
   });
 
   it("omits action and method when the app does not ask for a native post", () => {
     const { container } = render(<SignInForm onSubmit={() => {}} />);
     const form = getForm(container);
-    assertEquals(form.getAttribute("action"), null);
-    assertEquals(form.getAttribute("method"), null);
+    expect(form.getAttribute("action")).toStrictEqual(null);
+    expect(form.getAttribute("method")).toStrictEqual(null);
   });
 });
 
@@ -151,7 +146,7 @@ describe("forms report success to the host app", () => {
       await act(async () => {
         fireEvent.submit(getForm(container));
       });
-      assertEquals(succeeded, 1);
+      expect(succeeded).toStrictEqual(1);
     });
   }
 
@@ -166,6 +161,6 @@ describe("forms report success to the host app", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(succeeded, 0);
+    expect(succeeded).toStrictEqual(0);
   });
 });

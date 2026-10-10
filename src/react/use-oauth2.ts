@@ -1,5 +1,3 @@
-// deno-lint-ignore-file no-window -- `login`/`logout` touch `window` only after an isBrowser() guard
-
 /**
  * `useOAuth2()` — the primary React hook for consuming OAuth2 state and
  * driving auth actions, plus the two hooks that narrow the context's client
