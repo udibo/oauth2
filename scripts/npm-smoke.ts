@@ -88,6 +88,34 @@ function exactVersions(
   return pinned;
 }
 
+/**
+ * Packs the exact `@udibo/*` runtime dependencies this checkout resolved, so
+ * the age-gated consumer install can use them: the release-age policy exempts
+ * the scope's own packages, which `npm install --before` cannot express.
+ */
+function ownDependencyTarballs(
+  dependencies: Record<string, string>,
+  destination: string,
+): string[] {
+  return Object.keys(dependencies)
+    .filter((name) => name.startsWith("@udibo/"))
+    .map((name) => {
+      const { version } = readManifest(
+        join(packageDir, "node_modules", name, "package.json"),
+      );
+      const file = run(
+        "npm",
+        ["pack", `${name}@${version}`, "--pack-destination", destination],
+        destination,
+        "pipe",
+      )
+        .trim()
+        .split("\n")
+        .at(-1)!;
+      return join(destination, file);
+    });
+}
+
 const BIN_NAME = "udibo-oauth2";
 
 function npx(args: string[], cwd: string): string {
@@ -203,6 +231,7 @@ async function main(): Promise<void> {
         "--ignore-scripts",
         "--before",
         new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        ...ownDependencyTarballs(manifest.dependencies ?? {}, packDir),
         tarball,
       ],
       consumerDir,

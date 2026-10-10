@@ -11,39 +11,6 @@ call for a release publishes one, as long as the repository variable
 `OAUTH2_RELEASE_ENABLED` is `true`. Setting it to anything else is the off
 switch. Nothing in the validation commands below publishes a package.
 
-## Before the first npm release
-
-This is the release blocker for the Node migration. `@udibo/http-error` is
-still declared as
-`npm:@jsr/udibo__http-error@^0.11.1` in `package.json`, which installs it
-through the JSR npm mirror, and `.npmrc` routes the `@jsr` scope to
-`https://npm.jsr.io` so that works inside this repository. A published
-`@udibo/oauth2` cannot ship that: an adopter's `npm install` has no such
-registry rule and would fail on the dependency. Do these in order:
-
-1. **Publish `@udibo/http-error@0.12.0` to npm and JSR** from its own repository
-   (see its `PUBLISHING.md`). Confirm `npm view @udibo/http-error@0.12.0 version`
-   answers.
-2. **Switch this package to it.** In `package.json` set
-   `"@udibo/http-error": "^0.12.0"`; in `jsr.json` set the import to
-   `jsr:@udibo/http-error@^0.12.0`; delete the `@jsr:registry` line from `.npmrc`
-   (remove the file when it is empty); run `pnpm install` and commit the
-   lockfile.
-3. **Check the result.** `node scripts/verify-release.ts --dependencies-only`
-   and `pnpm build && node scripts/npm-smoke.ts --release` must both pass. The
-   second installs the packed tarball into an empty project that has no JSR
-   registry configured.
-
-Until step 2 is done the release job refuses to publish. It runs
-`node scripts/verify-release.ts --dependencies-only` and
-`node scripts/npm-smoke.ts --release` before building, and semantic-release runs
-the same dependency guard again from `verifyReleaseCmd` before it generates
-notes, edits files, pushes, or publishes. The failure reads
-`Refusing to release: dependencies resolve through JSR`. Because
-`OAUTH2_RELEASE_ENABLED` is currently `true`, merging the Node migration to
-`main` runs that job; set the variable to `false` first if you want the merge
-to run only the checks.
-
 ## Release configuration in place
 
 The release job depends on these:
