@@ -161,16 +161,17 @@ export function oauth2Provider(
       body,
       requiredField: "access_token",
       fetch: fetchImpl,
-      httpErrorHint: `Check that clientId/clientSecret and the redirect URI ` +
+      httpErrorHint:
+        `Check that clientId/clientSecret and the redirect URI ` +
         `match the ${options.displayName} app registration, then try again.`,
       tokenErrorHint: oauth2TokenErrorHint,
     });
     return { accessToken: value, raw };
   }
 
-  async function fetchUserInfo(accessToken: string): Promise<
-    Record<string, unknown>
-  > {
+  async function fetchUserInfo(
+    accessToken: string,
+  ): Promise<Record<string, unknown>> {
     let res: Response;
     try {
       res = await fetchImpl(options.userInfoEndpoint!, {
@@ -221,9 +222,9 @@ export function oauth2Provider(
       input: ExternalAuthorizationUrlInput,
     ): Promise<string> {
       const url = new URL(options.authorizationEndpoint);
-      for (
-        const [key, value] of Object.entries(options.authorizationParams ?? {})
-      ) {
+      for (const [key, value] of Object.entries(
+        options.authorizationParams ?? {},
+      )) {
         url.searchParams.set(key, value);
       }
       url.searchParams.set("response_type", "code");
@@ -271,18 +272,26 @@ export function oauth2Provider(
 
 function oauth2TokenErrorHint(error: string | undefined): string {
   if (error === "invalid_client" || error === "unauthorized_client") {
-    return `The provider rejected the client credentials — check clientId ` +
-      `and clientSecret against the app registration.`;
+    return (
+      `The provider rejected the client credentials — check clientId ` +
+      `and clientSecret against the app registration.`
+    );
   }
   if (error === "invalid_grant") {
-    return `The provider rejected the code — it expired, was already used, ` +
+    return (
+      `The provider rejected the code — it expired, was already used, ` +
       `or the redirect URI does not match the registered one. Ask the user ` +
-      `to start again.`;
+      `to start again.`
+    );
   }
   if (error === "invalid_scope") {
-    return `The provider rejected the requested scopes — check the ` +
-      `connector's scopes against what the app registration allows.`;
+    return (
+      `The provider rejected the requested scopes — check the ` +
+      `connector's scopes against what the app registration allows.`
+    );
   }
-  return `The code may have expired or already been used — ask the user to ` +
-    `start again.`;
+  return (
+    `The code may have expired or already been used — ask the user to ` +
+    `start again.`
+  );
 }

@@ -144,10 +144,7 @@ export function defaultSubjectOf(user: unknown): string {
   return String((user as { id?: unknown })?.id ?? user);
 }
 
-function publicJwkOf(
-  jwk: JsonWebKey,
-  kid: string,
-): SigningKey["publicJwk"] {
+function publicJwkOf(jwk: JsonWebKey, kid: string): SigningKey["publicJwk"] {
   return {
     kty: jwk.kty,
     crv: jwk.crv,
@@ -220,9 +217,12 @@ export async function signJwt(
   payload: Record<string, unknown>,
   header: Record<string, unknown> = {},
 ): Promise<string> {
-  const signingInput = `${
-    encodeSegment({ alg: key.alg, typ: "JWT", kid: key.kid, ...header })
-  }.${encodeSegment(payload)}`;
+  const signingInput = `${encodeSegment({
+    alg: key.alg,
+    typ: "JWT",
+    kid: key.kid,
+    ...header,
+  })}.${encodeSegment(payload)}`;
   const signature = await crypto.subtle.sign(
     ES256_SIGN_PARAMS,
     key.privateKey,
@@ -282,7 +282,8 @@ export async function verifyJwt(
     );
     if (
       !options.ignoreExpiration &&
-      typeof payload.exp === "number" && payload.exp * 1000 <= Date.now()
+      typeof payload.exp === "number" &&
+      payload.exp * 1000 <= Date.now()
     ) {
       return undefined;
     }
@@ -366,9 +367,10 @@ export function createJwtAccessTokenGenerator(options: {
       : undefined;
     const key = await options.signingKeys.getSigningKey();
     const now = Math.floor(Date.now() / 1000);
-    const extraClaims = user && options.userClaims
-      ? await options.userClaims(user, scope, client, event)
-      : undefined;
+    const extraClaims =
+      user && options.userClaims
+        ? await options.userClaims(user, scope, client, event)
+        : undefined;
     const storedExp = expiresAt
       ? Math.floor(expiresAt.getTime() / 1000)
       : now + lifetime;

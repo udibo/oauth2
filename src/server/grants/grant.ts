@@ -144,8 +144,8 @@ export abstract class AbstractGrant<
   /** Creates a grant from the shared {@linkcode GrantOptions}. */
   constructor(options: GrantOptions<Client, User, Scope, Services>) {
     this.allowRefreshToken = options.allowRefreshToken ?? false;
-    this.Scope = options.Scope ??
-      (BasicScope as unknown as ScopeConstructor<Scope>);
+    this.Scope =
+      options.Scope ?? (BasicScope as unknown as ScopeConstructor<Scope>);
     this.#resolve = options.resolve;
   }
 
@@ -253,9 +253,10 @@ export abstract class AbstractGrant<
     authenticationContext?: AuthenticationContext,
     familyExpiresAt?: Date,
   ): Promise<Token<Client, User, Scope>> {
-    const event = user === undefined
-      ? undefined
-      : snapshotAuthenticationContext(authenticationContext);
+    const event =
+      user === undefined
+        ? undefined
+        : snapshotAuthenticationContext(authenticationContext);
     const token: Token<Client, User, Scope> = { accessToken: "", client };
 
     if (event) token.authenticationContext = event;
@@ -296,12 +297,18 @@ export abstract class AbstractGrant<
         if (refreshTokenExpiresAt) {
           withRefresh.refreshTokenExpiresAt = refreshTokenExpiresAt;
         }
-        const newFamilyExpiresAt = await tokenService
-          .refreshTokenFamilyExpiresAt?.(client, user, familyCreatedAt, scope);
+        const newFamilyExpiresAt =
+          await tokenService.refreshTokenFamilyExpiresAt?.(
+            client,
+            user,
+            familyCreatedAt,
+            scope,
+          );
         if (newFamilyExpiresAt) {
-          ceiling = ceiling && ceiling < newFamilyExpiresAt
-            ? ceiling
-            : newFamilyExpiresAt;
+          ceiling =
+            ceiling && ceiling < newFamilyExpiresAt
+              ? ceiling
+              : newFamilyExpiresAt;
         }
         result = withRefresh;
       }

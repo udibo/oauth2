@@ -86,10 +86,7 @@ export interface AuthRequestStorage {
     state: string,
   ): Promise<AuthRequestRecord | null> | AuthRequestRecord | null;
   /** Stores {@linkcode value} under {@linkcode state} before the authorize redirect. */
-  set(
-    state: string,
-    value: AuthRequestRecord,
-  ): Promise<void> | void;
+  set(state: string, value: AuthRequestRecord): Promise<void> | void;
   /**
    * Returns the record for {@linkcode state} and removes it in one atomic
    * step, or `null` if absent. `DirectClient` claims the record this way

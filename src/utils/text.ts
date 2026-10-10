@@ -17,7 +17,7 @@ export const PROVIDER_TEXT_MAX_LENGTH = 200;
  * every byte a remote server chose that reaches a message.
  */
 export function sanitizeProviderText(value: string): string {
-  // deno-lint-ignore no-control-regex
+  // oxlint-disable-next-line no-control-regex
   const flattened = value.replace(/[\u0000-\u001F\u007F-\u009F]+/g, " ");
   return flattened.trim().slice(0, PROVIDER_TEXT_MAX_LENGTH).toWellFormed();
 }

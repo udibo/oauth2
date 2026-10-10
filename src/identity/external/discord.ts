@@ -27,9 +27,7 @@ export interface DiscordProviderOptions {
   fetch?: typeof fetch;
 }
 
-function avatarUrl(
-  user: Record<string, unknown>,
-): string | undefined {
+function avatarUrl(user: Record<string, unknown>): string | undefined {
   const id = user.id;
   const avatar = user.avatar;
   if (typeof id === "string" && typeof avatar === "string" && avatar) {
@@ -53,8 +51,8 @@ function avatarUrl(
  * ```ts
  * const flow = new ExternalAuthFlow({
  *   provider: discordProvider({
- *     clientId: Deno.env.get("DISCORD_CLIENT_ID")!,
- *     clientSecret: Deno.env.get("DISCORD_CLIENT_SECRET")!,
+ *     clientId: process.env.DISCORD_CLIENT_ID!,
+ *     clientSecret: process.env.DISCORD_CLIENT_SECRET!,
  *   }),
  * });
  * ```
@@ -76,11 +74,12 @@ export function discordProvider(
       subject: typeof profile.id === "string" ? profile.id : "",
       email: typeof profile.email === "string" ? profile.email : undefined,
       emailVerified: profile.verified === true,
-      name: typeof profile.global_name === "string" && profile.global_name
-        ? profile.global_name
-        : typeof profile.username === "string"
-        ? profile.username
-        : undefined,
+      name:
+        typeof profile.global_name === "string" && profile.global_name
+          ? profile.global_name
+          : typeof profile.username === "string"
+            ? profile.username
+            : undefined,
       picture: avatarUrl(profile),
     }),
   });

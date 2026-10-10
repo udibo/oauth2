@@ -105,7 +105,7 @@ export interface OidcProviderOptions {
  *   displayName: "Acme SSO",
  *   issuer: "https://sso.acme.example",
  *   clientId: "my-app",
- *   clientSecret: Deno.env.get("ACME_CLIENT_SECRET")!,
+ *   clientSecret: process.env.ACME_CLIENT_SECRET!,
  * });
  * const flow = new ExternalAuthFlow({ provider });
  * ```
@@ -155,20 +155,18 @@ export function oidcProvider(options: OidcProviderOptions): ExternalProvider {
       throw new ExternalAuthError(
         id,
         "configuration",
-        `discovery document "issuer" is "${
-          String(meta.issuer)
-        }" but the configured issuer is "${options.issuer}" — OpenID Connect ` +
+        `discovery document "issuer" is "${String(
+          meta.issuer,
+        )}" but the configured issuer is "${options.issuer}" — OpenID Connect ` +
           `Discovery §4.3 / RFC 8414 §3.3 require them to be identical. The ` +
           `configured issuer likely points at a proxy or the wrong tenant.`,
       );
     }
-    for (
-      const endpoint of [
-        meta.authorization_endpoint,
-        meta.token_endpoint,
-        meta.userinfo_endpoint,
-      ]
-    ) {
+    for (const endpoint of [
+      meta.authorization_endpoint,
+      meta.token_endpoint,
+      meta.userinfo_endpoint,
+    ]) {
       if (endpoint !== undefined) assertSecureIssuer(id, endpoint);
     }
     return meta;
@@ -362,8 +360,10 @@ function assertSecureIssuer(id: string, issuer: string): void {
       `issuer "${issuer}" is not a valid absolute URL.`,
     );
   }
-  const loopback = url.hostname === "localhost" ||
-    url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
     throw new ExternalAuthError(
       id,
@@ -379,14 +379,20 @@ function assertSecureIssuer(id: string, issuer: string): void {
 function tokenExchangeHint(error: unknown): string {
   const code = isOAuth2Error(error) ? error.extensions.error : undefined;
   if (code === "invalid_client") {
-    return `The provider rejected the client credentials — check clientId ` +
-      `and clientSecret against the provider's app registration.`;
+    return (
+      `The provider rejected the client credentials — check clientId ` +
+      `and clientSecret against the provider's app registration.`
+    );
   }
   if (code === "invalid_grant") {
-    return `The provider rejected the code — most often the redirectUri ` +
+    return (
+      `The provider rejected the code — most often the redirectUri ` +
       `does not exactly match the URI registered with the provider, or the ` +
-      `code expired or was already used.`;
+      `code expired or was already used.`
+    );
   }
-  return `Check the provider's app registration (client credentials and ` +
-    `redirect URI) if this persists.`;
+  return (
+    `Check the provider's app registration (client credentials and ` +
+    `redirect URI) if this persists.`
+  );
 }

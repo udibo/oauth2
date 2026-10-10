@@ -1,32 +1,4 @@
-/**
- * Contract test suite for {@link MfaStore} implementations.
- *
- * `MfaService` leans on three store methods for its concurrency guarantees —
- * `activateTotp` (compare-and-swap on the pending secret), `advanceLastStep`
- * (monotonic replay guard), and `consumeRecoveryHash` (single-use recovery
- * codes). This suite checks each of them with concurrent calls, so a
- * read-modify-write implementation fails here instead of silently letting two
- * requests spend one recovery code.
- *
- * @example Verify a database-backed store
- * ```ts
- * import { runMfaStoreContractTests } from "@udibo/oauth2/testing/contract";
- * import type { MfaStore } from "@udibo/oauth2/identity/mfa";
- *
- * declare function freshMfaStore(): Promise<MfaStore>;
- *
- * runMfaStoreContractTests({
- *   describeName: "DrizzleMfaStore satisfies MfaStore contract",
- *   makeStore: freshMfaStore,
- * });
- * ```
- *
- * @module
- */
-
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { beforeEach, describe, expect, it } from "vitest";
 import type { MfaStore } from "../../identity/mfa/service.ts";
 import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
@@ -76,21 +48,21 @@ export function runMfaStoreContractTests(
 
     describe("getTotp / setPendingTotp", () => {
       it("returns undefined for a user with no record", async () => {
-        assertStrictEquals(await store.getTotp(USER), undefined);
+        expect(await store.getTotp(USER)).toBe(undefined);
       });
 
       it("stores a pending secret without activating it", async () => {
         await store.setPendingTotp(USER, SECRET_A);
         const record = await store.getTotp(USER);
-        assertEquals(record?.pendingSecretBase32, SECRET_A);
-        assertStrictEquals(record?.secretBase32, undefined);
+        expect(record?.pendingSecretBase32).toStrictEqual(SECRET_A);
+        expect(record?.secretBase32).toBe(undefined);
       });
 
       it("replaces a previous pending secret", async () => {
         await store.setPendingTotp(USER, SECRET_A);
         await store.setPendingTotp(USER, SECRET_B);
         const record = await store.getTotp(USER);
-        assertEquals(record?.pendingSecretBase32, SECRET_B);
+        expect(record?.pendingSecretBase32).toStrictEqual(SECRET_B);
       });
 
       it("keeps an active credential when a new enrollment starts", async () => {
@@ -98,55 +70,54 @@ export function runMfaStoreContractTests(
         await store.activateTotp(USER, SECRET_A, 100);
         await store.setPendingTotp(USER, SECRET_B);
         const record = await store.getTotp(USER);
-        assertEquals(record?.secretBase32, SECRET_A);
-        assertEquals(record?.lastStep, 100);
-        assertEquals(record?.pendingSecretBase32, SECRET_B);
+        expect(record?.secretBase32).toStrictEqual(SECRET_A);
+        expect(record?.lastStep).toStrictEqual(100);
+        expect(record?.pendingSecretBase32).toStrictEqual(SECRET_B);
       });
 
       it("keeps each user's record separate", async () => {
         await store.setPendingTotp(USER, SECRET_A);
-        assertStrictEquals(await store.getTotp(OTHER_USER), undefined);
+        expect(await store.getTotp(OTHER_USER)).toBe(undefined);
       });
     });
 
     describe("activateTotp", () => {
       it("promotes the matching pending secret and clears it", async () => {
         await store.setPendingTotp(USER, SECRET_A);
-        assertStrictEquals(await store.activateTotp(USER, SECRET_A, 42), true);
+        expect(await store.activateTotp(USER, SECRET_A, 42)).toBe(true);
         const record = await store.getTotp(USER);
-        assertEquals(record?.secretBase32, SECRET_A);
-        assertEquals(record?.lastStep, 42);
-        assertStrictEquals(record?.pendingSecretBase32, undefined);
+        expect(record?.secretBase32).toStrictEqual(SECRET_A);
+        expect(record?.lastStep).toStrictEqual(42);
+        expect(record?.pendingSecretBase32).toBe(undefined);
       });
 
       it("refuses when the user has no pending secret", async () => {
-        assertStrictEquals(await store.activateTotp(USER, SECRET_A, 42), false);
-        assertStrictEquals(await store.getTotp(USER), undefined);
+        expect(await store.activateTotp(USER, SECRET_A, 42)).toBe(false);
+        expect(await store.getTotp(USER)).toBe(undefined);
       });
 
       it("refuses a secret a newer enrollment replaced, changing nothing", async () => {
         await store.setPendingTotp(USER, SECRET_A);
         await store.setPendingTotp(USER, SECRET_B);
-        assertStrictEquals(await store.activateTotp(USER, SECRET_A, 42), false);
+        expect(await store.activateTotp(USER, SECRET_A, 42)).toBe(false);
         const record = await store.getTotp(USER);
-        assertStrictEquals(record?.secretBase32, undefined);
-        assertEquals(record?.pendingSecretBase32, SECRET_B);
+        expect(record?.secretBase32).toBe(undefined);
+        expect(record?.pendingSecretBase32).toStrictEqual(SECRET_B);
       });
 
       it(`activates for exactly one of ${CONCURRENT_CALLERS} concurrent confirmations`, async () => {
         await store.setPendingTotp(USER, SECRET_A);
         const results = await race((caller) =>
-          store.activateTotp(USER, SECRET_A, 10 + caller)
+          store.activateTotp(USER, SECRET_A, 10 + caller),
         );
-        assertStrictEquals(
+        expect(
           countTrue(results),
-          1,
           "the pending secret must be claimable once — a second concurrent " +
             "confirmation finds it already spent",
-        );
+        ).toBe(1);
         const record = await store.getTotp(USER);
-        assertEquals(record?.secretBase32, SECRET_A);
-        assertStrictEquals(record?.pendingSecretBase32, undefined);
+        expect(record?.secretBase32).toStrictEqual(SECRET_A);
+        expect(record?.pendingSecretBase32).toBe(undefined);
       });
 
       it("activates for exactly one of two concurrent enrollments", async () => {
@@ -155,13 +126,12 @@ export function runMfaStoreContractTests(
           store.activateTotp(USER, SECRET_A, 10),
           store.activateTotp(USER, SECRET_B, 20),
         ]);
-        assertStrictEquals(countTrue(results), 1);
+        expect(countTrue(results)).toBe(1);
         const record = await store.getTotp(USER);
-        assertEquals(
+        expect(
           record?.secretBase32,
-          SECRET_B,
           "only the secret that was actually pending may become active",
-        );
+        ).toStrictEqual(SECRET_B);
       });
     });
 
@@ -171,12 +141,12 @@ export function runMfaStoreContractTests(
         await store.activateTotp(USER, SECRET_A, 5);
         await store.setPendingTotp(USER, SECRET_B);
         await store.clearTotp(USER);
-        assertStrictEquals(await store.getTotp(USER), undefined);
+        expect(await store.getTotp(USER)).toBe(undefined);
       });
 
       it("is a no-op for a user with no record", async () => {
         await store.clearTotp(USER);
-        assertStrictEquals(await store.getTotp(USER), undefined);
+        expect(await store.getTotp(USER)).toBe(undefined);
       });
     });
 
@@ -187,32 +157,31 @@ export function runMfaStoreContractTests(
       });
 
       it("advances to a higher step", async () => {
-        assertStrictEquals(await store.advanceLastStep(USER, 101), true);
-        assertEquals((await store.getTotp(USER))?.lastStep, 101);
+        expect(await store.advanceLastStep(USER, 101)).toBe(true);
+        expect((await store.getTotp(USER))?.lastStep).toStrictEqual(101);
       });
 
       it("refuses the step already spent", async () => {
-        assertStrictEquals(await store.advanceLastStep(USER, 100), false);
-        assertEquals((await store.getTotp(USER))?.lastStep, 100);
+        expect(await store.advanceLastStep(USER, 100)).toBe(false);
+        expect((await store.getTotp(USER))?.lastStep).toStrictEqual(100);
       });
 
       it("refuses an earlier step, leaving the guard where it was", async () => {
-        assertStrictEquals(await store.advanceLastStep(USER, 99), false);
-        assertEquals((await store.getTotp(USER))?.lastStep, 100);
+        expect(await store.advanceLastStep(USER, 99)).toBe(false);
+        expect((await store.getTotp(USER))?.lastStep).toStrictEqual(100);
       });
 
       it("refuses for a user with no record", async () => {
-        assertStrictEquals(await store.advanceLastStep(OTHER_USER, 1), false);
+        expect(await store.advanceLastStep(OTHER_USER, 1)).toBe(false);
       });
 
       it(`admits exactly one of ${CONCURRENT_CALLERS} concurrent claims on the same step`, async () => {
         const results = await race(() => store.advanceLastStep(USER, 101));
-        assertStrictEquals(
+        expect(
           countTrue(results),
-          1,
           "a time step is spendable once — the loser must read as a replay",
-        );
-        assertEquals((await store.getTotp(USER))?.lastStep, 101);
+        ).toBe(1);
+        expect((await store.getTotp(USER))?.lastStep).toStrictEqual(101);
       });
 
       it("never regresses under concurrent claims on different steps", async () => {
@@ -220,71 +189,62 @@ export function runMfaStoreContractTests(
           store.advanceLastStep(USER, 105),
           store.advanceLastStep(USER, 101),
         ]);
-        assertEquals(
+        expect(
           (await store.getTotp(USER))?.lastStep,
-          105,
           "the highest accepted step must survive a concurrent lower one",
-        );
+        ).toStrictEqual(105);
       });
     });
 
     describe("recovery hashes", () => {
       it("returns an empty list for a user with none", async () => {
-        assertEquals(await store.getRecoveryHashes(USER), []);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual([]);
       });
 
       it("replaces the stored set exactly", async () => {
         await store.setRecoveryHashes(USER, ["h1", "h2", "h3"]);
-        assertEquals(
-          [...await store.getRecoveryHashes(USER)].sort(),
+        expect([...(await store.getRecoveryHashes(USER))].sort()).toStrictEqual(
           ["h1", "h2", "h3"],
         );
         await store.setRecoveryHashes(USER, ["h4"]);
-        assertEquals(await store.getRecoveryHashes(USER), ["h4"]);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual(["h4"]);
       });
 
       it("clears the set when given an empty list", async () => {
         await store.setRecoveryHashes(USER, ["h1"]);
         await store.setRecoveryHashes(USER, []);
-        assertEquals(await store.getRecoveryHashes(USER), []);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual([]);
       });
 
       it("keeps each user's codes separate", async () => {
         await store.setRecoveryHashes(USER, ["h1"]);
-        assertEquals(await store.getRecoveryHashes(OTHER_USER), []);
-        assertStrictEquals(
-          await store.consumeRecoveryHash(OTHER_USER, "h1"),
-          false,
-        );
-        assertEquals(await store.getRecoveryHashes(USER), ["h1"]);
+        expect(await store.getRecoveryHashes(OTHER_USER)).toStrictEqual([]);
+        expect(await store.consumeRecoveryHash(OTHER_USER, "h1")).toBe(false);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual(["h1"]);
       });
 
       it("burns a consumed hash and refuses it afterwards", async () => {
         await store.setRecoveryHashes(USER, ["h1", "h2"]);
-        assertStrictEquals(await store.consumeRecoveryHash(USER, "h1"), true);
-        assertStrictEquals(await store.consumeRecoveryHash(USER, "h1"), false);
-        assertEquals(await store.getRecoveryHashes(USER), ["h2"]);
+        expect(await store.consumeRecoveryHash(USER, "h1")).toBe(true);
+        expect(await store.consumeRecoveryHash(USER, "h1")).toBe(false);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual(["h2"]);
       });
 
       it("refuses a hash that was never stored", async () => {
         await store.setRecoveryHashes(USER, ["h1"]);
-        assertStrictEquals(
-          await store.consumeRecoveryHash(USER, "nope"),
-          false,
-        );
-        assertEquals(await store.getRecoveryHashes(USER), ["h1"]);
+        expect(await store.consumeRecoveryHash(USER, "nope")).toBe(false);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual(["h1"]);
       });
 
       it(`burns a code for exactly one of ${CONCURRENT_CALLERS} concurrent redemptions`, async () => {
         await store.setRecoveryHashes(USER, ["h1", "h2"]);
         const results = await race(() => store.consumeRecoveryHash(USER, "h1"));
-        assertStrictEquals(
+        expect(
           countTrue(results),
-          1,
           "a recovery code is single-use — requests racing one code must " +
             "not each be told they redeemed it",
-        );
-        assertEquals(await store.getRecoveryHashes(USER), ["h2"]);
+        ).toBe(1);
+        expect(await store.getRecoveryHashes(USER)).toStrictEqual(["h2"]);
       });
 
       it("burns both codes when two different ones are redeemed concurrently", async () => {
@@ -293,12 +253,11 @@ export function runMfaStoreContractTests(
           store.consumeRecoveryHash(USER, "h1"),
           store.consumeRecoveryHash(USER, "h2"),
         ]);
-        assertStrictEquals(countTrue(results), 2);
-        assertEquals(
+        expect(countTrue(results)).toBe(2);
+        expect(
           await store.getRecoveryHashes(USER),
-          ["h3"],
           "neither deletion may be lost to the other's stale read",
-        );
+        ).toStrictEqual(["h3"]);
       });
     });
   });

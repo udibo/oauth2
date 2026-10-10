@@ -141,7 +141,7 @@ function baseAuthenticate<
   request: Request,
   requiredScope?: S | string,
 ): Promise<AuthenticatedContext<Client, User, S>> {
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const base: any = ResourceServer.prototype;
   return base.authenticate.call(server, request, requiredScope);
 }
@@ -156,10 +156,7 @@ export function readContext<
   Client extends ClientInterface,
   User,
   S extends AbstractScope,
->(
-  c: Context,
-  adapterName: string,
-): AuthenticatedContext<Client, User, S> {
+>(c: Context, adapterName: string): AuthenticatedContext<Client, User, S> {
   const ctx = c.get(OAUTH2_CONTEXT_KEY) as
     | AuthenticatedContext<Client, User, S>
     | undefined;

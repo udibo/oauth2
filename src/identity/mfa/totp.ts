@@ -1,6 +1,6 @@
 /**
  * TOTP primitives (RFC 6238 over RFC 4226 HOTP) built on Web Crypto — no
- * dependencies beyond `@std`. Generate a secret, render the `otpauth://` URI an
+ * dependencies. Generate a secret, render the `otpauth://` URI an
  * authenticator app scans, and verify submitted codes with a constant-time
  * comparison.
  *
@@ -12,9 +12,8 @@
  * @module
  */
 
-import { decodeBase32, encodeBase32 } from "@std/encoding/base32";
-
 import { toArrayBuffer } from "../../utils/_buffer.ts";
+import { decodeBase32, encodeBase32 } from "../../utils/_encoding.ts";
 import { timingSafeMatchIndex } from "../../utils/_timing-safe.ts";
 
 /**
@@ -42,9 +41,11 @@ function normalizeTotpSecret(base32: string): string {
  *
  * @throws {TypeError} on the first invalid value.
  */
-export function validateTotpParams(
-  params: { digits?: number; periodSeconds?: number; windows?: number },
-): void {
+export function validateTotpParams(params: {
+  digits?: number;
+  periodSeconds?: number;
+  windows?: number;
+}): void {
   const { digits, periodSeconds, windows } = params;
   if (digits !== undefined && (!Number.isInteger(digits) || digits <= 0)) {
     throw new TypeError("totp digits must be a positive integer");
@@ -144,9 +145,9 @@ export function buildOtpauthUri(options: OtpauthUriOptions): string {
   if (!/^[A-Z2-7]+$/.test(secret)) {
     throw new TypeError("otpauth secret must be base32");
   }
-  const label = `${encodeURIComponent(options.issuer)}:${
-    encodeURIComponent(options.accountName)
-  }`;
+  const label = `${encodeURIComponent(options.issuer)}:${encodeURIComponent(
+    options.accountName,
+  )}`;
   const query = [
     `secret=${secret}`,
     `issuer=${encodeURIComponent(options.issuer)}`,
@@ -181,7 +182,8 @@ async function hotp(
     await crypto.subtle.sign("HMAC", hmacKey, message),
   );
   const offset = mac[mac.length - 1] & 0x0f;
-  const binary = ((mac[offset] & 0x7f) << 24) |
+  const binary =
+    ((mac[offset] & 0x7f) << 24) |
     (mac[offset + 1] << 16) |
     (mac[offset + 2] << 8) |
     mac[offset + 3];
@@ -271,14 +273,14 @@ export interface VerifyTotpCodeOptions {
 export type TotpVerification =
   | { valid: false }
   | {
-    valid: true;
-    /**
-     * The time-step counter the code matched. Persist the highest accepted
-     * step per user and reject codes with `matchedStep <= lastStep` — that is
-     * what makes each code single-use.
-     */
-    matchedStep: number;
-  };
+      valid: true;
+      /**
+       * The time-step counter the code matched. Persist the highest accepted
+       * step per user and reject codes with `matchedStep <= lastStep` — that is
+       * what makes each code single-use.
+       */
+      matchedStep: number;
+    };
 
 /**
  * Verify a submitted TOTP code against the secret, accepting `windows` steps

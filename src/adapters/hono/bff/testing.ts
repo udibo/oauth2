@@ -1,24 +1,5 @@
-/**
- * Testing helpers for the Hono BFF adapter.
- *
- * Lets a consumer's tests drive protected endpoints without walking
- * through the full login → authorize → callback flow, and ages the
- * access token in the underlying {@link SessionStore} so a follow-up
- * request through `attachToken()` exercises the refresh path
- * deterministically (no `setTimeout` required).
- *
- * The runner-style helper {@link runSessionStoreContractTests} is
- * available for verifying custom {@link SessionStore} implementations
- * (Postgres, Redis, DynamoDB, …) satisfy the create / read / update /
- * destroy contract.
- *
- * @module
- */
-
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { delay } from "@std/async/delay";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
+import { delay } from "../../../utils/_delay.ts";
 import type { ClientInterface } from "../../../models/client.ts";
 import type { AbstractScope } from "../../../models/scope.ts";
 import type { TokenServiceInterface } from "../../../server/services/token.ts";
@@ -84,8 +65,8 @@ export async function createTestSession(
   const data: SessionData = {
     tokens: {
       accessToken: options.tokens?.accessToken ?? crypto.randomUUID(),
-      accessTokenExpiresAt: options.tokens?.accessTokenExpiresAt ??
-        now + 60 * 60 * 1000,
+      accessTokenExpiresAt:
+        options.tokens?.accessTokenExpiresAt ?? now + 60 * 60 * 1000,
       tokenType: options.tokens?.tokenType ?? "Bearer",
       scope: options.tokens?.scope,
       idToken: options.tokens?.idToken,
@@ -279,7 +260,7 @@ const BOUND_MS = 1000;
 
 /**
  * Contract test suite for {@link SessionStore} implementations. Registers
- * `describe`/`it` blocks from `@std/testing/bdd`, so call it at a test
+ * `describe`/`it` blocks from Vitest, so call it at a test
  * module's top level. It does not check that a stateful store's `update`
  * rejects a missing or destroyed session, which {@link SessionStore.update}
  * requires — test that yourself.
@@ -314,12 +295,12 @@ export function runSessionStoreContractTests(
 
     it("create returns a non-empty cookie value", async () => {
       const value = await store.create(sampleSession());
-      assertEquals(typeof value, "string");
+      expect(typeof value).toStrictEqual("string");
       assert(value.length > 0);
     });
 
     it("read returns null for an unknown cookie value", async () => {
-      assertStrictEquals(await store.read("no-such-session"), null);
+      expect(await store.read("no-such-session")).toBe(null);
     });
 
     it("create + read round-trips the session data", async () => {
@@ -327,9 +308,11 @@ export function runSessionStoreContractTests(
       const value = await store.create(original);
       const fetched = await store.read(value);
       assert(fetched !== null, "read should return data for a created session");
-      assertEquals(fetched.tokens.accessToken, original.tokens.accessToken);
-      assertEquals(fetched.refreshToken, original.refreshToken);
-      assertEquals(fetched.user, original.user);
+      expect(fetched.tokens.accessToken).toStrictEqual(
+        original.tokens.accessToken,
+      );
+      expect(fetched.refreshToken).toStrictEqual(original.refreshToken);
+      expect(fetched.user).toStrictEqual(original.user);
     });
 
     it("preserves createdAt, which carries the session's absolute age", async () => {
@@ -337,12 +320,11 @@ export function runSessionStoreContractTests(
       const value = await store.create(original);
       const fetched = await store.read(value);
       assert(fetched !== null, "read should return data for a created session");
-      assertEquals(
+      expect(
         fetched.createdAt,
-        original.createdAt,
         "a store that drops createdAt silently opts its sessions out of " +
           "HonoBffOptions.sessionMaxAgeMs, so they never age out",
-      );
+      ).toStrictEqual(original.createdAt);
     });
 
     it("update reflects changes on subsequent read", async () => {
@@ -354,53 +336,50 @@ export function runSessionStoreContractTests(
       };
       const newValue = await store.update(value, updated);
       const fetched = await store.read(newValue);
-      assertEquals(fetched?.user, { sub: "u1", role: "admin" });
+      expect(fetched?.user).toStrictEqual({ sub: "u1", role: "admin" });
     });
 
     if (destroyClearsRead) {
       it("destroy removes the session", async () => {
         const value = await store.create(sampleSession());
         await store.destroy(value);
-        assertStrictEquals(await store.read(value), null);
+        expect(await store.read(value)).toBe(null);
       });
     }
 
     it("never advertises a max age without proving it enforces one", () => {
       const advertised = sessionStoreMaxAgeMs(store);
-      assertEquals(
+      expect(
         advertised !== undefined && makeBoundedStore === undefined,
-        false,
         `this store advertises maxAgeMs=${advertised}, which HonoBff trusts ` +
           "when it refuses a session cookie that would expire before the " +
           "session does. Supply makeBoundedStore so the contract can prove " +
           "the bound is real.",
-      );
+      ).toStrictEqual(false);
     });
 
     if (makeBoundedStore) {
       it("reports the max age it was built with, so a BFF can outlive it", async () => {
         const bounded = await makeBoundedStore(BOUND_MS);
-        assertStrictEquals(
+        expect(
           sessionStoreMaxAgeMs(bounded),
-          BOUND_MS,
           "a store that hides its bound gets no divergence check from HonoBff",
-        );
+        ).toBe(BOUND_MS);
       });
 
       it("stops reading a session older than the max age it enforces", async () => {
         const bounded = await makeBoundedStore(BOUND_MS);
         const value = await bounded.create(sampleSession());
         assert(
-          await bounded.read(value) !== null,
+          (await bounded.read(value)) !== null,
           "a session created moments ago must still read",
         );
         await delay(BOUND_MS + 500);
-        assertStrictEquals(
+        expect(
           await bounded.read(value),
-          null,
           "a session past the store's own bound must stop reading, or a " +
             "captured cookie outlives the window the bound promises",
-        );
+        ).toBe(null);
       });
     }
   });

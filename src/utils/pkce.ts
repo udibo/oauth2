@@ -7,7 +7,7 @@
  * @module
  */
 
-import { encodeBase64Url } from "@std/encoding/base64url";
+import { encodeBase64Url } from "./_encoding.ts";
 
 /**
  * A challenge method used for PKCE.
@@ -38,7 +38,7 @@ export const CODE_VERIFIER_MAX_LENGTH = 128;
  * Allowed characters: [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
  * @see https://datatracker.ietf.org/doc/html/rfc7636#section-4.1
  */
-export const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]+$/;
+export const CODE_VERIFIER_PATTERN: RegExp = /^[A-Za-z0-9\-._~]+$/;
 
 /**
  * The default allowed PKCE code challenge methods.

@@ -167,8 +167,9 @@ export class Authorization {
   inOrganization(idOrSlug?: string): boolean {
     if (!this.organization) return false;
     if (idOrSlug === undefined) return true;
-    return this.organization.id === idOrSlug ||
-      this.organization.slug === idOrSlug;
+    return (
+      this.organization.id === idOrSlug || this.organization.slug === idOrSlug
+    );
   }
 
   /**
@@ -235,12 +236,13 @@ export function authorizationFromClaims(
     scope,
     roles: stringsOf(claims?.roles),
     permissions: stringsOf(claims?.permissions),
-    organization: typeof orgId === "string"
-      ? {
-        id: orgId,
-        slug: typeof orgSlug === "string" ? orgSlug : undefined,
-        roles: new Set(stringsOf(claims?.org_roles)),
-      }
-      : null,
+    organization:
+      typeof orgId === "string"
+        ? {
+            id: orgId,
+            slug: typeof orgSlug === "string" ? orgSlug : undefined,
+            roles: new Set(stringsOf(claims?.org_roles)),
+          }
+        : null,
   });
 }

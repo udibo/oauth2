@@ -138,7 +138,7 @@ export function resolveCookieName(resolution: CookieNameResolution): string {
     assertCookiePrefixSatisfiable(name, attributes, consequence);
     return name;
   }
-  const hostPrefixOk = attributes.secure && attributes.path === "/" &&
-    !attributes.domain;
+  const hostPrefixOk =
+    attributes.secure && attributes.path === "/" && !attributes.domain;
   return hostPrefixOk ? `__Host-${base}` : base;
 }

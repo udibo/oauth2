@@ -91,9 +91,9 @@ export function encodeBasicAuth(
   clientId: string,
   clientSecret: string,
 ): string {
-  return `Basic ${
-    btoa(`${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`)
-  }`;
+  return `Basic ${btoa(
+    `${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`,
+  )}`;
 }
 
 /**

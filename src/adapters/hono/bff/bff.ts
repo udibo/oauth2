@@ -119,9 +119,9 @@ import {
  *   `JwksTokenReader` (signed JWT access tokens, verified locally).
  */
 export type HonoBffResourceServer<
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   Client extends ClientInterface = any,
-  // deno-lint-ignore no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   User = any,
   S extends AbstractScope = BasicScope,
 > =
@@ -740,8 +740,9 @@ function resolvePaths(
     backchannel: paths.backchannel ?? "/auth/backchannel",
   };
   if (basePath === "") return resolved;
-  const stray = BFF_PATH_KEYS
-    .filter((key) => key !== "backchannel" || options.backchannelMounted)
+  const stray = BFF_PATH_KEYS.filter(
+    (key) => key !== "backchannel" || options.backchannelMounted,
+  )
     .filter((key) => !resolved[key].startsWith(`${basePath}/`))
     .map((key) => `${key} ("${resolved[key]}")`);
   if (stray.length > 0) {
@@ -1040,8 +1041,8 @@ export class HonoBff {
     });
     this.#cookieName = sessionCookieName(options.cookie);
     this.#loginStateCookieName = loginStateCookieName(options.cookie);
-    this.#loginStateTtlMs = options.loginStateTtlMs ??
-      DEFAULT_LOGIN_STATE_TTL_MS;
+    this.#loginStateTtlMs =
+      options.loginStateTtlMs ?? DEFAULT_LOGIN_STATE_TTL_MS;
     this.#sessionMode = options.sessionMode ?? "own";
     this.#csrf = resolveCsrf(options.csrf);
     this.#extraAuthorizeParams = resolveExtraAuthorizeParams(options);
@@ -1053,25 +1054,28 @@ export class HonoBff {
     this.#sessionMaxAgeMs = sessionMaxAgeMs;
     if (this.#sessionMode === "shared") {
       const maxAge = options.cookie?.maxAge;
-      this.#cookieMaxAgeSeconds = maxAge === undefined || maxAge === "session"
-        ? undefined
-        : positiveSeconds(maxAge, "cookie.maxAge");
+      this.#cookieMaxAgeSeconds =
+        maxAge === undefined || maxAge === "session"
+          ? undefined
+          : positiveSeconds(maxAge, "cookie.maxAge");
     } else {
-      const configuredMaxAge = options.cookie?.maxAge ??
-        Math.ceil(sessionMaxAgeMs / 1000);
-      this.#cookieMaxAgeSeconds = configuredMaxAge === "session"
-        ? undefined
-        : positiveSeconds(configuredMaxAge, "cookie.maxAge");
+      const configuredMaxAge =
+        options.cookie?.maxAge ?? Math.ceil(sessionMaxAgeMs / 1000);
+      this.#cookieMaxAgeSeconds =
+        configuredMaxAge === "session"
+          ? undefined
+          : positiveSeconds(configuredMaxAge, "cookie.maxAge");
       if (this.#cookieMaxAgeSeconds !== undefined) {
         const storeMaxAgeMs = sessionStoreMaxAgeMs(this.#store);
         const sessionSeconds = Math.ceil(
           Math.max(sessionMaxAgeMs, storeMaxAgeMs ?? 0) / 1000,
         );
         if (this.#cookieMaxAgeSeconds < sessionSeconds) {
-          const cookieSource = options.cookie?.maxAge !== undefined
-            ? `cookie.maxAge (${this.#cookieMaxAgeSeconds}s)`
-            : `the session cookie's Max-Age (${this.#cookieMaxAgeSeconds}s, ` +
-              "taken from sessionMaxAgeMs)";
+          const cookieSource =
+            options.cookie?.maxAge !== undefined
+              ? `cookie.maxAge (${this.#cookieMaxAgeSeconds}s)`
+              : `the session cookie's Max-Age (${this.#cookieMaxAgeSeconds}s, ` +
+                "taken from sessionMaxAgeMs)";
           const storeDrivesIt = (storeMaxAgeMs ?? 0) > sessionMaxAgeMs;
           const remedy = storeDrivesIt
             ? `Set sessionMaxAgeMs to ${sessionSeconds * 1000} so it matches ` +
@@ -1380,9 +1384,12 @@ export class HonoBff {
         this.#options.onCallbackError
           ? this.#options.onCallbackError(c, error)
           : c.json(
-            { error: error.error, error_description: error.error_description },
-            400,
-          );
+              {
+                error: error.error,
+                error_description: error.error_description,
+              },
+              400,
+            );
 
       if (params.get("error")) {
         return await fail({
@@ -1418,8 +1425,8 @@ export class HonoBff {
 
       try {
         const origin = this.#options.resolveOrigin?.(c);
-        const { tokens, refreshToken, returnTo, raw } = await this.#client
-          .exchangeAuthorizationCode(code, state, {
+        const { tokens, refreshToken, returnTo, raw } =
+          await this.#client.exchangeAuthorizationCode(code, state, {
             origin,
             redirectUri: this.#derivedRedirectUri(c, origin),
             authRequestStorage: this.#options.authRequestStorage?.forRequest(c),
@@ -1458,12 +1465,7 @@ export class HonoBff {
           ? await this.#store.update(existing, data)
           : await this.#store.create(data);
         if (cookieValue !== existing) {
-          setCookie(
-            c,
-            this.#cookieName,
-            cookieValue,
-            this.#cookieOptions(),
-          );
+          setCookie(c, this.#cookieName, cookieValue, this.#cookieOptions());
         }
 
         return c.redirect(
@@ -1485,9 +1487,10 @@ export class HonoBff {
       this.#noStore(c);
       const cookieValue = getCookie(c, this.#cookieName);
       if (cookieValue && this.#csrf) {
-        const ok = c.req.method === "GET"
-          ? this.#sameOriginOk(c)
-          : this.#csrfHeaderOk(c);
+        const ok =
+          c.req.method === "GET"
+            ? this.#sameOriginOk(c)
+            : this.#csrfHeaderOk(c);
         if (!ok) return this.#csrfReject(c);
       }
       let idToken: string | undefined;
@@ -1515,8 +1518,8 @@ export class HonoBff {
       if (this.#options.rpInitiatedLogout) {
         const endSession = this.#client.endSessionEndpoint;
         if (endSession) {
-          const origin = this.#options.resolveOrigin?.(c) ??
-            new URL(c.req.url).origin;
+          const origin =
+            this.#options.resolveOrigin?.(c) ?? new URL(c.req.url).origin;
           const url = new URL(endSession, origin);
           if (idToken) url.searchParams.set("id_token_hint", idToken);
           url.searchParams.set("client_id", this.#client.clientId);
@@ -1628,9 +1631,10 @@ export class HonoBff {
     return {
       isAuthenticated: true,
       user: data.user ?? null,
-      sessionExpiresIn: expiresAt !== undefined
-        ? Math.max(0, Math.round((expiresAt - Date.now()) / 1000))
-        : null,
+      sessionExpiresIn:
+        expiresAt !== undefined
+          ? Math.max(0, Math.round((expiresAt - Date.now()) / 1000))
+          : null,
       logoutUrl: this.#paths.logout,
     };
   }
@@ -1685,7 +1689,8 @@ export class HonoBff {
         subject = null;
       }
       if (
-        !subject || (subject.sub === undefined && subject.sid === undefined)
+        !subject ||
+        (subject.sub === undefined && subject.sid === undefined)
       ) {
         return c.json(
           {
@@ -1725,9 +1730,10 @@ export class HonoBff {
     if (!data) return { status: "anonymous" };
 
     const skew = (this.#options.refreshSkewSeconds ?? 30) * 1000;
-    const needsRefresh = data.tokens.accessTokenExpiresAt !== undefined
-      ? data.tokens.accessTokenExpiresAt - skew < Date.now()
-      : false;
+    const needsRefresh =
+      data.tokens.accessTokenExpiresAt !== undefined
+        ? data.tokens.accessTokenExpiresAt - skew < Date.now()
+        : false;
     if (!needsRefresh || !data.refreshToken) {
       return { status: "active", entry: { cookieValue, data } };
     }
@@ -1930,7 +1936,9 @@ export class HonoBff {
         const hasBearer = /^bearer\s+\S/i.test(inboundAuth);
 
         if (
-          !hasBearer && this.#csrf && this.#hasSessionCookie(c) &&
+          !hasBearer &&
+          this.#csrf &&
+          this.#hasSessionCookie(c) &&
           !this.#csrfHeaderOk(c)
         ) {
           return this.#csrfReject(c);
@@ -2060,7 +2068,7 @@ export class HonoBff {
     const retryOn401 = options.retryOn401 ?? true;
     const mountPrefix = (options.stripPrefix ?? "").endsWith("/")
       ? options.stripPrefix!.slice(0, -1)
-      : options.stripPrefix ?? "";
+      : (options.stripPrefix ?? "");
 
     return async (c) => {
       if (this.#csrf && this.#hasSessionCookie(c) && !this.#csrfHeaderOk(c)) {
@@ -2120,8 +2128,8 @@ export class HonoBff {
         );
       }
 
-      const canRetry = retryOn401 && body === null &&
-        entry.data.refreshToken !== undefined;
+      const canRetry =
+        retryOn401 && body === null && entry.data.refreshToken !== undefined;
       if (canRetry && isInvalidTokenChallenge(response)) {
         await response.body?.cancel();
         const outcome = await this.#refreshSessionEntry(c, entry);
@@ -2155,10 +2163,12 @@ export class HonoBff {
           mountPrefix,
         }),
       };
-      return downstream === null ? c.body(null, init) : c.body(downstream, {
-        ...init,
-        status: response.status as ContentfulStatusCode,
-      });
+      return downstream === null
+        ? c.body(null, init)
+        : c.body(downstream, {
+            ...init,
+            status: response.status as ContentfulStatusCode,
+          });
     };
   }
 }

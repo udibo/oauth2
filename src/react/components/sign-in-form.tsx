@@ -143,37 +143,33 @@ export function SignInForm(props: SignInFormProps): ReactNode {
         required
         error={form.errors.password}
       >
-        {forgotPasswordHref
-          ? (
-            <a
-              href={forgotPasswordHref}
-              data-oauth2-forgot-password=""
-              className={classNames.hint}
-            >
-              {labels?.forgotPassword ?? "Forgot password?"}
-            </a>
-          )
-          : null}
+        {forgotPasswordHref ? (
+          <a
+            href={forgotPasswordHref}
+            data-oauth2-forgot-password=""
+            className={classNames.hint}
+          >
+            {labels?.forgotPassword ?? "Forgot password?"}
+          </a>
+        ) : null}
       </TextField>
-      {showRemember
-        ? (
-          <div data-oauth2-field="remember" className={classNames.field}>
-            <label
-              htmlFor={rememberField.id}
-              data-oauth2-label=""
-              className={classNames.label}
-            >
-              <input
-                {...rememberField}
-                type="checkbox"
-                data-oauth2-input=""
-                className={classNames.input}
-              />
-              {labels?.remember ?? "Remember me"}
-            </label>
-          </div>
-        )
-        : null}
+      {showRemember ? (
+        <div data-oauth2-field="remember" className={classNames.field}>
+          <label
+            htmlFor={rememberField.id}
+            data-oauth2-label=""
+            className={classNames.label}
+          >
+            <input
+              {...rememberField}
+              type="checkbox"
+              data-oauth2-input=""
+              className={classNames.input}
+            />
+            {labels?.remember ?? "Remember me"}
+          </label>
+        </div>
+      ) : null}
       <SubmitButton
         isSubmitting={form.isSubmitting}
         label={labels?.submit ?? "Sign in"}

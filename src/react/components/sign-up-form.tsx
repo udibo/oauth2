@@ -129,11 +129,9 @@ export function SignUpForm(props: SignUpFormProps): ReactNode {
     onSuccess: props.onSuccess,
     validate: (values) => {
       const errors: AuthFormErrors<SignUpValues> = {};
-      if (
-        showConfirmPassword && values.password !== values.confirmPassword
-      ) {
-        errors.confirmPassword = labels?.passwordMismatch ??
-          "Passwords do not match.";
+      if (showConfirmPassword && values.password !== values.confirmPassword) {
+        errors.confirmPassword =
+          labels?.passwordMismatch ?? "Passwords do not match.";
       }
       return errors;
     },
@@ -159,17 +157,15 @@ export function SignUpForm(props: SignUpFormProps): ReactNode {
         />
       }
     >
-      {showUsername
-        ? (
-          <TextField
-            fieldProps={form.getFieldProps("username")}
-            label={labels?.username ?? "Username"}
-            autoComplete="username"
-            required
-            error={form.errors.username}
-          />
-        )
-        : null}
+      {showUsername ? (
+        <TextField
+          fieldProps={form.getFieldProps("username")}
+          label={labels?.username ?? "Username"}
+          autoComplete="username"
+          required
+          error={form.errors.username}
+        />
+      ) : null}
       <TextField
         fieldProps={form.getFieldProps("email")}
         label={labels?.email ?? "Email"}
@@ -178,26 +174,24 @@ export function SignUpForm(props: SignUpFormProps): ReactNode {
         required
         error={form.errors.email}
       />
-      {showName
-        ? (
-          <>
-            <TextField
-              fieldProps={form.getFieldProps("firstName")}
-              label={labels?.firstName ?? "First name"}
-              autoComplete="given-name"
-              required
-              error={form.errors.firstName}
-            />
-            <TextField
-              fieldProps={form.getFieldProps("lastName")}
-              label={labels?.lastName ?? "Last name"}
-              autoComplete="family-name"
-              required
-              error={form.errors.lastName}
-            />
-          </>
-        )
-        : null}
+      {showName ? (
+        <>
+          <TextField
+            fieldProps={form.getFieldProps("firstName")}
+            label={labels?.firstName ?? "First name"}
+            autoComplete="given-name"
+            required
+            error={form.errors.firstName}
+          />
+          <TextField
+            fieldProps={form.getFieldProps("lastName")}
+            label={labels?.lastName ?? "Last name"}
+            autoComplete="family-name"
+            required
+            error={form.errors.lastName}
+          />
+        </>
+      ) : null}
       <TextField
         fieldProps={form.getFieldProps("password")}
         label={labels?.password ?? "Password"}
@@ -206,18 +200,16 @@ export function SignUpForm(props: SignUpFormProps): ReactNode {
         required
         error={form.errors.password}
       />
-      {showConfirmPassword
-        ? (
-          <TextField
-            fieldProps={form.getFieldProps("confirmPassword")}
-            label={labels?.confirmPassword ?? "Confirm password"}
-            type="password"
-            autoComplete="new-password"
-            required
-            error={form.errors.confirmPassword}
-          />
-        )
-        : null}
+      {showConfirmPassword ? (
+        <TextField
+          fieldProps={form.getFieldProps("confirmPassword")}
+          label={labels?.confirmPassword ?? "Confirm password"}
+          type="password"
+          autoComplete="new-password"
+          required
+          error={form.errors.confirmPassword}
+        />
+      ) : null}
       <SubmitButton
         isSubmitting={form.isSubmitting}
         label={labels?.submit ?? "Create account"}

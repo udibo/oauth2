@@ -28,11 +28,7 @@ export interface AuthorizationCodeServiceInterface<
   ): Promise<string>;
 
   /** Gets the date that a new authorization code would expire at. */
-  expiresAt(
-    client: Client,
-    user: User,
-    scope?: Scope | null,
-  ): Promise<Date>;
+  expiresAt(client: Client, user: User, scope?: Scope | null): Promise<Date>;
 
   /** Retrieves an existing authorization code. */
   get(

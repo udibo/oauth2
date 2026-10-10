@@ -186,9 +186,7 @@ export interface TokenServiceInterface<
    * cannot terminate the very session it renews. When absent, the refresh
    * grant falls back to {@linkcode revoke}.
    */
-  revokeRotated?(
-    token: RefreshToken<Client, User, Scope>,
-  ): Promise<boolean>;
+  revokeRotated?(token: RefreshToken<Client, User, Scope>): Promise<boolean>;
 
   /**
    * Revokes all tokens issued with the given authorization code.
@@ -365,9 +363,11 @@ export abstract class AbstractTokenService<
     _scope?: Scope | null,
   ): Promise<Date | undefined> {
     return Promise.resolve(
-      this.refreshTokenMaxLifetime == null ? undefined : new Date(
-        familyCreatedAt.getTime() + this.refreshTokenMaxLifetime * 1000,
-      ),
+      this.refreshTokenMaxLifetime == null
+        ? undefined
+        : new Date(
+            familyCreatedAt.getTime() + this.refreshTokenMaxLifetime * 1000,
+          ),
     );
   }
 

@@ -6,8 +6,8 @@
  * - **Testing surface for the OAuth2 protocol.** The recommended pattern
  *   for testing apps that use the resource server is to expose your
  *   `IntrospectionTokenReader` instance from your app's OAuth2 wiring module
- *   and stub `tokenReader.getToken` directly with `@std/testing/mock`'s
- *   `stub` —
+ *   and stub `tokenReader.getToken` directly with Vitest's
+ *   `vi.spyOn` —
  *   one method on one object, no `fetch` indirection, no wire format to
  *   fake. For tests that need the OAuth2 protocol end-to-end (BFF flows,
  *   SPA integration), build a real in-process authorization server with

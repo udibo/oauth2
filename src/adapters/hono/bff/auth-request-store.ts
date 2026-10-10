@@ -131,7 +131,7 @@ function cookieAttributes(
     path,
     secure,
     httpOnly: true,
-    sameSite: options?.sameSite ?? "Lax" as const,
+    sameSite: options?.sameSite ?? ("Lax" as const),
     ...(domain ? { domain } : {}),
     ...(maxAgeSeconds === undefined ? {} : { maxAge: maxAgeSeconds }),
   };
@@ -174,8 +174,7 @@ export interface AuthRequestStorageFactory {
  * });
  * ```
  */
-export class EncryptedCookieAuthRequestStorage
-  implements AuthRequestStorageFactory {
+export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFactory {
   readonly #cookie: AuthRequestCookieOptions | undefined;
   readonly #secret: string;
   readonly #name: string;
@@ -208,7 +207,7 @@ export class EncryptedCookieAuthRequestStorage
   }
 
   #key(): Promise<CryptoKey> {
-    return this.#keyPromise ??= deriveAesKey(this.#secret);
+    return (this.#keyPromise ??= deriveAesKey(this.#secret));
   }
 
   async #read(c: Context): Promise<PendingRequests> {
@@ -278,7 +277,7 @@ export class EncryptedCookieAuthRequestStorage
  * import { encryptedCookieAuthRequestStorage } from "@udibo/oauth2/hono/bff";
  *
  * const authRequestStorage = encryptedCookieAuthRequestStorage({
- *   secret: Deno.env.get("SESSION_SECRET")!,
+ *   secret: process.env.SESSION_SECRET!,
  * });
  * ```
  */

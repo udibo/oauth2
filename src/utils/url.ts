@@ -105,7 +105,7 @@ export function loginContinuation(
     const authorizePath = new URL(options.authorizeEndpoint, base).pathname;
     if (new URL(safe, base).pathname === authorizePath) return safe;
   }
-  return `${options.loginPath ?? "/auth/login"}?return_to=${
-    encodeURIComponent(safe)
-  }`;
+  return `${options.loginPath ?? "/auth/login"}?return_to=${encodeURIComponent(
+    safe,
+  )}`;
 }

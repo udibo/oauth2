@@ -1,23 +1,4 @@
-/**
- * Contract test suite for {@link TokenServiceInterface} implementations.
- *
- * Verifies the methods the framework actually calls during the OAuth2
- * flows: token persistence, refresh-token lookup, revocation by token
- * value or by authorization code, and per-(client, user) lifetime/scope
- * generation.
- *
- * Both a token with a user and a token without one are exercised. The client
- * credentials grant (RFC 6749 §4.4) has no resource owner, so the framework
- * calls `acceptedScope`, `generateAccessToken`, and `accessTokenExpiresAt`
- * with `user: undefined` and persists a token whose `user` is unset — a store
- * that requires a user cannot hold a machine token.
- *
- * @module
- */
-
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import { BasicScope } from "../../models/scope.ts";
 import type { AbstractScope } from "../../models/scope.ts";
@@ -36,15 +17,15 @@ export interface TokenServiceContractOptions<
   /** Returns fresh services for each test. */
   makeServices():
     | Promise<{
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      tokenService: TokenServiceInterface<C, U, S>;
-    }>
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        tokenService: TokenServiceInterface<C, U, S>;
+      }>
     | {
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      tokenService: TokenServiceInterface<C, U, S>;
-    };
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        tokenService: TokenServiceInterface<C, U, S>;
+      };
   /** Persists a user with the given password into the user service under test. */
   addUser(
     service: UserServiceInterface<U>,
@@ -122,8 +103,8 @@ export function runTokenServiceContractTests<
       it("produces unique access tokens", async () => {
         const a = await tokenService.generateAccessToken(client, user);
         const b = await tokenService.generateAccessToken(client, user);
-        assertEquals(typeof a, "string");
-        assertEquals(typeof b, "string");
+        expect(typeof a).toStrictEqual("string");
+        expect(typeof b).toStrictEqual("string");
         assert(a !== b, "access tokens should not collide");
       });
 
@@ -144,7 +125,7 @@ export function runTokenServiceContractTests<
           user,
           requested,
         );
-        assertEquals(result?.toString(), "read");
+        expect(result?.toString()).toStrictEqual("read");
       });
     });
 
@@ -163,19 +144,17 @@ export function runTokenServiceContractTests<
         };
         await tokenService.save(token);
         const fetched = await tokenService.getToken(accessToken);
-        assertEquals(fetched?.client.id, client.id);
-        assertEquals(
+        expect(fetched?.client.id).toStrictEqual(client.id);
+        expect(
           (fetched?.user as MemoryUserShape | undefined)?.id,
-          user.id,
-        );
-        assertStrictEquals(
-          fetched?.accessTokenExpiresAt?.getTime(),
+        ).toStrictEqual(user.id);
+        expect(fetched?.accessTokenExpiresAt?.getTime()).toBe(
           expiresAt.getTime(),
         );
       });
 
       it("returns undefined for an unknown access token", async () => {
-        assertStrictEquals(await tokenService.getToken("nope"), undefined);
+        expect(await tokenService.getToken("nope")).toBe(undefined);
       });
     });
 
@@ -185,7 +164,7 @@ export function runTokenServiceContractTests<
           client,
           undefined,
         );
-        assertEquals(typeof accessToken, "string");
+        expect(typeof accessToken).toStrictEqual("string");
       });
 
       it("accepts scope for a client with no user", async () => {
@@ -215,8 +194,8 @@ export function runTokenServiceContractTests<
         );
         await tokenService.save({ accessToken, client });
         const fetched = await tokenService.getToken(accessToken);
-        assertEquals(fetched?.client.id, client.id);
-        assertStrictEquals(fetched?.user, undefined);
+        expect(fetched?.client.id).toStrictEqual(client.id);
+        expect(fetched?.user).toBe(undefined);
       });
 
       it("revokes a token with no user", async () => {
@@ -225,8 +204,8 @@ export function runTokenServiceContractTests<
           undefined,
         );
         await tokenService.save({ accessToken, client });
-        assertStrictEquals(await tokenService.revoke(accessToken), true);
-        assertStrictEquals(await tokenService.getToken(accessToken), undefined);
+        expect(await tokenService.revoke(accessToken)).toBe(true);
+        expect(await tokenService.getToken(accessToken)).toBe(undefined);
       });
     });
 
@@ -236,8 +215,10 @@ export function runTokenServiceContractTests<
           client,
           user,
         );
-        const refreshToken =
-          (await tokenService.generateRefreshToken(client, user))!;
+        const refreshToken = (await tokenService.generateRefreshToken(
+          client,
+          user,
+        ))!;
         const token: RefreshToken<C, U, S> = {
           accessToken,
           accessTokenExpiresAt: new Date(Date.now() + 60_000),
@@ -248,14 +229,11 @@ export function runTokenServiceContractTests<
         };
         await tokenService.save(token);
         const fetched = await tokenService.getRefreshToken(refreshToken);
-        assertEquals(fetched?.client.id, client.id);
+        expect(fetched?.client.id).toStrictEqual(client.id);
       });
 
       it("returns undefined for an unknown refresh token", async () => {
-        assertStrictEquals(
-          await tokenService.getRefreshToken("nope"),
-          undefined,
-        );
+        expect(await tokenService.getRefreshToken("nope")).toBe(undefined);
       });
     });
 
@@ -272,8 +250,8 @@ export function runTokenServiceContractTests<
         };
         await tokenService.save(token);
         const ok = await tokenService.revoke(token);
-        assertStrictEquals(ok, true);
-        assertStrictEquals(await tokenService.getToken(accessToken), undefined);
+        expect(ok).toBe(true);
+        expect(await tokenService.getToken(accessToken)).toBe(undefined);
       });
 
       it("revokes by access token string", async () => {
@@ -283,8 +261,8 @@ export function runTokenServiceContractTests<
         );
         await tokenService.save({ accessToken, client, user });
         const ok = await tokenService.revoke(accessToken);
-        assertStrictEquals(ok, true);
-        assertStrictEquals(await tokenService.getToken(accessToken), undefined);
+        expect(ok).toBe(true);
+        expect(await tokenService.getToken(accessToken)).toBe(undefined);
       });
 
       it("revokes by refresh token string when hint='refresh_token'", async () => {
@@ -292,8 +270,10 @@ export function runTokenServiceContractTests<
           client,
           user,
         );
-        const refreshToken =
-          (await tokenService.generateRefreshToken(client, user))!;
+        const refreshToken = (await tokenService.generateRefreshToken(
+          client,
+          user,
+        ))!;
         await tokenService.save({
           accessToken,
           refreshToken,
@@ -301,16 +281,15 @@ export function runTokenServiceContractTests<
           user,
         } as RefreshToken<C, U, S>);
         const ok = await tokenService.revoke(refreshToken, "refresh_token");
-        assertStrictEquals(ok, true);
-        assertStrictEquals(
-          await tokenService.getRefreshToken(refreshToken),
+        expect(ok).toBe(true);
+        expect(await tokenService.getRefreshToken(refreshToken)).toBe(
           undefined,
         );
-        assertStrictEquals(await tokenService.getToken(accessToken), undefined);
+        expect(await tokenService.getToken(accessToken)).toBe(undefined);
       });
 
       it("returns false for an unknown token string", async () => {
-        assertStrictEquals(await tokenService.revoke("missing"), false);
+        expect(await tokenService.revoke("missing")).toBe(false);
       });
 
       it("answers true only for the call that removed a live token", async () => {
@@ -319,15 +298,14 @@ export function runTokenServiceContractTests<
           user,
         );
         const token: Token<C, U, S> = { accessToken, client, user };
-        assertStrictEquals(
+        expect(
           await tokenService.revoke(token),
-          false,
           "a token that was never saved was not revoked by this call — " +
             "answering true makes a single-use check built on the result inert",
-        );
+        ).toBe(false);
         await tokenService.save(token);
-        assertStrictEquals(await tokenService.revoke(token), true);
-        assertStrictEquals(await tokenService.revoke(token), false);
+        expect(await tokenService.revoke(token)).toBe(true);
+        expect(await tokenService.revoke(token)).toBe(false);
       });
     });
 
@@ -355,19 +333,13 @@ export function runTokenServiceContractTests<
           user,
         });
         const ok = await tokenService.revokeCode(code);
-        assertStrictEquals(ok, true);
-        assertStrictEquals(
-          await tokenService.getToken(accessToken1),
-          undefined,
-        );
-        assertStrictEquals(
-          await tokenService.getToken(accessToken2),
-          undefined,
-        );
+        expect(ok).toBe(true);
+        expect(await tokenService.getToken(accessToken1)).toBe(undefined);
+        expect(await tokenService.getToken(accessToken2)).toBe(undefined);
       });
 
       it("returns false when no tokens were issued for the code", async () => {
-        assertStrictEquals(await tokenService.revokeCode("never-used"), false);
+        expect(await tokenService.revokeCode("never-used")).toBe(false);
       });
     });
 
@@ -383,8 +355,10 @@ export function runTokenServiceContractTests<
             client,
             user,
           );
-          const refreshToken =
-            (await tokenService.generateRefreshToken(client, user))!;
+          const refreshToken = (await tokenService.generateRefreshToken(
+            client,
+            user,
+          ))!;
           const token: RefreshToken<C, U, S> = {
             accessToken,
             accessTokenExpiresAt: new Date(Date.now() + 60_000),
@@ -414,11 +388,10 @@ export function runTokenServiceContractTests<
         it("keeps a rotated-out refresh token findable, with its family", async () => {
           const token = await saveFamilyMember(FAMILY);
           await tokenService.revoke(token.refreshToken, "refresh_token");
-          assertStrictEquals(
+          expect(
             await tokenService.getRefreshToken(token.refreshToken),
-            undefined,
             "a rotated-out token must no longer refresh",
-          );
+          ).toBe(undefined);
           const revoked = await tokenService.getRevokedRefreshToken!(
             token.refreshToken,
           );
@@ -427,75 +400,61 @@ export function runTokenServiceContractTests<
             "a revoked refresh token must stay findable — deleting the row " +
               "is what turns a replay into an ordinary unknown token",
           );
-          assertStrictEquals(revoked.familyId, FAMILY);
+          expect(revoked.familyId).toBe(FAMILY);
         });
 
         it("does not report a live refresh token as revoked", async () => {
           const token = await saveFamilyMember(FAMILY);
-          assertStrictEquals(
+          expect(
             await tokenService.getRevokedRefreshToken!(token.refreshToken),
-            undefined,
             "reporting a live token as revoked turns every legitimate " +
               "refresh into a detected replay",
-          );
+          ).toBe(undefined);
         });
 
         it("returns undefined for a refresh token that was never issued", async () => {
-          assertStrictEquals(
+          expect(
             await tokenService.getRevokedRefreshToken!("never-issued"),
-            undefined,
-          );
+          ).toBe(undefined);
         });
 
         it("revokes every live member of a replayed token's family", async () => {
           const first = await saveFamilyMember(FAMILY);
           const second = await saveFamilyMember(FAMILY);
-          assertStrictEquals(await tokenService.revokeFamily!(FAMILY), true);
-          assertStrictEquals(
-            await tokenService.getRefreshToken(first.refreshToken),
+          expect(await tokenService.revokeFamily!(FAMILY)).toBe(true);
+          expect(await tokenService.getRefreshToken(first.refreshToken)).toBe(
             undefined,
           );
-          assertStrictEquals(
-            await tokenService.getRefreshToken(second.refreshToken),
+          expect(await tokenService.getRefreshToken(second.refreshToken)).toBe(
             undefined,
           );
-          assertStrictEquals(
+          expect(
             await tokenService.getToken(second.accessToken),
-            undefined,
             "the family's access tokens die with it — leaving them live " +
               "keeps the thief's session alive for their remaining lifetime",
-          );
+          ).toBe(undefined);
         });
 
         it("leaves other families untouched", async () => {
           const mine = await saveFamilyMember(FAMILY);
           const theirs = await saveFamilyMember(OTHER_FAMILY);
           await tokenService.revokeFamily!(FAMILY);
-          assertStrictEquals(
-            await tokenService.getRefreshToken(mine.refreshToken),
+          expect(await tokenService.getRefreshToken(mine.refreshToken)).toBe(
             undefined,
           );
           assert(
-            await tokenService.getRefreshToken(theirs.refreshToken) !==
+            (await tokenService.getRefreshToken(theirs.refreshToken)) !==
               undefined,
             "one compromised family must not sign every other session out",
           );
         });
 
         it("returns false when the family has no live tokens", async () => {
-          assertStrictEquals(
-            await tokenService.revokeFamily!("never-issued"),
-            false,
-          );
+          expect(await tokenService.revokeFamily!("never-issued")).toBe(false);
         });
       });
     } else {
-      it({
-        name:
-          "refresh-token reuse detection is not implemented — a replayed rotated-out token cannot be detected (refreshTokenReuseDetection: false)",
-        ignore: true,
-        fn: () => {},
-      });
+      it.skip("refresh-token reuse detection is not implemented — a replayed rotated-out token cannot be detected (refreshTokenReuseDetection: false)", () => {});
     }
   });
 }

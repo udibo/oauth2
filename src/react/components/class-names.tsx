@@ -18,9 +18,8 @@ import type { AuthFormClassNames } from "./types.ts";
 
 const EMPTY_CLASS_NAMES: Readonly<AuthFormClassNames> = Object.freeze({});
 
-const AuthFormClassNamesContext = createContext<Readonly<AuthFormClassNames>>(
-  EMPTY_CLASS_NAMES,
-);
+const AuthFormClassNamesContext =
+  createContext<Readonly<AuthFormClassNames>>(EMPTY_CLASS_NAMES);
 
 function merge(
   inherited: Readonly<AuthFormClassNames>,
@@ -44,7 +43,7 @@ interface ResolvedClassNames {
 function slotKey(classNames: AuthFormClassNames): string {
   const slots = Object.entries(classNames)
     .filter(([, value]) => value !== undefined)
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return JSON.stringify(slots);
 }
 
@@ -87,7 +86,8 @@ export function useAuthFormClassNames(
   const key = overrides ? slotKey(overrides) : "";
   const held = useRef<ResolvedClassNames | null>(null);
   if (
-    held.current === null || held.current.inherited !== inherited ||
+    held.current === null ||
+    held.current.inherited !== inherited ||
     held.current.key !== key
   ) {
     held.current = {

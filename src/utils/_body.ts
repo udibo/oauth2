@@ -11,7 +11,7 @@
  * token that also travels in an `Authorization` header already has to fit
  * the 8–16 KiB header limits common to servers and proxies.
  */
-export const DEFAULT_MAX_BODY_BYTES = 64 * 1024;
+export const DEFAULT_MAX_BODY_BYTES: number = 64 * 1024;
 
 /**
  * Throws a `RangeError` naming `option` unless `maxBodyBytes` is a positive

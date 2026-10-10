@@ -218,7 +218,7 @@ export class TokenFlowService {
     const tokenHash = await sha256Hash(token);
     const status = this.#statusOf(await this.#store.get(tokenHash), purpose);
     if (status.status !== "valid") return null;
-    if (!await this.#store.markConsumed(tokenHash, Date.now())) return null;
+    if (!(await this.#store.markConsumed(tokenHash, Date.now()))) return null;
     return { subject: status.subject, data: status.data };
   }
 
@@ -289,7 +289,8 @@ export class MemoryTokenFlowStore implements TokenFlowStore {
   deleteBySubject(purpose: string, subject: string): Promise<void> {
     for (const [hash, record] of this.#byHash) {
       if (
-        record.purpose === purpose && record.subject === subject &&
+        record.purpose === purpose &&
+        record.subject === subject &&
         record.consumedAt === undefined
       ) {
         this.#byHash.delete(hash);

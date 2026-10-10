@@ -45,8 +45,7 @@ export interface ResetPasswordLabels {
 }
 
 /** Props for {@link ResetPasswordForm}. */
-export interface ResetPasswordFormProps
-  extends BaseAuthFormProps<ResetPasswordValues> {
+export interface ResetPasswordFormProps extends BaseAuthFormProps<ResetPasswordValues> {
   /** The opaque reset token, typically read from the URL by your route. */
   token?: string;
   /** Text overrides. */
@@ -88,8 +87,8 @@ export function ResetPasswordForm(props: ResetPasswordFormProps): ReactNode {
     validate: (values) => {
       const errors: AuthFormErrors<ResetPasswordValues> = {};
       if (values.password !== values.confirmPassword) {
-        errors.confirmPassword = labels?.passwordMismatch ??
-          "Passwords do not match.";
+        errors.confirmPassword =
+          labels?.passwordMismatch ?? "Passwords do not match.";
       }
       return errors;
     },

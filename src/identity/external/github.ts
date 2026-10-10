@@ -60,8 +60,8 @@ interface GithubEmailEntry {
  * ```ts
  * const flow = new ExternalAuthFlow({
  *   provider: githubProvider({
- *     clientId: Deno.env.get("GITHUB_CLIENT_ID")!,
- *     clientSecret: Deno.env.get("GITHUB_CLIENT_SECRET")!,
+ *     clientId: process.env.GITHUB_CLIENT_ID!,
+ *     clientSecret: process.env.GITHUB_CLIENT_SECRET!,
  *   }),
  * });
  * ```
@@ -86,7 +86,8 @@ export function githubProvider(
       }),
       requiredField: "access_token",
       fetch: fetchImpl,
-      httpErrorHint: `Check that clientId/clientSecret match the GitHub ` +
+      httpErrorHint:
+        `Check that clientId/clientSecret match the GitHub ` +
         `OAuth App and try again.`,
       tokenErrorHint: githubTokenErrorHint,
     });
@@ -148,9 +149,10 @@ export function githubProvider(
     async fetchProfile(input: ExternalProfileInput): Promise<ExternalProfile> {
       const accessToken = await exchangeCode(input);
       const [user, emailsRaw] = await Promise.all([
-        getJson(GITHUB_USER_URL, accessToken) as Promise<
-          Record<string, unknown> | null
-        >,
+        getJson(GITHUB_USER_URL, accessToken) as Promise<Record<
+          string,
+          unknown
+        > | null>,
         getJson(GITHUB_EMAILS_URL, accessToken),
       ]);
       if (!user || user.id === undefined || user.id === null) {
@@ -163,20 +165,20 @@ export function githubProvider(
         );
       }
       const emails = parseGithubEmails(emailsRaw);
-      const chosen = emails?.find((entry) => entry.primary) ??
-        emails?.find((entry) => entry.verified) ?? emails?.[0];
-      const publicEmail = typeof user.email === "string"
-        ? user.email
-        : undefined;
+      const chosen =
+        emails?.find((entry) => entry.primary) ??
+        emails?.find((entry) => entry.verified) ??
+        emails?.[0];
+      const publicEmail =
+        typeof user.email === "string" ? user.email : undefined;
       return {
         provider: id,
         subject: String(user.id),
         email: chosen?.email ?? publicEmail,
         emailVerified: chosen?.verified === true,
         name: typeof user.name === "string" ? user.name : undefined,
-        picture: typeof user.avatar_url === "string"
-          ? user.avatar_url
-          : undefined,
+        picture:
+          typeof user.avatar_url === "string" ? user.avatar_url : undefined,
         raw: Array.isArray(emailsRaw) ? { ...user, emails: emailsRaw } : user,
       };
     },
@@ -201,17 +203,23 @@ function parseGithubEmails(raw: unknown): GithubEmailEntry[] | null {
 
 function githubTokenErrorHint(error: string | undefined): string {
   if (error === "incorrect_client_credentials") {
-    return `Check clientId/clientSecret against the GitHub OAuth App ` +
-      `settings.`;
+    return (
+      `Check clientId/clientSecret against the GitHub OAuth App ` + `settings.`
+    );
   }
   if (error === "redirect_uri_mismatch") {
-    return `The redirectUri must exactly match the "Authorization callback ` +
-      `URL" configured on the GitHub OAuth App.`;
+    return (
+      `The redirectUri must exactly match the "Authorization callback ` +
+      `URL" configured on the GitHub OAuth App.`
+    );
   }
   if (error === "bad_verification_code") {
-    return `The code expired or was already used — ask the user to start ` +
-      `signing in again.`;
+    return (
+      `The code expired or was already used — ask the user to start ` +
+      `signing in again.`
+    );
   }
-  return `See https://docs.github.com/apps/oauth-apps for the error's ` +
-    `meaning.`;
+  return (
+    `See https://docs.github.com/apps/oauth-apps for the error's ` + `meaning.`
+  );
 }

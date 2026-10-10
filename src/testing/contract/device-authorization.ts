@@ -1,13 +1,4 @@
-/**
- * Contract test suite for {@link DeviceAuthorizationServiceInterface}
- * implementations (RFC 8628).
- *
- * @module
- */
-
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { DeviceAuthorization } from "../../models/device-authorization.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
@@ -25,15 +16,23 @@ export interface DeviceAuthorizationServiceContractOptions<
   /** Returns fresh services for each test. */
   makeServices():
     | Promise<{
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      deviceAuthorizationService: DeviceAuthorizationServiceInterface<C, U, S>;
-    }>
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        deviceAuthorizationService: DeviceAuthorizationServiceInterface<
+          C,
+          U,
+          S
+        >;
+      }>
     | {
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      deviceAuthorizationService: DeviceAuthorizationServiceInterface<C, U, S>;
-    };
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        deviceAuthorizationService: DeviceAuthorizationServiceInterface<
+          C,
+          U,
+          S
+        >;
+      };
   /** Persists a user with the given password into the user service under test. */
   addUser(
     service: UserServiceInterface<U>,
@@ -68,15 +67,12 @@ export function runDeviceAuthorizationServiceContractTests<
   C extends ClientInterface,
   U extends MemoryUserShape,
   S extends AbstractScope = BasicScope,
->(
-  options: DeviceAuthorizationServiceContractOptions<C, U, S>,
-): void {
+>(options: DeviceAuthorizationServiceContractOptions<C, U, S>): void {
   const makeUser = options.makeUser ?? defaultMakeUser<U>;
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
 
   describe(
-    options.describeName ??
-      "DeviceAuthorizationServiceInterface contract",
+    options.describeName ?? "DeviceAuthorizationServiceInterface contract",
     () => {
       let userService: UserServiceInterface<U>;
       let clientService: ClientServiceInterface<C, U>;
@@ -118,45 +114,39 @@ export function runDeviceAuthorizationServiceContractTests<
         const auth = await makeDeviceAuth();
         await deviceService.save(auth);
         const fetched = await deviceService.getByDeviceCode(auth.deviceCode);
-        assertEquals(fetched?.deviceCode, auth.deviceCode);
-        assertEquals(fetched?.client.id, client.id);
+        expect(fetched?.deviceCode).toStrictEqual(auth.deviceCode);
+        expect(fetched?.client.id).toStrictEqual(client.id);
       });
 
       it("save + lookup by user code", async () => {
         const auth = await makeDeviceAuth();
         await deviceService.save(auth);
         const fetched = await deviceService.getByUserCode(auth.userCode);
-        assertEquals(fetched?.userCode, auth.userCode);
+        expect(fetched?.userCode).toStrictEqual(auth.userCode);
       });
 
       it("getByDeviceCode / getByUserCode return undefined for unknown codes", async () => {
-        assertStrictEquals(
-          await deviceService.getByDeviceCode("missing"),
-          undefined,
-        );
-        assertStrictEquals(
-          await deviceService.getByUserCode("missing"),
-          undefined,
-        );
+        expect(await deviceService.getByDeviceCode("missing")).toBe(undefined);
+        expect(await deviceService.getByUserCode("missing")).toBe(undefined);
       });
 
       it("approve marks the authorization with the approving user", async () => {
         const auth = await makeDeviceAuth();
         await deviceService.save(auth);
         const approved = await deviceService.approve(auth, user);
-        assertStrictEquals(approved.authorized, true);
-        assertEquals((approved.user as MemoryUserShape).id, user.id);
+        expect(approved.authorized).toBe(true);
+        expect((approved.user as MemoryUserShape).id).toStrictEqual(user.id);
         const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
-        assertStrictEquals(refetched?.authorized, true);
+        expect(refetched?.authorized).toBe(true);
       });
 
       it("deny marks the authorization as denied", async () => {
         const auth = await makeDeviceAuth();
         await deviceService.save(auth);
         const denied = await deviceService.deny(auth);
-        assertStrictEquals(denied.denied, true);
+        expect(denied.denied).toBe(true);
         const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
-        assertStrictEquals(refetched?.denied, true);
+        expect(refetched?.denied).toBe(true);
       });
 
       it("updateLastPolled records a poll time", async () => {
@@ -171,17 +161,15 @@ export function runDeviceAuthorizationServiceContractTests<
       it("revoke deletes by object and by string", async () => {
         const auth1 = await makeDeviceAuth();
         await deviceService.save(auth1);
-        assertStrictEquals(await deviceService.revoke(auth1), true);
-        assertStrictEquals(
-          await deviceService.getByDeviceCode(auth1.deviceCode),
+        expect(await deviceService.revoke(auth1)).toBe(true);
+        expect(await deviceService.getByDeviceCode(auth1.deviceCode)).toBe(
           undefined,
         );
 
         const auth2 = await makeDeviceAuth();
         await deviceService.save(auth2);
-        assertStrictEquals(await deviceService.revoke(auth2.deviceCode), true);
-        assertStrictEquals(
-          await deviceService.getByDeviceCode(auth2.deviceCode),
+        expect(await deviceService.revoke(auth2.deviceCode)).toBe(true);
+        expect(await deviceService.getByDeviceCode(auth2.deviceCode)).toBe(
           undefined,
         );
       });
@@ -190,9 +178,9 @@ export function runDeviceAuthorizationServiceContractTests<
         const auth = await makeDeviceAuth();
         await deviceService.save(auth);
 
-        assertStrictEquals(await deviceService.revoke(auth), true);
-        assertStrictEquals(await deviceService.revoke(auth), false);
-        assertStrictEquals(await deviceService.revoke(auth.deviceCode), false);
+        expect(await deviceService.revoke(auth)).toBe(true);
+        expect(await deviceService.revoke(auth)).toBe(false);
+        expect(await deviceService.revoke(auth.deviceCode)).toBe(false);
       });
 
       async function saveDeviceAuth(): Promise<{
@@ -214,46 +202,44 @@ export function runDeviceAuthorizationServiceContractTests<
       async function assertUnreachableByEitherCode(
         auth: DeviceAuthorization<C, U, S>,
       ): Promise<void> {
-        assertStrictEquals(
+        expect(
           await deviceService.getByDeviceCode(auth.deviceCode),
-          undefined,
           "a revoked authorization must not resolve by its device code",
-        );
-        assertStrictEquals(
+        ).toBe(undefined);
+        expect(
           await deviceService.getByUserCode(auth.userCode),
-          undefined,
           "a revoked authorization must not resolve by its user code",
-        );
+        ).toBe(undefined);
       }
 
       it("revoke by full record clears both the device-code and user-code lookups", async () => {
         const { auth } = await saveDeviceAuth();
-        assertStrictEquals(await deviceService.revoke(auth), true);
+        expect(await deviceService.revoke(auth)).toBe(true);
         await assertUnreachableByEitherCode(auth);
       });
 
       it("revoke by raw device code clears both the device-code and user-code lookups", async () => {
         const { auth } = await saveDeviceAuth();
-        assertStrictEquals(await deviceService.revoke(auth.deviceCode), true);
+        expect(await deviceService.revoke(auth.deviceCode)).toBe(true);
         await assertUnreachableByEitherCode(auth);
       });
 
       it("revoke accepts the record getByDeviceCode returns and clears both lookups", async () => {
         const { auth, byDeviceCode } = await saveDeviceAuth();
-        assertStrictEquals(await deviceService.revoke(byDeviceCode), true);
+        expect(await deviceService.revoke(byDeviceCode)).toBe(true);
         await assertUnreachableByEitherCode(auth);
       });
 
       it("revoke accepts the record getByUserCode returns and clears both lookups", async () => {
         const { auth, byUserCode } = await saveDeviceAuth();
-        assertStrictEquals(await deviceService.revoke(byUserCode), true);
+        expect(await deviceService.revoke(byUserCode)).toBe(true);
         await assertUnreachableByEitherCode(auth);
       });
 
       it("revoke answers true once across the hydrated shapes of one authorization", async () => {
         const { byDeviceCode, byUserCode } = await saveDeviceAuth();
-        assertStrictEquals(await deviceService.revoke(byDeviceCode), true);
-        assertStrictEquals(await deviceService.revoke(byUserCode), false);
+        expect(await deviceService.revoke(byDeviceCode)).toBe(true);
+        expect(await deviceService.revoke(byUserCode)).toBe(false);
       });
 
       it("revoke answers true to exactly one of two concurrent claims", async () => {
@@ -262,11 +248,10 @@ export function runDeviceAuthorizationServiceContractTests<
           deviceService.revoke(byDeviceCode),
           deviceService.revoke(byDeviceCode),
         ]);
-        assertEquals(
+        expect(
           claims.filter(Boolean).length,
-          1,
           "concurrent polls of one device code must not both be told they claimed it",
-        );
+        ).toStrictEqual(1);
         await assertUnreachableByEitherCode(auth);
       });
 
@@ -274,38 +259,36 @@ export function runDeviceAuthorizationServiceContractTests<
         const { auth, byUserCode } = await saveDeviceAuth();
         await deviceService.approve(byUserCode, user);
         await deviceService.revoke(byUserCode);
-        assertStrictEquals(
+        expect(
           await deviceService.getByDeviceCode(auth.deviceCode),
-          undefined,
           "a cancelled authorization must not stay redeemable by its device code",
-        );
+        ).toBe(undefined);
       });
 
       it("approve accepts the record getByUserCode returns", async () => {
         const { auth, byUserCode } = await saveDeviceAuth();
         const approved = await deviceService.approve(byUserCode, user);
-        assertStrictEquals(approved.authorized, true);
+        expect(approved.authorized).toBe(true);
         const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
-        assertStrictEquals(refetched?.authorized, true);
-        assertEquals(
+        expect(refetched?.authorized).toBe(true);
+        expect(
           (refetched?.user as MemoryUserShape | undefined)?.id,
-          user.id,
-        );
+        ).toStrictEqual(user.id);
       });
 
       it("approve accepts the record getByDeviceCode returns", async () => {
         const { auth, byDeviceCode } = await saveDeviceAuth();
         await deviceService.approve(byDeviceCode, user);
         const refetched = await deviceService.getByUserCode(auth.userCode);
-        assertStrictEquals(refetched?.authorized, true);
+        expect(refetched?.authorized).toBe(true);
       });
 
       it("deny accepts the record getByUserCode returns", async () => {
         const { auth, byUserCode } = await saveDeviceAuth();
         const denied = await deviceService.deny(byUserCode);
-        assertStrictEquals(denied.denied, true);
+        expect(denied.denied).toBe(true);
         const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
-        assertStrictEquals(refetched?.denied, true);
+        expect(refetched?.denied).toBe(true);
       });
 
       it("updateLastPolled accepts the record getByDeviceCode returns", async () => {

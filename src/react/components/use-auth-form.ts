@@ -215,8 +215,8 @@ export function useAuthForm<V extends AuthFormValues>(
         }
 
         const fieldErrors = result?.fieldErrors;
-        const hasFieldErrors = fieldErrors &&
-          Object.keys(fieldErrors).length > 0;
+        const hasFieldErrors =
+          fieldErrors && Object.keys(fieldErrors).length > 0;
         if (result?.error || hasFieldErrors) {
           if (result?.error) setFormError(result.error);
           if (hasFieldErrors) setErrors(fieldErrors as AuthFormErrors<V>);
@@ -250,9 +250,8 @@ export function useAuthForm<V extends AuthFormValues>(
         value: typeof raw === "boolean" ? "" : String(raw ?? ""),
         onChange: (event: ChangeEvent<HTMLInputElement>) => {
           const target = event.target;
-          const next = target.type === "checkbox"
-            ? target.checked
-            : target.value;
+          const next =
+            target.type === "checkbox" ? target.checked : target.value;
           setValue(name, next as V[K]);
         },
         "aria-invalid": hasError ? true : undefined,
@@ -264,29 +263,32 @@ export function useAuthForm<V extends AuthFormValues>(
     [values, errors, idBase, setValue],
   );
 
-  return useMemo<AuthFormState<V>>(() => ({
-    values,
-    errors,
-    formError,
-    status,
-    isSubmitting: status === "submitting",
-    succeeded: status === "success",
-    submitCount,
-    setValue,
-    setValues,
-    reset,
-    handleSubmit,
-    getFieldProps,
-  }), [
-    values,
-    errors,
-    formError,
-    status,
-    submitCount,
-    setValue,
-    setValues,
-    reset,
-    handleSubmit,
-    getFieldProps,
-  ]);
+  return useMemo<AuthFormState<V>>(
+    () => ({
+      values,
+      errors,
+      formError,
+      status,
+      isSubmitting: status === "submitting",
+      succeeded: status === "success",
+      submitCount,
+      setValue,
+      setValues,
+      reset,
+      handleSubmit,
+      getFieldProps,
+    }),
+    [
+      values,
+      errors,
+      formError,
+      status,
+      submitCount,
+      setValue,
+      setValues,
+      reset,
+      handleSubmit,
+      getFieldProps,
+    ],
+  );
 }

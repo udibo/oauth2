@@ -54,7 +54,9 @@ export function AuthFormShell<V extends AuthFormValues>(props: {
   } = props;
   return (
     <AuthFormClassNamesScope classNames={classNames}>
-      {render ? render(form) : (
+      {render ? (
+        render(form)
+      ) : (
         <div
           data-oauth2-form={name}
           {...rootProps}
@@ -150,18 +152,16 @@ export function TextField(props: {
         ref={inputRef}
       />
       {children}
-      {error
-        ? (
-          <p
-            id={`${fieldProps.id}-error`}
-            role="alert"
-            data-oauth2-error=""
-            className={classNames.error}
-          >
-            {error}
-          </p>
-        )
-        : null}
+      {error ? (
+        <p
+          id={`${fieldProps.id}-error`}
+          role="alert"
+          data-oauth2-error=""
+          className={classNames.error}
+        >
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -184,7 +184,9 @@ export function ErrorSummary(props: {
       data-oauth2-error-summary=""
       className={classNames.errorSummary}
     >
-      <span role="alert" data-oauth2-error-summary-message="">{error}</span>
+      <span role="alert" data-oauth2-error-summary-message="">
+        {error}
+      </span>
     </div>
   );
 }
@@ -218,9 +220,9 @@ export function SocialButtons(props: SocialProvidersProps): ReactNode {
   if (!socialProviders || socialProviders.length === 0) return null;
   const label = (provider: SocialProvider): ReactNode => (
     <>
-      {provider.iconSlot
-        ? <span data-oauth2-social-icon="">{provider.iconSlot}</span>
-        : null}
+      {provider.iconSlot ? (
+        <span data-oauth2-social-icon="">{provider.iconSlot}</span>
+      ) : null}
       <span data-oauth2-social-label="">Continue with {provider.name}</span>
     </>
   );
@@ -228,28 +230,26 @@ export function SocialButtons(props: SocialProvidersProps): ReactNode {
     <>
       <div data-oauth2-social="" className={classNames.socialSection}>
         {socialProviders.map((provider) =>
-          socialHref
-            ? (
-              <a
-                key={provider.id}
-                href={socialHref(provider)}
-                data-oauth2-social-button={provider.id}
-                className={classNames.socialButton}
-              >
-                {label(provider)}
-              </a>
-            )
-            : (
-              <button
-                key={provider.id}
-                type="button"
-                onClick={() => onSocialSelect?.(provider)}
-                data-oauth2-social-button={provider.id}
-                className={classNames.socialButton}
-              >
-                {label(provider)}
-              </button>
-            )
+          socialHref ? (
+            <a
+              key={provider.id}
+              href={socialHref(provider)}
+              data-oauth2-social-button={provider.id}
+              className={classNames.socialButton}
+            >
+              {label(provider)}
+            </a>
+          ) : (
+            <button
+              key={provider.id}
+              type="button"
+              onClick={() => onSocialSelect?.(provider)}
+              data-oauth2-social-button={provider.id}
+              className={classNames.socialButton}
+            >
+              {label(provider)}
+            </button>
+          ),
         )}
       </div>
       <div

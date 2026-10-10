@@ -51,8 +51,8 @@ export interface GoogleProviderOptions {
  * ```ts
  * const flow = new ExternalAuthFlow({
  *   provider: googleProvider({
- *     clientId: Deno.env.get("GOOGLE_CLIENT_ID")!,
- *     clientSecret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
+ *     clientId: process.env.GOOGLE_CLIENT_ID!,
+ *     clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
  *   }),
  * });
  * ```

@@ -15,8 +15,9 @@
  * @module
  */
 
-import { encodeHex } from "@std/encoding";
-import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
+import { timingSafeEqual } from "node:crypto";
+
+import { encodeHex } from "../utils/_encoding.ts";
 
 /**
  * Generates a cryptographically random salt for password hashing.
@@ -161,7 +162,10 @@ export async function verifyPassword(
   const computedHash = await hashPassword(password, salt, iterations);
   // Both are fixed-width hex digests, so length carries no secret.
   if (computedHash.length !== hash.length) return false;
-  return timingSafeEqual(encoder.encode(computedHash), encoder.encode(hash));
+  const computedBytes = encoder.encode(computedHash);
+  const expectedBytes = encoder.encode(hash);
+  if (computedBytes.byteLength !== expectedBytes.byteLength) return false;
+  return timingSafeEqual(computedBytes, expectedBytes);
 }
 
 /** Options for {@link PasswordIdentityService}. */
@@ -253,7 +257,8 @@ export class PasswordIdentityService implements PasswordHasherLike {
   needsRehash(credential: PasswordCredential): boolean {
     const params = credential.params;
     if (!params) return LEGACY_PBKDF2_ITERATIONS < this.#iterations;
-    return params.algorithm !== PBKDF2_SHA256 ||
-      params.iterations < this.#iterations;
+    return (
+      params.algorithm !== PBKDF2_SHA256 || params.iterations < this.#iterations
+    );
   }
 }

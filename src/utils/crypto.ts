@@ -23,11 +23,10 @@
  * @module
  */
 
-import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
-import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
-
 import { sha256Hash } from "../server/utils/hash.ts";
 import { toArrayBuffer } from "./_buffer.ts";
+import { constantTimeEqual } from "./_constant-time.ts";
+import { decodeBase64Url, encodeBase64Url } from "./_encoding.ts";
 
 export { sha256Hash };
 export { toArrayBuffer };
@@ -42,7 +41,7 @@ export function timingSafeEqualString(a: string, b: string): boolean {
   const aBytes = encoder.encode(a);
   const bBytes = encoder.encode(b);
   if (aBytes.byteLength !== bBytes.byteLength) return false;
-  return timingSafeEqual(aBytes, bBytes);
+  return constantTimeEqual(aBytes, bBytes);
 }
 
 /** URL-safe base64 encode (no padding). */

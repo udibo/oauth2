@@ -30,10 +30,7 @@ export type RefreshTokenGrantServices<
  * What the refresh grant observed when a rotated-out refresh token was
  * replayed. Passed to {@link RefreshTokenGrantOptions.onTokenReuse}.
  */
-export interface TokenReuseEvent<
-  Client extends ClientInterface,
-  User,
-> {
+export interface TokenReuseEvent<Client extends ClientInterface, User> {
   /** The rotation family the replayed token belonged to. */
   familyId: string;
   /** The client the replayed token was issued to. */
@@ -52,11 +49,10 @@ export interface RefreshTokenGrantOptions<
   Client extends ClientInterface,
   User,
   S extends AbstractScope,
-> extends
-  Omit<
-    GrantOptions<Client, User, S, RefreshTokenGrantServices<Client, User, S>>,
-    "allowRefreshToken"
-  > {
+> extends Omit<
+  GrantOptions<Client, User, S, RefreshTokenGrantServices<Client, User, S>>,
+  "allowRefreshToken"
+> {
   /**
    * Called when reuse detection catches a rotated-out refresh token being
    * replayed by the client it was issued to (after the family was revoked) —
@@ -68,9 +64,7 @@ export interface RefreshTokenGrantOptions<
    * rethrown, so a failing security-logging hook cannot change the
    * client-facing `invalid_grant` a replayed token always yields.
    */
-  onTokenReuse?: (
-    event: TokenReuseEvent<Client, User>,
-  ) => void | Promise<void>;
+  onTokenReuse?: (event: TokenReuseEvent<Client, User>) => void | Promise<void>;
 }
 
 /**
@@ -145,9 +139,8 @@ export class RefreshTokenGrant<
       // old member of a rotation family was replayed (stolen or raced) —
       // revoke the entire family so neither party keeps a live session.
       if (tokenService.getRevokedRefreshToken && tokenService.revokeFamily) {
-        const replayed = await tokenService.getRevokedRefreshToken(
-          refreshTokenStr,
-        );
+        const replayed =
+          await tokenService.getRevokedRefreshToken(refreshTokenStr);
         if (
           replayed?.familyId &&
           replayed.client.id.toString() === client.id.toString()
@@ -194,15 +187,15 @@ export class RefreshTokenGrant<
       }
     }
 
-    const familyExpiresAt = currentToken.familyCreatedAt &&
-        tokenService.refreshTokenFamilyExpiresAt
-      ? await tokenService.refreshTokenFamilyExpiresAt(
-        client,
-        user,
-        currentToken.familyCreatedAt,
-        nextScope,
-      )
-      : undefined;
+    const familyExpiresAt =
+      currentToken.familyCreatedAt && tokenService.refreshTokenFamilyExpiresAt
+        ? await tokenService.refreshTokenFamilyExpiresAt(
+            client,
+            user,
+            currentToken.familyCreatedAt,
+            nextScope,
+          )
+        : undefined;
     if (familyExpiresAt && familyExpiresAt.getTime() <= Date.now()) {
       throw new InvalidGrantError("refresh_token family expired");
     }
@@ -218,18 +211,18 @@ export class RefreshTokenGrant<
 
     const nextRefreshToken: RefreshToken<Client, User, S> =
       "refreshToken" in nextToken
-        ? nextToken as RefreshToken<Client, User, S>
+        ? (nextToken as RefreshToken<Client, User, S>)
         : {
-          ...nextToken,
-          refreshToken: currentToken.refreshToken,
-          refreshTokenExpiresAt: currentToken.refreshTokenExpiresAt,
-        };
+            ...nextToken,
+            refreshToken: currentToken.refreshToken,
+            refreshTokenExpiresAt: currentToken.refreshTokenExpiresAt,
+          };
     // A rotation stays in its ancestor's family so replaying any rotated-out
     // member revokes the whole chain.
-    nextRefreshToken.familyId = currentToken.familyId ??
-      nextRefreshToken.familyId;
-    nextRefreshToken.familyCreatedAt = currentToken.familyCreatedAt ??
-      nextRefreshToken.familyCreatedAt;
+    nextRefreshToken.familyId =
+      currentToken.familyId ?? nextRefreshToken.familyId;
+    nextRefreshToken.familyCreatedAt =
+      currentToken.familyCreatedAt ?? nextRefreshToken.familyCreatedAt;
     if (familyExpiresAt) {
       this.capAtFamilyExpiry(nextRefreshToken, familyExpiresAt);
     }
@@ -243,9 +236,7 @@ export class RefreshTokenGrant<
     return await tokenService.save(nextRefreshToken);
   }
 
-  async #notifyTokenReuse(
-    event: TokenReuseEvent<Client, User>,
-  ): Promise<void> {
+  async #notifyTokenReuse(event: TokenReuseEvent<Client, User>): Promise<void> {
     if (!this.#onTokenReuse) return;
     try {
       await this.#onTokenReuse(event);

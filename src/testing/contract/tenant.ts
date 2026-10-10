@@ -1,40 +1,4 @@
-/**
- * Contract test suite for what a Udibo Identity tenant answers an application
- * about its signed-in people: what introspection reports, what
- * `GET /api/memberships` lists, what `POST /api/check` and
- * `POST /api/check/batch` answer, the organization API under
- * `/api/organizations`, and the account API under `/api/account` — and what it
- * answers the application itself: the `client_credentials` grant, and
- * `GET /api/resource-grants` under the application's own machine token.
- *
- * It runs against `createFakeTenant` from `@udibo/oauth2/testing` and against the
- * real identity service in Udibo's own repository, so the fake an app tests
- * with answers the way the tenant it ships against does. Run it against
- * another stand-in to hold it to the same answers.
- *
- * @example
- * ```ts
- * import {
- *   runTenantContractTests,
- *   type TenantContractFixture,
- * } from "@udibo/oauth2/testing/contract";
- *
- * declare function startSeededTenant(): Promise<TenantContractFixture>;
- *
- * runTenantContractTests({ setup: startSeededTenant });
- * ```
- *
- * @module
- */
-
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertStringIncludes,
-} from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import { encodeBasicAuth } from "../../utils/basic-auth.ts";
 
 /** A token response from a completed sign-in. */
@@ -286,7 +250,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         headers: { authorization: clientAuth() },
         body: new URLSearchParams({ token: accessToken }),
       });
-      assertEquals(response.status, 200);
+      expect(response.status).toStrictEqual(200);
       return await response.json();
     }
 
@@ -307,23 +271,26 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       return { status: response.status, body: text ? JSON.parse(text) : {} };
     }
 
-    const sorted = (values: string[] | undefined) => [...values ?? []].sort();
+    const sorted = (values: string[] | undefined) => [...(values ?? [])].sort();
 
     describe("introspection", () => {
       it("reports tenant-wide permissions and no organization for a sign-in that picked none", async () => {
         const { access_token } = await tenant.signIn(people.member);
         const claims = await introspect(access_token);
-        assertEquals(claims.active, true);
-        assertEquals(claims.sub, people.member);
-        assertEquals(sorted(claims.permissions), ["contract:tenant"]);
-        assertFalse(claims.org_id, "a sign-in with no organization names none");
+        expect(claims.active).toStrictEqual(true);
+        expect(claims.sub).toStrictEqual(people.member);
+        expect(sorted(claims.permissions)).toStrictEqual(["contract:tenant"]);
+        expect(
+          claims.org_id,
+          "a sign-in with no organization names none",
+        ).toBeFalsy();
       });
 
       it("picks a person's only organization when the sign-in names none", async () => {
         const { access_token } = await tenant.signIn(people.solo);
         const claims = await introspect(access_token);
-        assertEquals(claims.org_id, organizations.other);
-        assertEquals(sorted(claims.permissions), ["contract:other"]);
+        expect(claims.org_id).toStrictEqual(organizations.other);
+        expect(sorted(claims.permissions)).toStrictEqual(["contract:other"]);
       });
 
       it("adds the picked organization and its permissions, and no other's", async () => {
@@ -332,8 +299,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           organizations.home,
         );
         const claims = await introspect(access_token);
-        assertEquals(claims.org_id, organizations.home);
-        assertEquals(sorted(claims.permissions), [
+        expect(claims.org_id).toStrictEqual(organizations.home);
+        expect(sorted(claims.permissions)).toStrictEqual([
           "contract:home",
           "contract:tenant",
         ]);
@@ -350,10 +317,10 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             refresh_token: issued.refresh_token,
           }),
         });
-        assertEquals(response.status, 200);
+        expect(response.status).toStrictEqual(200);
         const refreshed = await response.json();
         const claims = await introspect(refreshed.access_token);
-        assertEquals(claims.org_id, organizations.other);
+        expect(claims.org_id).toStrictEqual(organizations.other);
       });
 
       it("stops answering for an organization once the membership ends", async () => {
@@ -363,8 +330,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         );
         await tenant.removeMember(organizations.home, people.leaver);
         const claims = await introspect(access_token);
-        assertFalse(claims.org_id);
-        assertEquals(sorted(claims.permissions), []);
+        expect(claims.org_id).toBeFalsy();
+        expect(sorted(claims.permissions)).toStrictEqual([]);
       });
     });
 
@@ -375,8 +342,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           new URL("/api/memberships", tenant.issuer),
           { headers: { authorization: `Bearer ${access_token}` } },
         );
-        assertEquals(response.status, 200);
-        const body = await response.json() as {
+        expect(response.status).toStrictEqual(200);
+        const body = (await response.json()) as {
           memberships: {
             org_id: string;
             org_slug: string;
@@ -385,22 +352,21 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           }[];
           cursor: string | null;
         };
-        assertEquals(
+        expect(
           body.memberships.map((membership) => membership.org_id).sort(),
-          [organizations.home, organizations.other].sort(),
-        );
+        ).toStrictEqual([organizations.home, organizations.other].sort());
         for (const membership of body.memberships) {
-          assertEquals(membership.roles, ["member"]);
+          expect(membership.roles).toStrictEqual(["member"]);
           assert(membership.org_slug, "every membership names its slug");
           assert(membership.name, "every membership names its organization");
         }
-        assertEquals(body.cursor, null);
+        expect(body.cursor).toStrictEqual(null);
       });
 
       it("refuses a caller with no bearer token", async () => {
         const response = await send(new URL("/api/memberships", tenant.issuer));
         await response.body?.cancel();
-        assertEquals(response.status, 401);
+        expect(response.status).toStrictEqual(401);
       });
     });
 
@@ -413,8 +379,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const answer = await ask(access_token, "/api/check", {
           permissions: ["contract:home", "contract:other", "contract:tenant"],
         });
-        assertEquals(answer.status, 200);
-        assertEquals(answer.body, {
+        expect(answer.status).toStrictEqual(200);
+        expect(answer.body).toStrictEqual({
           subject: people.member,
           resource: { type: "organization", id: organizations.home },
           results: {
@@ -430,7 +396,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const answer = await ask(access_token, "/api/check", {
           permissions: ["contract:home", "contract:tenant"],
         });
-        assertEquals(answer.body, {
+        expect(answer.body).toStrictEqual({
           subject: people.member,
           resource: null,
           results: { "contract:home": false, "contract:tenant": true },
@@ -446,8 +412,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:other"],
           resource: { type: "organization", id: organizations.other },
         });
-        assertEquals(answer.status, 200);
-        assertEquals(answer.body.results, { "contract:other": true });
+        expect(answer.status).toStrictEqual(200);
+        expect(answer.body.results).toStrictEqual({ "contract:other": true });
       });
 
       it("answers an organization the caller does not belong to from tenant-wide permissions alone", async () => {
@@ -456,8 +422,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:other", "contract:tenant"],
           resource: { type: "organization", id: organizations.unjoined },
         });
-        assertEquals(answer.status, 200);
-        assertEquals(answer.body.results, {
+        expect(answer.status).toStrictEqual(200);
+        expect(answer.body.results).toStrictEqual({
           "contract:other": false,
           "contract:tenant": true,
         });
@@ -469,7 +435,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:tenant"],
           resource: { type: "organization", id: crypto.randomUUID() },
         });
-        assertEquals(answer.status, 404);
+        expect(answer.status).toStrictEqual(404);
       });
 
       it("answers a resource from a grant to the person and from one to their organization", async () => {
@@ -478,8 +444,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:read", "contract:write"],
           resource: { type: "contract_document", id: "direct" },
         });
-        assertEquals(direct.status, 200);
-        assertEquals(direct.body.results, {
+        expect(direct.status).toStrictEqual(200);
+        expect(direct.body.results).toStrictEqual({
           "contract:read": true,
           "contract:write": false,
         });
@@ -487,7 +453,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:write"],
           resource: { type: "contract_document", id: "shared" },
         });
-        assertEquals(shared.body.results, { "contract:write": true });
+        expect(shared.body.results).toStrictEqual({ "contract:write": true });
       });
 
       it("leaves organization permissions out of a resource answer", async () => {
@@ -499,7 +465,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:home", "contract:tenant"],
           resource: { type: "contract_document", id: "direct" },
         });
-        assertEquals(answer.body.results, {
+        expect(answer.body.results).toStrictEqual({
           "contract:home": false,
           "contract:tenant": true,
         });
@@ -511,7 +477,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:read"],
           resource: { type: "contract_unregistered", id: "x" },
         });
-        assertEquals(answer.status, 400);
+        expect(answer.status).toStrictEqual(400);
       });
 
       it("refuses a caller with no bearer token", async () => {
@@ -521,7 +487,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           body: JSON.stringify({ permissions: ["contract:tenant"] }),
         });
         await response.body?.cancel();
-        assertEquals(response.status, 401);
+        expect(response.status).toStrictEqual(401);
       });
     });
 
@@ -532,8 +498,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: ["contract:read"],
           resource: { type: "contract_document", ids: ["direct", "unseen"] },
         });
-        assertEquals(answer.status, 200);
-        assertEquals(answer.body, {
+        expect(answer.status).toStrictEqual(200);
+        expect(answer.body).toStrictEqual({
           subject: people.outsider,
           resource: { type: "contract_document" },
           results: {
@@ -632,9 +598,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
     type InviteOutcome =
       | { status: "membership"; membership: Member }
       | {
-        status: "invitation";
-        invitation: { id: string; email: string; role: string };
-      };
+          status: "invitation";
+          invitation: { id: string; email: string; role: string };
+        };
 
     interface AcceptOutcome {
       status: string;
@@ -654,7 +620,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         "GET",
         "/api/memberships",
       );
-      assertEquals(reply.status, 200);
+      expect(reply.status).toStrictEqual(200);
       return reply.body.memberships;
     }
 
@@ -668,7 +634,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         "/api/organizations",
         { name: `Contract ${slug}`, slug },
       );
-      assertEquals(reply.status, 201, JSON.stringify(reply.body));
+      expect(reply.status, JSON.stringify(reply.body)).toStrictEqual(201);
       return reply.body;
     }
 
@@ -695,7 +661,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         "POST",
         `/api/organizations/offers/${offerId}/accept`,
       );
-      assertEquals(reply.status, 200, JSON.stringify(reply.body));
+      expect(reply.status, JSON.stringify(reply.body)).toStrictEqual(200);
       return reply.body;
     }
 
@@ -711,10 +677,10 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         invitee.email,
         role,
       );
-      assertEquals(offered.status, 201, JSON.stringify(offered.body));
+      expect(offered.status, JSON.stringify(offered.body)).toStrictEqual(201);
       assert(offered.body.status === "membership", offered.body.status);
       const accepted = await accept(invitee.token, offered.body.membership.id);
-      assertEquals(accepted.status, "accepted");
+      expect(accepted.status).toStrictEqual("accepted");
     }
 
     async function membersOf(
@@ -768,7 +734,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           `/api/organizations/${organizationId}/invitations`,
         );
-        assertEquals(listed.status, 200);
+        expect(listed.status).toStrictEqual(200);
         return listed.body.data.map((entry) => entry.id);
       }
 
@@ -781,25 +747,26 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "/api/organizations",
           { name: "Contract Created", slug },
         );
-        assertEquals(created.status, 201);
-        assertEquals(created.body.slug, slug);
-        assertEquals(created.body.name, "Contract Created");
+        expect(created.status).toStrictEqual(201);
+        expect(created.body.slug).toStrictEqual(slug);
+        expect(created.body.name).toStrictEqual("Contract Created");
         const listed = await call<Page<Organization>>(
           creator.token,
           "GET",
           "/api/organizations",
         );
-        assertEquals(listed.status, 200);
-        assertEquals(
-          listed.body.data.map((entry) => entry.id),
-          [created.body.id],
-        );
-        assertEquals(await membershipsOf(creator.token), [{
-          org_id: created.body.id,
-          org_slug: slug,
-          name: "Contract Created",
-          roles: ["owner"],
-        }]);
+        expect(listed.status).toStrictEqual(200);
+        expect(listed.body.data.map((entry) => entry.id)).toStrictEqual([
+          created.body.id,
+        ]);
+        expect(await membershipsOf(creator.token)).toStrictEqual([
+          {
+            org_id: created.body.id,
+            org_slug: slug,
+            name: "Contract Created",
+            roles: ["owner"],
+          },
+        ]);
       });
 
       it("refuses a slug another organization holds", async () => {
@@ -809,7 +776,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "/api/organizations",
           { name: "Contract Taken", slug: organization.slug },
         );
-        assertEquals(reply.status, 409);
+        expect(reply.status).toStrictEqual(409);
       });
 
       it("refuses a slug that is not lowercase letters, numbers and single hyphens", async () => {
@@ -819,47 +786,46 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "/api/organizations",
           { name: "Contract Shouting", slug: "Contract--Shouting" },
         );
-        assertEquals(reply.status, 400);
+        expect(reply.status).toStrictEqual(400);
       });
 
       it("lets a member of any tier read the organization and its members, and no cache keep them", async () => {
+        const organization = await createOrganization(seats.owner.token);
+        await seat(seats.owner.token, organization.id, seats.admin, "admin");
+        await seat(seats.owner.token, organization.id, seats.member, "member");
         const read = await call<Organization>(
           seats.member.token,
           "GET",
           `/api/organizations/${organization.id}`,
         );
-        assertEquals(read.status, 200);
-        assertEquals(read.body.id, organization.id);
-        assertEquals(read.body.slug, organization.slug);
-        assertStringIncludes(
-          read.headers.get("cache-control") ?? "",
-          "no-store",
-        );
+        expect(read.status).toStrictEqual(200);
+        expect(read.body.id).toStrictEqual(organization.id);
+        expect(read.body.slug).toStrictEqual(organization.slug);
+        expect(read.headers.get("cache-control") ?? "").toContain("no-store");
         const members = await membersOf(seats.member.token, organization.id);
-        assertEquals(members.status, 200);
-        assertStringIncludes(
-          members.headers.get("cache-control") ?? "",
+        expect(members.status).toStrictEqual(200);
+        expect(members.headers.get("cache-control") ?? "").toContain(
           "no-store",
         );
-        assertEquals(
+        expect(
           members.body.data.map((row) => `${row.userId}:${row.role}`).sort(),
+        ).toStrictEqual(
           [
             `${seats.admin.id}:admin`,
             `${seats.member.id}:member`,
             `${seats.owner.id}:owner`,
           ].sort(),
         );
-        assertFalse(members.body.hasMore);
+        expect(members.body.hasMore).toBeFalsy();
         for (const row of members.body.data) {
           assert(row.id, "every member row names its grant");
           assert(row.name, "every member row names its person");
           assert(row.acceptedAt, "a member row is an accepted grant");
         }
-        assertEquals(
+        expect(
           members.body.data.find((row) => row.userId === seats.member.id)
             ?.email,
-          seats.member.email,
-        );
+        ).toStrictEqual(seats.member.email);
       });
 
       it("answers a non-member, an unknown id and a malformed id with the same 404", async () => {
@@ -878,14 +844,15 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           "/api/organizations/not-an-organization",
         );
-        assertEquals(
-          [outsider.status, unknown.status, malformed.status],
-          [404, 404, 404],
-        );
-        assertEquals(outsider.body.detail, unknown.body.detail);
-        assertEquals(unknown.body.detail, malformed.body.detail);
+        expect([
+          outsider.status,
+          unknown.status,
+          malformed.status,
+        ]).toStrictEqual([404, 404, 404]);
+        expect(outsider.body.detail).toStrictEqual(unknown.body.detail);
+        expect(unknown.body.detail).toStrictEqual(malformed.body.detail);
         const members = await membersOf(seats.outsider.token, organization.id);
-        assertEquals(members.status, 404);
+        expect(members.status).toStrictEqual(404);
       });
 
       it("lets an owner or admin rename the organization and a plain member not", async () => {
@@ -895,9 +862,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           `/api/organizations/${organization.id}`,
           { name: "Contract Renamed" },
         );
-        assertEquals(renamed.status, 200);
-        assertEquals(renamed.body.name, "Contract Renamed");
-        assertEquals(renamed.body.slug, organization.slug);
+        expect(renamed.status).toStrictEqual(200);
+        expect(renamed.body.name).toStrictEqual("Contract Renamed");
+        expect(renamed.body.slug).toStrictEqual(organization.slug);
         for (const caller of [seats.member, seats.outsider]) {
           const refused = await call(
             caller.token,
@@ -905,7 +872,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             `/api/organizations/${organization.id}`,
             { name: "Contract Hijacked" },
           );
-          assertEquals(refused.status, 404);
+          expect(refused.status).toStrictEqual(404);
         }
       });
 
@@ -915,8 +882,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           `/api/organizations/${organization.id}/member-roles`,
         );
-        assertEquals(roles.status, 200);
-        assertEquals(roles.body.slice(0, 3), [
+        expect(roles.status).toStrictEqual(200);
+        expect(roles.body.slice(0, 3)).toStrictEqual([
           { slug: "owner", name: "Owner" },
           { slug: "admin", name: "Admin" },
           { slug: "member", name: "Member" },
@@ -926,7 +893,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           `/api/organizations/${organization.id}/member-roles`,
         );
-        assertEquals(refused.status, 404);
+        expect(refused.status).toStrictEqual(404);
       });
 
       it("offers an existing person a pending membership that confers nothing until they accept it", async () => {
@@ -937,34 +904,36 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           invitee.email,
           "member",
         );
-        assertEquals(offered.status, 201);
+        expect(offered.status).toStrictEqual(201);
         assert(offered.body.status === "membership", offered.body.status);
-        assertEquals(offered.body.membership.role, "member");
-        assertEquals(offered.body.membership.acceptedAt, null);
-        assertEquals(await membershipsOf(invitee.token), []);
+        expect(offered.body.membership.role).toStrictEqual("member");
+        expect(offered.body.membership.acceptedAt).toStrictEqual(null);
+        expect(await membershipsOf(invitee.token)).toStrictEqual([]);
         const before = await membersOf(seats.admin.token, organization.id);
-        assertFalse(
+        expect(
           before.body.data.some((row) => row.userId === invitee.id),
           "a pending grant is not a member",
-        );
+        ).toBeFalsy();
 
         const waiting = await call<Offers>(
           invitee.token,
           "GET",
           "/api/organizations/offers",
         );
-        assertEquals(waiting.status, 200);
+        expect(waiting.status).toStrictEqual(200);
         const current = await call<Organization>(
           seats.owner.token,
           "GET",
           `/api/organizations/${organization.id}`,
         );
-        assertEquals(waiting.body, {
-          offers: [{
-            id: offered.body.membership.id,
-            organizationName: current.body.name,
-            roleName: "Member",
-          }],
+        expect(waiting.body).toStrictEqual({
+          offers: [
+            {
+              id: offered.body.membership.id,
+              organizationName: current.body.name,
+              roleName: "Member",
+            },
+          ],
           unverifiedEmail: null,
         });
 
@@ -972,13 +941,14 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           invitee.token,
           offered.body.membership.id,
         );
-        assertEquals(accepted.status, "accepted");
-        assertEquals(accepted.membership?.organizationId, organization.id);
-        assertEquals(accepted.membership?.role, "member");
-        assertEquals(
-          (await membershipsOf(invitee.token)).map((entry) => entry.roles),
-          [["member"]],
+        expect(accepted.status).toStrictEqual("accepted");
+        expect(accepted.membership?.organizationId).toStrictEqual(
+          organization.id,
         );
+        expect(accepted.membership?.role).toStrictEqual("member");
+        expect(
+          (await membershipsOf(invitee.token)).map((entry) => entry.roles),
+        ).toStrictEqual([["member"]]);
         const after = await membersOf(seats.admin.token, organization.id);
         assert(after.body.data.some((row) => row.userId === invitee.id));
       });
@@ -993,15 +963,15 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         );
         assert(offered.body.status === "membership", offered.body.status);
         const offerId = offered.body.membership.id;
-        assertEquals(
+        expect(
           (await accept(seats.outsider.token, offerId)).status,
-          "invalid",
-        );
-        assertEquals(
+        ).toStrictEqual("invalid");
+        expect(
           (await accept(seats.outsider.token, "not-an-offer")).status,
-          "invalid",
+        ).toStrictEqual("invalid");
+        expect((await accept(invitee.token, offerId)).status).toStrictEqual(
+          "accepted",
         );
-        assertEquals((await accept(invitee.token, offerId)).status, "accepted");
       });
 
       it("refuses a second offer of a role an address already holds or was offered", async () => {
@@ -1012,21 +982,21 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           stranger,
           "member",
         );
-        assertEquals(first.status, 201);
+        expect(first.status).toStrictEqual(201);
         const again = await invite(
           seats.admin.token,
           organization.id,
           stranger,
           "member",
         );
-        assertEquals(again.status, 409);
+        expect(again.status).toStrictEqual(409);
         const held = await invite(
           seats.admin.token,
           organization.id,
           seats.member.email,
           "member",
         );
-        assertEquals(held.status, 409);
+        expect(held.status).toStrictEqual(409);
       });
 
       it("keeps the owner tier to owners", async () => {
@@ -1036,13 +1006,13 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           newEmail(),
           "owner",
         );
-        assertEquals(offered.status, 403);
+        expect(offered.status).toStrictEqual(403);
         const revoked = await call(
           seats.admin.token,
           "DELETE",
           `/api/organizations/${organization.id}/members/${seats.owner.id}/owner`,
         );
-        assertEquals(revoked.status, 403);
+        expect(revoked.status).toStrictEqual(403);
       });
 
       it("refuses a plain member every manager action with the 404 a stranger gets, and changes nothing", async () => {
@@ -1071,17 +1041,16 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             method,
             path,
           );
-          assertEquals(
+          expect(
             [byMember.status, byStranger.status],
-            [404, 404],
             `${method} ${path}`,
-          );
-          assertEquals(byMember.body.detail, byStranger.body.detail);
+          ).toStrictEqual([404, 404]);
+          expect(byMember.body.detail).toStrictEqual(byStranger.body.detail);
         }
         const members = await membersOf(seats.owner.token, organization.id);
         assert(
-          members.body.data.some((row) =>
-            row.userId === seats.admin.id && row.role === "admin"
+          members.body.data.some(
+            (row) => row.userId === seats.admin.id && row.role === "admin",
           ),
           "a plain member revoked a manager's tier",
         );
@@ -1100,29 +1069,27 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `${base}/invitations/${rivalInvitationId}`,
         );
-        assertEquals(withdrawn.status, 404);
+        expect(withdrawn.status).toStrictEqual(404);
         const revoked = await call(
           seats.owner.token,
           "DELETE",
           `${base}/members/${seats.rivalMember.id}/member`,
         );
-        assertEquals(revoked.status, 404);
-        assertFalse(
+        expect(revoked.status).toStrictEqual(404);
+        expect(
           (await invitationIdsOf(seats.owner.token, organization.id)).includes(
             rivalInvitationId,
           ),
           "one organization's invitations listed another's",
-        );
+        ).toBeFalsy();
         const rivalBase = `/api/organizations/${rival.id}`;
-        for (
-          const [method, path] of [
-            ["DELETE", `${rivalBase}/invitations/${rivalInvitationId}`],
-            ["DELETE", `${rivalBase}/members/${seats.rivalMember.id}/member`],
-            ["GET", `${rivalBase}/invitations`],
-          ]
-        ) {
+        for (const [method, path] of [
+          ["DELETE", `${rivalBase}/invitations/${rivalInvitationId}`],
+          ["DELETE", `${rivalBase}/members/${seats.rivalMember.id}/member`],
+          ["GET", `${rivalBase}/invitations`],
+        ]) {
           const refused = await call(seats.owner.token, method, path);
-          assertEquals(refused.status, 404, `${method} ${path}`);
+          expect(refused.status, `${method} ${path}`).toStrictEqual(404);
         }
         assert(
           (await invitationIdsOf(seats.rival.token, rival.id)).includes(
@@ -1132,8 +1099,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         );
         const rivalMembers = await membersOf(seats.rival.token, rival.id);
         assert(
-          rivalMembers.body.data.some((row) =>
-            row.userId === seats.rivalMember.id
+          rivalMembers.body.data.some(
+            (row) => row.userId === seats.rivalMember.id,
           ),
           "another organization's manager revoked this member",
         );
@@ -1146,7 +1113,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           newEmail(),
           "member",
         );
-        assertEquals(offered.status, 404);
+        expect(offered.status).toStrictEqual(404);
       });
 
       it("refuses a role the tenant has not defined", async () => {
@@ -1156,7 +1123,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           newEmail(),
           "contract-undefined-role",
         );
-        assertEquals(offered.status, 400);
+        expect(offered.status).toStrictEqual(400);
       });
 
       it("refuses a return_to on an origin with no registered redirect URI", async () => {
@@ -1170,7 +1137,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             return_to: "https://unregistered.example/welcome",
           },
         );
-        assertEquals(reply.status, 400);
+        expect(reply.status).toStrictEqual(400);
       });
 
       it("invites an address with no account, lowercased, for its verified holder to accept later", async () => {
@@ -1181,16 +1148,16 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           address.toUpperCase(),
           "member",
         );
-        assertEquals(offered.status, 201);
+        expect(offered.status).toStrictEqual(201);
         assert(offered.body.status === "invitation", offered.body.status);
-        assertEquals(offered.body.invitation.email, address);
+        expect(offered.body.invitation.email).toStrictEqual(address);
         const invitationId = offered.body.invitation.id;
         const listed = await call<Page<{ id: string }>>(
           seats.admin.token,
           "GET",
           `/api/organizations/${organization.id}/invitations?status=outstanding`,
         );
-        assertEquals(listed.status, 200);
+        expect(listed.status).toStrictEqual(200);
         assert(listed.body.data.some((entry) => entry.id === invitationId));
 
         const holder = await person({ email: address });
@@ -1199,17 +1166,17 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           "/api/organizations/offers",
         );
-        assertEquals(
-          waiting.body.offers.map((offer) => offer.id),
-          [invitationId],
-        );
+        expect(waiting.body.offers.map((offer) => offer.id)).toStrictEqual([
+          invitationId,
+        ]);
         const accepted = await accept(holder.token, invitationId);
-        assertEquals(accepted.status, "accepted");
-        assertEquals(accepted.membership?.organizationId, organization.id);
-        assertEquals(
-          (await membershipsOf(holder.token)).map((entry) => entry.org_id),
-          [organization.id],
+        expect(accepted.status).toStrictEqual("accepted");
+        expect(accepted.membership?.organizationId).toStrictEqual(
+          organization.id,
         );
+        expect(
+          (await membershipsOf(holder.token)).map((entry) => entry.org_id),
+        ).toStrictEqual([organization.id]);
       });
 
       it("hides an invitation from its address's unverified holder and names the address instead", async () => {
@@ -1227,11 +1194,13 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           "/api/organizations/offers",
         );
-        assertEquals(waiting.body, { offers: [], unverifiedEmail: address });
-        assertEquals(
+        expect(waiting.body).toStrictEqual({
+          offers: [],
+          unverifiedEmail: address,
+        });
+        expect(
           (await accept(holder.token, offered.body.invitation.id)).status,
-          "wrong-account",
-        );
+        ).toStrictEqual("wrong-account");
       });
 
       it("converts an invitation only for the address it names", async () => {
@@ -1243,10 +1212,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         );
         assert(offered.body.status === "invitation", offered.body.status);
         const other = await person();
-        assertEquals(
+        expect(
           (await accept(other.token, offered.body.invitation.id)).status,
-          "wrong-account",
-        );
+        ).toStrictEqual("wrong-account");
       });
 
       it("withdraws an invitation so that it can no longer be accepted", async () => {
@@ -1264,18 +1232,17 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/organizations/${organization.id}/invitations/${invitationId}`,
         );
-        assertEquals(withdrawn.status, 204);
+        expect(withdrawn.status).toStrictEqual(204);
         const listed = await call<Page<{ id: string }>>(
           seats.admin.token,
           "GET",
           `/api/organizations/${organization.id}/invitations`,
         );
-        assertFalse(
+        expect(
           listed.body.data.some((entry) => entry.id === invitationId),
-        );
+        ).toBeFalsy();
         const holder = await person({ email: address });
-        assertEquals(
-          (await accept(holder.token, invitationId)).status,
+        expect((await accept(holder.token, invitationId)).status).toStrictEqual(
           "invalid",
         );
       });
@@ -1288,20 +1255,20 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/organizations/${organization.id}/members/${leaver.id}/member`,
         );
-        assertEquals(revoked.status, 204);
-        assertEquals(await membershipsOf(leaver.token), []);
+        expect(revoked.status).toStrictEqual(204);
+        expect(await membershipsOf(leaver.token)).toStrictEqual([]);
         const read = await call(
           leaver.token,
           "GET",
           `/api/organizations/${organization.id}`,
         );
-        assertEquals(read.status, 404);
+        expect(read.status).toStrictEqual(404);
         const again = await call(
           seats.admin.token,
           "DELETE",
           `/api/organizations/${organization.id}/members/${leaver.id}/member`,
         );
-        assertEquals(again.status, 404);
+        expect(again.status).toStrictEqual(404);
       });
 
       it("never leaves an organization without an owner", async () => {
@@ -1310,7 +1277,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/organizations/${organization.id}/members/${seats.owner.id}/owner`,
         );
-        assertEquals(reply.status, 409);
+        expect(reply.status).toStrictEqual(409);
       });
 
       it("deletes an organization for its owner alone, and not while it holds a grant", async () => {
@@ -1322,13 +1289,13 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/organizations/${doomed.id}`,
         );
-        assertEquals(byAdmin.status, 403);
+        expect(byAdmin.status).toStrictEqual(403);
         const byMember = await call(
           seats.member.token,
           "DELETE",
           `/api/organizations/${doomed.id}`,
         );
-        assertEquals(byMember.status, 404);
+        expect(byMember.status).toStrictEqual(404);
 
         const holding = await createOrganization(seats.owner.token);
         await tenant.grant({
@@ -1341,30 +1308,30 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/organizations/${holding.id}`,
         );
-        assertEquals(blocked.status, 409);
+        expect(blocked.status).toStrictEqual(409);
 
         const deleted = await call(
           seats.owner.token,
           "DELETE",
           `/api/organizations/${doomed.id}`,
         );
-        assertEquals(deleted.status, 204);
+        expect(deleted.status).toStrictEqual(204);
         const gone = await call(
           seats.member.token,
           "GET",
           `/api/organizations/${doomed.id}`,
         );
-        assertEquals(gone.status, 404);
-        assertFalse(
-          (await membershipsOf(seats.member.token)).some((entry) =>
-            entry.org_id === doomed.id
+        expect(gone.status).toStrictEqual(404);
+        expect(
+          (await membershipsOf(seats.member.token)).some(
+            (entry) => entry.org_id === doomed.id,
           ),
-        );
+        ).toBeFalsy();
       });
 
       it("refuses a caller with no bearer token", async () => {
         const reply = await call(null, "GET", "/api/organizations");
-        assertEquals(reply.status, 401);
+        expect(reply.status).toStrictEqual(401);
       });
 
       describe("application roles a manager grants a member", () => {
@@ -1400,7 +1367,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "GET",
             `/api/organizations/${organization.id}/member-roles`,
           );
-          assertEquals(listed.status, 200);
+          expect(listed.status).toStrictEqual(200);
           const found = listed.body.find((entry) => entry.id === roleId);
           assert(found, "member-roles does not list the role by its id");
           option = found;
@@ -1444,7 +1411,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "GET",
             rolesPath(userId, organizationId),
           );
-          assertEquals(reply.status, 200, JSON.stringify(reply.body));
+          expect(reply.status, JSON.stringify(reply.body)).toStrictEqual(200);
           return reply.body;
         }
 
@@ -1454,11 +1421,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         ): Promise<boolean> {
           const reply = await ask(accessToken, "/api/check", {
             permissions: [APP_PERMISSION],
-            ...organizationId
+            ...(organizationId
               ? { resource: { type: "organization", id: organizationId } }
-              : {},
+              : {}),
           });
-          assertEquals(reply.status, 200);
+          expect(reply.status).toStrictEqual(200);
           return (reply.body.results as Record<string, boolean>)[
             APP_PERMISSION
           ];
@@ -1470,12 +1437,12 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "GET",
             "/api/organizations/offers",
           );
-          assertEquals(reply.status, 200);
+          expect(reply.status).toStrictEqual(200);
           return reply.body.offers.map((offer) => offer.id).sort();
         }
 
         it("names a tenant-wide role in member-roles by the id a grant takes, and no built-in tier by any", async () => {
-          assertEquals(option.id, roleId);
+          expect(option.id).toStrictEqual(roleId);
           assert(option.slug, "the role is listed by its slug");
           assert(option.name, "the role is listed by its name");
           const listed = await call<{ id?: string; slug: string }[]>(
@@ -1486,74 +1453,79 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           for (const slug of ["owner", "admin", "member"]) {
             const tier = listed.body.find((entry) => entry.slug === slug);
             assert(tier, `the built-in ${slug} tier is listed`);
-            assertFalse("id" in tier, `the built-in ${slug} tier has an id`);
+            expect(
+              "id" in tier,
+              `the built-in ${slug} tier has an id`,
+            ).toBeFalsy();
           }
         });
 
         it("grants an accepted member a role that counts inside the organization only", async () => {
           const member = await seated();
           await seat(seats.rival.token, rival.id, member, "member");
-          assertFalse(await holds(member.token, organization.id));
+          expect(await holds(member.token, organization.id)).toBeFalsy();
           const granted = await grantRole(seats.admin.token, member.id);
-          assertEquals(granted.status, 201, JSON.stringify(granted.body));
-          assertEquals(granted.body.subjectId, member.id);
-          assertEquals(granted.body.roleId, roleId);
-          assertEquals(granted.body.builtInRole, null);
-          assertEquals(granted.body.scopeType, "organization");
-          assertEquals(granted.body.scopeId, organization.id);
-          assertEquals(granted.body.created, true);
+          expect(granted.status, JSON.stringify(granted.body)).toStrictEqual(
+            201,
+          );
+          expect(granted.body.subjectId).toStrictEqual(member.id);
+          expect(granted.body.roleId).toStrictEqual(roleId);
+          expect(granted.body.builtInRole).toStrictEqual(null);
+          expect(granted.body.scopeType).toStrictEqual("organization");
+          expect(granted.body.scopeId).toStrictEqual(organization.id);
+          expect(granted.body.created).toStrictEqual(true);
           assert(await holds(member.token, organization.id));
-          assertFalse(
+          expect(
             await holds(member.token),
             "a role held in an organization answered at tenant scope",
-          );
-          assertFalse(
+          ).toBeFalsy();
+          expect(
             await holds(member.token, rival.id),
             "a role held in one organization answered for another it belongs to",
-          );
-          assertEquals(await heldBy(member.id), [{
-            id: roleId,
-            builtInRole: null,
-            organizationId: null,
-            slug: option.slug,
-            name: option.name,
-            permissions: [APP_PERMISSION],
-          }]);
+          ).toBeFalsy();
+          expect(await heldBy(member.id)).toStrictEqual([
+            {
+              id: roleId,
+              builtInRole: null,
+              organizationId: null,
+              slug: option.slug,
+              name: option.name,
+              permissions: [APP_PERMISSION],
+            },
+          ]);
           const again = await grantRole(seats.owner.token, member.id);
-          assertEquals(again.status, 201);
-          assertEquals(again.body.id, granted.body.id);
-          assertEquals(again.body.created, false);
-          assertEquals((await heldBy(member.id)).length, 1);
+          expect(again.status).toStrictEqual(201);
+          expect(again.body.id).toStrictEqual(granted.body.id);
+          expect(again.body.created).toStrictEqual(false);
+          expect((await heldBy(member.id)).length).toStrictEqual(1);
         });
 
         it("revokes a role, after which the permission stops answering and the role is not found", async () => {
           const member = await seated();
-          assertEquals(
+          expect(
             (await grantRole(seats.admin.token, member.id)).status,
-            201,
-          );
+          ).toStrictEqual(201);
           const revoked = await call(
             seats.admin.token,
             "DELETE",
             `${rolesPath(member.id)}/${roleId}`,
           );
-          assertEquals(revoked.status, 204);
-          assertFalse(await holds(member.token, organization.id));
-          assertEquals(await heldBy(member.id), []);
+          expect(revoked.status).toStrictEqual(204);
+          expect(await holds(member.token, organization.id)).toBeFalsy();
+          expect(await heldBy(member.id)).toStrictEqual([]);
           const again = await call(
             seats.admin.token,
             "DELETE",
             `${rolesPath(member.id)}/${roleId}`,
           );
-          assertEquals(again.status, 404);
+          expect(again.status).toStrictEqual(404);
         });
 
         it("refuses a plain member and a stranger every verb with the 404 an unknown organization gets, and changes nothing", async () => {
           const member = await seated();
-          assertEquals(
+          expect(
             (await grantRole(seats.admin.token, member.id)).status,
-            201,
-          );
+          ).toStrictEqual(201);
           const unknown = crypto.randomUUID();
           const verbs: [string, (organizationId: string) => string, unknown][] =
             [
@@ -1572,7 +1544,10 @@ export function runTenantContractTests(options: TenantContractOptions): void {
               path(unknown),
               body,
             );
-            assertEquals(onUnknown.status, 404, `${method} on an unknown id`);
+            expect(
+              onUnknown.status,
+              `${method} on an unknown id`,
+            ).toStrictEqual(404);
             for (const caller of [seats.member, seats.outsider]) {
               const refused = await call<{ detail?: string }>(
                 caller.token,
@@ -1580,12 +1555,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
                 path(organization.id),
                 body,
               );
-              assertEquals(
+              expect(
                 refused.status,
-                404,
                 `${method} below the manager tier`,
-              );
-              assertEquals(refused.body.detail, onUnknown.body.detail);
+              ).toStrictEqual(404);
+              expect(refused.body.detail).toStrictEqual(onUnknown.body.detail);
             }
           }
           assert(
@@ -1604,30 +1578,29 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           );
           assert(offered.body.status === "membership", offered.body.status);
           const details = new Set<string | undefined>();
-          for (
-            const userId of [
-              pending.id,
-              seats.outsider.id,
-              crypto.randomUUID(),
-            ]
-          ) {
+          for (const userId of [
+            pending.id,
+            seats.outsider.id,
+            crypto.randomUUID(),
+          ]) {
             const read = await call<{ detail?: string }>(
               seats.admin.token,
               "GET",
               rolesPath(userId),
             );
             const granted = await grantRole(seats.admin.token, userId);
-            assertEquals([read.status, granted.status], [404, 404], userId);
+            expect([read.status, granted.status], userId).toStrictEqual([
+              404, 404,
+            ]);
             details.add(read.body.detail);
             details.add((granted.body as { detail?: string }).detail);
           }
-          assertEquals(details.size, 1, [...details].join(" | "));
-          assertEquals(
+          expect(details.size, [...details].join(" | ")).toStrictEqual(1);
+          expect(
             (await accept(pending.token, offered.body.membership.id)).status,
-            "accepted",
-          );
-          assertEquals(await heldBy(pending.id), []);
-          assertFalse(await holds(pending.token, organization.id));
+          ).toStrictEqual("accepted");
+          expect(await heldBy(pending.id)).toStrictEqual([]);
+          expect(await holds(pending.token, organization.id)).toBeFalsy();
         });
 
         it("refuses a role the tenant does not know with 404, and a grant that names no role with 400", async () => {
@@ -1637,15 +1610,15 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             member.id,
             crypto.randomUUID(),
           );
-          assertEquals(unknown.status, 404);
+          expect(unknown.status).toStrictEqual(404);
           const unnamed = await call(
             seats.admin.token,
             "POST",
             rolesPath(member.id),
             {},
           );
-          assertEquals(unnamed.status, 400);
-          assertEquals(await heldBy(member.id), []);
+          expect(unnamed.status).toStrictEqual(400);
+          expect(await heldBy(member.id)).toStrictEqual([]);
         });
 
         it("refuses a manager revoking a built-in role they do not hold there, and answers any other name with 404", async () => {
@@ -1655,23 +1628,22 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "DELETE",
             `${rolesPath(member.id)}/owner`,
           );
-          assertEquals(asAdmin.status, 403);
+          expect(asAdmin.status).toStrictEqual(403);
           const asOwner = await call(
             seats.owner.token,
             "DELETE",
             `${rolesPath(member.id)}/member`,
           );
-          assertEquals(
+          expect(
             asOwner.status,
-            403,
             "an owner membership is not a built-in role held there",
-          );
+          ).toStrictEqual(403);
           const unnamed = await call(
             seats.owner.token,
             "DELETE",
             `${rolesPath(member.id)}/not-a-role`,
           );
-          assertEquals(unnamed.status, 404);
+          expect(unnamed.status).toStrictEqual(404);
         });
 
         it("ends the roles and open offers a person's last membership carried, so rejoining restores nothing", async () => {
@@ -1696,12 +1668,10 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             ownerOffer.body.status === "membership",
             ownerOffer.body.status,
           );
-          assertEquals(
+          expect(
             (await grantRole(seats.admin.token, leaver.id)).status,
-            201,
-          );
-          assertEquals(
-            await offersOf(leaver.token),
+          ).toStrictEqual(201);
+          expect(await offersOf(leaver.token)).toStrictEqual(
             [invitationId, ownerOffer.body.membership.id].sort(),
           );
 
@@ -1710,26 +1680,27 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "DELETE",
             `/api/organizations/${organization.id}/members/${leaver.id}/member`,
           );
-          assertEquals(revoked.status, 204);
-          assertEquals(await offersOf(leaver.token), []);
-          assertFalse(
-            (await invitationIdsOf(seats.owner.token, organization.id))
-              .includes(invitationId),
+          expect(revoked.status).toStrictEqual(204);
+          expect(await offersOf(leaver.token)).toStrictEqual([]);
+          expect(
+            (
+              await invitationIdsOf(seats.owner.token, organization.id)
+            ).includes(invitationId),
             "an invitation to the leaver's address outlived their membership",
-          );
+          ).toBeFalsy();
           const read = await call(
             seats.admin.token,
             "GET",
             rolesPath(leaver.id),
           );
-          assertEquals(read.status, 404);
+          expect(read.status).toStrictEqual(404);
 
           await seat(seats.owner.token, organization.id, leaver, "member");
-          assertEquals(await heldBy(leaver.id), []);
-          assertFalse(
+          expect(await heldBy(leaver.id)).toStrictEqual([]);
+          expect(
             await holds(leaver.token, organization.id),
             "rejoining restored a role the last membership carried",
-          );
+          ).toBeFalsy();
         });
 
         it("keeps a role revoke and a membership's end to the person and organization they name", async () => {
@@ -1746,28 +1717,25 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           const bystander = await seated();
           await seat(seats.rival.token, rival.id, bystander, "member");
           for (const userId of [leaver.id, bystander.id]) {
-            assertEquals(
+            expect(
               (await grantRole(seats.admin.token, userId)).status,
-              201,
-            );
+            ).toStrictEqual(201);
           }
-          assertEquals(
+          expect(
             (await grantRole(seats.rival.token, bystander.id, roleId, rival.id))
               .status,
-            201,
-          );
+          ).toStrictEqual(201);
 
           const revoked = await call(
             seats.admin.token,
             "DELETE",
             `/api/organizations/${organization.id}/members/${leaver.id}/member`,
           );
-          assertEquals(revoked.status, 204);
-          assertEquals(
+          expect(revoked.status).toStrictEqual(204);
+          expect(
             (await heldBy(bystander.id)).map((role) => role.id),
-            [roleId],
             "one person's membership ending took another's role",
-          );
+          ).toStrictEqual([roleId]);
           assert(
             (await invitationIdsOf(seats.rival.token, rival.id)).includes(
               elsewhere.body.invitation.id,
@@ -1781,15 +1749,14 @@ export function runTenantContractTests(options: TenantContractOptions): void {
               "DELETE",
               `${rolesPath(bystander.id)}/${roleId}`,
             );
-            assertEquals(taken.status, status);
+            expect(taken.status).toStrictEqual(status);
           }
-          assertEquals(
+          expect(
             (await heldBy(bystander.id, seats.rival.token, rival.id)).map(
               (role) => role.id,
             ),
-            [roleId],
             "a revoke here took the role held in another organization",
-          );
+          ).toStrictEqual([roleId]);
         });
 
         it("withdraws only the offer named from someone who is not a member", async () => {
@@ -1810,8 +1777,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "DELETE",
             `/api/organizations/${organization.id}/members/${invitee.id}/member`,
           );
-          assertEquals(withdrawn.status, 204);
-          assertEquals(await offersOf(invitee.token), [offers[1]]);
+          expect(withdrawn.status).toStrictEqual(204);
+          expect(await offersOf(invitee.token)).toStrictEqual([offers[1]]);
         });
 
         it("ends nothing while the person keeps another accepted role there", async () => {
@@ -1827,21 +1794,20 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             ownerOffer.body.status === "membership",
             ownerOffer.body.status,
           );
-          assertEquals(
+          expect(
             (await grantRole(seats.owner.token, stayer.id)).status,
-            201,
-          );
+          ).toStrictEqual(201);
           const revoked = await call(
             seats.owner.token,
             "DELETE",
             `/api/organizations/${organization.id}/members/${stayer.id}/member`,
           );
-          assertEquals(revoked.status, 204);
-          assertEquals((await heldBy(stayer.id)).map((role) => role.id), [
-            roleId,
-          ]);
+          expect(revoked.status).toStrictEqual(204);
+          expect(
+            (await heldBy(stayer.id)).map((role) => role.id),
+          ).toStrictEqual([roleId]);
           assert(await holds(stayer.token, organization.id));
-          assertEquals(await offersOf(stayer.token), [
+          expect(await offersOf(stayer.token)).toStrictEqual([
             ownerOffer.body.membership.id,
           ]);
 
@@ -1850,8 +1816,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "DELETE",
             `/api/organizations/${organization.id}/members/${stayer.id}/owner`,
           );
-          assertEquals(withdrawn.status, 204);
-          assertEquals(await offersOf(stayer.token), []);
+          expect(withdrawn.status).toStrictEqual(204);
+          expect(await offersOf(stayer.token)).toStrictEqual([]);
           assert(
             await holds(stayer.token, organization.id),
             "withdrawing a pending offer ended a role",
@@ -1864,12 +1830,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       it("answers a new person's own metadata bucket, empty, and no cache keeps it", async () => {
         const caller = await person();
         const reply = await call(caller.token, "GET", "/api/account");
-        assertEquals(reply.status, 200);
-        assertEquals(reply.body, { userMetadata: {} });
-        assertStringIncludes(
-          reply.headers.get("cache-control") ?? "",
-          "no-store",
-        );
+        expect(reply.status).toStrictEqual(200);
+        expect(reply.body).toStrictEqual({ userMetadata: {} });
+        expect(reply.headers.get("cache-control") ?? "").toContain("no-store");
       });
 
       it("merges a patch shallowly, deleting keys set to null and keeping keys it does not name", async () => {
@@ -1877,31 +1840,29 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const first = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: { theme: "dark", locale: "en", nested: { a: 1 } },
         });
-        assertEquals(first.status, 200);
-        assertEquals(first.body, {
+        expect(first.status).toStrictEqual(200);
+        expect(first.body).toStrictEqual({
           userMetadata: { theme: "dark", locale: "en", nested: { a: 1 } },
         });
         const second = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: { locale: null, nested: { b: 2 } },
         });
-        assertEquals(second.body, {
+        expect(second.body).toStrictEqual({
           userMetadata: { theme: "dark", nested: { b: 2 } },
         });
         const read = await call(caller.token, "GET", "/api/account");
-        assertEquals(read.body, second.body);
+        expect(read.body).toStrictEqual(second.body);
       });
 
       it("refuses anything but a userMetadata object", async () => {
         const caller = await person();
-        for (
-          const body of [
-            {},
-            { userMetadata: ["dark"] },
-            { userMetadata: {}, metadata: { role: "admin" } },
-          ]
-        ) {
+        for (const body of [
+          {},
+          { userMetadata: ["dark"] },
+          { userMetadata: {}, metadata: { role: "admin" } },
+        ]) {
           const reply = await call(caller.token, "PATCH", "/api/account", body);
-          assertEquals(reply.status, 400, JSON.stringify(body));
+          expect(reply.status, JSON.stringify(body)).toStrictEqual(400);
         }
       });
 
@@ -1912,11 +1873,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const deepest = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: nested(8),
         });
-        assertEquals(deepest.status, 200);
+        expect(deepest.status).toStrictEqual(200);
         const tooDeep = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: nested(9),
         });
-        assertEquals(tooDeep.status, 400);
+        expect(tooDeep.status).toStrictEqual(400);
       });
 
       it("measures the metadata limit in UTF-8 bytes and preserves the bucket on refusal", async () => {
@@ -1925,9 +1886,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const reply = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: { notes },
         });
-        assertEquals(reply.status, 400);
+        expect(reply.status).toStrictEqual(400);
         const read = await call(caller.token, "GET", "/api/account");
-        assertEquals(read.body, { userMetadata: {} });
+        expect(read.body).toStrictEqual({ userMetadata: {} });
       });
 
       it("keeps the merged bucket to sixteen kilobytes, however small each patch is", async () => {
@@ -1936,18 +1897,18 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const first = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: { first: half },
         });
-        assertEquals(first.status, 200);
+        expect(first.status).toStrictEqual(200);
         const second = await call(caller.token, "PATCH", "/api/account", {
           userMetadata: { second: half },
         });
-        assertEquals(second.status, 400);
+        expect(second.status).toStrictEqual(400);
         const read = await call(caller.token, "GET", "/api/account");
-        assertEquals(read.body, { userMetadata: { first: half } });
+        expect(read.body).toStrictEqual({ userMetadata: { first: half } });
       });
 
       it("refuses a caller with no bearer token", async () => {
         const reply = await call(null, "GET", "/api/account");
-        assertEquals(reply.status, 401);
+        expect(reply.status).toStrictEqual(401);
       });
     });
 
@@ -1967,7 +1928,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           "/api/account/sessions",
         );
-        assertEquals(reply.status, 200);
+        expect(reply.status).toStrictEqual(200);
         return reply.body.sessions;
       }
 
@@ -1990,9 +1951,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         const first = await tenant.signIn(id);
         const second = await tenant.signIn(id);
         const listed = await sessionsOf(second.access_token);
-        assertEquals(listed.length, 2);
-        assertEquals(currentOf(listed), [listed[0].id]);
-        assertEquals(Object.keys(listed[0]).sort(), [
+        expect(listed.length).toStrictEqual(2);
+        expect(currentOf(listed)).toStrictEqual([listed[0].id]);
+        expect(Object.keys(listed[0]).sort()).toStrictEqual([
           "createdAt",
           "current",
           "id",
@@ -2001,27 +1962,30 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "userAgent",
         ]);
         const fromFirst = await sessionsOf(first.access_token);
-        assertEquals(
-          fromFirst.map((session) => session.id).sort(),
+        expect(fromFirst.map((session) => session.id).sort()).toStrictEqual(
           listed.map((session) => session.id).sort(),
         );
-        assertEquals(currentOf(fromFirst), [listed[1].id]);
+        expect(currentOf(fromFirst)).toStrictEqual([listed[1].id]);
       });
 
       it("leaves an earlier sign-in's credential live when another browser signs in", async () => {
         const id = await tenant.addUser([], { email: newEmail() });
         const first = await tenant.signIn(id);
         const second = await tenant.signIn(id);
-        assertEquals((await introspect(first.access_token)).active, true);
-        assertEquals((await introspect(second.access_token)).active, true);
+        expect((await introspect(first.access_token)).active).toStrictEqual(
+          true,
+        );
+        expect((await introspect(second.access_token)).active).toStrictEqual(
+          true,
+        );
         const fromFirst = await sessionsOf(first.access_token);
         const fromSecond = await sessionsOf(second.access_token);
-        assertEquals(fromFirst.length, 2);
-        assertEquals(currentOf(fromFirst).length, 1);
-        assertFalse(
+        expect(fromFirst.length).toStrictEqual(2);
+        expect(currentOf(fromFirst).length).toStrictEqual(1);
+        expect(
           currentOf(fromFirst)[0] === currentOf(fromSecond)[0],
           "two browsers' sign-ins shared one login session",
-        );
+        ).toBeFalsy();
       });
 
       it("keeps a refreshed credential on the session it was issued from", async () => {
@@ -2030,12 +1994,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         await tenant.signIn(id);
         const issuedFrom = currentOf(await sessionsOf(first.access_token));
         const response = await refresh(first.refresh_token);
-        assertEquals(response.status, 200);
+        expect(response.status).toStrictEqual(200);
         const refreshed = await response.json();
-        assertEquals(
+        expect(
           currentOf(await sessionsOf(refreshed.access_token)),
-          issuedFrom,
-        );
+        ).toStrictEqual(issuedFrom);
       });
 
       it("refuses to end the caller's own session", async () => {
@@ -2047,8 +2010,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/account/sessions/${own}`,
         );
-        assertEquals(reply.status, 409);
-        assertEquals(reply.body.reason, "current_session");
+        expect(reply.status).toStrictEqual(409);
+        expect(reply.body.reason).toStrictEqual("current_session");
       });
 
       it("ends another of the caller's sessions and every token issued from it", async () => {
@@ -2061,30 +2024,36 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/account/sessions/${otherSession}`,
         );
-        assertEquals(ended.status, 204);
-        assertEquals((await introspect(other.access_token)).active, false);
+        expect(ended.status).toStrictEqual(204);
+        expect((await introspect(other.access_token)).active).toStrictEqual(
+          false,
+        );
         const refused = await refresh(other.refresh_token);
         await refused.body?.cancel();
-        assertEquals(refused.status, 400);
+        expect(refused.status).toStrictEqual(400);
         const remaining = await sessionsOf(current.access_token);
-        assertEquals(remaining.map((session) => session.current), [true]);
+        expect(remaining.map((session) => session.current)).toStrictEqual([
+          true,
+        ]);
       });
 
       it("answers another person's session, an unknown id and a malformed id with 404", async () => {
         const caller = await person();
         const stranger = await person();
         const [theirs] = currentOf(await sessionsOf(stranger.token));
-        for (
-          const sessionId of [theirs, crypto.randomUUID(), "not-a-session"]
-        ) {
+        for (const sessionId of [
+          theirs,
+          crypto.randomUUID(),
+          "not-a-session",
+        ]) {
           const reply = await call(
             caller.token,
             "DELETE",
             `/api/account/sessions/${sessionId}`,
           );
-          assertEquals(reply.status, 404, sessionId);
+          expect(reply.status, sessionId).toStrictEqual(404);
         }
-        assertEquals((await sessionsOf(stranger.token)).length, 1);
+        expect((await sessionsOf(stranger.token)).length).toStrictEqual(1);
       });
 
       it("ends every other session and keeps the caller's", async () => {
@@ -2097,11 +2066,15 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "POST",
           "/api/account/sessions/revoke-others",
         );
-        assertEquals(reply.status, 200);
-        assertEquals(reply.body, { revoked: 2 });
+        expect(reply.status).toStrictEqual(200);
+        expect(reply.body).toStrictEqual({ revoked: 2 });
         const remaining = await sessionsOf(kept.access_token);
-        assertEquals(remaining.map((session) => session.current), [true]);
-        assertEquals((await introspect(first.access_token)).active, false);
+        expect(remaining.map((session) => session.current)).toStrictEqual([
+          true,
+        ]);
+        expect((await introspect(first.access_token)).active).toStrictEqual(
+          false,
+        );
       });
 
       it("ends a login session when a token issued from it is revoked", async () => {
@@ -2121,23 +2094,31 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           }),
         });
         await response.body?.cancel();
-        assertEquals(response.status, 200);
-        assertEquals((await introspect(revoked.access_token)).active, false);
+        expect(response.status).toStrictEqual(200);
+        expect((await introspect(revoked.access_token)).active).toStrictEqual(
+          false,
+        );
         const remaining = await sessionsOf(kept.access_token);
-        assertEquals(remaining.map((session) => session.current), [true]);
+        expect(remaining.map((session) => session.current)).toStrictEqual([
+          true,
+        ]);
       });
 
       it("revokes a login session's earlier credential when the same browser signs in again", async () => {
         const id = await tenant.addUser([], { email: newEmail() });
         const first = await tenant.signIn(id);
         const again = await tenant.signIn(id, undefined, { sameBrowser: true });
-        assertEquals((await introspect(first.access_token)).active, false);
+        expect((await introspect(first.access_token)).active).toStrictEqual(
+          false,
+        );
         const refused = await refresh(first.refresh_token);
         await refused.body?.cancel();
-        assertEquals(refused.status, 400);
-        assertEquals((await introspect(again.access_token)).active, true);
+        expect(refused.status).toStrictEqual(400);
+        expect((await introspect(again.access_token)).active).toStrictEqual(
+          true,
+        );
         const listed = await sessionsOf(again.access_token);
-        assertEquals(listed.map((session) => session.current), [true]);
+        expect(listed.map((session) => session.current)).toStrictEqual([true]);
       });
 
       it("refuses a body that names anything", async () => {
@@ -2148,7 +2129,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "/api/account/sessions/revoke-others",
           { userId: caller.id },
         );
-        assertEquals(reply.status, 400);
+        expect(reply.status).toStrictEqual(400);
       });
     });
 
@@ -2171,7 +2152,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "GET",
           "/api/account/linked-accounts",
         );
-        assertEquals(reply.status, 200);
+        expect(reply.status).toStrictEqual(200);
         return reply.body;
       }
 
@@ -2183,13 +2164,13 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           email,
         });
         const body = await linkedOf(caller.token);
-        assertEquals(body.hasPassword, true);
+        expect(body.hasPassword).toStrictEqual(true);
         assert(Array.isArray(body.connectable));
-        assertEquals(body.identities.length, 1);
+        expect(body.identities.length).toStrictEqual(1);
         const [identity] = body.identities;
-        assertEquals(identity.id, linked);
-        assertEquals(identity.provider, "github");
-        assertEquals(identity.email, email);
+        expect(identity.id).toStrictEqual(linked);
+        expect(identity.provider).toStrictEqual("github");
+        expect(identity.email).toStrictEqual(email);
         assert(identity.displayName, "a linked account names its provider");
         assert(identity.createdAt, "a linked account says when it was linked");
       });
@@ -2205,8 +2186,8 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "DELETE",
           `/api/account/linked-accounts/${linked}`,
         );
-        assertEquals(reply.status, 204);
-        assertEquals((await linkedOf(caller.token)).identities, []);
+        expect(reply.status).toStrictEqual(204);
+        expect((await linkedOf(caller.token)).identities).toStrictEqual([]);
       });
 
       it("refuses to disconnect a person's last way to sign in", async () => {
@@ -2219,18 +2200,17 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           email: null,
         });
         const { access_token } = await tenant.signIn(id);
-        assertEquals((await linkedOf(access_token)).hasPassword, false);
+        expect((await linkedOf(access_token)).hasPassword).toStrictEqual(false);
         const reply = await call<{ reason?: string }>(
           access_token,
           "DELETE",
           `/api/account/linked-accounts/${linked}`,
         );
-        assertEquals(reply.status, 409);
-        assertEquals(reply.body.reason, "last_method");
-        assertEquals(
+        expect(reply.status).toStrictEqual(409);
+        expect(reply.body.reason).toStrictEqual("last_method");
+        expect(
           (await linkedOf(access_token)).identities.map((entry) => entry.id),
-          [linked],
-        );
+        ).toStrictEqual([linked]);
       });
 
       it("answers another person's linked account, an unknown id and a malformed id with 404", async () => {
@@ -2246,12 +2226,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
             "DELETE",
             `/api/account/linked-accounts/${identityId}`,
           );
-          assertEquals(reply.status, 404, identityId);
+          expect(reply.status, identityId).toStrictEqual(404);
         }
-        assertEquals(
+        expect(
           (await linkedOf(stranger.token)).identities.map((entry) => entry.id),
-          [theirs],
-        );
+        ).toStrictEqual([theirs]);
       });
     });
 
@@ -2308,13 +2287,14 @@ export function runTenantContractTests(options: TenantContractOptions): void {
       ): Promise<Reply<MachineTokens>> {
         const response = await send(metadata.token_endpoint, {
           method: "POST",
-          headers: client.secret === undefined
-            ? {}
-            : { authorization: encodeBasicAuth(client.id, client.secret) },
+          headers:
+            client.secret === undefined
+              ? {}
+              : { authorization: encodeBasicAuth(client.id, client.secret) },
           body: new URLSearchParams({
             grant_type: "client_credentials",
-            ...client.secret === undefined ? { client_id: client.id } : {},
-            ...scope === undefined ? {} : { scope },
+            ...(client.secret === undefined ? { client_id: client.id } : {}),
+            ...(scope === undefined ? {} : { scope }),
           }),
         });
         const text = await response.text();
@@ -2330,7 +2310,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
         scope?: string,
       ): Promise<string> {
         const issued = await machineToken(client, scope);
-        assertEquals(issued.status, 200, JSON.stringify(issued.body));
+        expect(issued.status, JSON.stringify(issued.body)).toStrictEqual(200);
         assert(issued.body.access_token);
         return issued.body.access_token;
       }
@@ -2344,7 +2324,7 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           headers: { authorization: encodeBasicAuth(client.id, client.secret) },
           body: new URLSearchParams({ token: accessToken }),
         });
-        assertEquals(response.status, 200);
+        expect(response.status).toStrictEqual(200);
         return await response.json();
       }
 
@@ -2385,29 +2365,29 @@ export function runTenantContractTests(options: TenantContractOptions): void {
 
       it("issues a machine token with no refresh token, naming no person and no organization", async () => {
         const issued = await machineToken(reader, ORGANIZATIONS_READ);
-        assertEquals(issued.status, 200, JSON.stringify(issued.body));
-        assertEquals(issued.body.token_type, "Bearer");
+        expect(issued.status, JSON.stringify(issued.body)).toStrictEqual(200);
+        expect(issued.body.token_type).toStrictEqual("Bearer");
         assert(issued.body.access_token);
-        assertFalse(
+        expect(
           "refresh_token" in issued.body,
           "a machine token has no refresh token",
-        );
+        ).toBeFalsy();
         const claims = await introspectAs(reader, issued.body.access_token);
-        assertEquals(claims.active, true);
-        assertEquals(claims.client_id, reader.id);
-        assertEquals(claims.scope, ORGANIZATIONS_READ);
-        assertFalse(claims.sub, "a machine token names no person");
-        assertFalse(claims.username, "a machine token names no person");
-        assertFalse(
+        expect(claims.active).toStrictEqual(true);
+        expect(claims.client_id).toStrictEqual(reader.id);
+        expect(claims.scope).toStrictEqual(ORGANIZATIONS_READ);
+        expect(claims.sub, "a machine token names no person").toBeFalsy();
+        expect(claims.username, "a machine token names no person").toBeFalsy();
+        expect(
           claims.org_id,
           "a machine token belongs to no organization",
-        );
-        assertEquals(sorted(claims.permissions), []);
+        ).toBeFalsy();
+        expect(sorted(claims.permissions)).toStrictEqual([]);
       });
 
       it("answers another application introspecting a machine token that it is inactive", async () => {
         const claims = await introspectAs(unassigned, readerToken);
-        assertEquals(claims, { active: false });
+        expect(claims).toStrictEqual({ active: false });
       });
 
       it("refuses the grant to a public application, which has no secret to authenticate with", async () => {
@@ -2416,11 +2396,14 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           permissions: [],
           confidential: false,
         });
-        assertFalse(open.secret, "a public application is issued no secret");
+        expect(
+          open.secret,
+          "a public application is issued no secret",
+        ).toBeFalsy();
         const refused = await machineToken(open, ORGANIZATIONS_READ);
-        assertEquals(refused.status, 401, JSON.stringify(refused.body));
-        assertEquals(refused.body.error, "invalid_client");
-        assertFalse(refused.body.access_token);
+        expect(refused.status, JSON.stringify(refused.body)).toStrictEqual(401);
+        expect(refused.body.error).toStrictEqual("invalid_client");
+        expect(refused.body.access_token).toBeFalsy();
       });
 
       it("refuses the grant to an application not registered for it, and refuses a machine token an OIDC scope or one outside its allowlist", async () => {
@@ -2428,17 +2411,15 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           tenant.client,
           ORGANIZATIONS_READ,
         );
-        assertEquals(interactive.status, 401);
-        assertEquals(interactive.body.error, "unauthorized_client");
-        for (
-          const scope of [
-            "openid",
-            `${ORGANIZATIONS_READ} identity:organizations:write`,
-          ]
-        ) {
+        expect(interactive.status).toStrictEqual(401);
+        expect(interactive.body.error).toStrictEqual("unauthorized_client");
+        for (const scope of [
+          "openid",
+          `${ORGANIZATIONS_READ} identity:organizations:write`,
+        ]) {
           const refused = await machineToken(reader, scope);
-          assertEquals(refused.status, 400, scope);
-          assertEquals(refused.body.error, "invalid_scope", scope);
+          expect(refused.status, scope).toStrictEqual(400);
+          expect(refused.body.error, scope).toStrictEqual("invalid_scope");
         }
       });
 
@@ -2453,58 +2434,55 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           }),
         });
         const body = await response.json();
-        assertEquals(response.status, 400, JSON.stringify(body));
-        assertEquals(body.error, "invalid_request");
+        expect(response.status, JSON.stringify(body)).toStrictEqual(400);
+        expect(body.error).toStrictEqual("invalid_request");
       });
 
       it("refuses a machine token wherever the tenant answers for a person", async () => {
         const checked = await ask(readerToken, "/api/check", {
           permissions: ["contract:tenant"],
         });
-        assertEquals(checked.status, 403);
-        assertEquals(checked.body.reason, "machine_token");
+        expect(checked.status).toStrictEqual(403);
+        expect(checked.body.reason).toStrictEqual("machine_token");
         const batch = await ask(readerToken, "/api/check/batch", {
           permissions: ["contract:read"],
           resource: { type: "contract_document", ids: ["direct"] },
         });
-        assertEquals(batch.status, 403);
-        assertEquals(batch.body.reason, "machine_token");
+        expect(batch.status).toStrictEqual(403);
+        expect(batch.body.reason).toStrictEqual("machine_token");
         for (const path of ["/api/memberships", "/api/account"]) {
           const reply = await call<{ reason?: string }>(
             readerToken,
             "GET",
             path,
           );
-          assertEquals(reply.status, 403, path);
-          assertEquals(reply.body.reason, "machine_token", path);
+          expect(reply.status, path).toStrictEqual(403);
+          expect(reply.body.reason, path).toStrictEqual("machine_token");
         }
         const organizations = await call(
           readerToken,
           "GET",
           "/api/organizations",
         );
-        assertEquals(organizations.status, 403);
+        expect(organizations.status).toStrictEqual(403);
         const userinfo = await send(userinfoEndpoint, {
           headers: { authorization: `Bearer ${readerToken}` },
         });
         await userinfo.body?.cancel();
-        assertEquals(userinfo.status, 401);
+        expect(userinfo.status).toStrictEqual(401);
       });
 
       it("lists who holds a grant on a resource, roles named, and an empty list where nobody does", async () => {
         const direct = await grantsOn(readerToken, DIRECT);
-        assertEquals(direct.status, 200, JSON.stringify(direct.body));
-        assertStringIncludes(
-          direct.headers.get("cache-control") ?? "",
-          "no-store",
-        );
-        assertEquals(direct.body.resource, {
+        expect(direct.status, JSON.stringify(direct.body)).toStrictEqual(200);
+        expect(direct.headers.get("cache-control") ?? "").toContain("no-store");
+        expect(direct.body.resource).toStrictEqual({
           type: "contract_document",
           id: "direct",
         });
-        assertEquals(direct.body.grants.length, 1);
+        expect(direct.body.grants.length).toStrictEqual(1);
         const [held] = direct.body.grants;
-        assertEquals(Object.keys(held).sort(), [
+        expect(Object.keys(held).sort()).toStrictEqual([
           "builtInRole",
           "id",
           "roleId",
@@ -2516,42 +2494,43 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           "subjectRole",
           "subjectType",
         ]);
-        assertEquals(held.subjectType, "user");
-        assertEquals(held.subjectId, people.outsider);
-        assertEquals(held.subjectRole, null);
-        assertEquals(held.subjectActive, true);
+        expect(held.subjectType).toStrictEqual("user");
+        expect(held.subjectId).toStrictEqual(people.outsider);
+        expect(held.subjectRole).toStrictEqual(null);
+        expect(held.subjectActive).toStrictEqual(true);
         assert(held.subjectName, "a grant names its holder");
         assert(held.id, "a grant has an id");
         assert(held.roleId, "a grant names its role");
         assert(held.roleSlug, "a grant names its role's slug");
         assert(held.roleName, "a grant names its role's name");
-        assertEquals(held.builtInRole, null);
+        expect(held.builtInRole).toStrictEqual(null);
 
         const shared = await grantsOn(
           readerToken,
           "type=contract_document&id=shared",
         );
-        assertEquals(shared.status, 200);
-        assertEquals(
-          shared.body.grants.map((
-            grant,
-          ) => [grant.subjectType, grant.subjectId]),
-          [["organization", organizations.home]],
-        );
+        expect(shared.status).toStrictEqual(200);
+        expect(
+          shared.body.grants.map((grant) => [
+            grant.subjectType,
+            grant.subjectId,
+          ]),
+        ).toStrictEqual([["organization", organizations.home]]);
 
         const nobody = await grantsOn(
           readerToken,
           `type=contract_document&id=nobody-${crypto.randomUUID()}`,
         );
-        assertEquals(nobody.status, 200);
-        assertEquals(nobody.body.grants, []);
+        expect(nobody.status).toStrictEqual(200);
+        expect(nobody.body.grants).toStrictEqual([]);
       });
 
       it("lists the grants on one resource in role-name order", async () => {
         const ranked = await grantsOn(readerToken, RANKED);
-        assertEquals(ranked.status, 200, JSON.stringify(ranked.body));
-        assertEquals(
+        expect(ranked.status, JSON.stringify(ranked.body)).toStrictEqual(200);
+        expect(
           ranked.body.grants.map((grant) => grant.subjectId).sort(),
+        ).toStrictEqual(
           [
             people.member,
             people.outsider,
@@ -2561,13 +2540,11 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           ].sort(),
         );
         const names = ranked.body.grants.map((grant) => grant.roleName);
-        assertEquals(
+        expect(
           new Set(names).size,
-          names.length,
           "each grant confers a role of its own",
-        );
-        assertEquals(
-          names,
+        ).toStrictEqual(names.length);
+        expect(names).toStrictEqual(
           [...names].sort((a, b) => a.localeCompare(b)),
         );
       });
@@ -2577,22 +2554,26 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           unassigned,
           ORGANIZATIONS_READ,
         );
-        assertEquals((await grantsOn(withoutPermission, DIRECT)).status, 404);
+        expect(
+          (await grantsOn(withoutPermission, DIRECT)).status,
+        ).toStrictEqual(404);
         const withoutScope = await issuedTo(reader);
-        assertEquals((await grantsOn(withoutScope, DIRECT)).status, 404);
+        expect((await grantsOn(withoutScope, DIRECT)).status).toStrictEqual(
+          404,
+        );
         const { access_token } = await tenant.signIn(people.member);
         const person = await call<{ reason?: string }>(
           access_token,
           "GET",
           `/api/resource-grants?${DIRECT}`,
         );
-        assertEquals(person.status, 403);
-        assertEquals(person.body.reason, "user_token");
-        assertEquals((await grantsOn(null, DIRECT)).status, 401);
+        expect(person.status).toStrictEqual(403);
+        expect(person.body.reason).toStrictEqual("user_token");
+        expect((await grantsOn(null, DIRECT)).status).toStrictEqual(401);
       });
 
       function refusedFields(reply: Reply<unknown>): string[] {
-        assertEquals(reply.status, 400, JSON.stringify(reply.body));
+        expect(reply.status, JSON.stringify(reply.body)).toStrictEqual(400);
         const { fieldErrors } = reply.body as {
           fieldErrors?: Record<string, string>;
         };
@@ -2604,9 +2585,9 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           readerToken,
           "type=contract_unregistered&id=direct",
         );
-        assertEquals(refusedFields(unregistered), ["type"]);
+        expect(refusedFields(unregistered)).toStrictEqual(["type"]);
         const missing = await grantsOn(readerToken, "type=contract_document");
-        assertEquals(refusedFields(missing), ["resource"]);
+        expect(refusedFields(missing)).toStrictEqual(["resource"]);
       });
 
       it("bounds the type to 64 characters and the id to 255, refusing ASCII control characters and no other", async () => {
@@ -2614,24 +2595,24 @@ export function runTenantContractTests(options: TenantContractOptions): void {
           readerToken,
           `type=${"t".repeat(65)}&id=direct`,
         );
-        assertEquals(refusedFields(long), ["resource"]);
+        expect(refusedFields(long)).toStrictEqual(["resource"]);
         const longest = await grantsOn(
           readerToken,
           `type=${"t".repeat(64)}&id=direct`,
         );
-        assertEquals(refusedFields(longest), ["type"]);
+        expect(refusedFields(longest)).toStrictEqual(["type"]);
         const query = (id: string) =>
           `type=contract_document&id=${encodeURIComponent(id)}`;
         const wide = await grantsOn(readerToken, query("i".repeat(256)));
-        assertEquals(refusedFields(wide), ["resource"]);
+        expect(refusedFields(wide)).toStrictEqual(["resource"]);
         const widest = await grantsOn(readerToken, query("i".repeat(255)));
-        assertEquals(widest.status, 200, JSON.stringify(widest.body));
-        assertEquals(widest.body.grants, []);
+        expect(widest.status, JSON.stringify(widest.body)).toStrictEqual(200);
+        expect(widest.body.grants).toStrictEqual([]);
         const control = await grantsOn(readerToken, query("tab\there"));
-        assertEquals(refusedFields(control), ["resource"]);
+        expect(refusedFields(control)).toStrictEqual(["resource"]);
         const unicode = await grantsOn(readerToken, query("next\u0085line"));
-        assertEquals(unicode.status, 200, JSON.stringify(unicode.body));
-        assertEquals(unicode.body.grants, []);
+        expect(unicode.status, JSON.stringify(unicode.body)).toStrictEqual(200);
+        expect(unicode.body.grants).toStrictEqual([]);
       });
     });
   });

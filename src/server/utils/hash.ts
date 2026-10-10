@@ -3,7 +3,7 @@
  * @module
  */
 
-import { encodeHex } from "@std/encoding/hex";
+import { encodeHex } from "../../utils/_encoding.ts";
 
 /** Hashes a high-entropy string (UUID, token, secret) using SHA-256. */
 export async function sha256Hash(value: string): Promise<string> {

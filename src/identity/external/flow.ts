@@ -17,7 +17,7 @@ import type {
 } from "./provider.ts";
 
 /** Default {@link ExternalAuthFlowOptions.maxTransientAgeMs}: 10 minutes. */
-export const DEFAULT_MAX_TRANSIENT_AGE_MS = 10 * 60 * 1000;
+export const DEFAULT_MAX_TRANSIENT_AGE_MS: number = 10 * 60 * 1000;
 
 /** Options for {@link ExternalAuthFlow}. */
 export interface ExternalAuthFlowOptions {
@@ -101,8 +101,8 @@ export class ExternalAuthFlow {
   /** Creates a flow for one configured provider. */
   constructor(options: ExternalAuthFlowOptions) {
     this.provider = options.provider;
-    this.#maxTransientAgeMs = options.maxTransientAgeMs ??
-      DEFAULT_MAX_TRANSIENT_AGE_MS;
+    this.#maxTransientAgeMs =
+      options.maxTransientAgeMs ?? DEFAULT_MAX_TRANSIENT_AGE_MS;
   }
 
   /**

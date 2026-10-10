@@ -23,10 +23,11 @@
  *
  * @example
  * ```ts
+ * import { it } from "vitest";
  * import { DirectClient } from "@udibo/oauth2/client";
  * import { createMemoryAuthorizationServer } from "@udibo/oauth2/testing";
  *
- * Deno.test("client credentials grant", async () => {
+ * it("client credentials grant", async () => {
  *   const oauth = await createMemoryAuthorizationServer({
  *     issuer: "http://localhost",
  *     clients: [{
@@ -231,11 +232,7 @@ export interface MemoryAuthorizationServerHarness<
    */
   addUser(user: U, password: string): Promise<void>;
   /** Convenience wrapper around `services.clientService.add`. */
-  addClient(
-    client: C,
-    secret?: string,
-    ownerUserId?: string,
-  ): Promise<void>;
+  addClient(client: C, secret?: string, ownerUserId?: string): Promise<void>;
 }
 
 const DEFAULT_PATHS = {
@@ -328,9 +325,7 @@ export async function createMemoryAuthorizationServer<
   }
 
   const endpointOverrides = options.endpoints ?? {};
-  const endpoint = (
-    name: keyof typeof DEFAULT_PATHS,
-  ): string | undefined => {
+  const endpoint = (name: keyof typeof DEFAULT_PATHS): string | undefined => {
     const override = endpointOverrides[name];
     if (override === null) return undefined;
     if (override !== undefined) return override;
@@ -377,18 +372,18 @@ export async function createMemoryAuthorizationServer<
     authorize: (url, authorizeOptions = {}) => {
       const authenticateUser: AuthenticateUserFn<U> =
         authorizeOptions.authenticateUser ??
-          (() => {
-            const user = authorizeOptions.user ?? defaultUser;
-            if (!user) {
-              return Promise.reject(
-                new Error(
-                  "authorize() has no user to authenticate as: seed a user, " +
-                    "or pass `user`/`authenticateUser`",
-                ),
-              );
-            }
-            return Promise.resolve({ user });
-          });
+        (() => {
+          const user = authorizeOptions.user ?? defaultUser;
+          if (!user) {
+            return Promise.reject(
+              new Error(
+                "authorize() has no user to authenticate as: seed a user, " +
+                  "or pass `user`/`authenticateUser`",
+              ),
+            );
+          }
+          return Promise.resolve({ user });
+        });
       return server.handleAuthorizeRequest(
         new Request(String(url)),
         authenticateUser,

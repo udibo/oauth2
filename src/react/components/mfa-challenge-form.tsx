@@ -48,8 +48,7 @@ export interface MfaChallengeLabels {
 }
 
 /** Props for {@link MfaChallengeForm}. */
-export interface MfaChallengeFormProps
-  extends BaseAuthFormProps<MfaChallengeValues> {
+export interface MfaChallengeFormProps extends BaseAuthFormProps<MfaChallengeValues> {
   /** Offer the "use a recovery code" toggle. Default: `true`. */
   allowRecoveryCode?: boolean;
   /** Text overrides. */
@@ -118,9 +117,11 @@ export function MfaChallengeForm(props: MfaChallengeFormProps): ReactNode {
     >
       <TextField
         fieldProps={form.getFieldProps("code")}
-        label={isRecovery
-          ? labels?.recoveryCode ?? "Recovery code"
-          : labels?.code ?? "Authentication code"}
+        label={
+          isRecovery
+            ? (labels?.recoveryCode ?? "Recovery code")
+            : (labels?.code ?? "Authentication code")
+        }
         autoComplete={isRecovery ? "off" : "one-time-code"}
         required
         error={form.errors.code}
@@ -130,21 +131,19 @@ export function MfaChallengeForm(props: MfaChallengeFormProps): ReactNode {
         label={labels?.submit ?? "Verify"}
         submittingLabel={labels?.submitting ?? "Verifying…"}
       />
-      {allowRecoveryCode
-        ? (
-          <button
-            type="button"
-            onClick={toggleMethod}
-            data-oauth2-secondary=""
-            data-oauth2-toggle-recovery=""
-            className={classNames.secondary}
-          >
-            {isRecovery
-              ? labels?.useAuthenticator ?? "Use your authenticator app"
-              : labels?.useRecovery ?? "Use a recovery code"}
-          </button>
-        )
-        : null}
+      {allowRecoveryCode ? (
+        <button
+          type="button"
+          onClick={toggleMethod}
+          data-oauth2-secondary=""
+          data-oauth2-toggle-recovery=""
+          className={classNames.secondary}
+        >
+          {isRecovery
+            ? (labels?.useAuthenticator ?? "Use your authenticator app")
+            : (labels?.useRecovery ?? "Use a recovery code")}
+        </button>
+      ) : null}
     </AuthFormShell>
   );
 }

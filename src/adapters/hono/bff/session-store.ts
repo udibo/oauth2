@@ -74,8 +74,10 @@ export interface BackchannelLogoutStore {
 export function supportsBackchannelLogout(
   store: SessionStore,
 ): store is SessionStore & BackchannelLogoutStore {
-  return typeof (store as Partial<BackchannelLogoutStore>).destroyByLogout ===
-    "function";
+  return (
+    typeof (store as Partial<BackchannelLogoutStore>).destroyByLogout ===
+    "function"
+  );
 }
 
 /**
@@ -148,7 +150,8 @@ export interface SessionStore {
  * persistent store in production.
  */
 export class MemorySessionStore
-  implements SessionStore, BackchannelLogoutStore {
+  implements SessionStore, BackchannelLogoutStore
+{
   #sessions = new Map<string, SessionData>();
 
   /** Stores the session under a fresh random id and returns it as the cookie value. */
@@ -185,15 +188,14 @@ export class MemorySessionStore
    * when given, otherwise every session for `sub`. Returns the number
    * destroyed.
    */
-  destroyByLogout(
-    criteria: { sub?: string; sid?: string },
-  ): Promise<number> {
+  destroyByLogout(criteria: { sub?: string; sid?: string }): Promise<number> {
     const { sub, sid } = criteria;
     let destroyed = 0;
     for (const [id, data] of this.#sessions) {
-      const match = sid !== undefined
-        ? data.sid === sid
-        : sub !== undefined && data.user?.sub === sub;
+      const match =
+        sid !== undefined
+          ? data.sid === sid
+          : sub !== undefined && data.user?.sub === sub;
       if (match) {
         this.#sessions.delete(id);
         destroyed++;
@@ -248,10 +250,13 @@ interface SealedSession {
 }
 
 function isSealedSession(value: unknown): value is SealedSession {
-  return typeof value === "object" && value !== null &&
+  return (
+    typeof value === "object" &&
+    value !== null &&
     typeof (value as SealedSession).issuedAt === "number" &&
     typeof (value as SealedSession).data === "object" &&
-    (value as SealedSession).data !== null;
+    (value as SealedSession).data !== null
+  );
 }
 
 /**
@@ -278,13 +283,14 @@ function isSealedSession(value: unknown): value is SealedSession {
  * // Deploy with the new secret first, the old one second: new cookies seal
  * // under NEW, cookies still sealed under OLD keep unsealing until you drop it.
  * const store = new EncryptedCookieSessionStore({
- *   secret: [Deno.env.get("SESSION_SECRET")!, Deno.env.get("SESSION_SECRET_OLD")!],
+ *   secret: [process.env.SESSION_SECRET!, process.env.SESSION_SECRET_OLD!],
  *   maxAgeMs: 7 * 24 * 60 * 60 * 1000,
  * });
  * ```
  */
 export class EncryptedCookieSessionStore
-  implements SessionStore, BoundedSessionStore {
+  implements SessionStore, BoundedSessionStore
+{
   #secrets: Array<string | Uint8Array>;
   #keyPromises: Array<Promise<CryptoKey> | undefined>;
   #maxAgeMs: number;
@@ -328,7 +334,7 @@ export class EncryptedCookieSessionStore
   }
 
   #key(index: number): Promise<CryptoKey> {
-    return this.#keyPromises[index] ??= deriveAesKey(this.#secrets[index]);
+    return (this.#keyPromises[index] ??= deriveAesKey(this.#secrets[index]));
   }
 
   /** Encrypts the session into the cookie value under the current secret; there is no server-side record. */

@@ -374,7 +374,7 @@ const RESOURCE_GRANTS_READ: FakeTenantMachinePermission =
   "resource_grants.read";
 const RESOURCE_TYPE_MAX_LENGTH = 64;
 const RESOURCE_ID_MAX_LENGTH = 255;
-// deno-lint-ignore no-control-regex
+// oxlint-disable-next-line no-control-regex
 const ASCII_CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
 const UNSTATED_ALLOWLIST =
   "A client_credentials application has to state the scopes its tokens may " +
@@ -502,18 +502,23 @@ interface ResourceGrant extends FakeTenantGrant {
   roleId: string | null;
 }
 
-class ConfidentialClientCredentialsGrant
-  extends ClientCredentialsGrant<FakeTenantClient, FakeTenantUser> {
+class ConfidentialClientCredentialsGrant extends ClientCredentialsGrant<
+  FakeTenantClient,
+  FakeTenantUser
+> {
   constructor(
     options: ClientCredentialsGrantOptions<
       FakeTenantClient,
       FakeTenantUser,
       BasicScope
     >,
-    readonly isConfidential: (client: FakeTenantClient) => boolean,
+    isConfidential: (client: FakeTenantClient) => boolean,
   ) {
     super(options);
+    this.isConfidential = isConfidential;
   }
+
+  readonly isConfidential: (client: FakeTenantClient) => boolean;
 
   override async getAuthenticatedClient(
     request: Request,
@@ -528,8 +533,7 @@ class ConfidentialClientCredentialsGrant
 }
 
 function machineScopeCeiling(client: FakeTenantClient): readonly string[] {
-  return client.scopes?.filter((scope) => MACHINE_SCOPES.includes(scope)) ??
-    [];
+  return client.scopes?.filter((scope) => MACHINE_SCOPES.includes(scope)) ?? [];
 }
 
 function isBuiltInRole(slug: string): boolean {
@@ -539,20 +543,17 @@ function isBuiltInRole(slug: string): boolean {
 function roleSlugOf(permissions: string[]): string {
   const slug = permissions
     .map((permission) =>
-      permission.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
-        /^-+|-+$/g,
-        "",
-      )
+      permission
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, ""),
     )
     .filter(Boolean)
     .join("-");
   return slug || "grant";
 }
 
-type Route = (
-  request: Request,
-  params: string[],
-) => Promise<Response>;
+type Route = (request: Request, params: string[]) => Promise<Response>;
 
 class TenantTokenService extends MemoryTokenService<
   FakeTenantClient,
@@ -563,13 +564,13 @@ class TenantTokenService extends MemoryTokenService<
     options: ConstructorParameters<
       typeof MemoryTokenService<FakeTenantClient, FakeTenantUser, BasicScope>
     >[0],
-    readonly issuanceOf: (userId: string) => Issuance | undefined,
-    readonly recordCredential: (
+    issuanceOf: (userId: string) => Issuance | undefined,
+    recordCredential: (
       accessToken: string,
       issuance: Issuance,
       client: FakeTenantClient,
     ) => void,
-    readonly mintJwt: (
+    mintJwt: (
       client: FakeTenantClient,
       user: FakeTenantUser | undefined,
       scope: BasicScope | null | undefined,
@@ -577,7 +578,23 @@ class TenantTokenService extends MemoryTokenService<
     ) => Promise<string>,
   ) {
     super(options);
+    this.issuanceOf = issuanceOf;
+    this.recordCredential = recordCredential;
+    this.mintJwt = mintJwt;
   }
+
+  readonly issuanceOf: (userId: string) => Issuance | undefined;
+  readonly recordCredential: (
+    accessToken: string,
+    issuance: Issuance,
+    client: FakeTenantClient,
+  ) => void;
+  readonly mintJwt: (
+    client: FakeTenantClient,
+    user: FakeTenantUser | undefined,
+    scope: BasicScope | null | undefined,
+    organizationId: string | undefined,
+  ) => Promise<string>;
 
   override acceptedScope(
     client: FakeTenantClient,
@@ -601,9 +618,10 @@ class TenantTokenService extends MemoryTokenService<
     scope?: BasicScope | null,
   ): Promise<string> {
     const issuance = (user ? this.issuanceOf(user.id) : undefined) ?? {};
-    const accessToken = client.accessTokenFormat === "jwt"
-      ? await this.mintJwt(client, user, scope, issuance.organizationId)
-      : await super.generateAccessToken(client, user, scope);
+    const accessToken =
+      client.accessTokenFormat === "jwt"
+        ? await this.mintJwt(client, user, scope, issuance.organizationId)
+        : await super.generateAccessToken(client, user, scope);
     this.recordCredential(accessToken, issuance, client);
     return accessToken;
   }
@@ -614,16 +632,20 @@ function problem(
   detail: string,
   extensions: Record<string, unknown> = {},
 ): Response {
-  return Response.json({ status, detail, ...extensions }, {
-    status,
-    headers: { "content-type": "application/problem+json" },
-  });
+  return Response.json(
+    { status, detail, ...extensions },
+    {
+      status,
+      headers: { "content-type": "application/problem+json" },
+    },
+  );
 }
 
 function asPermissions(value: unknown): string[] | undefined {
   const list = typeof value === "string" ? [value] : value;
   if (
-    !Array.isArray(list) || list.length === 0 ||
+    !Array.isArray(list) ||
+    list.length === 0 ||
     list.length > MAX_PERMISSIONS ||
     !list.every((entry) => typeof entry === "string" && entry.length > 0)
   ) {
@@ -680,7 +702,9 @@ function metadataProblem(value: unknown): string | undefined {
 
 function nameProblem(value: unknown): string | undefined {
   if (
-    typeof value !== "string" || value.length < 1 || value.length > 100 ||
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 100 ||
     CONTROL_CHARACTERS.test(value)
   ) {
     return "name must be 1 to 100 characters with no control characters";
@@ -714,7 +738,7 @@ function decodeCursor(
   try {
     const cursor = JSON.parse(atob(value));
     return typeof cursor?.id === "string" &&
-        (cursor.direction === "next" || cursor.direction === "prev")
+      (cursor.direction === "next" || cursor.direction === "prev")
       ? cursor
       : null;
   } catch {
@@ -736,7 +760,7 @@ function page<T extends { id: string }>(
     ? Math.min(Math.max(Math.floor(requested), 1), MAX_PAGE_SIZE)
     : DEFAULT_PAGE_SIZE;
   const sorted = [...rows].sort((a, b) =>
-    a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   );
   const cursor = decodeCursor(params.get("cursor"));
   let data: T[];
@@ -788,18 +812,22 @@ function noStore(response: Response): Response {
  *
  * @example
  * ```ts
+ * import type { AddressInfo } from "node:net";
+ * import { serve } from "@hono/node-server";
  * import { createFakeTenant } from "@udibo/oauth2/testing";
  *
- * const server = Deno.serve(
- *   { hostname: "127.0.0.1", port: 0, onListen() {} },
- *   (request) => tenant.fetch(request),
- * );
+ * const server = serve({
+ *   fetch: (request) => tenant.fetch(request),
+ *   hostname: "127.0.0.1",
+ *   port: 0,
+ * });
+ * const { port } = server.address() as AddressInfo;
  * const tenant = await createFakeTenant({
- *   issuer: `http://127.0.0.1:${server.addr.port}`,
+ *   issuer: `http://127.0.0.1:${port}`,
  * });
  * await tenant.addUser({ id: "user-1", username: "ada" });
  * tenant.signInAs("user-1");
- * await server.shutdown();
+ * server.close();
  * ```
  */
 export async function createFakeTenant(
@@ -826,9 +854,12 @@ export async function createFakeTenant(
 
   const acceptedRoles = (organizationId: string | undefined, userId: string) =>
     organizationId
-      ? organizations.get(organizationId)?.grants
-        .filter((grant) => grant.userId === userId && grant.acceptedAt)
-        .map((grant) => grant.role) ?? []
+      ? (organizations
+          .get(organizationId)
+          ?.grants.filter(
+            (grant) => grant.userId === userId && grant.acceptedAt,
+          )
+          .map((grant) => grant.role) ?? [])
       : [];
 
   const isMember = (organizationId: string | undefined, userId: string) =>
@@ -845,26 +876,27 @@ export async function createFakeTenant(
     [...definedRoles.values()].find((role) => role.id === roleId);
 
   const appRolesHeld = (organizationId: string, userId: string) =>
-    appRoles.filter((assignment) =>
-      assignment.organizationId === organizationId &&
-      assignment.userId === userId
+    appRoles.filter(
+      (assignment) =>
+        assignment.organizationId === organizationId &&
+        assignment.userId === userId,
     );
 
   const appRolePermissions = (organizationId: string, userId: string) =>
-    appRolesHeld(organizationId, userId).flatMap((assignment) =>
-      definedRoleById(assignment.roleId)?.permissions ?? []
+    appRolesHeld(organizationId, userId).flatMap(
+      (assignment) => definedRoleById(assignment.roleId)?.permissions ?? [],
     );
 
   const permissionsIn = (userId: string, organizationId?: string) =>
     new Set([
-      ...users.get(userId)?.permissions ?? [],
-      ...isMember(organizationId, userId)
+      ...(users.get(userId)?.permissions ?? []),
+      ...(isMember(organizationId, userId)
         ? [
-          ...organizations.get(organizationId!)!.permissions.get(userId) ??
-            [],
-          ...appRolePermissions(organizationId!, userId),
-        ]
-        : [],
+            ...(organizations.get(organizationId!)!.permissions.get(userId) ??
+              []),
+            ...appRolePermissions(organizationId!, userId),
+          ]
+        : []),
     ]);
 
   const organizationClaims = (userId: string, organizationId?: string) => {
@@ -898,9 +930,8 @@ export async function createFakeTenant(
     (accessToken, issuance, client) =>
       credentials.set(accessToken, {
         ...issuance,
-        boundSessionId: client.type === "third-party"
-          ? undefined
-          : issuance.sessionId,
+        boundSessionId:
+          client.type === "third-party" ? undefined : issuance.sessionId,
       }),
     (client, user, scope, organizationId) =>
       createJwtAccessTokenGenerator({
@@ -909,9 +940,9 @@ export async function createFakeTenant(
         audience: client.audience ?? client.id,
         userClaims: user
           ? () => ({
-            username: user.username,
-            ...authorizationClaims(user.id, organizationId),
-          })
+              username: user.username,
+              ...authorizationClaims(user.id, organizationId),
+            })
           : undefined,
       })(client, user, scope),
   );
@@ -965,7 +996,7 @@ export async function createFakeTenant(
       preferred_username: user.username,
       name: user.name,
       email: user.email,
-      email_verified: user.email ? user.emailVerified ?? true : undefined,
+      email_verified: user.email ? (user.emailVerified ?? true) : undefined,
       ...organizationClaims(
         user.id,
         signedIn?.userId === user.id ? signedIn.organizationId : undefined,
@@ -976,9 +1007,9 @@ export async function createFakeTenant(
     introspectionClaims: (token) =>
       token.user
         ? authorizationClaims(
-          token.user.id,
-          credentials.get(token.accessToken)?.organizationId,
-        )
+            token.user.id,
+            credentials.get(token.accessToken)?.organizationId,
+          )
         : {},
   });
 
@@ -1034,9 +1065,10 @@ export async function createFakeTenant(
     const held = permissionsIn(userId);
     for (const grant of grants) {
       if (grant.resource.type !== type || grant.resource.id !== id) continue;
-      const admits = grant.subject.type === "user"
-        ? grant.subject.id === userId
-        : isMember(grant.subject.id, userId);
+      const admits =
+        grant.subject.type === "user"
+          ? grant.subject.id === userId
+          : isMember(grant.subject.id, userId);
       if (admits) grant.permissions.forEach((p) => held.add(p));
     }
     return held;
@@ -1050,7 +1082,7 @@ export async function createFakeTenant(
   const check = async (request: Request): Promise<Response> => {
     const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return caller;
-    const body = await request.json().catch(() => null) as {
+    const body = (await request.json().catch(() => null)) as {
       permissions?: unknown;
       resource?: { type?: unknown; id?: unknown };
     } | null;
@@ -1098,7 +1130,7 @@ export async function createFakeTenant(
   const checkBatch = async (request: Request): Promise<Response> => {
     const caller = await authenticated(request, personOnly);
     if (caller instanceof Response) return caller;
-    const body = await request.json().catch(() => null) as {
+    const body = (await request.json().catch(() => null)) as {
       permissions?: unknown;
       resource?: { type?: unknown; ids?: unknown };
     } | null;
@@ -1107,7 +1139,9 @@ export async function createFakeTenant(
     const type = body?.resource?.type;
     const ids = body?.resource?.ids;
     if (
-      typeof type !== "string" || !Array.isArray(ids) || ids.length === 0 ||
+      typeof type !== "string" ||
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
       ids.length > MAX_BATCH_IDS ||
       !ids.every((id) => typeof id === "string" && id.length > 0)
     ) {
@@ -1133,13 +1167,14 @@ export async function createFakeTenant(
 
   const soleOrganizationOf = (userId: string) => {
     const joined = [...organizations.values()].filter((organization) =>
-      isMember(organization.id, userId)
+      isMember(organization.id, userId),
     );
     return joined.length === 1 ? joined[0].id : undefined;
   };
 
   const requestedOrganization = (requested: string, userId: string) => {
-    const organization = organizations.get(requested) ??
+    const organization =
+      organizations.get(requested) ??
       [...organizations.values()].find((o) => o.slug === requested);
     if (!organization || !isMember(organization.id, userId)) {
       throw new InvalidRequestError("organization is not available");
@@ -1166,8 +1201,8 @@ export async function createFakeTenant(
   const continuedSession = (request: Request, userId: string) => {
     const secret = cookieValue(request, LOGIN_SESSION_COOKIE);
     if (!secret) return undefined;
-    return [...loginSessions.values()].find((session) =>
-      session.secret === secret && session.userId === userId
+    return [...loginSessions.values()].find(
+      (session) => session.secret === secret && session.userId === userId,
     );
   };
 
@@ -1192,7 +1227,7 @@ export async function createFakeTenant(
       "Path=/",
       "HttpOnly",
       "SameSite=Lax",
-      ...issuer.startsWith("https:") ? ["Secure"] : [],
+      ...(issuer.startsWith("https:") ? ["Secure"] : []),
     ].join("; ");
 
   const authorize = async (request: Request): Promise<Response> => {
@@ -1200,25 +1235,22 @@ export async function createFakeTenant(
     const requested = new URL(request.url).searchParams.get("organization");
     let issued: SignIn | undefined;
     let started: LoginSession | undefined;
-    const response = await server.handleAuthorizeRequest(
-      request,
-      () => {
-        const user = chosen ? users.get(chosen.userId) : undefined;
-        if (!chosen || !user) return Promise.resolve(null);
-        const organizationId = requested
-          ? requestedOrganization(requested, user.id)
-          : chosen.organizationId ?? soleOrganizationOf(user.id);
-        const continued = continuedSession(request, user.id);
-        if (continued) continued.lastActiveAt = new Date();
-        else started = startSession(chosen);
-        issued = {
-          userId: user.id,
-          organizationId,
-          sessionId: (continued ?? started)!.id,
-        };
-        return Promise.resolve({ user });
-      },
-    );
+    const response = await server.handleAuthorizeRequest(request, () => {
+      const user = chosen ? users.get(chosen.userId) : undefined;
+      if (!chosen || !user) return Promise.resolve(null);
+      const organizationId = requested
+        ? requestedOrganization(requested, user.id)
+        : (chosen.organizationId ?? soleOrganizationOf(user.id));
+      const continued = continuedSession(request, user.id);
+      if (continued) continued.lastActiveAt = new Date();
+      else started = startSession(chosen);
+      issued = {
+        userId: user.id,
+        organizationId,
+        sessionId: (continued ?? started)!.id,
+      };
+      return Promise.resolve({ user });
+    });
     const location = response.headers.get("location");
     const code = location ? new URL(location).searchParams.get("code") : null;
     if (code && issued) signInOfCode.set(code, issued);
@@ -1233,14 +1265,14 @@ export async function createFakeTenant(
   };
 
   const isLive = async (accessToken: string) =>
-    await tokenService.getToken(accessToken) !== undefined;
+    (await tokenService.getToken(accessToken)) !== undefined;
 
   const liveCredentials = async (
     matches: (credential: Credential, accessToken: string) => boolean,
   ): Promise<[string, Credential][]> => {
     const live: [string, Credential][] = [];
     for (const [accessToken, credential] of credentials) {
-      if (matches(credential, accessToken) && await isLive(accessToken)) {
+      if (matches(credential, accessToken) && (await isLive(accessToken))) {
         live.push([accessToken, credential]);
       }
     }
@@ -1275,10 +1307,14 @@ export async function createFakeTenant(
   };
 
   const token = async (request: Request): Promise<Response> => {
-    const form = await request.clone().formData().catch(() => null);
+    const form = await request
+      .clone()
+      .formData()
+      .catch(() => null);
     const organizationId = form?.get("organization_id");
     if (
-      typeof organizationId === "string" && organizationId.length > 0 &&
+      typeof organizationId === "string" &&
+      organizationId.length > 0 &&
       form?.get("grant_type") !== "refresh_token"
     ) {
       return Response.json(
@@ -1294,18 +1330,22 @@ export async function createFakeTenant(
     }
     const code = form?.get("code");
     const refreshToken = form?.get("refresh_token");
-    const signIn = typeof code === "string"
-      ? signInOfCode.get(code)
-      : typeof refreshToken === "string"
-      ? signInOfRefreshToken.get(refreshToken)
-      : undefined;
+    const signIn =
+      typeof code === "string"
+        ? signInOfCode.get(code)
+        : typeof refreshToken === "string"
+          ? signInOfRefreshToken.get(refreshToken)
+          : undefined;
     return await withIssuance(
       signIn?.userId,
       { organizationId: signIn?.organizationId, sessionId: signIn?.sessionId },
       async () => {
-        const family = typeof refreshToken === "string" && signIn
-          ? await liveCredentials((credential) => credential.signIn === signIn)
-          : [];
+        const family =
+          typeof refreshToken === "string" && signIn
+            ? await liveCredentials(
+                (credential) => credential.signIn === signIn,
+              )
+            : [];
         const response = await server.handleTokenRequest(request);
         if (!response.ok) {
           await endSessionsOfRevoked(family);
@@ -1316,7 +1356,7 @@ export async function createFakeTenant(
             ? loginSessions.get(signIn.sessionId)
             : undefined;
           if (session) session.lastActiveAt = new Date();
-          const issued = await response.clone().json() as {
+          const issued = (await response.clone().json()) as {
             access_token: string;
             refresh_token?: string;
           };
@@ -1338,13 +1378,18 @@ export async function createFakeTenant(
   };
 
   const revocation = async (request: Request): Promise<Response> => {
-    const form = await request.clone().formData().catch(() => null);
+    const form = await request
+      .clone()
+      .formData()
+      .catch(() => null);
     const value = form?.get("token");
-    const presented = typeof value === "string"
-      ? await liveCredentials((credential, accessToken) =>
-        accessToken === value || credential.refreshToken === value
-      )
-      : [];
+    const presented =
+      typeof value === "string"
+        ? await liveCredentials(
+            (credential, accessToken) =>
+              accessToken === value || credential.refreshToken === value,
+          )
+        : [];
     const response = await server.handleRevocationRequest(request);
     await endSessionsOfRevoked(presented);
     return response;
@@ -1423,13 +1468,9 @@ export async function createFakeTenant(
     return grant;
   };
 
-  const grantOf = (
-    organization: Organization,
-    userId: string,
-    role: string,
-  ) =>
-    organization.grants.find((grant) =>
-      grant.userId === userId && grant.role === role
+  const grantOf = (organization: Organization, userId: string, role: string) =>
+    organization.grants.find(
+      (grant) => grant.userId === userId && grant.role === role,
     );
 
   const acceptGrant = (grant: MembershipGrant): MembershipGrant => {
@@ -1472,7 +1513,7 @@ export async function createFakeTenant(
   ): Organization | Response => {
     const organization = organizations.get(organizationId);
     return organization &&
-        holdsAny(organization.id, caller.user.id, MANAGER_ROLES)
+      holdsAny(organization.id, caller.user.id, MANAGER_ROLES)
       ? organization
       : problem(404, ORGANIZATION_NOT_FOUND);
   };
@@ -1484,9 +1525,9 @@ export async function createFakeTenant(
   ): Response | undefined =>
     role === OWNER && !holdsAny(organization.id, caller.user.id, [OWNER])
       ? problem(
-        403,
-        "Only an owner of this organization can offer or revoke its owner role.",
-      )
+          403,
+          "Only an owner of this organization can offer or revoke its owner role.",
+        )
       : undefined;
 
   const resolveReturnTo = (value: string): string | null => {
@@ -1500,7 +1541,7 @@ export async function createFakeTenant(
     try {
       const url = new URL(value);
       return (url.protocol === "https:" || url.protocol === "http:") &&
-          redirectOrigins.has(url.origin)
+        redirectOrigins.has(url.origin)
         ? url.href
         : null;
     } catch {
@@ -1528,8 +1569,8 @@ export async function createFakeTenant(
   ) => {
     endAppRoles(organization.id, userId);
     organization.permissions.delete(userId);
-    organization.grants = organization.grants.filter((grant) =>
-      grant.userId !== userId || grant.acceptedAt
+    organization.grants = organization.grants.filter(
+      (grant) => grant.userId !== userId || grant.acceptedAt,
     );
     const email = users.get(userId)?.email?.toLowerCase();
     if (!email) return;
@@ -1537,7 +1578,8 @@ export async function createFakeTenant(
     for (const invitation of invitations.values()) {
       if (
         invitation.organizationId === organization.id &&
-        invitation.email === email && !invitation.acceptedAt &&
+        invitation.email === email &&
+        !invitation.acceptedAt &&
         !invitation.deletedAt
       ) {
         invitation.deletedAt = now;
@@ -1547,29 +1589,35 @@ export async function createFakeTenant(
   };
 
   const holdsGrantOnResource = (organizationId: string) =>
-    grants.filter((grant) =>
-      grant.subject.type === "organization" &&
-      grant.subject.id === organizationId
+    grants.filter(
+      (grant) =>
+        grant.subject.type === "organization" &&
+        grant.subject.id === organizationId,
     );
 
-  const organizationApi = (
-    handler: (caller: Caller, request: Request, params: string[]) =>
-      | Response
-      | Promise<Response>,
-  ): Route =>
-  async (request, params) => {
-    const caller = await authenticated(request);
-    if (caller instanceof Response) return noStore(caller);
-    return noStore(await handler(caller, request, params));
-  };
+  const organizationApi =
+    (
+      handler: (
+        caller: Caller,
+        request: Request,
+        params: string[],
+      ) => Response | Promise<Response>,
+    ): Route =>
+    async (request, params) => {
+      const caller = await authenticated(request);
+      if (caller instanceof Response) return noStore(caller);
+      return noStore(await handler(caller, request, params));
+    };
 
   const listOrganizations = organizationApi((caller, request) =>
-    Response.json(page(
-      [...organizations.values()]
-        .filter((organization) => isMember(organization.id, caller.user.id))
-        .map(organizationJson),
-      request,
-    ))
+    Response.json(
+      page(
+        [...organizations.values()]
+          .filter((organization) => isMember(organization.id, caller.user.id))
+          .map(organizationJson),
+        request,
+      ),
+    ),
   );
 
   const createOrganization = organizationApi(async (caller, request) => {
@@ -1579,9 +1627,8 @@ export async function createFakeTenant(
     if (nameRefusal) return invalid("name", nameRefusal);
     const slugRefusal = slugProblem(body.slug);
     if (slugRefusal) return invalid("slug", slugRefusal);
-    const metadataRefusal = body.metadata === undefined
-      ? undefined
-      : metadataProblem(body.metadata);
+    const metadataRefusal =
+      body.metadata === undefined ? undefined : metadataProblem(body.metadata);
     if (metadataRefusal) return invalid("metadata", metadataRefusal);
     const slug = body.slug as string;
     if ([...organizations.values()].some((o) => o.slug === slug)) {
@@ -1624,8 +1671,8 @@ export async function createFakeTenant(
       const refusal = slugProblem(body.slug);
       if (refusal) return invalid("slug", refusal);
       if (
-        [...organizations.values()].some((o) =>
-          o.slug === body.slug && o.id !== organization.id
+        [...organizations.values()].some(
+          (o) => o.slug === body.slug && o.id !== organization.id,
         )
       ) {
         return problem(409, "An organization with this slug already exists", {
@@ -1654,9 +1701,10 @@ export async function createFakeTenant(
     }
     const held = holdsGrantOnResource(organization.id);
     if (held.length > 0) {
-      const named = held.slice(0, 3).map((grant) =>
-        `${grant.resource.type} ${grant.resource.id}`
-      ).join(", ");
+      const named = held
+        .slice(0, 3)
+        .map((grant) => `${grant.resource.type} ${grant.resource.id}`)
+        .join(", ");
       return problem(
         409,
         `This organization still holds a role on ${named}. Revoke what it holds before deleting it.`,
@@ -1670,20 +1718,22 @@ export async function createFakeTenant(
   const listMembers = organizationApi((caller, request, [id]) => {
     const organization = readableOrganization(caller, id);
     if (organization instanceof Response) return organization;
-    return Response.json(page(
-      organization.grants
-        .filter((grant) => grant.acceptedAt)
-        .map((grant) => {
-          const { returnTo: _offerOnly, ...row } = grantJson(grant);
-          const holder = users.get(grant.userId);
-          return {
-            ...row,
-            name: holder?.name ?? holder?.username ?? "Unknown user",
-            email: holder?.email ?? null,
-          };
-        }),
-      request,
-    ));
+    return Response.json(
+      page(
+        organization.grants
+          .filter((grant) => grant.acceptedAt)
+          .map((grant) => {
+            const { returnTo: _offerOnly, ...row } = grantJson(grant);
+            const holder = users.get(grant.userId);
+            return {
+              ...row,
+              name: holder?.name ?? holder?.username ?? "Unknown user",
+              email: holder?.email ?? null,
+            };
+          }),
+        request,
+      ),
+    );
   });
 
   const listMemberRoles = organizationApi((caller, _request, [id]) => {
@@ -1700,9 +1750,10 @@ export async function createFakeTenant(
       if (refusal) return refusal;
       const grant = grantOf(organization, userId, role);
       if (
-        role === OWNER && grant?.acceptedAt &&
+        role === OWNER &&
+        grant?.acceptedAt &&
         organization.grants.filter((g) => g.role === OWNER && g.acceptedAt)
-            .length <= 1
+          .length <= 1
       ) {
         return problem(
           409,
@@ -1751,7 +1802,8 @@ export async function createFakeTenant(
       if (organization instanceof Response) return organization;
       const body = await jsonBody(request);
       if (
-        !isRecord(body) || typeof body.roleId !== "string" ||
+        !isRecord(body) ||
+        typeof body.roleId !== "string" ||
         body.roleId.length === 0
       ) {
         return invalid("roleId", "A role id is required");
@@ -1761,8 +1813,8 @@ export async function createFakeTenant(
       }
       const role = definedRoleById(body.roleId);
       if (!role) return problem(404, "organization role not found");
-      const held = appRolesHeld(organization.id, userId).find((assignment) =>
-        assignment.roleId === role.id
+      const held = appRolesHeld(organization.id, userId).find(
+        (assignment) => assignment.roleId === role.id,
       );
       const assignment = held ?? {
         id: crypto.randomUUID(),
@@ -1771,16 +1823,19 @@ export async function createFakeTenant(
         roleId: role.id,
       };
       if (!held) appRoles.push(assignment);
-      return Response.json({
-        id: assignment.id,
-        subjectId: userId,
-        subjectRole: null,
-        roleId: role.id,
-        builtInRole: null,
-        scopeType: "organization",
-        scopeId: organization.id,
-        created: !held,
-      }, { status: 201 });
+      return Response.json(
+        {
+          id: assignment.id,
+          subjectId: userId,
+          subjectRole: null,
+          roleId: role.id,
+          builtInRole: null,
+          scopeType: "organization",
+          scopeId: organization.id,
+          created: !held,
+        },
+        { status: 201 },
+      );
     },
   );
 
@@ -1789,13 +1844,12 @@ export async function createFakeTenant(
       const organization = managedOrganization(caller, id);
       if (organization instanceof Response) return organization;
       if (BUILT_IN_APP_ROLES.includes(roleId)) {
-        const who = roleId === OWNER
-          ? "Only an owner"
-          : "Only an admin or owner";
+        const who =
+          roleId === OWNER ? "Only an owner" : "Only an admin or owner";
         return problem(403, `${who} can grant or revoke ${roleId} access.`);
       }
-      const held = appRolesHeld(organization.id, userId).find((assignment) =>
-        assignment.roleId === roleId
+      const held = appRolesHeld(organization.id, userId).find(
+        (assignment) => assignment.roleId === roleId,
       );
       if (!held) return problem(404, "role assignment not found");
       appRoles.splice(appRoles.indexOf(held), 1);
@@ -1823,19 +1877,23 @@ export async function createFakeTenant(
     const role = body.role as string;
     const refusal = ownerTierRefusal(organization, caller, role);
     if (refusal) return refusal;
-    const returnTo = typeof body.return_to === "string"
-      ? resolveReturnTo(body.return_to)
-      : null;
+    const returnTo =
+      typeof body.return_to === "string"
+        ? resolveReturnTo(body.return_to)
+        : null;
     if (typeof body.return_to === "string" && !returnTo) {
       return invalid(
         "return_to",
         "return_to must be a path on this tenant's host or an absolute URL on the origin of a redirect URI registered on one of its live applications",
       );
     }
-    const offered = [...invitations.values()].find((invitation) =>
-      invitation.organizationId === organization.id &&
-      invitation.email === email && invitation.role === role &&
-      !invitation.acceptedAt && !invitation.deletedAt
+    const offered = [...invitations.values()].find(
+      (invitation) =>
+        invitation.organizationId === organization.id &&
+        invitation.email === email &&
+        invitation.role === role &&
+        !invitation.acceptedAt &&
+        !invitation.deletedAt,
     );
     if (offered) {
       return problem(
@@ -1895,17 +1953,21 @@ export async function createFakeTenant(
       return invalid("status", "status must be outstanding or unaccepted");
     }
     const now = Date.now();
-    return Response.json(page(
-      [...invitations.values()]
-        .filter((invitation) =>
-          invitation.organizationId === organization.id &&
-          !invitation.deletedAt &&
-          (status === "" || !invitation.acceptedAt) &&
-          (status !== "outstanding" || invitation.expiresAt.getTime() > now)
-        )
-        .map(invitationJson),
-      request,
-    ));
+    return Response.json(
+      page(
+        [...invitations.values()]
+          .filter(
+            (invitation) =>
+              invitation.organizationId === organization.id &&
+              !invitation.deletedAt &&
+              (status === "" || !invitation.acceptedAt) &&
+              (status !== "outstanding" ||
+                invitation.expiresAt.getTime() > now),
+          )
+          .map(invitationJson),
+        request,
+      ),
+    );
   });
 
   const withdrawInvitation = organizationApi(
@@ -1914,8 +1976,10 @@ export async function createFakeTenant(
       if (organization instanceof Response) return organization;
       const invitation = invitations.get(invitationId);
       if (
-        !invitation || invitation.organizationId !== organization.id ||
-        invitation.acceptedAt || invitation.deletedAt
+        !invitation ||
+        invitation.organizationId !== organization.id ||
+        invitation.acceptedAt ||
+        invitation.deletedAt
       ) {
         return problem(404, "Organization invitation not found");
       }
@@ -1927,9 +1991,9 @@ export async function createFakeTenant(
 
   const pendingGrantsOf = (userId: string) =>
     [...organizations.values()].flatMap((organization) =>
-      organization.grants.filter((grant) =>
-        grant.userId === userId && !grant.acceptedAt
-      )
+      organization.grants.filter(
+        (grant) => grant.userId === userId && !grant.acceptedAt,
+      ),
     );
 
   const listOffers = organizationApi((caller) => {
@@ -1937,22 +2001,28 @@ export async function createFakeTenant(
     const unverifiedEmail = email && !emailVerified ? email : null;
     const address = email?.toLowerCase();
     const now = Date.now();
-    const invited = address && !unverifiedEmail
-      ? [...invitations.values()].filter((invitation) =>
-        invitation.email === address && !invitation.acceptedAt &&
-        !invitation.deletedAt && invitation.expiresAt.getTime() > now
-      )
-      : [];
+    const invited =
+      address && !unverifiedEmail
+        ? [...invitations.values()].filter(
+            (invitation) =>
+              invitation.email === address &&
+              !invitation.acceptedAt &&
+              !invitation.deletedAt &&
+              invitation.expiresAt.getTime() > now,
+          )
+        : [];
     return Response.json({
       offers: [...pendingGrantsOf(caller.user.id), ...invited].flatMap(
         (offer) => {
           const organization = organizations.get(offer.organizationId);
           return organization
-            ? [{
-              id: offer.id,
-              organizationName: organization.name,
-              roleName: roleName(offer.role),
-            }]
+            ? [
+                {
+                  id: offer.id,
+                  organizationName: organization.name,
+                  roleName: roleName(offer.role),
+                },
+              ]
             : [];
         },
       ),
@@ -1965,7 +2035,8 @@ export async function createFakeTenant(
     if (invitation && !invitation.acceptedAt && !invitation.deletedAt) {
       const email = caller.user.email?.toLowerCase();
       if (
-        !email || caller.user.emailVerified === false ||
+        !email ||
+        caller.user.emailVerified === false ||
         email !== invitation.email
       ) {
         return Response.json({ status: "wrong-account" });
@@ -1989,8 +2060,8 @@ export async function createFakeTenant(
         membership: grantJson(membership),
       });
     }
-    const offered = pendingGrantsOf(caller.user.id).find((grant) =>
-      grant.id === offerId
+    const offered = pendingGrantsOf(caller.user.id).find(
+      (grant) => grant.id === offerId,
     );
     if (!offered) return Response.json({ status: "invalid" });
     return Response.json({
@@ -1999,16 +2070,19 @@ export async function createFakeTenant(
     });
   });
 
-  const accountApi = (
-    handler: (caller: Caller, request: Request, params: string[]) =>
-      | Response
-      | Promise<Response>,
-  ): Route =>
-  async (request, params) => {
-    const caller = await authenticated(request, personOnly);
-    if (caller instanceof Response) return noStore(caller);
-    return noStore(await handler(caller, request, params));
-  };
+  const accountApi =
+    (
+      handler: (
+        caller: Caller,
+        request: Request,
+        params: string[],
+      ) => Response | Promise<Response>,
+    ): Route =>
+    async (request, params) => {
+      const caller = await authenticated(request, personOnly);
+      if (caller instanceof Response) return noStore(caller);
+      return noStore(await handler(caller, request, params));
+    };
 
   const userinfo = async (request: Request): Promise<Response> => {
     try {
@@ -2025,25 +2099,24 @@ export async function createFakeTenant(
   const readAccount = accountApi((caller) =>
     Response.json({
       userMetadata: userMetadata.get(caller.user.id) ?? {},
-    })
+    }),
   );
 
   const patchAccount = accountApi(async (caller, request) => {
     const body = await jsonBody(request);
     if (
-      !isRecord(body) || Object.keys(body).length !== 1 ||
+      !isRecord(body) ||
+      Object.keys(body).length !== 1 ||
       !("userMetadata" in body)
     ) {
       return problem(400, "Only userMetadata may be written here");
     }
     const incoming = metadataProblem(body.userMetadata);
     if (incoming) return invalid("userMetadata", incoming);
-    const merged = { ...userMetadata.get(caller.user.id) ?? {} };
-    for (
-      const [key, value] of Object.entries(
-        body.userMetadata as Record<string, unknown>,
-      )
-    ) {
+    const merged = { ...(userMetadata.get(caller.user.id) ?? {}) };
+    for (const [key, value] of Object.entries(
+      body.userMetadata as Record<string, unknown>,
+    )) {
       if (value === null) delete merged[key];
       else merged[key] = value;
     }
@@ -2063,9 +2136,10 @@ export async function createFakeTenant(
     return Response.json({
       sessions: [...loginSessions.values()]
         .filter((session) => session.userId === caller.user.id)
-        .sort((a, b) =>
-          Number(b.id === current) - Number(a.id === current) ||
-          b.lastActiveAt.getTime() - a.lastActiveAt.getTime()
+        .sort(
+          (a, b) =>
+            Number(b.id === current) - Number(a.id === current) ||
+            b.lastActiveAt.getTime() - a.lastActiveAt.getTime(),
         )
         .map((session) => ({
           id: session.id,
@@ -2079,7 +2153,7 @@ export async function createFakeTenant(
   });
 
   const revokeSession = accountApi(async (caller, request, [sessionId]) => {
-    if (!await isEmptyBody(request)) {
+    if (!(await isEmptyBody(request))) {
       return problem(400, "The request body must be empty");
     }
     if (sessionId === currentSessionOf(caller)) {
@@ -2099,7 +2173,7 @@ export async function createFakeTenant(
   });
 
   const revokeOtherSessions = accountApi(async (caller, request) => {
-    if (!await isEmptyBody(request)) {
+    if (!(await isEmptyBody(request))) {
       return problem(400, "The request body must be empty");
     }
     const current = currentSessionOf(caller);
@@ -2108,8 +2182,8 @@ export async function createFakeTenant(
         reason: "current_session_required",
       });
     }
-    const others = [...loginSessions.values()].filter((session) =>
-      session.userId === caller.user.id && session.id !== current
+    const others = [...loginSessions.values()].filter(
+      (session) => session.userId === caller.user.id && session.id !== current,
     );
     for (const session of others) await endSession(session.id);
     return Response.json({ revoked: others.length });
@@ -2129,11 +2203,11 @@ export async function createFakeTenant(
       })),
       hasPassword: caller.user.hasPassword ?? true,
       connectable: [],
-    })
+    }),
   );
 
   const unlinkAccount = accountApi(async (caller, request, [identityId]) => {
-    if (!await isEmptyBody(request)) {
+    if (!(await isEmptyBody(request))) {
       return problem(400, "Only an empty request body is accepted");
     }
     const account = linkedAccounts.get(identityId);
@@ -2171,20 +2245,20 @@ export async function createFakeTenant(
   };
 
   const resourceGrantJson = (grant: ResourceGrant) => {
-    const holder = grant.subject.type === "user"
-      ? users.get(grant.subject.id)
-      : undefined;
-    const organization = grant.subject.type === "organization"
-      ? organizations.get(grant.subject.id)
-      : undefined;
+    const holder =
+      grant.subject.type === "user" ? users.get(grant.subject.id) : undefined;
+    const organization =
+      grant.subject.type === "organization"
+        ? organizations.get(grant.subject.id)
+        : undefined;
     return {
       id: grant.id,
       subjectType: grant.subject.type,
       subjectId: grant.subject.id,
       subjectRole: null,
       subjectName: holder
-        ? holder.name ?? holder.username
-        : organization?.name ?? null,
+        ? (holder.name ?? holder.username)
+        : (organization?.name ?? null),
       subjectActive: holder !== undefined || organization !== undefined,
       roleId: grant.roleId,
       builtInRole: isBuiltInRole(grant.role) ? grant.role : null,
@@ -2206,8 +2280,11 @@ export async function createFakeTenant(
     const type = params.get("type");
     const id = params.get("id");
     if (
-      !type || type.length > RESOURCE_TYPE_MAX_LENGTH || !id ||
-      id.length > RESOURCE_ID_MAX_LENGTH || ASCII_CONTROL_CHARACTERS.test(id)
+      !type ||
+      type.length > RESOURCE_TYPE_MAX_LENGTH ||
+      !id ||
+      id.length > RESOURCE_ID_MAX_LENGTH ||
+      ASCII_CONTROL_CHARACTERS.test(id)
     ) {
       return noStore(
         invalid(
@@ -2224,15 +2301,17 @@ export async function createFakeTenant(
         ),
       );
     }
-    return noStore(Response.json({
-      resource: { type, id },
-      grants: grants
-        .filter((grant) =>
-          grant.resource.type === type && grant.resource.id === id
-        )
-        .map(resourceGrantJson)
-        .sort((a, b) => a.roleName.localeCompare(b.roleName)),
-    }));
+    return noStore(
+      Response.json({
+        resource: { type, id },
+        grants: grants
+          .filter(
+            (grant) => grant.resource.type === type && grant.resource.id === id,
+          )
+          .map(resourceGrantJson)
+          .sort((a, b) => a.roleName.localeCompare(b.roleName)),
+      }),
+    );
   };
 
   const routes: Record<string, (request: Request) => Promise<Response>> = {
@@ -2271,11 +2350,7 @@ export async function createFakeTenant(
       new RegExp(`^/api/organizations/${segment}$`),
       deleteOrganization,
     ],
-    [
-      "GET",
-      new RegExp(`^/api/organizations/${segment}/members$`),
-      listMembers,
-    ],
+    ["GET", new RegExp(`^/api/organizations/${segment}/members$`), listMembers],
     [
       "GET",
       new RegExp(`^/api/organizations/${segment}/member-roles$`),
@@ -2305,11 +2380,7 @@ export async function createFakeTenant(
       ),
       revokeMembership,
     ],
-    [
-      "POST",
-      new RegExp(`^/api/organizations/${segment}/invitations$`),
-      invite,
-    ],
+    ["POST", new RegExp(`^/api/organizations/${segment}/invitations$`), invite],
     [
       "GET",
       new RegExp(`^/api/organizations/${segment}/invitations$`),
@@ -2323,16 +2394,8 @@ export async function createFakeTenant(
     ["GET", /^\/api\/account$/, readAccount],
     ["PATCH", /^\/api\/account$/, patchAccount],
     ["GET", /^\/api\/account\/sessions$/, listSessions],
-    [
-      "POST",
-      /^\/api\/account\/sessions\/revoke-others$/,
-      revokeOtherSessions,
-    ],
-    [
-      "DELETE",
-      new RegExp(`^/api/account/sessions/${segment}$`),
-      revokeSession,
-    ],
+    ["POST", /^\/api\/account\/sessions\/revoke-others$/, revokeOtherSessions],
+    ["DELETE", new RegExp(`^/api/account/sessions/${segment}$`), revokeSession],
     ["GET", /^\/api\/account\/linked-accounts$/, listLinkedAccounts],
     [
       "DELETE",
@@ -2391,7 +2454,7 @@ export async function createFakeTenant(
     addUser: async (user) => {
       await userService.add(user, crypto.randomUUID());
       users.set(user.id, user);
-      userMetadata.set(user.id, { ...user.userMetadata ?? {} });
+      userMetadata.set(user.id, { ...(user.userMetadata ?? {}) });
     },
     addOrganization: (organization) => {
       if (organizations.has(organization.id)) {
@@ -2414,8 +2477,8 @@ export async function createFakeTenant(
       if (!organization) {
         throw new Error(`Organization "${organizationId}" does not exist`);
       }
-      organization.grants = organization.grants.filter((grant) =>
-        grant.userId !== userId
+      organization.grants = organization.grants.filter(
+        (grant) => grant.userId !== userId,
       );
       const roles = membership.roles?.length ? membership.roles : DEFAULT_ROLES;
       for (const role of new Set(roles)) {
@@ -2430,8 +2493,8 @@ export async function createFakeTenant(
     removeMember: (organizationId, userId) => {
       const organization = organizations.get(organizationId);
       if (!organization) return;
-      organization.grants = organization.grants.filter((grant) =>
-        grant.userId !== userId
+      organization.grants = organization.grants.filter(
+        (grant) => grant.userId !== userId,
       );
       organization.permissions.delete(userId);
       endAppRoles(organizationId, userId);
@@ -2453,7 +2516,7 @@ export async function createFakeTenant(
         id: roleId,
         slug,
         name: name ?? slug,
-        permissions: [...permissions ?? []],
+        permissions: [...(permissions ?? [])],
       });
       return roleId;
     },
@@ -2464,7 +2527,7 @@ export async function createFakeTenant(
       const role = grant.role ?? roleSlugOf(grant.permissions);
       let roleId = isBuiltInRole(role)
         ? null
-        : definedRoles.get(role)?.id ?? resourceRoleIds.get(role);
+        : (definedRoles.get(role)?.id ?? resourceRoleIds.get(role));
       if (roleId === undefined) {
         roleId = crypto.randomUUID();
         resourceRoleIds.set(role, roleId);

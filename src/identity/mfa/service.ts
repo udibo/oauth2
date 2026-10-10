@@ -173,13 +173,13 @@ export interface MfaEnrollmentStart {
 export type MfaEnrollmentConfirmation =
   | { confirmed: false }
   | {
-    confirmed: true;
-    /**
-     * The plaintext recovery codes. Display them to the user exactly once;
-     * only their hashes are stored.
-     */
-    recoveryCodes: string[];
-  };
+      confirmed: true;
+      /**
+       * The plaintext recovery codes. Display them to the user exactly once;
+       * only their hashes are stored.
+       */
+      recoveryCodes: string[];
+    };
 
 /** Per-call options for {@link MfaService.verify} and {@link MfaService.confirmEnrollment}. */
 export interface MfaVerifyOptions {
@@ -211,20 +211,20 @@ export type MfaVerifyFailureReason = "invalid" | "replayed";
 /** The result of {@link MfaService.verify}. */
 export type MfaVerification =
   | {
-    valid: false;
-    /** Why the code was rejected — see {@link MfaVerifyFailureReason}. */
-    reason: MfaVerifyFailureReason;
-  }
+      valid: false;
+      /** Why the code was rejected — see {@link MfaVerifyFailureReason}. */
+      reason: MfaVerifyFailureReason;
+    }
   | { valid: true; method: "totp" }
   | {
-    valid: true;
-    method: "recovery";
-    /**
-     * How many unused recovery codes remain — surface it so the UI can
-     * prompt regeneration when low.
-     */
-    remainingRecoveryCodes: number;
-  };
+      valid: true;
+      method: "recovery";
+      /**
+       * How many unused recovery codes remain — surface it so the UI can
+       * prompt regeneration when low.
+       */
+      remainingRecoveryCodes: number;
+    };
 
 /**
  * A user's TOTP enrollment stage, as {@link MfaService.enrollmentStatus}
@@ -474,7 +474,7 @@ export class MfaService {
    * TOTP enrollment.
    */
   async regenerateRecoveryCodes(userId: string): Promise<string[]> {
-    if (!await this.isEnrolled(userId)) {
+    if (!(await this.isEnrolled(userId))) {
       throw new IdentityError(
         "mfa_not_enrolled",
         "cannot regenerate recovery codes: MFA is not enrolled",
@@ -498,7 +498,7 @@ export class MfaService {
       ...this.#totp,
     });
     if (!result.valid) return undefined;
-    if (!await this.#store.advanceLastStep(userId, result.matchedStep)) {
+    if (!(await this.#store.advanceLastStep(userId, result.matchedStep))) {
       return await this.#verifyFailed(userId, "replayed");
     }
     await this.#resetThrottle(userId);
@@ -518,8 +518,8 @@ export class MfaService {
       await hashRecoveryCode(code),
     );
     if (!consumed) return undefined;
-    const remainingRecoveryCodes =
-      (await this.#store.getRecoveryHashes(userId)).length;
+    const remainingRecoveryCodes = (await this.#store.getRecoveryHashes(userId))
+      .length;
     await this.#resetThrottle(userId);
     await this.#emit({
       type: "mfa.verify.succeeded",

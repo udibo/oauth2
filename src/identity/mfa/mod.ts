@@ -2,7 +2,7 @@
  * MFA primitives for apps that own their login: TOTP (RFC 6238) and single-use
  * recovery codes, plus a small orchestrator over an app-owned store — the same
  * thin-seam philosophy as the rest of the identity layer. Built entirely on
- * Web Crypto and `@std`; no other dependencies.
+ * Web Crypto; no other dependencies.
  *
  * - {@link generateTotpSecret} / {@link buildOtpauthUri} /
  *   {@link generateTotpCode} / {@link verifyTotpCode} — the TOTP math, with a

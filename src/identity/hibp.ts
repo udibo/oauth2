@@ -18,8 +18,7 @@
  * @module
  */
 
-import { encodeHex } from "@std/encoding/hex";
-
+import { encodeHex } from "../utils/_encoding.ts";
 import {
   defaultFetch,
   packageDeadlineSignal,

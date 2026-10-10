@@ -75,14 +75,12 @@ import {
  *   This is how login redirects, interstitials, etc. are wired without
  *   wrapping the framework handler.
  */
-export type HonoAuthenticateUserFn<User> = (
-  c: Context,
-) => Promise<
+export type HonoAuthenticateUserFn<User> = (c: Context) => Promise<
   | {
-    user: User;
-    authorizedScope?: AbstractScope;
-    authenticationContext?: AuthenticationContext;
-  }
+      user: User;
+      authorizedScope?: AbstractScope;
+      authenticationContext?: AuthenticationContext;
+    }
   | Response
   | null
 >;
@@ -184,11 +182,7 @@ export class HonoAuthorizationServer<
    * protected routes. See {@link HonoResourceServer.require}.
    */
   require(conditions: RequireConditions): MiddlewareHandler {
-    return createRequireMiddleware(
-      this,
-      "HonoAuthorizationServer",
-      conditions,
-    );
+    return createRequireMiddleware(this, "HonoAuthorizationServer", conditions);
   }
 
   /**
@@ -228,7 +222,7 @@ export class HonoAuthorizationServer<
       const auth: AuthenticateUserFn<User> = () => authenticateUser(c);
       const consent: HandleConsentFn<Client, S> | undefined = handleConsent
         ? (client, requestedScope, user) =>
-          handleConsent(c, client, requestedScope, user)
+            handleConsent(c, client, requestedScope, user)
         : undefined;
       return this.handleAuthorizeRequest(c.req.raw, auth, consent);
     };

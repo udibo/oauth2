@@ -7,9 +7,8 @@
  * @module
  */
 
-import { decodeBase64 } from "@std/encoding/base64";
-
 import { toArrayBuffer } from "../../utils/_buffer.ts";
+import { decodeBase64 } from "../../utils/_encoding.ts";
 import { base64urlEncode } from "../../utils/crypto.ts";
 import { ExternalAuthError } from "./errors.ts";
 
@@ -144,7 +143,7 @@ async function importPrivateKey(
  *   teamId: "ABCDE12345",
  *   keyId: "KEY1234567",
  *   clientId: "com.example.web",
- *   privateKey: Deno.env.get("APPLE_PRIVATE_KEY")!,
+ *   privateKey: process.env.APPLE_PRIVATE_KEY!,
  * });
  * ```
  */
@@ -159,10 +158,11 @@ export async function generateAppleClientSecret(
     options.clientId,
     "client id (Services ID)",
   );
-  const ttl = options.expiresInSeconds ??
-    DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS;
+  const ttl =
+    options.expiresInSeconds ?? DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS;
   if (
-    !Number.isFinite(ttl) || ttl <= 0 ||
+    !Number.isFinite(ttl) ||
+    ttl <= 0 ||
     ttl > APPLE_CLIENT_SECRET_MAX_TTL_SECONDS
   ) {
     throw configError(
@@ -214,8 +214,8 @@ export type AppleClientSecretFactory = () => Promise<string>;
 export function createAppleClientSecretFactory(
   options: AppleClientSecretOptions & { renewBeforeSeconds?: number },
 ): AppleClientSecretFactory {
-  const ttl = options.expiresInSeconds ??
-    DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS;
+  const ttl =
+    options.expiresInSeconds ?? DEFAULT_APPLE_CLIENT_SECRET_TTL_SECONDS;
   const renewBefore = options.renewBeforeSeconds ?? 60 * 60;
   let cached: { secret: string; expiresAt: number } | null = null;
 

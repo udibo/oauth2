@@ -28,7 +28,7 @@ import type { TokenReaderInterface } from "./services/token.ts";
 import { assertClockSkewSeconds } from "./_clock-skew.ts";
 
 /** Bearer token regex pattern. */
-export const BEARER_TOKEN =
+export const BEARER_TOKEN: RegExp =
   /^ *(?:[Bb][Ee][Aa][Rr][Ee][Rr]) +([\w-.~+/]+=*) *$/;
 
 const FAILURE_LABELS = {
@@ -235,8 +235,8 @@ export class ResourceServer<
    *   overflows when converted to milliseconds.
    */
   constructor(options: ResourceServerOptions<Client, User, S>) {
-    this.Scope = options.Scope ??
-      (BasicScope as unknown as ScopeConstructor<S>);
+    this.Scope =
+      options.Scope ?? (BasicScope as unknown as ScopeConstructor<S>);
     this.realm = options.realm ?? "Service";
     this.clockSkewSeconds = options.clockSkewSeconds ?? 0;
     this.errorFormat = options.errorFormat ?? "oauth2";
@@ -266,11 +266,11 @@ export class ResourceServer<
    */
   buildWwwAuthenticate(error?: OAuth2Error, requiredScope?: string): string {
     const quote = (value: string): string =>
-      // deno-lint-ignore no-control-regex
-      value.replace(/[\x00-\x1f\x7f]/g, "").replace(/\\/g, "\\\\").replace(
-        /"/g,
-        '\\"',
-      );
+      value
+        // oxlint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1f\x7f]/g, "")
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"');
     const parts: string[] = [`realm="${quote(this.realm)}"`];
 
     const code = error?.extensions.error;
@@ -284,8 +284,8 @@ export class ResourceServer<
     if (requiredScope) {
       parts.push(`scope="${quote(requiredScope)}"`);
     } else if (error instanceof InsufficientScopeError) {
-      const scope =
-        (error.extensions as { requiredScope?: string }).requiredScope;
+      const scope = (error.extensions as { requiredScope?: string })
+        .requiredScope;
       if (scope) {
         parts.push(`scope="${quote(scope)}"`);
       }
@@ -309,9 +309,10 @@ export class ResourceServer<
   createErrorResponse(error: unknown): Response {
     const oauth2Error = toOAuth2Error(error);
 
-    const response = this.errorFormat === "problem-details"
-      ? oauth2Error.getResponse()
-      : this.#createOAuth2ErrorResponse(oauth2Error);
+    const response =
+      this.errorFormat === "problem-details"
+        ? oauth2Error.getResponse()
+        : this.#createOAuth2ErrorResponse(oauth2Error);
 
     for (const [key, value] of oauth2Error.headers) {
       if (key.toLowerCase() === "content-type") continue;
@@ -325,8 +326,8 @@ export class ResourceServer<
     const body: Record<string, string> = {
       error: oauth2Error.extensions.error ?? "server_error",
     };
-    const description = oauth2Error.extensions.error_description ??
-      oauth2Error.exposedMessage;
+    const description =
+      oauth2Error.extensions.error_description ?? oauth2Error.exposedMessage;
     if (description) {
       body.error_description = description;
     }
@@ -448,8 +449,8 @@ export class ResourceServer<
     }
 
     if (token.accessTokenExpiresAt) {
-      const deadline = token.accessTokenExpiresAt.getTime() +
-        this.clockSkewSeconds * 1000;
+      const deadline =
+        token.accessTokenExpiresAt.getTime() + this.clockSkewSeconds * 1000;
       if (deadline < Date.now()) {
         throw new InvalidTokenError("access token has expired");
       }
@@ -516,16 +517,16 @@ export class ResourceServer<
     conditions: RequireConditions,
   ): void {
     if (conditions.scope !== undefined) {
-      const required = typeof conditions.scope === "string"
-        ? conditions.scope
-        : conditions.scope.join(" ");
+      const required =
+        typeof conditions.scope === "string"
+          ? conditions.scope
+          : conditions.scope.join(" ");
       this.assertScope(context.scope, required);
     }
     const failure = context.authorization.unmet(conditions);
     if (failure) {
-      const required = failure.required === true
-        ? "an active organization"
-        : failure.required;
+      const required =
+        failure.required === true ? "an active organization" : failure.required;
       throw new InsufficientPermissionsError(
         `${FAILURE_LABELS[failure.kind]}: ${required}`,
       );
@@ -543,13 +544,11 @@ export class ResourceServer<
    *
    * @throws {InsufficientScopeError} If `granted` lacks `requiredScope` (403).
    */
-  assertScope(
-    granted: S | null | undefined,
-    requiredScope: S | string,
-  ): void {
-    const scope = typeof requiredScope === "string"
-      ? new this.Scope(requiredScope)
-      : requiredScope;
+  assertScope(granted: S | null | undefined, requiredScope: S | string): void {
+    const scope =
+      typeof requiredScope === "string"
+        ? new this.Scope(requiredScope)
+        : requiredScope;
     if (!granted?.has(scope)) {
       throw new InsufficientScopeError("insufficient scope", {
         extensions: { requiredScope: scope.toString() },

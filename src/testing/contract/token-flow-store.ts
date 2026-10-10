@@ -1,30 +1,4 @@
-/**
- * Contract test suite for {@link TokenFlowStore} implementations — the storage
- * behind verification links, password-reset links, and magic links.
- *
- * The load-bearing method is `markConsumed`: it is what makes a link
- * single-use, and only a conditional write survives concurrent requests
- * redeeming one link. This suite races eight of them on one link.
- *
- * @example Verify a database-backed store
- * ```ts
- * import { runTokenFlowStoreContractTests } from "@udibo/oauth2/testing/contract";
- * import type { TokenFlowStore } from "@udibo/oauth2/identity";
- *
- * declare function freshTokenFlowStore(): Promise<TokenFlowStore>;
- *
- * runTokenFlowStoreContractTests({
- *   describeName: "DrizzleTokenFlowStore satisfies TokenFlowStore contract",
- *   makeStore: freshTokenFlowStore,
- * });
- * ```
- *
- * @module
- */
-
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   TokenFlowRecord,
   TokenFlowStore,
@@ -99,7 +73,7 @@ export function runTokenFlowStoreContractTests(
 
     describe("save / get", () => {
       it("returns null for an unknown token hash", async () => {
-        assertStrictEquals(await store.get("no-such-hash"), null);
+        expect(await store.get("no-such-hash")).toBe(null);
       });
 
       it("round-trips every field of a saved record", async () => {
@@ -110,12 +84,12 @@ export function runTokenFlowStoreContractTests(
         await store.save(saved);
         const fetched = await store.get("hash-1");
         assert(fetched !== null, "a saved record must be readable back");
-        assertEquals(fetched.purpose, saved.purpose);
-        assertEquals(fetched.subject, saved.subject);
-        assertEquals(fetched.data, saved.data);
-        assertStrictEquals(fetched.expiresAt, saved.expiresAt);
-        assertStrictEquals(fetched.createdAt, saved.createdAt);
-        assertStrictEquals(fetched.consumedAt, undefined);
+        expect(fetched.purpose).toStrictEqual(saved.purpose);
+        expect(fetched.subject).toStrictEqual(saved.subject);
+        expect(fetched.data).toStrictEqual(saved.data);
+        expect(fetched.expiresAt).toBe(saved.expiresAt);
+        expect(fetched.createdAt).toBe(saved.createdAt);
+        expect(fetched.consumedAt).toBe(undefined);
       });
 
       it("returns an expired record rather than hiding it", async () => {
@@ -133,8 +107,8 @@ export function runTokenFlowStoreContractTests(
       it("keeps records with different hashes independent", async () => {
         await store.save(record({ tokenHash: "hash-1" }));
         await store.save(record({ tokenHash: "hash-2" }));
-        assertStrictEquals((await store.get("hash-1"))?.tokenHash, "hash-1");
-        assertStrictEquals((await store.get("hash-2"))?.tokenHash, "hash-2");
+        expect((await store.get("hash-1"))?.tokenHash).toBe("hash-1");
+        expect((await store.get("hash-2"))?.tokenHash).toBe("hash-2");
       });
     });
 
@@ -142,31 +116,23 @@ export function runTokenFlowStoreContractTests(
       it("claims a live record and stamps it", async () => {
         await store.save(record({ tokenHash: "hash-1" }));
         const consumedAt = Date.now();
-        assertStrictEquals(
-          await store.markConsumed("hash-1", consumedAt),
-          true,
-        );
-        assertStrictEquals((await store.get("hash-1"))?.consumedAt, consumedAt);
+        expect(await store.markConsumed("hash-1", consumedAt)).toBe(true);
+        expect((await store.get("hash-1"))?.consumedAt).toBe(consumedAt);
       });
 
       it("refuses a record already consumed, keeping the first stamp", async () => {
         await store.save(record({ tokenHash: "hash-1" }));
         const first = Date.now();
         await store.markConsumed("hash-1", first);
-        assertStrictEquals(
-          await store.markConsumed("hash-1", first + 5_000),
-          false,
-        );
-        assertStrictEquals(
+        expect(await store.markConsumed("hash-1", first + 5_000)).toBe(false);
+        expect(
           (await store.get("hash-1"))?.consumedAt,
-          first,
           "a losing claim must not overwrite the winner's record",
-        );
+        ).toBe(first);
       });
 
       it("refuses an unknown token hash", async () => {
-        assertStrictEquals(
-          await store.markConsumed("no-such-hash", Date.now()),
+        expect(await store.markConsumed("no-such-hash", Date.now())).toBe(
           false,
         );
       });
@@ -175,14 +141,13 @@ export function runTokenFlowStoreContractTests(
         await store.save(record({ tokenHash: "hash-1" }));
         const now = Date.now();
         const results = await race((caller) =>
-          store.markConsumed("hash-1", now + caller)
+          store.markConsumed("hash-1", now + caller),
         );
-        assertStrictEquals(
+        expect(
           countTrue(results),
-          1,
           "a link is single-use — requests racing one link must not each be " +
             "told they claimed it",
-        );
+        ).toBe(1);
       });
 
       it("claims both tokens when two different ones are redeemed concurrently", async () => {
@@ -193,7 +158,7 @@ export function runTokenFlowStoreContractTests(
           store.markConsumed("hash-1", now),
           store.markConsumed("hash-2", now),
         ]);
-        assertStrictEquals(countTrue(results), 2);
+        expect(countTrue(results)).toBe(2);
         assert(
           (await store.get("hash-1"))?.consumedAt !== undefined &&
             (await store.get("hash-2"))?.consumedAt !== undefined,
@@ -218,8 +183,8 @@ export function runTokenFlowStoreContractTests(
           await store.save(record({ tokenHash: "hash-1" }));
           await store.save(record({ tokenHash: "hash-2" }));
           await store.deleteBySubject!(PURPOSE, SUBJECT);
-          assertStrictEquals(await store.get("hash-1"), null);
-          assertStrictEquals(await store.get("hash-2"), null);
+          expect(await store.get("hash-1")).toBe(null);
+          expect(await store.get("hash-2")).toBe(null);
         });
 
         it("leaves other subjects and other purposes alone", async () => {
@@ -231,13 +196,13 @@ export function runTokenFlowStoreContractTests(
             record({ tokenHash: "hash-other-purpose", purpose: OTHER_PURPOSE }),
           );
           await store.deleteBySubject!(PURPOSE, SUBJECT);
-          assertStrictEquals(await store.get("hash-mine"), null);
+          expect(await store.get("hash-mine")).toBe(null);
           assert(
-            await store.get("hash-other-subject") !== null,
+            (await store.get("hash-other-subject")) !== null,
             "another subject's token must survive",
           );
           assert(
-            await store.get("hash-other-purpose") !== null,
+            (await store.get("hash-other-purpose")) !== null,
             "the same subject's token for another purpose must survive",
           );
         });
@@ -245,24 +210,20 @@ export function runTokenFlowStoreContractTests(
         it("is a no-op when the pair has no tokens", async () => {
           await store.save(record({ tokenHash: "hash-1" }));
           await store.deleteBySubject!(PURPOSE, OTHER_SUBJECT);
-          assert(await store.get("hash-1") !== null);
+          assert((await store.get("hash-1")) !== null);
         });
 
         it("keeps an already-consumed record so it still reads as consumed", async () => {
           await store.save(record({ tokenHash: "hash-used" }));
           await store.save(record({ tokenHash: "hash-pending" }));
-          assertStrictEquals(
-            await store.markConsumed("hash-used", Date.now()),
-            true,
-          );
+          expect(await store.markConsumed("hash-used", Date.now())).toBe(true);
 
           await store.deleteBySubject!(PURPOSE, SUBJECT);
 
-          assertStrictEquals(
+          expect(
             await store.get("hash-pending"),
-            null,
             "the pending token must be dropped",
-          );
+          ).toBe(null);
           const used = await store.get("hash-used");
           assert(
             used !== null,
@@ -276,12 +237,7 @@ export function runTokenFlowStoreContractTests(
         });
       });
     } else {
-      it({
-        name:
-          "deleteBySubject is not implemented — outstanding links stay redeemable until they expire (deleteBySubject: false)",
-        ignore: true,
-        fn: () => {},
-      });
+      it.skip("deleteBySubject is not implemented — outstanding links stay redeemable until they expire (deleteBySubject: false)", () => {});
     }
   });
 }

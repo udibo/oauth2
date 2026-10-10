@@ -41,8 +41,8 @@ export function RequireAuth(props: RequireAuthProps): ReactNode {
   useEffect(() => {
     if (isLoading || isAuthenticated) return;
     if (!isBrowser()) return;
-    const target = returnTo ??
-      `${window.location.pathname}${window.location.search}`;
+    const target =
+      returnTo ?? `${window.location.pathname}${window.location.search}`;
     login({ returnTo: target }).catch(() => {});
   }, [isLoading, isAuthenticated, login, returnTo]);
 

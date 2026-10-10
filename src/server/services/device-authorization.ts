@@ -59,10 +59,7 @@ export interface DeviceAuthorizationServiceInterface<
    * The device code is a long, high-entropy string used by the client
    * to poll for authorization status.
    */
-  generateDeviceCode(
-    client: Client,
-    scope?: Scope | null,
-  ): Promise<string>;
+  generateDeviceCode(client: Client, scope?: Scope | null): Promise<string>;
 
   /**
    * Generates a user code.
@@ -70,18 +67,12 @@ export interface DeviceAuthorizationServiceInterface<
    * The user code should be short and easy for users to type.
    * Common formats include: ABCD-1234, WDJB-MJHT, 12345678
    */
-  generateUserCode(
-    client: Client,
-    scope?: Scope | null,
-  ): Promise<string>;
+  generateUserCode(client: Client, scope?: Scope | null): Promise<string>;
 
   /**
    * Returns when the codes should expire.
    */
-  expiresAt(
-    client: Client,
-    scope?: Scope | null,
-  ): Promise<Date>;
+  expiresAt(client: Client, scope?: Scope | null): Promise<Date>;
 
   /**
    * Saves a device authorization request.
