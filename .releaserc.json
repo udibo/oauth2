@@ -67,30 +67,11 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "deno task release:prepare ${nextRelease.version} && deno fmt",
-        "verifyReleaseCmd": "deno run --allow-run=git --allow-read scripts/verify-release.ts ${nextRelease.version} ${lastRelease.gitHead || ''}"
+        "verifyReleaseCmd": "node scripts/verify-release.ts ${lastRelease.gitHead || ''}"
       }
     ],
-    [
-      "@sebbo2002/semantic-release-jsr",
-      {
-        "configFile": "src/deno.json",
-        "cwd": "src",
-        "allowDirty": true
-      }
-    ],
-    [
-      "@semantic-release/exec",
-      {
-        "prepareCmd": "deno task npm:build ${nextRelease.version}"
-      }
-    ],
-    [
-      "@semantic-release/npm",
-      {
-        "pkgRoot": "npm"
-      }
-    ],
+    "@sebbo2002/semantic-release-jsr",
+    "@semantic-release/npm",
     [
       "@semantic-release/github",
       {
@@ -102,15 +83,8 @@
       {
         "assets": [
           "CHANGELOG.md",
-          "deno.lock",
-          "src/deno.json",
-          "templates/juniper/deno.json",
-          "templates/react-router/deno.json",
-          "examples/hono/app-with-own-auth/deno.json",
-          "examples/hono/app-with-external-auth/deno.json",
-          "examples/hono/api-service/deno.json",
-          "examples/juniper/app-with-own-auth/deno.json",
-          "examples/juniper/app-with-external-auth/deno.json"
+          "package.json",
+          "jsr.json"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

@@ -9,91 +9,110 @@ permissions:
   contents: read
 concurrency:
   group: oauth2-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
-  oauth2-package:
-    name: Test on ${{ matrix.os }}
+  test:
+    name: Check and test on Node ${{ matrix.node }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    timeout-minutes: 10
+        include:
+          - { os: ubuntu-latest, node: 22 }
+          - { os: ubuntu-latest, node: 24, coverage: true }
+          - { os: ubuntu-latest, node: 26 }
+          - { os: windows-latest, node: 26 }
+          - { os: macos-latest, node: 26 }
     steps:
       - name: Clone repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
-      - name: Setup Deno
-        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          deno-version: v2.x
-          cache: false
+          node-version: ${{ matrix.node }}
+          cache: pnpm
       - name: Check public release references
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && matrix.coverage
         env:
           RELEASE_REFERENCE_BASE: ${{ github.event.pull_request.base.sha }}
           RELEASE_REFERENCE_PR_TITLE: ${{ github.event.pull_request.title }}
           RELEASE_REFERENCE_PR_BODY: ${{ github.event.pull_request.body }}
-        run: >-
-          deno run --allow-run=git --allow-read
-          --allow-env=RELEASE_REFERENCE_BASE,RELEASE_REFERENCE_PR_TITLE,RELEASE_REFERENCE_PR_BODY
-          scripts/verify-release.ts --references-only
+        run: node scripts/verify-release.ts --references-only
       - name: Install dependencies
-        run: deno ci
-      - name: Run checks (includes doc-lint)
-        run: deno task check
-      - name: Verify the package publishes to JSR (dry run)
-        run: deno task check:publish
-      - name: Run package tests
-        run: deno task test
-      - name: Run repository script tests
-        run: deno task test:scripts
-      - name: Run example tests
-        run: deno task test:examples
-      - name: Run starter template tests
-        run: deno task test:templates
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        run: pnpm install --frozen-lockfile
+      - name: Check lint, formatting, types, and documentation
+        run: pnpm check
+      - name: Run tests
+        if: ${{ !matrix.coverage }}
+        run: pnpm test
+      - name: Run tests with coverage
+        if: ${{ matrix.coverage }}
+        run: pnpm test:coverage
+      - name: Upload coverage
+        if: ${{ matrix.coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
         with:
-          node-version: 22
-      - name: Build the npm artifact (publishes nothing)
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          npm_config_ignore_scripts: "true"
-        run: deno task npm:build
-      - name: Smoke-test the npm artifact from Node
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          npm_config_ignore_scripts: "true"
-        run: deno task npm:smoke
+          files: coverage/lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-  react-browser:
-    # jsdom never moves focus off a disabled element, so only a real engine
-    # can show that a pending submit keeps keyboard focus (issue #31).
-    name: React browser tests
+  package:
+    name: Build and smoke-test the package on Node ${{ matrix.node }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      # The runner image ships Google Chrome here. Naming it makes a missing
-      # browser fail the job instead of skipping the suite.
-      CHROMIUM_PATH: /usr/bin/google-chrome
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     steps:
       - name: Clone repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Setup Deno
-        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          deno-version: v2.x
-          cache: false
+          node-version: ${{ matrix.node }}
+          cache: pnpm
       - name: Install dependencies
-        run: deno ci
-      - name: Run React browser tests
-        run: deno task test:browser
+        run: pnpm install --frozen-lockfile
+      - name: Build the npm package
+        run: pnpm build
+      - name: Install the packed tarball and run it from Node
+        run: pnpm smoke
+      - name: Verify the package publishes to JSR (dry run)
+        if: matrix.node == 24
+        run: pnpm jsr:dry-run
 
-  release-oauth2-package:
-    name: Release @udibo/oauth2 to JSR and npm
-    needs: [oauth2-package, react-browser]
+  react-browser:
+    name: React browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run React browser tests
+        run: pnpm test:browser
+
+  release:
+    name: Release @udibo/oauth2 to npm and JSR
+    needs: [test, package, react-browser]
     if: >-
       github.event_name == 'push'
       && github.ref == 'refs/heads/main'
@@ -107,75 +126,41 @@ jobs:
       pull-requests: write
     steps:
       - name: Clone repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           ssh-key: ${{ secrets.DEPLOY_KEY }}
-      # No `registry-url` here on purpose. It makes setup-node write an .npmrc
-      # whose auth line reads ${NODE_AUTH_TOKEN} and point NPM_CONFIG_USERCONFIG
-      # at it; with no node-auth-token input that variable is a placeholder, and
-      # @semantic-release/npm reads that file instead of writing its own from
-      # NPM_TOKEN. npm then rejects the placeholder with a 401 on whoami, which
-      # reads as a bad credential rather than a workflow mistake.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # No `registry-url` on purpose: it makes setup-node write an .npmrc whose
+      # auth line is a placeholder, which @semantic-release/npm then reads
+      # instead of exchanging the OIDC token.
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
-      # npm trusted publishing (OIDC) needs npm 11.5.1 or later; the version
-      # bundled with a Node release is not guaranteed to be new enough.
+      # npm trusted publishing (OIDC) needs npm 11.5.1 or later.
       - name: Ensure npm supports trusted publishing
         run: |
           npm install -g npm@latest
           npm --version
-      - name: Setup Deno
-        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
-        with:
-          deno-version: v2.x
-          cache: false
       - name: Install dependencies
-        run: deno ci
-      # @semantic-release/npm reads npm/package.json during verifyConditions,
-      # which runs before any prepare step builds it. Building here lets the
-      # plugin verify registry auth before semantic-release pushes a release
-      # commit or tag, so a credential problem cannot strand a partial release.
-      - name: Build the npm artifact so the release can verify npm auth
-        env:
-          npm_config_ignore_scripts: "true"
-        run: deno task npm:build
-      # The dry run resolves the same plugins as the real run and verifies the
-      # same conditions, so both invocations need identical credentials.
-      # npm authentication is not among them: @semantic-release/npm exchanges
-      # this job's OIDC token with the registry, which is why no npm secret
-      # appears anywhere in this workflow.
-      # conventional-changelog-conventionalcommits stays on 9.x: 10.x needs
-      # conventional-changelog-writer 9, and the commit-analyzer and
-      # release-notes-generator bundled with semantic-release 25 load writer 8,
-      # so a 10.x preset fails while rendering the release notes.
+        run: pnpm install --frozen-lockfile
+      - name: Refuse to release while a dependency resolves through JSR
+        run: node scripts/verify-release.ts --dependencies-only
+      # @semantic-release/npm verifies registry auth before anything is pushed,
+      # so the package it publishes has to exist by then.
+      - name: Build the npm package
+        run: pnpm build
+      - name: Prove the packed tarball installs from npm alone
+        run: node scripts/npm-smoke.ts --release
+      # No npm secret appears here: @semantic-release/npm exchanges this job's
+      # OIDC token with the registry, and the JSR plugin does the same with JSR.
       - name: Compute the next version (dry run, publishes nothing)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          npx
-          --package semantic-release@25.0.5
-          --package @semantic-release/changelog@6.0.3
-          --package @semantic-release/exec@7.1.0
-          --package @semantic-release/git@10.0.1
-          --package @semantic-release/github@12.0.8
-          --package @sebbo2002/semantic-release-jsr@3.2.1
-          --package @semantic-release/npm@13.1.5
-          --package conventional-changelog-conventionalcommits@9.3.1
-          semantic-release --dry-run
+        run: pnpm exec semantic-release --dry-run
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          npx
-          --package semantic-release@25.0.5
-          --package @semantic-release/changelog@6.0.3
-          --package @semantic-release/exec@7.1.0
-          --package @semantic-release/git@10.0.1
-          --package @semantic-release/github@12.0.8
-          --package @sebbo2002/semantic-release-jsr@3.2.1
-          --package @semantic-release/npm@13.1.5
-          --package conventional-changelog-conventionalcommits@9.3.1
-          semantic-release
+        run: pnpm exec semantic-release
