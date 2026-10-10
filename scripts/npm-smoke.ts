@@ -9,7 +9,7 @@
  * fails when a runtime dependency resolves through JSR instead of npm, which
  * a published package must not do.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   copyFileSync,
   mkdirSync,
@@ -27,6 +27,7 @@ interface PackageManifest {
   name: string;
   version: string;
   exports: Record<string, unknown>;
+  bin?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 }
@@ -52,12 +53,17 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function run(command: string, args: string[], cwd: string): string {
+function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  stderr: "inherit" | "pipe" = "inherit",
+): string {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
     shell: isWindows && command !== process.execPath,
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", stderr],
     env: { ...process.env, npm_config_ignore_scripts: "true" },
   });
 }
@@ -81,7 +87,68 @@ function exactVersions(
   return pinned;
 }
 
-function main(): void {
+const BIN_NAME = "udibo-oauth2";
+
+function npx(args: string[], cwd: string): string {
+  return run("npx", ["--no-install", BIN_NAME, ...args], cwd, "pipe");
+}
+
+function checkBin(consumerDir: string, listing: string[]): void {
+  const installed = readManifest(
+    join(consumerDir, "node_modules", "@udibo", "oauth2", "package.json"),
+  );
+  const target = installed.bin?.[BIN_NAME];
+  if (!target || !listing.includes(target.replace(/^\.\//, ""))) {
+    fail(`bin ${BIN_NAME} points at ${target}, which is not in the tarball`);
+  }
+  const help = npx(["--help"], consumerDir);
+  if (!help.includes("oidc keygen") || !help.includes("idp dev")) {
+    fail(`${BIN_NAME} --help did not list its commands: ${help}`);
+  }
+  const jwk = JSON.parse(npx(["oidc", "keygen"], consumerDir)) as {
+    kty?: string;
+    d?: string;
+  };
+  if (jwk.kty !== "EC" || !jwk.d)
+    fail(`${BIN_NAME} oidc keygen printed no key`);
+}
+
+async function checkIdpDev(consumerDir: string): Promise<void> {
+  const entry = join(
+    consumerDir,
+    "node_modules",
+    "@udibo",
+    "oauth2",
+    "dist",
+    "cli",
+    "bin.js",
+  );
+  const child = spawn(process.execPath, [entry, "idp", "dev", "--port", "0"], {
+    cwd: consumerDir,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const exited = new Promise<void>((resolve) => child.once("close", resolve));
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      let output = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+        output += chunk;
+        const match = output.match(/Listening on (http:\/\/\S+)/);
+        if (match) resolve(match[1]!);
+      });
+      child.once("error", reject);
+      child.once("close", () => reject(new Error(`exited early:\n${output}`)));
+    });
+    const response = await fetch(`${url}/.well-known/openid-configuration`);
+    if (!response.ok)
+      fail(`idp dev answered discovery with ${response.status}`);
+  } finally {
+    child.kill("SIGTERM");
+    await exited;
+  }
+}
+
+async function main(): Promise<void> {
   const manifest = readManifest(join(packageDir, "package.json"));
   const workDir = mkdtempSync(join(tmpdir(), "oauth2-smoke-"));
   try {
@@ -172,6 +239,9 @@ function main(): void {
       }
     }
 
+    checkBin(consumerDir, listing);
+    await checkIdpDev(consumerDir);
+
     const nonNpm = Object.entries(installed.dependencies ?? {}).filter(
       ([, spec]) => spec.includes("jsr"),
     );
@@ -219,4 +289,4 @@ function main(): void {
   }
 }
 
-main();
+await main();
