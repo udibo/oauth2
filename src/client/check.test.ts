@@ -1,19 +1,9 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-  assertStringIncludes,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it, vi } from "vitest";
+import { rejection } from "../_test_assert.ts";
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
 import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
-import {
-  generateTestCertificate,
-  runTrustingCertificate,
-  serveTls,
-} from "../utils/_test_tls.ts";
+import { hangUntilAborted, stubDenoRuntime } from "../_test_deno-runtime.ts";
+import { controlTimeouts } from "../_test_timeouts.ts";
 import { checkPermissions } from "./check.ts";
 import {
   serveDroppedBody,
@@ -47,10 +37,10 @@ describe("checkPermissions", () => {
       }),
     });
 
-    assertEquals(result, RESULT);
-    assertEquals(seen?.method, "POST");
-    assertEquals(seen?.headers.get("authorization"), "Bearer token-1");
-    assertEquals(await seen?.json(), {
+    expect(result).toStrictEqual(RESULT);
+    expect(seen?.method).toStrictEqual("POST");
+    expect(seen?.headers.get("authorization")).toStrictEqual("Bearer token-1");
+    expect(await seen?.json()).toStrictEqual({
       permissions: ["posts:write", "posts:delete"],
       resource: { type: "organization", id: "org-2" },
     });
@@ -71,12 +61,12 @@ describe("checkPermissions", () => {
         });
       }),
     });
-    assertEquals(body, { permissions: "posts:write" });
+    expect(body).toStrictEqual({ permissions: "posts:write" });
   });
 
   it("reports an unreachable or failing endpoint as temporarily unavailable", async () => {
     const dnsFailure = new TypeError("dns failure");
-    const unreachable = await assertRejects(
+    const unreachable = await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -86,8 +76,8 @@ describe("checkPermissions", () => {
         }),
       TemporarilyUnavailableError,
     );
-    assertStrictEquals(unreachable.cause, dnsFailure);
-    await assertRejects(
+    expect(unreachable.cause).toBe(dnsFailure);
+    await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -100,7 +90,7 @@ describe("checkPermissions", () => {
   });
 
   it("reports a refused request as a server error", async () => {
-    await assertRejects(
+    await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -114,7 +104,7 @@ describe("checkPermissions", () => {
 
   it("refuses to follow a redirect while carrying the bearer token", async () => {
     const calls: string[] = [];
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -137,8 +127,8 @@ describe("checkPermissions", () => {
         }),
       ServerError,
     );
-    assertStringIncludes(error.message, "refuses to follow");
-    assertEquals(calls, ["https://tenant.example.com/api/check"]);
+    expect(error.message).toContain("refuses to follow");
+    expect(calls).toStrictEqual(["https://tenant.example.com/api/check"]);
   });
 
   it("sends the request with a deadline", async () => {
@@ -156,7 +146,7 @@ describe("checkPermissions", () => {
   });
 
   it("reports a timed-out request as temporarily unavailable", async () => {
-    await assertRejects(
+    await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -172,28 +162,28 @@ describe("checkPermissions", () => {
   });
 
   it("reports a 2xx that is not JSON as a server error", async () => {
-    const error = await assertRejects(
-      () =>
-        checkPermissions({
-          endpoint: "https://tenant.example.com/api/check",
-          accessToken: "token-1",
-          permissions: "posts:write",
-          fetch: fetchAnswering(() =>
+    const error = await rejection(() =>
+      checkPermissions({
+        endpoint: "https://tenant.example.com/api/check",
+        accessToken: "token-1",
+        permissions: "posts:write",
+        fetch: fetchAnswering(
+          () =>
             new Response("<!doctype html>", {
               headers: { "content-type": "text/html" },
-            })
-          ),
-        }),
+            }),
+        ),
+      }),
     );
     assert(
       error instanceof ServerError,
       `expected a ServerError, got ${error}`,
     );
-    assertStringIncludes(error.message, "not valid JSON");
+    expect(error.message).toContain("not valid JSON");
   });
 
   it("refuses a 2xx body larger than the response cap", async () => {
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -203,78 +193,71 @@ describe("checkPermissions", () => {
             Response.json({
               ...RESULT,
               padding: "x".repeat(MAX_RESPONSE_BYTES),
-            })
+            }),
           ),
         }),
       ServerError,
     );
-    assertStringIncludes(error.message, "exceeded");
+    expect(error.message).toContain("exceeded");
   });
 
-  it(
-    "reports a body that stalls past the deadline as temporarily unavailable",
-    async () => {
-      await using endpoint = serveStalledBody('{"subject":"user-1",');
-      const started = performance.now();
-      const error = await assertRejects(
-        () =>
-          checkPermissions({
-            endpoint: endpoint.url,
-            accessToken: "token-1",
-            permissions: "posts:write",
-          }),
-      );
-      assert(
-        error instanceof TemporarilyUnavailableError,
-        `expected a TemporarilyUnavailableError, got ${error}`,
-      );
-      assert(
-        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
-        "the call must end at the deadline, not before it",
-      );
-    },
-  );
+  it("reports a body that stalls past the deadline as temporarily unavailable", async () => {
+    using timeouts = controlTimeouts();
+    await using endpoint = await serveStalledBody('{"subject":"user-1",');
+    let settled = false;
+    const pending = rejection(() =>
+      checkPermissions({
+        endpoint: endpoint.url,
+        accessToken: "token-1",
+        permissions: "posts:write",
+      }),
+    ).finally(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(endpoint.requests).toBe(1));
+    expect(settled, "the call must not end before the deadline").toBe(false);
+    await timeouts.expireOnceRequested(1);
+    const error = await pending;
 
-  it(
-    "reports a connection dropped mid-body as temporarily unavailable",
-    async () => {
-      await using endpoint = serveDroppedBody('{"subject":"user-1",');
-      const error = await assertRejects(
-        () =>
-          checkPermissions({
-            endpoint: endpoint.url,
-            accessToken: "token-1",
-            permissions: "posts:write",
-          }),
-      );
-      assert(
-        error instanceof TemporarilyUnavailableError,
-        `expected a TemporarilyUnavailableError, got ${error}`,
-      );
-    },
-  );
+    expect(timeouts.requested).toStrictEqual([REQUEST_TIMEOUT_MS]);
+    assert(
+      error instanceof TemporarilyUnavailableError,
+      `expected a TemporarilyUnavailableError, got ${error}`,
+    );
+  });
 
-  it(
-    "refuses a body past the response cap even when the connection then drops",
-    async () => {
-      await using endpoint = serveDroppedBody(
-        `{"padding":"${"x".repeat(MAX_RESPONSE_BYTES)}"}`,
-      );
-      const error = await assertRejects(
-        () =>
-          checkPermissions({
-            endpoint: endpoint.url,
-            accessToken: "token-1",
-            permissions: "posts:write",
-          }),
-      );
-      assert(
-        error instanceof ServerError,
-        `expected a ServerError, got ${error}`,
-      );
-      assertStringIncludes(error.message, "exceeded");
-    },
-  );
+  it("reports a connection dropped mid-body as temporarily unavailable", async () => {
+    await using endpoint = await serveDroppedBody('{"subject":"user-1",');
+    const error = await rejection(() =>
+      checkPermissions({
+        endpoint: endpoint.url,
+        accessToken: "token-1",
+        permissions: "posts:write",
+      }),
+    );
+    assert(
+      error instanceof TemporarilyUnavailableError,
+      `expected a TemporarilyUnavailableError, got ${error}`,
+    );
+  });
+
+  it("refuses a body past the response cap even when the connection then drops", async () => {
+    await using endpoint = await serveDroppedBody(
+      `{"padding":"${"x".repeat(MAX_RESPONSE_BYTES)}"}`,
+    );
+    const error = await rejection(() =>
+      checkPermissions({
+        endpoint: endpoint.url,
+        accessToken: "token-1",
+        permissions: "posts:write",
+      }),
+    );
+    assert(
+      error instanceof ServerError,
+      `expected a ServerError, got ${error}`,
+    );
+    expect(error.message).toContain("exceeded");
+  });
 
   it("cancels the body of a refused response", async () => {
     let cancelled = false;
@@ -286,7 +269,7 @@ describe("checkPermissions", () => {
         cancelled = true;
       },
     });
-    await assertRejects(
+    await rejection(
       () =>
         checkPermissions({
           endpoint: "https://tenant.example.com/api/check",
@@ -299,29 +282,38 @@ describe("checkPermissions", () => {
     assert(cancelled, "a refused response's body must be released");
   });
 
-  it(
-    "sends the request after a timed-out one on a new HTTP/2 connection",
-    async () => {
-      const certificate = await generateTestCertificate();
-      await using server = serveTls(
-        certificate,
-        async (_request, connection) => {
-          if (connection.stalled) {
-            await connection.released;
-            return new Response(null, { status: 503 });
-          }
-          server.stall();
-          return Response.json(RESULT);
-        },
+  it("sends the request after a timed-out one on a new connection", async () => {
+    const endpoint = "https://check-reconnect.example.com/api/check";
+    const check = () =>
+      checkPermissions({
+        endpoint,
+        accessToken: "token-1",
+        permissions: "posts:write",
+      }).then(
+        ({ results }) => (results["posts:write"] ? "allowed" : "denied"),
+        (error: unknown) =>
+          error instanceof TemporarilyUnavailableError
+            ? "unavailable"
+            : String(error),
       );
+    using runtime = stubDenoRuntime((_input, init) =>
+      runtime.requests.length === 2
+        ? hangUntilAborted(init?.signal)
+        : Promise.resolve(Response.json(RESULT)),
+    );
+    using timeouts = controlTimeouts();
 
-      const outcomes = await runTrustingCertificate(
-        new URL("./_test_check_stalled_connection.ts", import.meta.url),
-        certificate,
-        [`${server.url}/api/check`, "3"],
-      );
+    const outcomes = [await check()];
+    const stalled = check();
+    await vi.waitFor(() => expect(runtime.requests).toHaveLength(2));
+    timeouts.expireLatest();
+    outcomes.push(await stalled, await check());
 
-      assertEquals(outcomes, ["allowed", "unavailable", "allowed"]);
-    },
-  );
+    expect(outcomes).toStrictEqual(["allowed", "unavailable", "allowed"]);
+    expect(runtime.clients).toHaveLength(1);
+    expect(runtime.requests[2]?.init).toHaveProperty(
+      "client",
+      runtime.clients[0],
+    );
+  });
 });

@@ -1,6 +1,6 @@
-import { assertRejects, assertStrictEquals, assertThrows } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
+import { beforeEach, describe, expect, it } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
+import { rejection, thrown } from "../_test_assert.ts";
 import { BasicScope } from "../models/scope.ts";
 import {
   AccessDeniedError,
@@ -39,9 +39,7 @@ function createTestServer() {
   return { server, ...services };
 }
 
-async function setupTestData(
-  services: ReturnType<typeof createTestServices>,
-) {
+async function setupTestData(services: ReturnType<typeof createTestServices>) {
   await services.userService.add(testUser, "password");
   await services.clientService.add(testClient);
 }
@@ -49,59 +47,57 @@ async function setupTestData(
 describe("BEARER_TOKEN", () => {
   it("should match valid Bearer token", () => {
     const match = BEARER_TOKEN.exec("Bearer abc123");
-    assertStrictEquals(match?.[1], "abc123");
+    expect(match?.[1]).toBe("abc123");
   });
 
   it("should match case-insensitive Bearer", () => {
     const match = BEARER_TOKEN.exec("bearer abc123");
-    assertStrictEquals(match?.[1], "abc123");
+    expect(match?.[1]).toBe("abc123");
   });
 
   it("should match BEARER in uppercase", () => {
     const match = BEARER_TOKEN.exec("BEARER abc123");
-    assertStrictEquals(match?.[1], "abc123");
+    expect(match?.[1]).toBe("abc123");
   });
 
   it("should handle leading whitespace", () => {
     const match = BEARER_TOKEN.exec("  Bearer abc123");
-    assertStrictEquals(match?.[1], "abc123");
+    expect(match?.[1]).toBe("abc123");
   });
 
   it("should handle trailing whitespace", () => {
     const match = BEARER_TOKEN.exec("Bearer abc123  ");
-    assertStrictEquals(match?.[1], "abc123");
+    expect(match?.[1]).toBe("abc123");
   });
 
   it("should match token with special chars", () => {
     const match = BEARER_TOKEN.exec("Bearer abc-123_456.789~+/==");
-    assertStrictEquals(match?.[1], "abc-123_456.789~+/==");
+    expect(match?.[1]).toBe("abc-123_456.789~+/==");
   });
 
   it("should not match Basic auth", () => {
     const match = BEARER_TOKEN.exec("Basic abc123");
-    assertStrictEquals(match, null);
+    expect(match).toBe(null);
   });
 
   it("should not match missing token", () => {
     const match = BEARER_TOKEN.exec("Bearer ");
-    assertStrictEquals(match, null);
+    expect(match).toBe(null);
   });
 });
 
 describe("ResourceServer", () => {
   describe("constructor", () => {
-    for (
-      const clockSkewSeconds of [
-        NaN,
-        Infinity,
-        -Infinity,
-        -1,
-        Number.MAX_VALUE,
-      ]
-    ) {
+    for (const clockSkewSeconds of [
+      NaN,
+      Infinity,
+      -Infinity,
+      -1,
+      Number.MAX_VALUE,
+    ]) {
       it(`rejects invalid clock skew ${clockSkewSeconds} at construction`, () => {
         const services = createTestServices();
-        assertThrows(
+        thrown(
           () =>
             new ResourceServer<TestClient, TestUser>({
               resolve: () => ({
@@ -117,23 +113,23 @@ describe("ResourceServer", () => {
       it(`refuses assigning invalid clock skew ${clockSkewSeconds} and retains its previous value`, () => {
         const { server } = createTestServer();
         server.clockSkewSeconds = 0.5;
-        assertThrows(
+        thrown(
           () => {
             server.clockSkewSeconds = clockSkewSeconds;
           },
           RangeError,
           "clockSkewSeconds",
         );
-        assertStrictEquals(server.clockSkewSeconds, 0.5);
+        expect(server.clockSkewSeconds).toBe(0.5);
       });
     }
 
     it("preserves zero default and valid mutable clock skew", () => {
       const { server } = createTestServer();
-      assertStrictEquals(server.clockSkewSeconds, 0);
+      expect(server.clockSkewSeconds).toBe(0);
       for (const clockSkewSeconds of [0, 0.5, Number.MAX_VALUE / 1000]) {
         server.clockSkewSeconds = clockSkewSeconds;
-        assertStrictEquals(server.clockSkewSeconds, clockSkewSeconds);
+        expect(server.clockSkewSeconds).toBe(clockSkewSeconds);
         const services = createTestServices();
         const configured = new ResourceServer<TestClient, TestUser>({
           resolve: () => ({
@@ -141,19 +137,19 @@ describe("ResourceServer", () => {
           }),
           clockSkewSeconds,
         });
-        assertStrictEquals(configured.clockSkewSeconds, clockSkewSeconds);
+        expect(configured.clockSkewSeconds).toBe(clockSkewSeconds);
       }
     });
 
     it("should use default Scope class", () => {
       const { server } = createTestServer();
       const scope = new server.Scope("read write");
-      assertStrictEquals(scope.toString(), "read write");
+      expect(scope.toString()).toBe("read write");
     });
 
     it("should use default realm", () => {
       const { server } = createTestServer();
-      assertStrictEquals(server.realm, "Service");
+      expect(server.realm).toBe("Service");
     });
 
     it("should allow custom realm", () => {
@@ -162,7 +158,7 @@ describe("ResourceServer", () => {
         resolve: () => ({ services: { tokenService: services.tokenService } }),
         realm: "MyAPI",
       });
-      assertStrictEquals(server.realm, "MyAPI");
+      expect(server.realm).toBe("MyAPI");
     });
   });
 
@@ -173,14 +169,13 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 401);
-      assertStrictEquals(
-        response.headers.get("Content-Type"),
+      expect(response.status).toBe(401);
+      expect(response.headers.get("Content-Type")).toBe(
         "application/json;charset=UTF-8",
       );
       const body = await response.json();
-      assertStrictEquals(body.error, "access_denied");
-      assertStrictEquals(body.error_description, "test error");
+      expect(body.error).toBe("access_denied");
+      expect(body.error_description).toBe("test error");
     });
 
     it("should wrap non-OAuth2 errors as ServerError", async () => {
@@ -189,9 +184,9 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
+      expect(body.error).toBe("server_error");
     });
 
     it("should copy headers from the error to the response", () => {
@@ -202,11 +197,10 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(
-        response.headers.get("WWW-Authenticate"),
+      expect(response.headers.get("WWW-Authenticate")).toBe(
         'Bearer realm="Service"',
       );
-      assertStrictEquals(response.headers.get("X-Custom"), "value");
+      expect(response.headers.get("X-Custom")).toBe("value");
     });
 
     it("should populate error_uri from error.type when only type is set", async () => {
@@ -218,12 +212,8 @@ describe("ResourceServer", () => {
       const response = server.createErrorResponse(error);
 
       const body = await response.json();
-      assertStrictEquals(
-        body.error_uri,
-        "https://errors.example/access-denied",
-      );
-      assertStrictEquals(
-        error.extensions.error_uri,
+      expect(body.error_uri).toBe("https://errors.example/access-denied");
+      expect(error.extensions.error_uri).toBe(
         "https://errors.example/access-denied",
       );
     });
@@ -240,8 +230,8 @@ describe("ResourceServer", () => {
       const response = server.createErrorResponse(error);
 
       const body = await response.json();
-      assertStrictEquals(body.error_uri, "https://errors.example/ad");
-      assertStrictEquals(error.type, "https://errors.example/ad");
+      expect(body.error_uri).toBe("https://errors.example/ad");
+      expect(error.type).toBe("https://errors.example/ad");
     });
 
     it("should throw the oauth2 error when throwOnError is true", () => {
@@ -257,7 +247,7 @@ describe("ResourceServer", () => {
       } catch (error) {
         thrown = error;
       }
-      assertStrictEquals(thrown instanceof ServerError, true);
+      expect(thrown instanceof ServerError).toBe(true);
     });
 
     it("should apply the prepare callback before throwing", () => {
@@ -269,20 +259,19 @@ describe("ResourceServer", () => {
 
       let thrown: OAuth2Error | undefined;
       try {
-        server.handleError(
-          new ServerError("boom"),
-          (e) => e.headers.set("X-Prepared", "yes"),
+        server.handleError(new ServerError("boom"), (e) =>
+          e.headers.set("X-Prepared", "yes"),
         );
       } catch (error) {
         thrown = error as OAuth2Error;
       }
-      assertStrictEquals(thrown?.headers.get("X-Prepared"), "yes");
+      expect(thrown?.headers.get("X-Prepared")).toBe("yes");
     });
 
     it("should return response normally when throwOnError is false", () => {
       const { server } = createTestServer();
       const response = server.handleError(new AccessDeniedError("denied"));
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
     });
   });
 
@@ -302,16 +291,15 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 401);
-      assertStrictEquals(
-        response.headers.get("content-type"),
+      expect(response.status).toBe(401);
+      expect(response.headers.get("content-type")).toBe(
         "application/problem+json",
       );
       const body = await response.json();
-      assertStrictEquals(body.error, "access_denied");
-      assertStrictEquals(body.status, 401);
-      assertStrictEquals(body.title, "Access Denied");
-      assertStrictEquals(body.detail, "test error");
+      expect(body.error).toBe("access_denied");
+      expect(body.status).toBe(401);
+      expect(body.title).toBe("Access Denied");
+      expect(body.detail).toBe("test error");
     });
 
     it("should wrap non-OAuth2 errors as ServerError", async () => {
@@ -320,12 +308,11 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
-      assertStrictEquals(body.status, 500);
-      assertStrictEquals(
-        body.detail,
+      expect(body.error).toBe("server_error");
+      expect(body.status).toBe(500);
+      expect(body.detail).toBe(
         "The server encountered an unexpected condition.",
       );
     });
@@ -337,8 +324,7 @@ describe("ResourceServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(
-        response.headers.get("WWW-Authenticate"),
+      expect(response.headers.get("WWW-Authenticate")).toBe(
         'Bearer realm="Service"',
       );
     });
@@ -352,13 +338,10 @@ describe("ResourceServer", () => {
       const response = server.createErrorResponse(error);
 
       const body = await response.json();
-      assertStrictEquals(body.error, "access_denied");
-      assertStrictEquals(body.detail, "denied");
-      assertStrictEquals(body.type, "https://errors.example/access-denied");
-      assertStrictEquals(
-        body.error_uri,
-        "https://errors.example/access-denied",
-      );
+      expect(body.error).toBe("access_denied");
+      expect(body.detail).toBe("denied");
+      expect(body.type).toBe("https://errors.example/access-denied");
+      expect(body.error_uri).toBe("https://errors.example/access-denied");
     });
   });
 
@@ -366,15 +349,14 @@ describe("ResourceServer", () => {
     it("should build basic WWW-Authenticate header", () => {
       const { server } = createTestServer();
       const result = server.buildWwwAuthenticate();
-      assertStrictEquals(result, 'Bearer realm="Service"');
+      expect(result).toBe('Bearer realm="Service"');
     });
 
     it("should include error attributes when error provided", () => {
       const { server } = createTestServer();
       const error = new InvalidTokenError("token expired");
       const result = server.buildWwwAuthenticate(error);
-      assertStrictEquals(
-        result,
+      expect(result).toBe(
         'Bearer realm="Service", error="invalid_token", error_description="token expired"',
       );
     });
@@ -383,8 +365,7 @@ describe("ResourceServer", () => {
       const { server } = createTestServer();
       const error = new InvalidTokenError("access denied");
       const result = server.buildWwwAuthenticate(error, "read write");
-      assertStrictEquals(
-        result,
+      expect(result).toBe(
         'Bearer realm="Service", error="invalid_token", error_description="access denied", scope="read write"',
       );
     });
@@ -394,8 +375,7 @@ describe("ResourceServer", () => {
       const error = new InsufficientScopeError("need more permissions");
       error.extensions.requiredScope = "admin delete";
       const result = server.buildWwwAuthenticate(error);
-      assertStrictEquals(
-        result,
+      expect(result).toBe(
         'Bearer realm="Service", error="insufficient_scope", error_description="need more permissions", scope="admin delete"',
       );
     });
@@ -405,7 +385,7 @@ describe("ResourceServer", () => {
       const result = server.buildWwwAuthenticate(
         new AccessDeniedError("authentication required"),
       );
-      assertStrictEquals(result, 'Bearer realm="Service"');
+      expect(result).toBe('Bearer realm="Service"');
     });
 
     it("omits an error code RFC 6750 does not register as a challenge code", () => {
@@ -413,7 +393,7 @@ describe("ResourceServer", () => {
       const result = server.buildWwwAuthenticate(
         new UnauthorizedClientError("client may not use this grant"),
       );
-      assertStrictEquals(result, 'Bearer realm="Service"');
+      expect(result).toBe('Bearer realm="Service"');
     });
 
     it("still names the required scope when the challenge carries no error code", () => {
@@ -422,7 +402,7 @@ describe("ResourceServer", () => {
         new AccessDeniedError("authentication required"),
         "read",
       );
-      assertStrictEquals(result, 'Bearer realm="Service", scope="read"');
+      expect(result).toBe('Bearer realm="Service", scope="read"');
     });
 
     it("should prefer explicit scope over error requiredScope", () => {
@@ -430,8 +410,7 @@ describe("ResourceServer", () => {
       const error = new InsufficientScopeError("insufficient");
       error.extensions.requiredScope = "admin";
       const result = server.buildWwwAuthenticate(error, "custom");
-      assertStrictEquals(
-        result,
+      expect(result).toBe(
         'Bearer realm="Service", error="insufficient_scope", error_description="insufficient", scope="custom"',
       );
     });
@@ -445,7 +424,7 @@ describe("ResourceServer", () => {
       });
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, "test-token");
+      expect(token).toBe("test-token");
     });
 
     it("should handle case-insensitive Bearer", async () => {
@@ -455,7 +434,7 @@ describe("ResourceServer", () => {
       });
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, "test-token");
+      expect(token).toBe("test-token");
     });
 
     it("should extract token from POST body", async () => {
@@ -465,17 +444,21 @@ describe("ResourceServer", () => {
       });
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, "body-token");
+      expect(token).toBe("body-token");
     });
 
     it("should prefer Authorization header over body", async () => {
       const { server } = createTestServer();
-      const request = formRequest("http://localhost/api", {
-        access_token: "body-token",
-      }, { Authorization: "Bearer header-token" });
+      const request = formRequest(
+        "http://localhost/api",
+        {
+          access_token: "body-token",
+        },
+        { Authorization: "Bearer header-token" },
+      );
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, "header-token");
+      expect(token).toBe("header-token");
     });
 
     it("should return null when no token present", async () => {
@@ -483,7 +466,7 @@ describe("ResourceServer", () => {
       const request = new Request("http://localhost/api");
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, null);
+      expect(token).toBe(null);
     });
 
     it("should return null for invalid Authorization header", async () => {
@@ -493,7 +476,7 @@ describe("ResourceServer", () => {
       });
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, null);
+      expect(token).toBe(null);
     });
 
     it("should not check body for GET requests", async () => {
@@ -503,7 +486,7 @@ describe("ResourceServer", () => {
       );
 
       const token = await server.getAccessToken(request);
-      assertStrictEquals(token, null);
+      expect(token).toBe(null);
     });
   });
 
@@ -528,11 +511,11 @@ describe("ResourceServer", () => {
       await tokenService.save(savedToken);
 
       const token = await server.getToken("valid-token", { tokenService });
-      assertStrictEquals(token.accessToken, "valid-token");
+      expect(token.accessToken).toBe("valid-token");
     });
 
     it("should throw InvalidTokenError for non-existent token", async () => {
-      await assertRejects(
+      await rejection(
         () => server.getToken("non-existent", { tokenService }),
         InvalidTokenError,
         "invalid access token",
@@ -548,7 +531,7 @@ describe("ResourceServer", () => {
       };
       await tokenService.save(expiredToken);
 
-      await assertRejects(
+      await rejection(
         () => server.getToken("expired-token", { tokenService }),
         InvalidTokenError,
         "access token has expired",
@@ -573,7 +556,7 @@ describe("ResourceServer", () => {
         tokenService: services.tokenService,
       });
 
-      assertStrictEquals(token.accessToken, "drifted-token");
+      expect(token.accessToken).toBe("drifted-token");
     });
 
     it("refuses a token that expired beyond the configured clock skew", async () => {
@@ -590,7 +573,7 @@ describe("ResourceServer", () => {
         user: testUser,
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           skewedServer.getToken("long-expired-token", {
             tokenService: services.tokenService,
@@ -609,7 +592,7 @@ describe("ResourceServer", () => {
       };
       await tokenService.save(expiredToken);
 
-      await assertRejects(
+      await rejection(
         () => server.getToken("just-expired-token", { tokenService }),
         InvalidTokenError,
         "access token has expired",
@@ -625,7 +608,7 @@ describe("ResourceServer", () => {
       await tokenService.save(noExpiryToken);
 
       const token = await server.getToken("no-expiry-token", { tokenService });
-      assertStrictEquals(token.accessToken, "no-expiry-token");
+      expect(token.accessToken).toBe("no-expiry-token");
     });
 
     it("applies fractional mutable skew to expiry while preserving no-expiry tokens", async () => {
@@ -642,34 +625,31 @@ describe("ResourceServer", () => {
         client: testClient,
         user: testUser,
       });
-      assertStrictEquals(
+      expect(
         (await server.getToken("fractional-expiry-token", { tokenService }))
           .accessToken,
-        "fractional-expiry-token",
-      );
+      ).toBe("fractional-expiry-token");
       time.tick(1);
-      await assertRejects(
+      await rejection(
         () => server.getToken("fractional-expiry-token", { tokenService }),
         InvalidTokenError,
         "access token has expired",
       );
       server.clockSkewSeconds = 0.75;
-      assertStrictEquals(
+      expect(
         (await server.getToken("fractional-expiry-token", { tokenService }))
           .accessToken,
-        "fractional-expiry-token",
-      );
+      ).toBe("fractional-expiry-token");
       server.clockSkewSeconds = 0;
-      await assertRejects(
+      await rejection(
         () => server.getToken("fractional-expiry-token", { tokenService }),
         InvalidTokenError,
         "access token has expired",
       );
-      assertStrictEquals(
+      expect(
         (await server.getToken("no-expiry-token", { tokenService }))
           .accessToken,
-        "no-expiry-token",
-      );
+      ).toBe("no-expiry-token");
     });
   });
 
@@ -700,16 +680,16 @@ describe("ResourceServer", () => {
 
       const context = await server.authenticate(request);
 
-      assertStrictEquals(context.token.accessToken, "auth-token");
-      assertStrictEquals(context.client.id, testClient.id);
-      assertStrictEquals(context.user?.id, testUser.id);
-      assertStrictEquals(context.scope?.toString(), "read write");
+      expect(context.token.accessToken).toBe("auth-token");
+      expect(context.client.id).toBe(testClient.id);
+      expect(context.user?.id).toBe(testUser.id);
+      expect(context.scope?.toString()).toBe("read write");
     });
 
     it("should throw AccessDeniedError when no token provided", async () => {
       const request = new Request("http://localhost/api");
 
-      await assertRejects(
+      await rejection(
         () => server.authenticate(request),
         AccessDeniedError,
         "authentication required",
@@ -732,7 +712,7 @@ describe("ResourceServer", () => {
 
       const context = await server.authenticate(request, "read");
 
-      assertStrictEquals(context.token.accessToken, "scoped-token");
+      expect(context.token.accessToken).toBe("scoped-token");
     });
 
     it("should verify required scope as Scope object", async () => {
@@ -754,7 +734,7 @@ describe("ResourceServer", () => {
         new BasicScope("read write"),
       );
 
-      assertStrictEquals(context.token.accessToken, "scoped-token");
+      expect(context.token.accessToken).toBe("scoped-token");
     });
 
     it("should throw InsufficientScopeError for insufficient scope (HTTP 403)", async () => {
@@ -771,7 +751,7 @@ describe("ResourceServer", () => {
         headers: { Authorization: "Bearer limited-token" },
       });
 
-      await assertRejects(
+      await rejection(
         () => server.authenticate(request, "write"),
         InsufficientScopeError,
         "insufficient scope",
@@ -791,7 +771,7 @@ describe("ResourceServer", () => {
         headers: { Authorization: "Bearer no-scope-token" },
       });
 
-      await assertRejects(
+      await rejection(
         () => server.authenticate(request, "read"),
         InsufficientScopeError,
         "insufficient scope",
@@ -817,10 +797,9 @@ describe("ResourceServer", () => {
         throw new Error("Should have thrown");
       } catch (error) {
         if (error instanceof InsufficientScopeError) {
-          assertStrictEquals(
+          expect(
             (error.extensions as { requiredScope?: string }).requiredScope,
-            "admin",
-          );
+          ).toBe("admin");
         } else {
           throw error;
         }
@@ -842,7 +821,7 @@ describe("ResourceServer", () => {
 
       const context = await server.authenticate(request);
 
-      assertStrictEquals(context.token.accessToken, "any-token");
+      expect(context.token.accessToken).toBe("any-token");
     });
   });
 
@@ -868,9 +847,10 @@ describe("ResourceServer", () => {
       const server = new ResourceServer<TestClient, TestUser>({
         resolve: (request) => ({
           services: {
-            tokenService: request.headers.get("x-tenant") === "b"
-              ? tenantB.tokenService
-              : tenantA.tokenService,
+            tokenService:
+              request.headers.get("x-tenant") === "b"
+                ? tenantB.tokenService
+                : tenantA.tokenService,
           },
         }),
       });
@@ -880,9 +860,9 @@ describe("ResourceServer", () => {
           headers: { Authorization: "Bearer token-b", "x-tenant": "b" },
         }),
       );
-      assertStrictEquals(context.token.accessToken, "token-b");
+      expect(context.token.accessToken).toBe("token-b");
 
-      await assertRejects(
+      await rejection(
         () =>
           server.authenticate(
             new Request("http://localhost/api", {
@@ -908,7 +888,7 @@ describe("ResourceServer", () => {
           headers: { Authorization: "Bearer default-token" },
         }),
       );
-      assertStrictEquals(context.token.accessToken, "default-token");
+      expect(context.token.accessToken).toBe("default-token");
     });
   });
 });

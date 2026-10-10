@@ -1,38 +1,36 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import { loginContinuation, safeReturnTo } from "./url.ts";
 
 describe("safeReturnTo", () => {
   it("accepts single-leading-slash same-origin paths", () => {
-    assertEquals(safeReturnTo("/dashboard"), "/dashboard");
-    assertEquals(safeReturnTo("/a/b?c=d#e"), "/a/b?c=d#e");
+    expect(safeReturnTo("/dashboard")).toStrictEqual("/dashboard");
+    expect(safeReturnTo("/a/b?c=d#e")).toStrictEqual("/a/b?c=d#e");
   });
 
   it("rejects absolute URLs", () => {
-    assertEquals(safeReturnTo("https://evil.com"), "/");
-    assertEquals(safeReturnTo("http://evil.com/path"), "/");
+    expect(safeReturnTo("https://evil.com")).toStrictEqual("/");
+    expect(safeReturnTo("http://evil.com/path")).toStrictEqual("/");
   });
 
   it("rejects protocol-relative //host", () => {
-    assertEquals(safeReturnTo("//evil.com"), "/");
+    expect(safeReturnTo("//evil.com")).toStrictEqual("/");
   });
 
   it("rejects backslash host tricks /\\host", () => {
-    assertEquals(safeReturnTo("/\\evil.com"), "/");
+    expect(safeReturnTo("/\\evil.com")).toStrictEqual("/");
   });
 
   it("rejects falsy and non-path values", () => {
-    assertEquals(safeReturnTo(undefined), "/");
-    assertEquals(safeReturnTo(null), "/");
-    assertEquals(safeReturnTo(""), "/");
-    assertEquals(safeReturnTo("relative/path"), "/");
+    expect(safeReturnTo(undefined)).toStrictEqual("/");
+    expect(safeReturnTo(null)).toStrictEqual("/");
+    expect(safeReturnTo("")).toStrictEqual("/");
+    expect(safeReturnTo("relative/path")).toStrictEqual("/");
   });
 
   it("uses the provided fallback", () => {
-    assertEquals(safeReturnTo("https://evil.com", "/home"), "/home");
-    assertEquals(safeReturnTo(undefined, "/home"), "/home");
-    assertEquals(safeReturnTo("/ok", "/home"), "/ok");
+    expect(safeReturnTo("https://evil.com", "/home")).toStrictEqual("/home");
+    expect(safeReturnTo(undefined, "/home")).toStrictEqual("/home");
+    expect(safeReturnTo("/ok", "/home")).toStrictEqual("/ok");
   });
 
   const CONTROL_CHARACTERS: [string, string][] = [
@@ -48,49 +46,58 @@ describe("safeReturnTo", () => {
   describe("rejects embedded control characters", () => {
     for (const [name, character] of CONTROL_CHARACTERS) {
       it(`rejects a ${name} in the /<control>/host shape`, () => {
-        assertEquals(safeReturnTo(`/${character}/evil.example`), "/");
+        expect(safeReturnTo(`/${character}/evil.example`)).toStrictEqual("/");
       });
 
       it(`rejects a ${name} in the /<control>\\host shape`, () => {
-        assertEquals(safeReturnTo(`/${character}\\evil.example`), "/");
+        expect(safeReturnTo(`/${character}\\evil.example`)).toStrictEqual("/");
       });
 
       it(`rejects a ${name} anywhere in an otherwise safe path`, () => {
-        assertEquals(safeReturnTo(`/dashboard${character}?a=b`), "/");
+        expect(safeReturnTo(`/dashboard${character}?a=b`)).toStrictEqual("/");
       });
 
       it(`falls back to the caller's fallback for a ${name}`, () => {
-        assertEquals(
+        expect(
           safeReturnTo(`/${character}/evil.example`, "/home"),
-          "/home",
-        );
+        ).toStrictEqual("/home");
       });
     }
   });
 
   it("accepts percent-encoded control characters, which browsers do not strip", () => {
-    assertEquals(safeReturnTo("/%09/evil.example"), "/%09/evil.example");
-    assertEquals(safeReturnTo("/%0d/evil.example"), "/%0d/evil.example");
-    assertEquals(safeReturnTo("/%0a/evil.example"), "/%0a/evil.example");
-    assertEquals(safeReturnTo("/%2F/evil.example"), "/%2F/evil.example");
+    expect(safeReturnTo("/%09/evil.example")).toStrictEqual(
+      "/%09/evil.example",
+    );
+    expect(safeReturnTo("/%0d/evil.example")).toStrictEqual(
+      "/%0d/evil.example",
+    );
+    expect(safeReturnTo("/%0a/evil.example")).toStrictEqual(
+      "/%0a/evil.example",
+    );
+    expect(safeReturnTo("/%2F/evil.example")).toStrictEqual(
+      "/%2F/evil.example",
+    );
   });
 
   it("returns unicode paths unchanged", () => {
-    assertEquals(safeReturnTo("/caf\u00e9"), "/caf\u00e9");
-    assertEquals(safeReturnTo("/a/b?q=\u00e9#\u00e9"), "/a/b?q=\u00e9#\u00e9");
+    expect(safeReturnTo("/caf\u00e9")).toStrictEqual("/caf\u00e9");
+    expect(safeReturnTo("/a/b?q=\u00e9#\u00e9")).toStrictEqual(
+      "/a/b?q=\u00e9#\u00e9",
+    );
   });
 
   it("rejects a path that resolves to a protocol-relative path", () => {
-    assertEquals(safeReturnTo("/..//evil.example"), "/");
+    expect(safeReturnTo("/..//evil.example")).toStrictEqual("/");
   });
 
   it("rejects a value the URL parser cannot resolve", () => {
-    assertEquals(safeReturnTo("//["), "/");
+    expect(safeReturnTo("//[")).toStrictEqual("/");
   });
 
   it("accepts a path that only looks host-like on this origin", () => {
-    assertEquals(safeReturnTo("/@evil.example"), "/@evil.example");
-    assertEquals(safeReturnTo("/ /evil.example"), "/ /evil.example");
+    expect(safeReturnTo("/@evil.example")).toStrictEqual("/@evil.example");
+    expect(safeReturnTo("/ /evil.example")).toStrictEqual("/ /evil.example");
   });
 });
 
@@ -103,54 +110,49 @@ describe("loginContinuation", () => {
 
   it("resumes an in-flight authorize URL unchanged", () => {
     const url = "/api/oauth2/authorize?response_type=code&state=abc";
-    assertEquals(loginContinuation(url, opts), url);
+    expect(loginContinuation(url, opts)).toStrictEqual(url);
   });
 
   it("matches the authorize path exactly, not by prefix", () => {
-    assertEquals(
+    expect(
       loginContinuation("/api/oauth2/authorized-devices", opts),
+    ).toStrictEqual(
       "/auth/login?return_to=%2Fapi%2Foauth2%2Fauthorized-devices",
     );
   });
 
   it("starts a fresh login for a normal path", () => {
-    assertEquals(
-      loginContinuation("/dashboard", opts),
+    expect(loginContinuation("/dashboard", opts)).toStrictEqual(
       "/auth/login?return_to=%2Fdashboard",
     );
   });
 
   it("guards open redirects and falls back to the default", () => {
-    assertEquals(
-      loginContinuation("https://evil.example/x", opts),
+    expect(loginContinuation("https://evil.example/x", opts)).toStrictEqual(
       "/auth/login?return_to=%2Fhome",
     );
-    assertEquals(
-      loginContinuation(undefined, opts),
+    expect(loginContinuation(undefined, opts)).toStrictEqual(
       "/auth/login?return_to=%2Fhome",
     );
   });
 
   it("works with an absolute authorize endpoint", () => {
     const url = "/oauth2/authorize?x=1";
-    assertEquals(
+    expect(
       loginContinuation(url, {
         authorizeEndpoint: "https://idp.example/oauth2/authorize",
       }),
-      url,
-    );
+    ).toStrictEqual(url);
   });
 
   it("falls back to the default for a control-character return_to", () => {
-    assertEquals(
-      loginContinuation("/\u0009/evil.example", opts),
+    expect(loginContinuation("/\u0009/evil.example", opts)).toStrictEqual(
       "/auth/login?return_to=%2Fhome",
     );
   });
 
   it("defaults loginPath and starts fresh when no authorize endpoint is set", () => {
-    assertEquals(
-      loginContinuation("/api/oauth2/authorize?x=1"),
+    expect(loginContinuation("/api/oauth2/authorize?x=1")).toStrictEqual(
       "/auth/login?return_to=%2Fapi%2Foauth2%2Fauthorize%3Fx%3D1",
     );
   });

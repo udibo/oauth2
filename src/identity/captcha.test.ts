@@ -1,6 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
 import {
   type CaptchaProvider,
   type CaptchaVerifyContext,
@@ -30,9 +28,9 @@ describe("verifyCaptcha", () => {
       provider: undefined,
       token: "anything",
     });
-    assertEquals(outcome.decision, "pass");
-    assertEquals(outcome.challenged, false);
-    assertEquals(outcome.degraded, false);
+    expect(outcome.decision).toStrictEqual("pass");
+    expect(outcome.challenged).toStrictEqual(false);
+    expect(outcome.degraded).toStrictEqual(false);
   });
 
   it("hands the token and context to the provider on a pass", async () => {
@@ -45,44 +43,47 @@ describe("verifyCaptcha", () => {
       token: "solved-token",
       context: { ip: "203.0.113.7", action: "signin" },
     });
-    assertEquals(outcome.decision, "pass");
-    assertEquals(outcome.challenged, true);
-    assertEquals(outcome.degraded, false);
-    assertEquals(outcome.score, 0.9);
-    assertEquals(calls.length, 1);
-    assertEquals(calls[0].token, "solved-token");
-    assertEquals(calls[0].context, { ip: "203.0.113.7", action: "signin" });
+    expect(outcome.decision).toStrictEqual("pass");
+    expect(outcome.challenged).toStrictEqual(true);
+    expect(outcome.degraded).toStrictEqual(false);
+    expect(outcome.score).toStrictEqual(0.9);
+    expect(calls.length).toStrictEqual(1);
+    expect(calls[0].token).toStrictEqual("solved-token");
+    expect(calls[0].context).toStrictEqual({
+      ip: "203.0.113.7",
+      action: "signin",
+    });
   });
 
   it("fails a token the provider rejects", async () => {
     const { provider, calls } = recordingProvider({ success: false });
     const outcome = await verifyCaptcha({ provider, token: "forged" });
-    assertEquals(outcome.decision, "fail");
-    assertEquals(outcome.challenged, true);
-    assertEquals(outcome.degraded, false);
-    assertEquals(calls.length, 1);
+    expect(outcome.decision).toStrictEqual("fail");
+    expect(outcome.challenged).toStrictEqual(true);
+    expect(outcome.degraded).toStrictEqual(false);
+    expect(calls.length).toStrictEqual(1);
   });
 
   it("fails a missing token without calling the provider", async () => {
     const { provider, calls } = recordingProvider({ success: true });
     const outcome = await verifyCaptcha({ provider, token: null });
-    assertEquals(outcome.decision, "fail");
-    assertEquals(outcome.challenged, true);
-    assertEquals(calls.length, 0);
+    expect(outcome.decision).toStrictEqual("fail");
+    expect(outcome.challenged).toStrictEqual(true);
+    expect(calls.length).toStrictEqual(0);
   });
 
   it("fails an empty-string token without calling the provider", async () => {
     const { provider, calls } = recordingProvider({ success: true });
     const outcome = await verifyCaptcha({ provider, token: "" });
-    assertEquals(outcome.decision, "fail");
-    assertEquals(calls.length, 0);
+    expect(outcome.decision).toStrictEqual("fail");
+    expect(calls.length).toStrictEqual(0);
   });
 
   it("fails open on a provider outage by default", async () => {
     const { provider } = recordingProvider(new Error("network down"));
     const outcome = await verifyCaptcha({ provider, token: "token" });
-    assertEquals(outcome.decision, "pass");
-    assertEquals(outcome.challenged, true);
+    expect(outcome.decision).toStrictEqual("pass");
+    expect(outcome.challenged).toStrictEqual(true);
     assert(outcome.degraded, "an outage pass must be flagged degraded");
   });
 
@@ -93,8 +94,8 @@ describe("verifyCaptcha", () => {
       token: "token",
       failOpen: false,
     });
-    assertEquals(outcome.decision, "fail");
-    assertEquals(outcome.challenged, true);
+    expect(outcome.decision).toStrictEqual("fail");
+    expect(outcome.challenged).toStrictEqual(true);
     assert(
       outcome.degraded,
       "a fail-closed outage is still a degraded evaluation",

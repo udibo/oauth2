@@ -1,5 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
 import type { AuthenticationContext } from "../models/authentication.ts";
 import { BasicScope } from "../models/scope.ts";
 import {
@@ -77,11 +76,12 @@ describe("authentication event propagation", () => {
       });
       const event:
         | { auth_time?: number; acr?: string; amr?: string[] }
-        | undefined = recorded === "verified"
+        | undefined =
+        recorded === "verified"
           ? { auth_time: 1000, acr: "single", amr: ["pwd"] }
           : recorded === "unknown"
-          ? {}
-          : undefined;
+            ? {}
+            : undefined;
       const expected = structuredClone(event);
       const expectedClaims = {
         auth_time: expected?.auth_time,
@@ -94,44 +94,51 @@ describe("authentication event propagation", () => {
         ),
         () => Promise.resolve({ user, authenticationContext: event }),
       );
-      assertEquals(authorize.status, 302);
+      expect(authorize.status).toStrictEqual(302);
       const code = new URL(authorize.headers.get("location")!).searchParams.get(
         "code",
       );
-      assertExists(code);
+      assert.exists(code);
       if (event) {
         event.auth_time = 2000;
         event.acr = "mfa";
         if (event.amr) event.amr.push("otp", "mfa");
         else event.amr = ["pwd", "otp", "mfa"];
       }
-      const exchange = await server.handleTokenRequest(tokenRequest({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: "https://app.example/callback",
-      }, basicAuthHeader(client.id, "secret")));
-      assertEquals(exchange.status, 200);
+      const exchange = await server.handleTokenRequest(
+        tokenRequest(
+          {
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "https://app.example/callback",
+          },
+          basicAuthHeader(client.id, "secret"),
+        ),
+      );
+      expect(exchange.status).toStrictEqual(200);
       let credential = await exchange.json();
       for (let generation = 0; generation < 3; generation++) {
         const id = await verifyJwt(credential.id_token, key.publicJwk);
-        assertExists(id);
-        assertEquals(
-          { auth_time: id.auth_time, acr: id.acr, amr: id.amr },
-          expectedClaims,
-        );
+        assert.exists(id);
+        expect({
+          auth_time: id.auth_time,
+          acr: id.acr,
+          amr: id.amr,
+        }).toStrictEqual(expectedClaims);
         const access = await verifyJwt(credential.access_token, key.publicJwk);
-        assertExists(access);
-        assertEquals(
-          { auth_time: access.auth_time, acr: access.acr, amr: access.amr },
-          expectedClaims,
-        );
+        assert.exists(access);
+        expect({
+          auth_time: access.auth_time,
+          acr: access.acr,
+          amr: access.amr,
+        }).toStrictEqual(expectedClaims);
         const info = await server.handleUserInfoRequest(
           new Request("https://auth.example/userinfo", {
             headers: { authorization: `Bearer ${credential.access_token}` },
           }),
         );
-        assertEquals(info.status, 200);
-        assertEquals(await info.json(), { sub: user.id, ...expected });
+        expect(info.status).toStrictEqual(200);
+        expect(await info.json()).toStrictEqual({ sub: user.id, ...expected });
         const introspection = await server.handleIntrospectionRequest(
           tokenRequest(
             { token: credential.access_token },
@@ -139,20 +146,23 @@ describe("authentication event propagation", () => {
           ),
         );
         const inspected = await introspection.json();
-        assertEquals({
+        expect({
           auth_time: inspected.auth_time,
           acr: inspected.acr,
           amr: inspected.amr,
-        }, expectedClaims);
+        }).toStrictEqual(expectedClaims);
         const stored = await tokenService.getToken(credential.access_token);
-        assertEquals(stored?.authenticationContext, expected);
+        expect(stored?.authenticationContext).toStrictEqual(expected);
         const refresh = await server.handleTokenRequest(
-          tokenRequest({
-            grant_type: "refresh_token",
-            refresh_token: credential.refresh_token,
-          }, basicAuthHeader(client.id, "secret")),
+          tokenRequest(
+            {
+              grant_type: "refresh_token",
+              refresh_token: credential.refresh_token,
+            },
+            basicAuthHeader(client.id, "secret"),
+          ),
         );
-        assertEquals(refresh.status, 200);
+        expect(refresh.status).toStrictEqual(200);
         credential = await refresh.json();
       }
     });
@@ -184,14 +194,14 @@ describe("authentication event propagation", () => {
       tokenService,
       { auth_time: 1000, acr: "mfa", amr: ["pwd", "otp", "mfa"] },
     );
-    assertEquals(token.authenticationContext, undefined);
+    expect(token.authenticationContext).toStrictEqual(undefined);
     const claims = await verifyJwt(token.accessToken, key.publicJwk);
-    assertExists(claims);
-    assertEquals(claims.sub, "machine");
+    assert.exists(claims);
+    expect(claims.sub).toStrictEqual("machine");
     for (const name of ["auth_time", "acr", "amr"]) {
-      assertEquals(Object.hasOwn(claims, name), false);
+      expect(Object.hasOwn(claims, name)).toStrictEqual(false);
     }
-    assertEquals(userClaimsCalled, false);
+    expect(userClaimsCalled).toStrictEqual(false);
   });
 
   it("exposes raw authentication controls to application policy without converting malformed values", () => {
@@ -207,14 +217,13 @@ describe("authentication event propagation", () => {
         "https://auth.example/authorize?acr_values=single+mfa&max_age=0&prompt=login",
       ),
     );
-    assertEquals(parsed.acrValues, "single mfa");
-    assertEquals(parsed.maxAge, "0");
-    assertEquals(parsed.prompt, "login");
-    assertEquals(
+    expect(parsed.acrValues).toStrictEqual("single mfa");
+    expect(parsed.maxAge).toStrictEqual("0");
+    expect(parsed.prompt).toStrictEqual("login");
+    expect(
       server.parseAuthorizeParameters(
         new Request("https://auth.example/authorize?max_age=garbage"),
       ).maxAge,
-      "garbage",
-    );
+    ).toStrictEqual("garbage");
   });
 });

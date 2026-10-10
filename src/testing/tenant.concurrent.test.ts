@@ -1,10 +1,9 @@
-import { assert, assertEquals } from "@std/assert";
-
+import { assert, expect, it } from "vitest";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
 import { generateCodeChallenge, generateCodeVerifier } from "../utils/pkce.ts";
 import { createFakeTenant } from "./tenant.ts";
 
-Deno.test("concurrent exchanges keep each browser's session binding", async () => {
+it("concurrent exchanges keep each browser's session binding", async () => {
   const issuer = "https://identity.example.com";
   const tenant = await createFakeTenant({ issuer });
   const client = { id: "app", secret: "app-secret" };
@@ -51,7 +50,7 @@ Deno.test("concurrent exchanges keep each browser's session binding", async () =
       headers: credentialHeaders,
       body: new URLSearchParams(body),
     });
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
     return (await response.json()).access_token;
   }
 
@@ -70,12 +69,12 @@ Deno.test("concurrent exchanges keep each browser's session binding", async () =
     const response = await request("/api/account/sessions", {
       headers: { authorization: `Bearer ${token}` },
     });
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
     const body = await response.json();
-    const current = body.sessions.filter((session: { current: boolean }) =>
-      session.current
+    const current = body.sessions.filter(
+      (session: { current: boolean }) => session.current,
     );
-    assertEquals(current.length, 1);
+    expect(current.length).toStrictEqual(1);
     return current[0];
   }
 
@@ -85,27 +84,25 @@ Deno.test("concurrent exchanges keep each browser's session binding", async () =
     exchange(phoneCode),
     exchange(laptopCode),
   ]);
-  assertEquals(
+  expect(
     await active(phone),
-    true,
     "the phone credential must remain active",
-  );
-  assertEquals(
+  ).toStrictEqual(true);
+  expect(
     await active(laptop),
-    true,
     "the laptop credential must remain active",
-  );
+  ).toStrictEqual(true);
   const phoneSession = await currentSession(phone);
   const laptopSession = await currentSession(laptop);
-  assertEquals(phoneSession.userAgent, "phone");
-  assertEquals(laptopSession.userAgent, "laptop");
+  expect(phoneSession.userAgent).toStrictEqual("phone");
+  expect(laptopSession.userAgent).toStrictEqual("laptop");
   assert(phoneSession.id !== laptopSession.id);
   const revoked = await request(`/api/account/sessions/${phoneSession.id}`, {
     method: "DELETE",
     headers: { authorization: `Bearer ${laptop}` },
   });
   await revoked.body?.cancel();
-  assertEquals(revoked.status, 204);
-  assertEquals(await active(phone), false);
-  assertEquals(await active(laptop), true);
+  expect(revoked.status).toStrictEqual(204);
+  expect(await active(phone)).toStrictEqual(false);
+  expect(await active(laptop)).toStrictEqual(true);
 });

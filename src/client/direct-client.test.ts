@@ -1,14 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
+import { rejection, thrown } from "../_test_assert.ts";
 import type { OAuth2ErrorCode } from "../models/responses.ts";
 import { AuthorizationCodeGrant } from "../server/grants/authorization-code.ts";
 import { ClientCredentialsGrant } from "../server/grants/client-credentials.ts";
@@ -44,6 +36,7 @@ import {
   MemoryTokenStorage,
 } from "./storage.ts";
 import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "./_http.ts";
+import { controlTimeouts } from "../_test_timeouts.ts";
 import { serveNoHeaders, serveStalledBody } from "./_test_interrupted_body.ts";
 import type { OAuth2ClientEvent } from "./events.ts";
 
@@ -153,11 +146,10 @@ async function performAuthorizeRedirect(
   authorizeUrl: string,
 ): Promise<string> {
   const request = new Request(authorizeUrl);
-  const response = await authServer.handleAuthorizeRequest(
-    request,
-    () => Promise.resolve({ user: testUser }),
+  const response = await authServer.handleAuthorizeRequest(request, () =>
+    Promise.resolve({ user: testUser }),
   );
-  assertStrictEquals(response.status, 302);
+  expect(response.status).toBe(302);
   const location = response.headers.get("Location");
   if (!location) throw new Error("missing redirect location");
   return location;
@@ -232,8 +224,7 @@ describe("DirectClient", () => {
       const { url } = await client.login({
         redirectUri: "https://app.example/derived/cb",
       });
-      assertStrictEquals(
-        new URL(url).searchParams.get("redirect_uri"),
+      expect(new URL(url).searchParams.get("redirect_uri")).toBe(
         "https://app.example/derived/cb",
       );
     });
@@ -252,15 +243,9 @@ describe("DirectClient", () => {
       });
 
       const begUrl = new URL(begin.url);
-      assertStrictEquals(begUrl.searchParams.get("response_type"), "code");
-      assertStrictEquals(
-        begUrl.searchParams.get("client_id"),
-        testPublicClient.id,
-      );
-      assertStrictEquals(
-        begUrl.searchParams.get("code_challenge_method"),
-        "S256",
-      );
+      expect(begUrl.searchParams.get("response_type")).toBe("code");
+      expect(begUrl.searchParams.get("client_id")).toBe(testPublicClient.id);
+      expect(begUrl.searchParams.get("code_challenge_method")).toBe("S256");
 
       const callback = await performAuthorizeRedirect(
         fixture.authServer,
@@ -273,9 +258,9 @@ describe("DirectClient", () => {
       const result = await client.handleAuthorizationCallback(callback);
       unsubscribe();
 
-      assertStrictEquals(result.returnTo, "/dashboard");
-      assertStrictEquals(typeof result.tokens.accessToken, "string");
-      assertStrictEquals(events[0]?.type, "authenticated");
+      expect(result.returnTo).toBe("/dashboard");
+      expect(typeof result.tokens.accessToken).toBe("string");
+      expect(events[0]?.type).toBe("authenticated");
     });
 
     it("is idempotent on duplicate callbacks for the same code (strict-mode guard)", async () => {
@@ -295,7 +280,7 @@ describe("DirectClient", () => {
         client.handleAuthorizationCallback(callback),
         client.handleAuthorizationCallback(callback),
       ]);
-      assertStrictEquals(a.tokens.accessToken, b.tokens.accessToken);
+      expect(a.tokens.accessToken).toBe(b.tokens.accessToken);
     });
 
     it("surfaces the OAuth2 error when the callback URL has ?error=…", async () => {
@@ -304,7 +289,7 @@ describe("DirectClient", () => {
         endpoints: { token: TOKEN_URL },
         fetch: fixture.fetchImpl,
       });
-      await assertRejects(
+      await rejection(
         () =>
           client.handleAuthorizationCallback(
             `${REDIRECT_URI}?error=access_denied&error_description=nope`,
@@ -334,11 +319,8 @@ describe("DirectClient", () => {
       client.subscribe((e) => events.push(e));
 
       const [a, b] = await Promise.all([client.refresh(), client.refresh()]);
-      assertStrictEquals(a, b, "single-flight refresh should share promise");
-      assertStrictEquals(
-        events.filter((e) => e.type === "token_refreshed").length,
-        1,
-      );
+      expect(a, "single-flight refresh should share promise").toBe(b);
+      expect(events.filter((e) => e.type === "token_refreshed").length).toBe(1);
     });
 
     it("clears session and emits logged_out on invalid_grant", async () => {
@@ -354,13 +336,12 @@ describe("DirectClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((e) => events.push(e));
 
-      await assertRejects(() => client.refresh(), InvalidGrantError);
-      assertStrictEquals(
-        events.some((e) =>
-          e.type === "logged_out" && e.reason === "invalid_grant"
+      await rejection(() => client.refresh(), InvalidGrantError);
+      expect(
+        events.some(
+          (e) => e.type === "logged_out" && e.reason === "invalid_grant",
         ),
-        true,
-      );
+      ).toBe(true);
     });
 
     it("refuses the refresh when the refresh token store cannot be read", async () => {
@@ -378,21 +359,15 @@ describe("DirectClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((e) => events.push(e));
 
-      await assertRejects(
-        () => client.refresh(),
-        Error,
-        "indexeddb unavailable",
-      );
-      assertStrictEquals(
+      await rejection(() => client.refresh(), Error, "indexeddb unavailable");
+      expect(
         events.filter((e) => e.type === "error").length,
-        1,
         "a store that cannot be read is reported, not thrown past the client",
-      );
-      assertStrictEquals(
+      ).toBe(1);
+      expect(
         events.some((e) => e.type === "logged_out"),
-        false,
         "a broken store is not evidence the grant died",
-      );
+      ).toBe(false);
     });
 
     it("stays quiet about an unreadable store on the background renew path", async () => {
@@ -411,8 +386,8 @@ describe("DirectClient", () => {
       client.subscribe((e) => events.push(e));
 
       const session = await client.renewSession();
-      assertStrictEquals(session.isAuthenticated, false);
-      assertStrictEquals(events.filter((e) => e.type === "error").length, 0);
+      expect(session.isAuthenticated).toBe(false);
+      expect(events.filter((e) => e.type === "error").length).toBe(0);
     });
   });
 
@@ -425,8 +400,8 @@ describe("DirectClient", () => {
         fetch: fixture.fetchImpl,
       });
       const tokens = await client.getClientCredentialsToken({ scope: "read" });
-      assertStrictEquals(typeof tokens.accessToken, "string");
-      assertStrictEquals(tokens.scope, "read");
+      expect(typeof tokens.accessToken).toBe("string");
+      expect(tokens.scope).toBe("read");
     });
 
     it("rejects without a clientSecret", async () => {
@@ -435,8 +410,8 @@ describe("DirectClient", () => {
         endpoints: { token: TOKEN_URL },
         fetch: fixture.fetchImpl,
       });
-      assertStrictEquals(client.isConfidential, false);
-      await assertRejects(
+      expect(client.isConfidential).toBe(false);
+      await rejection(
         () => client.getClientCredentialsToken(),
         Error,
         "clientSecret",
@@ -457,9 +432,10 @@ describe("DirectClient", () => {
       let capturedAuth: string | null = null;
       const spyFetch: typeof fetch = (input, init) => {
         if (urlOf(input) === TOKEN_URL && init?.method === "POST") {
-          capturedBody = init.body instanceof URLSearchParams
-            ? init.body
-            : new URLSearchParams(String(init.body));
+          capturedBody =
+            init.body instanceof URLSearchParams
+              ? init.body
+              : new URLSearchParams(String(init.body));
           capturedAuth = new Headers(init.headers).get("authorization");
         }
         return fixture.fetchImpl(input, init);
@@ -474,8 +450,8 @@ describe("DirectClient", () => {
 
       await client.exchangeRefreshToken("rt-conf");
 
-      assertStringIncludes(capturedAuth ?? "", "Basic ");
-      assertStrictEquals(capturedBody?.has("client_id"), false);
+      expect(capturedAuth ?? "").toContain("Basic ");
+      expect(capturedBody?.has("client_id")).toBe(false);
     });
 
     it("strips a caller-set body client_id for confidential clients (#postToken, RFC 6749 §2.3.1)", async () => {
@@ -485,9 +461,10 @@ describe("DirectClient", () => {
       let capturedAuth: string | null = null;
       const spyFetch: typeof fetch = (input, init) => {
         if (urlOf(input) === TOKEN_URL && init?.method === "POST") {
-          capturedBody = init.body instanceof URLSearchParams
-            ? init.body
-            : new URLSearchParams(String(init.body));
+          capturedBody =
+            init.body instanceof URLSearchParams
+              ? init.body
+              : new URLSearchParams(String(init.body));
           capturedAuth = new Headers(init.headers).get("authorization");
           return Promise.resolve(
             new Response(
@@ -508,8 +485,8 @@ describe("DirectClient", () => {
 
       await client.pollDeviceToken("device-code", { interval: 1 });
 
-      assertStringIncludes(capturedAuth ?? "", "Basic ");
-      assertStrictEquals(capturedBody?.has("client_id"), false);
+      expect(capturedAuth ?? "").toContain("Basic ");
+      expect(capturedBody?.has("client_id")).toBe(false);
     });
   });
 
@@ -528,8 +505,8 @@ describe("DirectClient", () => {
       const { accessToken } = await client.getClientCredentialsToken();
 
       const active = await client.introspect(accessToken);
-      assertStrictEquals(active.active, true);
-      assertStrictEquals(active.client_id, testClient.id);
+      expect(active.active).toBe(true);
+      expect(active.client_id).toBe(testClient.id);
 
       await client.revoke(accessToken);
     });
@@ -543,9 +520,9 @@ describe("DirectClient", () => {
         fetch: fixture.fetchImpl,
       });
       const res = await client.startDeviceAuthorization({ scope: "read" });
-      assertStrictEquals(typeof res.device_code, "string");
-      assertStrictEquals(typeof res.user_code, "string");
-      assertStrictEquals(res.verification_uri, `${ISSUER}/device`);
+      expect(typeof res.device_code).toBe("string");
+      expect(typeof res.user_code).toBe("string");
+      expect(res.verification_uri).toBe(`${ISSUER}/device`);
     });
 
     it("authenticates a confidential client at the device endpoint (RFC 8628 §3.1)", async () => {
@@ -556,8 +533,8 @@ describe("DirectClient", () => {
         fetch: fixture.fetchImpl,
       });
       const res = await client.startDeviceAuthorization({ scope: "read" });
-      assertStrictEquals(typeof res.device_code, "string");
-      assertStrictEquals(typeof res.user_code, "string");
+      expect(typeof res.device_code).toBe("string");
+      expect(typeof res.user_code).toBe("string");
     });
 
     it("polls through authorization_pending and slow_down to a token (RFC 8628 §3.4)", async () => {
@@ -573,10 +550,11 @@ describe("DirectClient", () => {
         endpoints: { token: TOKEN_URL },
         fetch: (input, init) => {
           if (urlOf(input) === TOKEN_URL && init?.method === "POST") {
-            const body = init.body instanceof URLSearchParams
-              ? init.body
-              : new URLSearchParams(String(init.body));
-            assertStrictEquals(body.get("client_id"), testPublicClient.id);
+            const body =
+              init.body instanceof URLSearchParams
+                ? init.body
+                : new URLSearchParams(String(init.body));
+            expect(body.get("client_id")).toBe(testPublicClient.id);
             calls++;
             if (calls === 1) {
               return Promise.resolve(pendingError("authorization_pending"));
@@ -604,8 +582,8 @@ describe("DirectClient", () => {
       await time.tickAsync(7000);
       const tokens = await promise;
 
-      assertStrictEquals(tokens.accessToken, "device-at");
-      assertStrictEquals(calls, 3);
+      expect(tokens.accessToken).toBe("device-at");
+      expect(calls).toBe(3);
     });
 
     it("rejects with access_denied when aborted mid-wait", async () => {
@@ -629,7 +607,7 @@ describe("DirectClient", () => {
       });
       await time.tickAsync(0);
       controller.abort();
-      await assertRejects(() => promise, AccessDeniedError);
+      await rejection(() => promise, AccessDeniedError);
     });
   });
 
@@ -647,12 +625,12 @@ describe("DirectClient", () => {
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         authRequestStorage: storage,
       });
-      await assertRejects(
+      await rejection(
         () => client.exchangeAuthorizationCode("code-1", "state-1"),
         InvalidGrantError,
         "authorization request expired",
       );
-      assertEquals(await storage.get("state-1"), null);
+      expect(await storage.get("state-1")).toStrictEqual(null);
     });
   });
 
@@ -665,7 +643,7 @@ describe("DirectClient", () => {
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         authRequestTtlMs: 30 * 60_000,
         fetch: respondingWith(() =>
-          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" }),
         ).fetch,
       });
       const { url } = await client.login();
@@ -675,7 +653,7 @@ describe("DirectClient", () => {
       await client.login();
 
       const result = await client.exchangeAuthorizationCode("code-1", state);
-      assertEquals(result.tokens.accessToken, "at-1");
+      expect(result.tokens.accessToken).toStrictEqual("at-1");
     });
 
     it("keeps a pending login past 10 minutes in the default browser store when authRequestTtlMs allows it", async () => {
@@ -687,7 +665,7 @@ describe("DirectClient", () => {
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         authRequestTtlMs: 30 * 60_000,
         fetch: respondingWith(() =>
-          jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+          jsonResponse({ access_token: "at-1", token_type: "Bearer" }),
         ).fetch,
       });
       const { url } = await client.login();
@@ -696,7 +674,7 @@ describe("DirectClient", () => {
       time.tick(11 * 60_000);
 
       const result = await client.exchangeAuthorizationCode("code-1", state);
-      assertEquals(result.tokens.accessToken, "at-1");
+      expect(result.tokens.accessToken).toStrictEqual("at-1");
     });
   });
 
@@ -708,7 +686,7 @@ describe("DirectClient", () => {
         createdAt: Date.now(),
       });
       const sink = respondingWith(() =>
-        jsonResponse({ access_token: "at-1", token_type: "Bearer" })
+        jsonResponse({ access_token: "at-1", token_type: "Bearer" }),
       );
       const client = new DirectClient({
         clientId: testPublicClient.id,
@@ -723,17 +701,16 @@ describe("DirectClient", () => {
         client.exchangeAuthorizationCode("code-2", "state-1"),
       ]);
 
-      assertEquals(
+      expect(
         sink.calls,
-        [TOKEN_URL],
         "a state must reach the token endpoint at most once",
-      );
-      assertEquals(outcomes.map((outcome) => outcome.status).sort(), [
+      ).toStrictEqual([TOKEN_URL]);
+      expect(outcomes.map((outcome) => outcome.status).sort()).toStrictEqual([
         "fulfilled",
         "rejected",
       ]);
-      const rejected = outcomes.find((outcome) =>
-        outcome.status === "rejected"
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === "rejected",
       ) as PromiseRejectedResult;
       assert(rejected.reason instanceof InvalidGrantError);
     });
@@ -750,15 +727,15 @@ describe("DirectClient", () => {
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         authRequestStorage: storage,
         fetch: respondingWith(() =>
-          jsonResponse({ error: "invalid_grant" }, 400)
+          jsonResponse({ error: "invalid_grant" }, 400),
         ).fetch,
       });
 
-      await assertRejects(
+      await rejection(
         () => client.exchangeAuthorizationCode("code-1", "state-1"),
         InvalidGrantError,
       );
-      assertEquals(await storage.get("state-1"), null);
+      expect(await storage.get("state-1")).toStrictEqual(null);
     });
 
     it("removes the record before the token call from a store that has no take", async () => {
@@ -797,7 +774,7 @@ describe("DirectClient", () => {
 
       await client.exchangeAuthorizationCode("code-1", "state-1");
 
-      assertEquals(log, ["get", "delete", `fetch ${TOKEN_URL}`]);
+      expect(log).toStrictEqual(["get", "delete", `fetch ${TOKEN_URL}`]);
     });
   });
 
@@ -842,7 +819,7 @@ describe("DirectClient", () => {
       await client.handleAuthorizationCallback(callback);
 
       const res = await client.fetch(`${ISSUER}/api/me`);
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
     });
 
     it("sends the headers a Request input was built with", async () => {
@@ -862,8 +839,8 @@ describe("DirectClient", () => {
         }),
       );
 
-      assertStrictEquals(sent?.get("x-trace"), "abc");
-      assertStrictEquals(sent?.get("accept"), "application/json");
+      expect(sent?.get("x-trace")).toBe("abc");
+      expect(sent?.get("accept")).toBe("application/json");
     });
 
     it("lets init.headers override a same-named Request header, keeping the rest", async () => {
@@ -884,8 +861,8 @@ describe("DirectClient", () => {
         { headers: { "x-trace": "from-init" } },
       );
 
-      assertStrictEquals(sent?.get("x-trace"), "from-init");
-      assertStrictEquals(sent?.get("x-keep"), "kept");
+      expect(sent?.get("x-trace")).toBe("from-init");
+      expect(sent?.get("x-keep")).toBe("kept");
     });
 
     it("leaves an Authorization header set on a Request input alone", async () => {
@@ -914,7 +891,7 @@ describe("DirectClient", () => {
         }),
       );
 
-      assertStrictEquals(sent?.get("Authorization"), "Bearer caller-supplied");
+      expect(sent?.get("Authorization")).toBe("Bearer caller-supplied");
     });
 
     it("replays a Request-shaped POST body on the retry after refreshing", async () => {
@@ -953,8 +930,8 @@ describe("DirectClient", () => {
         }),
       );
 
-      assertStrictEquals(res.status, 200);
-      assertEquals(bodies, [
+      expect(res.status).toBe(200);
+      expect(bodies).toStrictEqual([
         JSON.stringify({ name: "widget" }),
         JSON.stringify({ name: "widget" }),
       ]);
@@ -990,7 +967,7 @@ describe("DirectClient", () => {
         await performAuthorizeRedirect(fixture.authServer, begin.url),
       );
 
-      await assertRejects(
+      await rejection(
         () => client.fetch(`${ISSUER}/api/me`),
         TypeError,
         "network down",
@@ -1013,7 +990,7 @@ describe("DirectClient", () => {
       });
 
       const res = await client.fetch(`${ISSUER}/api/me`);
-      assertStrictEquals(res.status, 401);
+      expect(res.status).toBe(401);
     });
   });
 
@@ -1024,7 +1001,7 @@ describe("DirectClient", () => {
         endpoints: { token: TOKEN_URL },
         fetch: fixture.fetchImpl,
       });
-      assertEquals(await client.getSession(), {
+      expect(await client.getSession()).toStrictEqual({
         isAuthenticated: false,
         user: null,
         sessionExpiresIn: null,
@@ -1042,10 +1019,10 @@ describe("DirectClient", () => {
       await client.getClientCredentialsToken({ scope: "read" });
 
       const session = await client.getSession();
-      assertStrictEquals(session.isAuthenticated, true);
-      assertStrictEquals(session.user, null);
-      assertStrictEquals(session.logoutUrl, null);
-      assertStrictEquals(typeof session.sessionExpiresIn, "number");
+      expect(session.isAuthenticated).toBe(true);
+      expect(session.user).toBe(null);
+      expect(session.logoutUrl).toBe(null);
+      expect(typeof session.sessionExpiresIn).toBe("number");
     });
 
     it("renewSession rotates the token and reports the fresh session", async () => {
@@ -1063,12 +1040,11 @@ describe("DirectClient", () => {
       const { tokens } = await client.handleAuthorizationCallback(callback);
 
       const session = await client.renewSession();
-      assertStrictEquals(session.isAuthenticated, true);
-      assertStrictEquals(
+      expect(session.isAuthenticated).toBe(true);
+      expect(
         (await client.getAccessToken()) === tokens.accessToken,
-        false,
         "renewSession must leave a rotated access token behind",
-      );
+      ).toBe(false);
     });
 
     it("reports signed out for an expired token with nothing to revive it", async () => {
@@ -1084,7 +1060,7 @@ describe("DirectClient", () => {
         tokenStorage: store,
         fetch: fixture.fetchImpl,
       });
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
+      expect((await client.getSession()).isAuthenticated).toBe(false);
     });
 
     it("reports signed in for an expired token a refresh token can revive", async () => {
@@ -1104,8 +1080,8 @@ describe("DirectClient", () => {
         fetch: fixture.fetchImpl,
       });
       const session = await client.getSession();
-      assertStrictEquals(session.isAuthenticated, true);
-      assertStrictEquals(session.sessionExpiresIn, 0);
+      expect(session.isAuthenticated).toBe(true);
+      expect(session.sessionExpiresIn).toBe(0);
     });
 
     it("reports signed out for a bundle with an empty accessToken", async () => {
@@ -1117,7 +1093,7 @@ describe("DirectClient", () => {
         tokenStorage: store,
         fetch: fixture.fetchImpl,
       });
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
+      expect((await client.getSession()).isAuthenticated).toBe(false);
     });
 
     it("reports signed out and emits error rather than rejecting on a broken id_token", async () => {
@@ -1138,8 +1114,8 @@ describe("DirectClient", () => {
       client.subscribe((event) => events.push(event));
 
       const session = await client.getSession();
-      assertStrictEquals(session.isAuthenticated, false);
-      assertStrictEquals(events.filter((e) => e.type === "error").length, 1);
+      expect(session.isAuthenticated).toBe(false);
+      expect(events.filter((e) => e.type === "error").length).toBe(1);
     });
 
     it("stays quiet about a transport failure during a background renew", async () => {
@@ -1155,21 +1131,16 @@ describe("DirectClient", () => {
       client.subscribe((event) => events.push(event));
 
       await client.renewSession();
-      assertEquals(
+      expect(
         events,
-        [],
         "a blip on a background timer must not paint a user-visible error",
-      );
+      ).toStrictEqual([]);
 
-      await assertRejects(
-        () => client.refresh(),
-        TemporarilyUnavailableError,
-      );
-      assertEquals(
+      await rejection(() => client.refresh(), TemporarilyUnavailableError);
+      expect(
         events.map((event) => event.type),
-        ["error"],
         "an explicit refresh still reports the same failure",
-      );
+      ).toStrictEqual(["error"]);
     });
 
     it("stays quiet when a background renew cannot resolve the user either", async () => {
@@ -1193,18 +1164,16 @@ describe("DirectClient", () => {
       client.subscribe((event) => events.push(event));
 
       await client.renewSession();
-      assertEquals(
+      expect(
         events,
-        [],
         "the whole background path owes no error event, probe included",
-      );
+      ).toStrictEqual([]);
 
       await client.getSession();
-      assertEquals(
+      expect(
         events.map((event) => event.type),
-        ["error"],
         "a foreground probe still reports the same failure",
-      );
+      ).toStrictEqual(["error"]);
     });
 
     it("is a documented no-op for a client_credentials-only client", async () => {
@@ -1217,16 +1186,14 @@ describe("DirectClient", () => {
       const before = await client.getClientCredentialsToken({ scope: "read" });
 
       const session = await client.renewSession();
-      assertStrictEquals(
+      expect(
         session.isAuthenticated,
-        true,
         "the still-valid token keeps the session alive",
-      );
-      assertStrictEquals(
+      ).toBe(true);
+      expect(
         await client.getAccessToken(),
-        before.accessToken,
         "renewSession never re-runs the grant; that would swap identities",
-      );
+      ).toBe(before.accessToken);
     });
 
     it("renewSession reports signed out when the refresh token is dead", async () => {
@@ -1243,17 +1210,16 @@ describe("DirectClient", () => {
       client.subscribe((event) => events.push(event));
 
       const session = await client.renewSession();
-      assertStrictEquals(
+      expect(
         session.isAuthenticated,
-        false,
         "renewSession must not reject; it reports what the failure left",
-      );
-      assertEquals(
-        events.some((event) =>
-          event.type === "logged_out" && event.reason === "invalid_grant"
+      ).toBe(false);
+      expect(
+        events.some(
+          (event) =>
+            event.type === "logged_out" && event.reason === "invalid_grant",
         ),
-        true,
-      );
+      ).toStrictEqual(true);
     });
   });
 
@@ -1265,14 +1231,18 @@ describe("DirectClient", () => {
       });
       const payload = { sub: "user-1", name: "Demo" };
       const encoded = [
-        base64urlEncode(new TextEncoder().encode(JSON.stringify({
-          alg: "none",
-        }))),
+        base64urlEncode(
+          new TextEncoder().encode(
+            JSON.stringify({
+              alg: "none",
+            }),
+          ),
+        ),
         base64urlEncode(new TextEncoder().encode(JSON.stringify(payload))),
         "signature",
       ].join(".");
       const decoded = client.decodeIdToken(encoded);
-      assertEquals(decoded, payload);
+      expect(decoded).toStrictEqual(payload);
     });
 
     it("decodes an unpadded payload segment", () => {
@@ -1284,8 +1254,10 @@ describe("DirectClient", () => {
       const segment = base64urlEncode(
         new TextEncoder().encode(JSON.stringify(payload)),
       );
-      assertEquals(segment.length % 4, 2);
-      assertEquals(client.decodeIdToken(`header.${segment}.sig`), payload);
+      expect(segment.length % 4).toStrictEqual(2);
+      expect(client.decodeIdToken(`header.${segment}.sig`)).toStrictEqual(
+        payload,
+      );
     });
 
     it("decodes non-ASCII claims as UTF-8 (not Latin-1)", () => {
@@ -1297,7 +1269,9 @@ describe("DirectClient", () => {
       const claims = base64urlEncode(
         new TextEncoder().encode(JSON.stringify(payload)),
       );
-      assertEquals(client.decodeIdToken(`header.${claims}.sig`), payload);
+      expect(client.decodeIdToken(`header.${claims}.sig`)).toStrictEqual(
+        payload,
+      );
     });
   });
 
@@ -1320,13 +1294,12 @@ describe("DirectClient", () => {
         begin.url,
       );
 
-      assertStrictEquals(entries.size, 1);
+      expect(entries.size).toBe(1);
 
       const afterNavigation = new DirectClient(options);
-      const result = await afterNavigation.handleAuthorizationCallback(
-        callback,
-      );
-      assertStrictEquals(result.returnTo, "/dashboard");
+      const result =
+        await afterNavigation.handleAuthorizationCallback(callback);
+      expect(result.returnTo).toBe("/dashboard");
     });
 
     it("keeps a pending authorization in memory outside a browser document", async () => {
@@ -1341,12 +1314,12 @@ describe("DirectClient", () => {
         });
 
         const begin = await client.login({ returnTo: "/dashboard" });
-        assertStrictEquals(entries.size, 0);
+        expect(entries.size).toBe(0);
 
         const result = await client.handleAuthorizationCallback(
           await performAuthorizeRedirect(fixture.authServer, begin.url),
         );
-        assertStrictEquals(result.returnTo, "/dashboard");
+        expect(result.returnTo).toBe("/dashboard");
       } finally {
         restore();
       }
@@ -1361,8 +1334,8 @@ describe("DirectClient", () => {
         fetch: fixture.fetchImpl,
       });
       const meta = await client.discover();
-      assertStrictEquals(meta.issuer, ISSUER);
-      assertStrictEquals(meta.token_endpoint, TOKEN_URL);
+      expect(meta.issuer).toBe(ISSUER);
+      expect(meta.token_endpoint).toBe(TOKEN_URL);
 
       let fetchCount = 0;
       const spyClient = new DirectClient({
@@ -1375,7 +1348,7 @@ describe("DirectClient", () => {
       });
       await spyClient.discover();
       await spyClient.discover();
-      assertStrictEquals(fetchCount, 1);
+      expect(fetchCount).toBe(1);
     });
 
     it("resolves the introspection endpoint from discovery (introspection_endpoint, M2)", async () => {
@@ -1387,7 +1360,7 @@ describe("DirectClient", () => {
       });
       const { accessToken } = await client.getClientCredentialsToken();
       const result = await client.introspect(accessToken);
-      assertStrictEquals(result.active, true);
+      expect(result.active).toBe(true);
     });
 
     it("maps userinfo_endpoint and end_session_endpoint, and logout uses end-session (C1)", async () => {
@@ -1418,20 +1391,16 @@ describe("DirectClient", () => {
       });
 
       const meta = await client.discover();
-      assertStrictEquals(meta.userinfo_endpoint, USERINFO_URL);
-      assertStrictEquals(meta.end_session_endpoint, END_SESSION_URL);
+      expect(meta.userinfo_endpoint).toBe(USERINFO_URL);
+      expect(meta.end_session_endpoint).toBe(END_SESSION_URL);
 
       const { url } = await client.logout({
         returnTo: "https://app.example/bye",
       });
-      assertEquals(typeof url, "string");
+      expect(typeof url).toStrictEqual("string");
       const logoutUrl = new URL(url!);
-      assertStrictEquals(
-        `${logoutUrl.origin}${logoutUrl.pathname}`,
-        END_SESSION_URL,
-      );
-      assertStrictEquals(
-        logoutUrl.searchParams.get("post_logout_redirect_uri"),
+      expect(`${logoutUrl.origin}${logoutUrl.pathname}`).toBe(END_SESSION_URL);
+      expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(
         "https://app.example/bye",
       );
     });
@@ -1461,8 +1430,8 @@ describe("DirectClient", () => {
         fetch: fetchImpl,
       });
       const meta = await client.discover();
-      assertStrictEquals(triedOAuth, true);
-      assertStrictEquals(meta.token_endpoint, TOKEN_URL);
+      expect(triedOAuth).toBe(true);
+      expect(meta.token_endpoint).toBe(TOKEN_URL);
     });
 
     it("getUser falls back to the discovered userinfo endpoint (C1 mapping)", async () => {
@@ -1477,19 +1446,23 @@ describe("DirectClient", () => {
       const fetchImpl: typeof fetch = (input, init) => {
         const url = urlOf(input);
         if (url === METADATA_URL) {
-          return Promise.resolve(json({
-            issuer: ISSUER,
-            authorization_endpoint: AUTHORIZE_URL,
-            token_endpoint: TOKEN_URL,
-            userinfo_endpoint: USERINFO_URL,
-          }));
+          return Promise.resolve(
+            json({
+              issuer: ISSUER,
+              authorization_endpoint: AUTHORIZE_URL,
+              token_endpoint: TOKEN_URL,
+              userinfo_endpoint: USERINFO_URL,
+            }),
+          );
         }
         if (url === TOKEN_URL) {
-          return Promise.resolve(json({
-            access_token: "at-userinfo",
-            token_type: "Bearer",
-            expires_in: 3600,
-          }));
+          return Promise.resolve(
+            json({
+              access_token: "at-userinfo",
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+          );
         }
         if (url.startsWith(USERINFO_URL)) {
           userinfoBearer = new Headers(init?.headers).get("authorization");
@@ -1512,8 +1485,8 @@ describe("DirectClient", () => {
       );
 
       const user = await client.getUser();
-      assertEquals(user, claims);
-      assertStringIncludes(userinfoBearer ?? "", "Bearer at-userinfo");
+      expect(user).toStrictEqual(claims);
+      expect(userinfoBearer ?? "").toContain("Bearer at-userinfo");
     });
   });
 
@@ -1528,31 +1501,28 @@ describe("DirectClient", () => {
         },
         body: new URLSearchParams({ grant_type: "client_credentials" }),
       });
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
     });
 
     it("serves metadata at the .well-known path", async () => {
       const f = fixture.fetchImpl;
       const res = await f(METADATA_URL);
-      assertStrictEquals(res.status, 200);
+      expect(res.status).toBe(200);
       const meta = await res.json();
-      assertStrictEquals(meta.issuer, ISSUER);
+      expect(meta.issuer).toBe(ISSUER);
     });
 
     it("throws on unmapped paths", async () => {
       const f = fixture.fetchImpl;
-      await assertRejects(
-        () => f(`${ISSUER}/unknown`),
-        Error,
-        "no handler",
-      );
+      await rejection(() => f(`${ISSUER}/unknown`), Error, "no handler");
     });
   });
 });
 
-function respondingWith(
-  response: () => Response,
-): { fetch: typeof fetch; calls: string[] } {
+function respondingWith(response: () => Response): {
+  fetch: typeof fetch;
+  calls: string[];
+} {
   const calls: string[] = [];
   const fetchImpl = ((input: RequestInfo | URL) => {
     calls.push(urlOf(input));
@@ -1591,77 +1561,78 @@ function seededRefreshStore(): MemoryRefreshTokenStorage {
 describe("DirectClient response hardening", () => {
   it("refuses an HTML page where a token response was required", async () => {
     const client = publicClient(
-      respondingWith(() =>
-        new Response("<!doctype html><h1>Gateway</h1>", {
-          status: 200,
-          headers: { "Content-Type": "text/html" },
-        })
+      respondingWith(
+        () =>
+          new Response("<!doctype html><h1>Gateway</h1>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
       ).fetch,
     );
-    const error = await assertRejects(() => client.refresh(), ServerError);
-    assertStringIncludes(error.message, "text/html");
-    assertStringIncludes(error.message, "not valid JSON");
+    const error = await rejection(() => client.refresh(), ServerError);
+    expect(error.message).toContain("text/html");
+    expect(error.message).toContain("not valid JSON");
   });
 
   it("refuses JSON that is not an object", async () => {
     const client = publicClient(
       respondingWith(() => jsonResponse([1, 2])).fetch,
     );
-    const error = await assertRejects(() => client.refresh(), ServerError);
-    assertStringIncludes(error.message, "a JSON array");
+    const error = await rejection(() => client.refresh(), ServerError);
+    expect(error.message).toContain("a JSON array");
   });
 
   it("refuses a 200 that reports an error alongside a token (RFC 6749 §5.2)", async () => {
     const client = publicClient(
       respondingWith(() =>
-        jsonResponse({ error: "invalid_grant", access_token: "at-decoy" })
+        jsonResponse({ error: "invalid_grant", access_token: "at-decoy" }),
       ).fetch,
     );
-    await assertRejects(() => client.refresh(), InvalidGrantError);
+    await rejection(() => client.refresh(), InvalidGrantError);
   });
 
   it("refuses a 200 carrying no access_token rather than persisting one", async () => {
     const client = publicClient(
       respondingWith(() => jsonResponse({ token_type: "Bearer" })).fetch,
     );
-    const error = await assertRejects(() => client.refresh(), ServerError);
-    assertStringIncludes(error.message, 'no "access_token"');
-    assertStrictEquals(
+    const error = await rejection(() => client.refresh(), ServerError);
+    expect(error.message).toContain('no "access_token"');
+    expect(
       (await client.getSession()).isAuthenticated,
-      false,
       "a response with no access_token must leave nothing persisted",
-    );
+    ).toBe(false);
   });
 
   it("refuses to replay a credentialed POST at a redirect target", async () => {
-    const sink = respondingWith(() =>
-      new Response(null, {
-        status: 307,
-        headers: { Location: "https://attacker.example/token" },
-      })
+    const sink = respondingWith(
+      () =>
+        new Response(null, {
+          status: 307,
+          headers: { Location: "https://attacker.example/token" },
+        }),
     );
     const client = publicClient(sink.fetch);
-    const error = await assertRejects(() => client.refresh(), ServerError);
-    assertStringIncludes(error.message, "refuses to follow");
-    assertEquals(
+    const error = await rejection(() => client.refresh(), ServerError);
+    expect(error.message).toContain("refuses to follow");
+    expect(
       sink.calls,
-      [TOKEN_URL],
       "the redirect target must never receive the refresh token",
-    );
+    ).toStrictEqual([TOKEN_URL]);
   });
 
   it("refuses a token response larger than the byte cap", async () => {
     const oversized = "x".repeat(MAX_RESPONSE_BYTES + 1);
     const client = publicClient(
-      respondingWith(() =>
-        new Response(JSON.stringify({ access_token: oversized }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
+      respondingWith(
+        () =>
+          new Response(JSON.stringify({ access_token: oversized }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
       ).fetch,
     );
-    const error = await assertRejects(() => client.refresh(), ServerError);
-    assertStringIncludes(error.message, "exceeded");
+    const error = await rejection(() => client.refresh(), ServerError);
+    expect(error.message).toContain("exceeded");
   });
 
   it("accepts a token response exactly at the byte cap", async () => {
@@ -1669,66 +1640,69 @@ describe("DirectClient response hardening", () => {
       MAX_RESPONSE_BYTES - JSON.stringify({ access_token: "" }).length,
     );
     const body = JSON.stringify({ access_token: padding });
-    assertStrictEquals(
-      new TextEncoder().encode(body).byteLength,
-      MAX_RESPONSE_BYTES,
-    );
+    expect(new TextEncoder().encode(body).byteLength).toBe(MAX_RESPONSE_BYTES);
     const client = publicClient(
-      respondingWith(() =>
-        new Response(body, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
+      respondingWith(
+        () =>
+          new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
       ).fetch,
     );
-    assertStrictEquals(await client.refresh(), padding);
+    expect(await client.refresh()).toBe(padding);
   });
 
   it("still reads the OAuth2 code out of an oversized error body", async () => {
     const filler = "z".repeat(MAX_RESPONSE_BYTES);
     const client = publicClient(
-      respondingWith(() =>
-        new Response(
-          JSON.stringify({ error: "invalid_grant", error_description: filler }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        )
+      respondingWith(
+        () =>
+          new Response(
+            JSON.stringify({
+              error: "invalid_grant",
+              error_description: filler,
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          ),
       ).fetch,
     );
     const events: OAuth2ClientEvent[] = [];
     client.subscribe((event) => events.push(event));
 
-    await assertRejects(() => client.refresh(), InvalidGrantError);
-    assertEquals(
-      events.some((event) =>
-        event.type === "logged_out" && event.reason === "invalid_grant"
+    await rejection(() => client.refresh(), InvalidGrantError);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "logged_out" && event.reason === "invalid_grant",
       ),
-      true,
       "a dead grant must be recognised even when the body arrives oversized",
-    );
+    ).toStrictEqual(true);
   });
 
   it("caps a hostile error_description instead of echoing it whole", async () => {
     const client = publicClient(
       respondingWith(() =>
-        jsonResponse({
-          error: "invalid_grant",
-          error_description: `${"A".repeat(50_000)}\nX\u001b[31m`,
-        }, 400)
+        jsonResponse(
+          {
+            error: "invalid_grant",
+            error_description: `${"A".repeat(50_000)}\nX\u001b[31m`,
+          },
+          400,
+        ),
       ).fetch,
     );
-    const error = await assertRejects(
-      () => client.refresh(),
-      InvalidGrantError,
-    );
+    const error = await rejection(() => client.refresh(), InvalidGrantError);
     assert(
       error.message.length <= 200,
       `expected a capped message, got ${error.message.length} chars`,
     );
-    // deno-lint-ignore no-control-regex -- asserting control chars are gone
-    assertEquals(/[\u0000-\u001f]/.test(error.message), false);
+    // oxlint-disable-next-line no-control-regex
+    expect(/[\u0000-\u001f]/.test(error.message)).toStrictEqual(false);
   });
 
   it("gives up on an endpoint that never answers", async () => {
+    using timeouts = controlTimeouts();
     const client = new DirectClient({
       clientId: "spa",
       endpoints: { token: TOKEN_URL },
@@ -1740,19 +1714,24 @@ describe("DirectClient response hardening", () => {
           });
         })) as typeof fetch,
     });
-    const error = await assertRejects(
+    const pending = rejection(
       () => client.refresh(),
       TemporarilyUnavailableError,
     );
-    assertStringIncludes(error.message, "timed out");
+    await timeouts.expireOnceRequested(1);
+    const error = await pending;
+
+    expect(timeouts.requested).toStrictEqual([REQUEST_TIMEOUT_MS]);
+    expect(error.message).toContain("timed out");
   });
 
   it("hardens the introspection endpoint like every other call", async () => {
-    const sink = respondingWith(() =>
-      new Response(null, {
-        status: 307,
-        headers: { Location: "https://attacker.example/introspect" },
-      })
+    const sink = respondingWith(
+      () =>
+        new Response(null, {
+          status: 307,
+          headers: { Location: "https://attacker.example/introspect" },
+        }),
     );
     const client = new DirectClient({
       clientId: "svc",
@@ -1760,16 +1739,15 @@ describe("DirectClient response hardening", () => {
       endpoints: { token: TOKEN_URL, introspection: INTROSPECT_URL },
       fetch: sink.fetch,
     });
-    const error = await assertRejects(
+    const error = await rejection(
       () => client.introspect("at-probe"),
       ServerError,
     );
-    assertStringIncludes(error.message, "refuses to follow");
-    assertEquals(
+    expect(error.message).toContain("refuses to follow");
+    expect(
       sink.calls,
-      [INTROSPECT_URL],
       "the redirect target must never receive the introspected token",
-    );
+    ).toStrictEqual([INTROSPECT_URL]);
   });
 
   it("refuses an HTML introspection response", async () => {
@@ -1777,14 +1755,15 @@ describe("DirectClient response hardening", () => {
       clientId: "svc",
       clientSecret: "s3cret",
       endpoints: { token: TOKEN_URL, introspection: INTROSPECT_URL },
-      fetch: respondingWith(() =>
-        new Response("<html>nope</html>", {
-          status: 200,
-          headers: { "Content-Type": "text/html" },
-        })
+      fetch: respondingWith(
+        () =>
+          new Response("<html>nope</html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
       ).fetch,
     });
-    await assertRejects(
+    await rejection(
       () => client.introspect("at-probe"),
       ServerError,
       "not valid JSON",
@@ -1793,76 +1772,79 @@ describe("DirectClient response hardening", () => {
 
   it("reports an unreachable endpoint as temporarily unavailable, caused by the transport failure", async () => {
     const refused = new TypeError("connection refused");
-    const client = publicClient(
-      (() => Promise.reject(refused)) as typeof fetch,
-    );
-    const error = await assertRejects(
+    const client = publicClient((() =>
+      Promise.reject(refused)) as typeof fetch);
+    const error = await rejection(
       () => client.refresh(),
       TemporarilyUnavailableError,
     );
-    assertStringIncludes(error.message, "could not reach the token endpoint");
-    assertStrictEquals(error.cause, refused);
+    expect(error.message).toContain("could not reach the token endpoint");
+    expect(error.cause).toBe(refused);
   });
 
   it("refuses a device authorization response with no device_code", async () => {
     const client = publicClient(
       respondingWith(() => jsonResponse({ user_code: "ABCD" })).fetch,
     );
-    const error = await assertRejects(
+    const error = await rejection(
       () => client.startDeviceAuthorization(),
       ServerError,
     );
-    assertStringIncludes(error.message, 'no "device_code"');
+    expect(error.message).toContain('no "device_code"');
   });
 
   it("refuses to replay a revocation at a redirect target", async () => {
-    const sink = respondingWith(() =>
-      new Response(null, {
-        status: 302,
-        headers: { Location: "https://attacker.example/revoke" },
-      })
+    const sink = respondingWith(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { Location: "https://attacker.example/revoke" },
+        }),
     );
     const client = publicClient(sink.fetch);
-    await assertRejects(() => client.revoke("rt-seed"), ServerError);
-    assertEquals(sink.calls, [REVOKE_URL]);
+    await rejection(() => client.revoke("rt-seed"), ServerError);
+    expect(sink.calls).toStrictEqual([REVOKE_URL]);
   });
 
-  it(
-    "reports a token response that stalls past the deadline as temporarily unavailable",
-    async () => {
-      await using endpoint = serveStalledBody('{"access_token":"at-');
-      const client = new DirectClient({
-        clientId: "spa",
-        endpoints: { token: endpoint.url },
-        refreshTokenStorage: seededRefreshStore(),
-      });
-      const started = performance.now();
-      const error = await assertRejects(() => client.refresh());
-      assert(
-        error instanceof TemporarilyUnavailableError,
-        `expected a TemporarilyUnavailableError, got ${error}`,
-      );
-      assert(
-        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
-        "the call must end at the deadline, not before it",
-      );
-    },
-  );
+  it("reports a token response that stalls past the deadline as temporarily unavailable", async () => {
+    using timeouts = controlTimeouts();
+    await using endpoint = await serveStalledBody('{"access_token":"at-');
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: endpoint.url },
+      refreshTokenStorage: seededRefreshStore(),
+    });
+    let settled = false;
+    const pending = rejection(() => client.refresh()).finally(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(endpoint.requests).toBe(1));
+    expect(settled, "the call must not end before the deadline").toBe(false);
+    await timeouts.expireOnceRequested(1);
+    const error = await pending;
+
+    expect(timeouts.requested).toStrictEqual([REQUEST_TIMEOUT_MS]);
+    assert(
+      error instanceof TemporarilyUnavailableError,
+      `expected a TemporarilyUnavailableError, got ${error}`,
+    );
+  });
 
   it("refuses an HTML userinfo response", async () => {
     const client = new DirectClient({
       clientId: "spa",
       endpoints: { token: TOKEN_URL, userInfo: `${ISSUER}/userinfo` },
       tokenStorage: seededTokenStore(),
-      fetch: respondingWith(() =>
-        new Response("<html>nope</html>", {
-          status: 200,
-          headers: { "Content-Type": "text/html" },
-        })
+      fetch: respondingWith(
+        () =>
+          new Response("<html>nope</html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
       ).fetch,
     });
-    const error = await assertRejects(() => client.getUserInfo(), ServerError);
-    assertStringIncludes(error.message, "not valid JSON");
+    const error = await rejection(() => client.getUserInfo(), ServerError);
+    expect(error.message).toContain("not valid JSON");
   });
 });
 
@@ -1877,68 +1859,70 @@ function seededTokenStore(): MemoryTokenStorage {
 }
 
 describe("DirectClient unavailable endpoints", () => {
-  it(
-    "reports every call whose response headers never arrive as temporarily unavailable, caused by the timeout",
-    async () => {
-      await using endpoint = serveNoHeaders();
-      const confidential = new DirectClient({
-        clientId: "svc",
-        clientSecret: CLIENT_SECRET,
-        endpoints: {
-          token: `${endpoint.url}token`,
-          introspection: `${endpoint.url}introspect`,
-          revocation: `${endpoint.url}revoke`,
-          userInfo: `${endpoint.url}userinfo`,
-          deviceAuthorization: `${endpoint.url}device_authorization`,
-        },
-        tokenStorage: seededTokenStore(),
-        refreshTokenStorage: seededRefreshStore(),
-      });
-      const discovering = new DirectClient({
-        clientId: "spa",
-        issuer: endpoint.url,
-      });
-      const calls: Record<string, () => Promise<unknown>> = {
-        discover: () => discovering.discover(),
-        refresh: () => confidential.refresh(),
-        exchangeRefreshToken: () => confidential.exchangeRefreshToken("rt"),
-        getClientCredentialsToken: () =>
-          confidential.getClientCredentialsToken(),
-        startDeviceAuthorization: () => confidential.startDeviceAuthorization(),
-        pollDeviceToken: () =>
-          confidential.pollDeviceToken("device-code", { interval: 1 }),
-        introspect: () => confidential.introspect("at-probe"),
-        revoke: () => confidential.revoke("rt-seed"),
-        getUserInfo: () => confidential.getUserInfo(),
-      };
-      const started = performance.now();
-      const outcomes = await Promise.all(
-        Object.entries(calls).map(async ([name, call]) => {
-          try {
-            await call();
-            return { name, error: undefined as unknown };
-          } catch (error) {
-            return { name, error };
-          }
-        }),
+  it("reports every call whose response headers never arrive as temporarily unavailable, caused by the timeout", async () => {
+    using timeouts = controlTimeouts();
+    await using endpoint = await serveNoHeaders();
+    const confidential = new DirectClient({
+      clientId: "svc",
+      clientSecret: CLIENT_SECRET,
+      endpoints: {
+        token: `${endpoint.url}token`,
+        introspection: `${endpoint.url}introspect`,
+        revocation: `${endpoint.url}revoke`,
+        userInfo: `${endpoint.url}userinfo`,
+        deviceAuthorization: `${endpoint.url}device_authorization`,
+      },
+      tokenStorage: seededTokenStore(),
+      refreshTokenStorage: seededRefreshStore(),
+    });
+    const discovering = new DirectClient({
+      clientId: "spa",
+      issuer: endpoint.url,
+    });
+    const calls: Record<string, () => Promise<unknown>> = {
+      discover: () => discovering.discover(),
+      refresh: () => confidential.refresh(),
+      exchangeRefreshToken: () => confidential.exchangeRefreshToken("rt"),
+      getClientCredentialsToken: () => confidential.getClientCredentialsToken(),
+      startDeviceAuthorization: () => confidential.startDeviceAuthorization(),
+      pollDeviceToken: () =>
+        confidential.pollDeviceToken("device-code", { interval: 1 }),
+      introspect: () => confidential.introspect("at-probe"),
+      revoke: () => confidential.revoke("rt-seed"),
+      getUserInfo: () => confidential.getUserInfo(),
+    };
+    const pending = Promise.all(
+      Object.entries(calls).map(async ([name, call]) => {
+        try {
+          await call();
+          return { name, error: undefined as unknown };
+        } catch (error) {
+          return { name, error };
+        }
+      }),
+    );
+    const callCount = Object.keys(calls).length;
+    await vi.waitFor(() => expect(endpoint.requests).toBe(callCount));
+    await timeouts.expireOnceRequested(callCount);
+    await timeouts.expireOnceRequested(callCount + 1);
+    const outcomes = await pending;
+
+    expect(
+      timeouts.requested,
+      "every request, including discovery's fallback path, is bounded by the request timeout",
+    ).toStrictEqual(Array(callCount + 1).fill(REQUEST_TIMEOUT_MS));
+    for (const { name, error } of outcomes) {
+      assert(
+        error instanceof TemporarilyUnavailableError,
+        `${name}: expected a TemporarilyUnavailableError, got ${error}`,
       );
       assert(
-        performance.now() - started >= REQUEST_TIMEOUT_MS - 100,
-        "the calls must end at the deadline, not before it",
+        error.cause instanceof DOMException &&
+          error.cause.name === "TimeoutError",
+        `${name}: expected the deadline's TimeoutError as the cause, got ${error.cause}`,
       );
-      for (const { name, error } of outcomes) {
-        assert(
-          error instanceof TemporarilyUnavailableError,
-          `${name}: expected a TemporarilyUnavailableError, got ${error}`,
-        );
-        assert(
-          error.cause instanceof DOMException &&
-            error.cause.name === "TimeoutError",
-          `${name}: expected the deadline's TimeoutError as the cause, got ${error.cause}`,
-        );
-      }
-    },
-  );
+    }
+  });
 });
 
 describe("DirectClient logout", () => {
@@ -1961,16 +1945,15 @@ describe("DirectClient logout", () => {
     const events: OAuth2ClientEvent[] = [];
     client.subscribe((event) => events.push(event));
 
-    assertEquals(await client.logout(), {});
-    assertEquals(revoked, ["rt-seed"]);
-    assertEquals(
+    expect(await client.logout()).toStrictEqual({});
+    expect(revoked).toStrictEqual(["rt-seed"]);
+    expect(
       events.map((event) =>
-        event.type === "logged_out" ? event.reason : event.type
+        event.type === "logged_out" ? event.reason : event.type,
       ),
-      ["user"],
-    );
-    assertStrictEquals(await tokens.get(), null);
-    assertStrictEquals(await refresh.get(), null);
+    ).toStrictEqual(["user"]);
+    expect(await tokens.get()).toBe(null);
+    expect(await refresh.get()).toBe(null);
   });
 
   it("clears the session even when revocation fails", async () => {
@@ -1982,8 +1965,8 @@ describe("DirectClient logout", () => {
       refreshTokenStorage: seededRefreshStore(),
       fetch: (() => Promise.reject(new TypeError("offline"))) as typeof fetch,
     });
-    assertEquals(await client.logout(), {});
-    assertStrictEquals(await tokens.get(), null);
+    expect(await client.logout()).toStrictEqual({});
+    expect(await tokens.get()).toBe(null);
   });
 
   it("signs out locally even when the refresh token store cannot be read", async () => {
@@ -2003,12 +1986,9 @@ describe("DirectClient logout", () => {
     const events: OAuth2ClientEvent[] = [];
     client.subscribe((event) => events.push(event));
 
-    assertEquals(await client.logout(), {});
-    assertStrictEquals(await tokens.get(), null);
-    assertStrictEquals(
-      events.some((event) => event.type === "logged_out"),
-      true,
-    );
+    expect(await client.logout()).toStrictEqual({});
+    expect(await tokens.get()).toBe(null);
+    expect(events.some((event) => event.type === "logged_out")).toBe(true);
   });
 
   it("signs out locally even when the token store cannot be read", async () => {
@@ -2028,9 +2008,9 @@ describe("DirectClient logout", () => {
     const events: OAuth2ClientEvent[] = [];
     client.subscribe((event) => events.push(event));
 
-    assertEquals(await client.logout(), {});
-    assertStrictEquals(await refresh.get(), null);
-    assertEquals(events.map((event) => event.type), ["logged_out"]);
+    expect(await client.logout()).toStrictEqual({});
+    expect(await refresh.get()).toBe(null);
+    expect(events.map((event) => event.type)).toStrictEqual(["logged_out"]);
   });
 
   it("signs out locally even when the token store throws synchronously", async () => {
@@ -2048,8 +2028,8 @@ describe("DirectClient logout", () => {
       refreshTokenStorage: refresh,
     });
 
-    assertEquals(await client.logout(), {});
-    assertStrictEquals(await refresh.get(), null);
+    expect(await client.logout()).toStrictEqual({});
+    expect(await refresh.get()).toBe(null);
   });
 
   it("returns the end-session URL with id_token_hint when one is configured", async () => {
@@ -2066,9 +2046,8 @@ describe("DirectClient logout", () => {
     });
     const { url } = await client.logout({ returnTo: "https://app.test/" });
     const parsed = new URL(url!);
-    assertStrictEquals(parsed.searchParams.get("id_token_hint"), "hint-token");
-    assertStrictEquals(
-      parsed.searchParams.get("post_logout_redirect_uri"),
+    expect(parsed.searchParams.get("id_token_hint")).toBe("hint-token");
+    expect(parsed.searchParams.get("post_logout_redirect_uri")).toBe(
       "https://app.test/",
     );
   });
@@ -2089,13 +2068,11 @@ describe("DirectClient client authentication (RFC 6749 §2.3.1)", () => {
     await client.revoke("rt-seed");
 
     const headers = new Headers(captured?.headers);
-    assertStrictEquals(
+    expect(
       headers.has("Authorization"),
-      false,
       "a public client must not send Basic credentials it does not have",
-    );
-    assertStrictEquals(
-      new URLSearchParams(captured?.body as string).get("client_id"),
+    ).toBe(false);
+    expect(new URLSearchParams(captured?.body as string).get("client_id")).toBe(
       "spa",
     );
   });
@@ -2107,7 +2084,7 @@ describe("DirectClient construction guards", () => {
       clientId: "spa",
       endpoints: { token: TOKEN_URL },
     });
-    assertStrictEquals(client.isConfidential, false);
+    expect(client.isConfidential).toBe(false);
   });
 
   it("reads an explicitly-undefined clientSecret as omitted", () => {
@@ -2116,15 +2093,14 @@ describe("DirectClient construction guards", () => {
       clientSecret: undefined,
       endpoints: { token: TOKEN_URL },
     });
-    assertStrictEquals(
+    expect(
       client.isConfidential,
-      false,
       "forwarding an optional secret is how every wrapper spells `public`",
-    );
+    ).toBe(false);
   });
 
   it("refuses an empty clientSecret rather than authenticating with a blank", () => {
-    assertThrows(
+    thrown(
       () =>
         new DirectClient({
           clientId: "svc",
@@ -2140,7 +2116,7 @@ describe("DirectClient construction guards", () => {
     const globals = globalThis as { document?: unknown };
     globals.document = {};
     try {
-      assertThrows(
+      thrown(
         () =>
           new DirectClient({
             clientId: "svc",
@@ -2163,7 +2139,7 @@ describe("DirectClient construction guards", () => {
         clientId: "spa",
         endpoints: { token: TOKEN_URL },
       });
-      assertStrictEquals(client.isConfidential, false);
+      expect(client.isConfidential).toBe(false);
     } finally {
       delete globals.document;
     }
@@ -2179,11 +2155,11 @@ describe("DirectClient discovery issuer validation (RFC 8414 §3.3)", () => {
         jsonResponse({
           issuer: "https://evil.example",
           token_endpoint: "https://evil.example/token",
-        })
+        }),
       ).fetch,
     });
-    const error = await assertRejects(() => client.discover(), ServerError);
-    assertStringIncludes(error.message, "RFC 8414 §3.3");
+    const error = await rejection(() => client.discover(), ServerError);
+    expect(error.message).toContain("RFC 8414 §3.3");
   });
 
   it("refuses metadata with no issuer at all", async () => {
@@ -2191,10 +2167,10 @@ describe("DirectClient discovery issuer validation (RFC 8414 §3.3)", () => {
       clientId: "spa",
       issuer: "https://good.example",
       fetch: respondingWith(() =>
-        jsonResponse({ token_endpoint: "https://good.example/token" })
+        jsonResponse({ token_endpoint: "https://good.example/token" }),
       ).fetch,
     });
-    await assertRejects(() => client.discover(), ServerError, "no `issuer`");
+    await rejection(() => client.discover(), ServerError, "no `issuer`");
   });
 
   it("accepts metadata whose issuer differs only by a trailing slash", async () => {
@@ -2205,11 +2181,11 @@ describe("DirectClient discovery issuer validation (RFC 8414 §3.3)", () => {
         jsonResponse({
           issuer: "https://good.example",
           token_endpoint: "https://good.example/token",
-        })
+        }),
       ).fetch,
     });
     const meta = await client.discover();
-    assertStrictEquals(meta.issuer, "https://good.example");
+    expect(meta.issuer).toBe("https://good.example");
   });
 });
 
@@ -2217,6 +2193,6 @@ describe("OAuth2ErrorCode", () => {
   it("includes the RFC 6750 bearer-token error codes (M1)", () => {
     // Type-level guard: compiles only if the union covers both codes.
     const codes: OAuth2ErrorCode[] = ["invalid_token", "insufficient_scope"];
-    assertEquals(codes, ["invalid_token", "insufficient_scope"]);
+    expect(codes).toStrictEqual(["invalid_token", "insufficient_scope"]);
   });
 });

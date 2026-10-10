@@ -1,10 +1,5 @@
-import {
-  assertInstanceOf,
-  assertRejects,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { rejection, thrown } from "../../_test_assert.ts";
 import type { AuthorizationCode } from "../../models/authorization-code.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { RefreshToken } from "../../models/token.ts";
@@ -62,8 +57,11 @@ class TestAuthorizationCodeGrant<
  * read-then-delete window a real store faces under concurrency is exercised
  * deterministically instead of by luck of scheduling.
  */
-class RacingAuthorizationCodeService
-  extends MemoryAuthorizationCodeService<TestClient, TestUser, BasicScope> {
+class RacingAuthorizationCodeService extends MemoryAuthorizationCodeService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   #bothRead = Promise.withResolvers<void>();
   #reads = 0;
 
@@ -130,14 +128,14 @@ describe("AuthorizationCodeGrant", () => {
   describe("grantType", () => {
     it("should return authorization_code", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.grantType, "authorization_code");
+      expect(grant.grantType).toBe("authorization_code");
     });
   });
 
   describe("constructor", () => {
     it("should use default challengeMethods", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(typeof grant.challengeMethods["S256"], "function");
+      expect(typeof grant.challengeMethods["S256"]).toBe("function");
     });
 
     it("should allow custom challengeMethods", () => {
@@ -167,7 +165,7 @@ describe("AuthorizationCodeGrant", () => {
         challengeMethods: { custom: customMethod },
       });
 
-      assertStrictEquals(grant.challengeMethods["custom"], customMethod);
+      expect(grant.challengeMethods["custom"]).toBe(customMethod);
     });
 
     it("defaults requirePKCE to true when the option is omitted", () => {
@@ -193,7 +191,7 @@ describe("AuthorizationCodeGrant", () => {
         }),
       });
 
-      assertStrictEquals(grant.requirePKCE, true);
+      expect(grant.requirePKCE).toBe(true);
     });
   });
 
@@ -203,13 +201,13 @@ describe("AuthorizationCodeGrant", () => {
       await clientService.add(testClient, "secret");
 
       const client = await grant.getClient("client-1", clientService);
-      assertStrictEquals(client.id, "client-1");
+      expect(client.id).toBe("client-1");
     });
 
     it("should throw InvalidClientError for non-existent client", async () => {
       const { grant, clientService } = await createTestGrant();
 
-      await assertRejects(
+      await rejection(
         () => grant.getClient("unknown", clientService),
         InvalidClientError,
         "client not found",
@@ -221,25 +219,25 @@ describe("AuthorizationCodeGrant", () => {
     it("should return S256 by default", async () => {
       const { grant } = await createTestGrant();
       const method = grant.getChallengeMethod();
-      assertStrictEquals(typeof method, "function");
+      expect(typeof method).toBe("function");
     });
 
     it("should return S256 when specified", async () => {
       const { grant } = await createTestGrant();
       const method = grant.getChallengeMethod("S256");
-      assertStrictEquals(typeof method, "function");
+      expect(typeof method).toBe("function");
     });
 
     it("should return undefined for unknown method", async () => {
       const { grant } = await createTestGrant();
       const method = grant.getChallengeMethod("unknown");
-      assertStrictEquals(method, undefined);
+      expect(method).toBe(undefined);
     });
 
     it("returns no method for a name inherited from Object.prototype", async () => {
       const { grant } = await createTestGrant();
       for (const name of INHERITED_MEMBER_NAMES) {
-        assertStrictEquals(grant.getChallengeMethod(name), undefined, name);
+        expect(grant.getChallengeMethod(name), name).toBe(undefined);
       }
     });
 
@@ -249,30 +247,30 @@ describe("AuthorizationCodeGrant", () => {
       const { grant } = await createTestGrant({
         challengeMethods: { custom },
       });
-      assertStrictEquals(grant.getChallengeMethod("custom"), custom);
+      expect(grant.getChallengeMethod("custom")).toBe(custom);
     });
   });
 
   describe("validateChallengeMethod", () => {
     it("should return true for S256", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.validateChallengeMethod("S256"), true);
+      expect(grant.validateChallengeMethod("S256")).toBe(true);
     });
 
     it("should return true for null (defaults to S256)", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.validateChallengeMethod(null), true);
+      expect(grant.validateChallengeMethod(null)).toBe(true);
     });
 
     it("should return false for unknown method", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.validateChallengeMethod("plain"), false);
+      expect(grant.validateChallengeMethod("plain")).toBe(false);
     });
 
     it("rejects a code_challenge_method inherited from Object.prototype at the authorization endpoint", async () => {
       const { grant } = await createTestGrant();
       for (const name of INHERITED_MEMBER_NAMES) {
-        assertStrictEquals(grant.validateChallengeMethod(name), false, name);
+        expect(grant.validateChallengeMethod(name), name).toBe(false);
       }
     });
   });
@@ -293,7 +291,7 @@ describe("AuthorizationCodeGrant", () => {
       };
 
       const result = await grant.verifyCode(code, verifier);
-      assertStrictEquals(result, true);
+      expect(result).toBe(true);
     });
 
     it("should reject invalid code verifier", async () => {
@@ -311,7 +309,7 @@ describe("AuthorizationCodeGrant", () => {
       };
 
       const result = await grant.verifyCode(code, "wrong-verifier");
-      assertStrictEquals(result, false);
+      expect(result).toBe(false);
     });
 
     it("should return false when no challenge in code", async () => {
@@ -324,7 +322,7 @@ describe("AuthorizationCodeGrant", () => {
       };
 
       const result = await grant.verifyCode(code, "any-verifier");
-      assertStrictEquals(result, false);
+      expect(result).toBe(false);
     });
 
     it("should throw ServerError for unimplemented challenge method", async () => {
@@ -361,7 +359,7 @@ describe("AuthorizationCodeGrant", () => {
         challengeMethod: "unknown",
       };
 
-      await assertRejects(
+      await rejection(
         () => grant.verifyCode(code, "verifier"),
         ServerError,
         "code_challenge_method not implemented",
@@ -381,7 +379,7 @@ describe("AuthorizationCodeGrant", () => {
           challengeMethod: name,
         };
 
-        await assertRejects(
+        await rejection(
           () => grant.verifyCode(code, generateCodeVerifier()),
           ServerError,
           "code_challenge_method not implemented",
@@ -403,9 +401,9 @@ describe("AuthorizationCodeGrant", () => {
         new Request("http://localhost/authorize"),
       );
 
-      assertStrictEquals(typeof code.code, "string");
-      assertStrictEquals(code.client.id, testClient.id);
-      assertStrictEquals(code.user.id, testUser.id);
+      expect(typeof code.code).toBe("string");
+      expect(code.client.id).toBe(testClient.id);
+      expect(code.user.id).toBe(testUser.id);
     });
 
     it("should include scope when provided", async () => {
@@ -422,7 +420,7 @@ describe("AuthorizationCodeGrant", () => {
         new Request("http://localhost/authorize"),
       );
 
-      assertStrictEquals(code.scope?.toString(), "read write");
+      expect(code.scope?.toString()).toBe("read write");
     });
 
     it("should include redirectUri when provided", async () => {
@@ -438,7 +436,7 @@ describe("AuthorizationCodeGrant", () => {
         new Request("http://localhost/authorize"),
       );
 
-      assertStrictEquals(code.redirectUri, "https://example.com/callback");
+      expect(code.redirectUri).toBe("https://example.com/callback");
     });
 
     it("should include PKCE challenge when provided", async () => {
@@ -455,11 +453,10 @@ describe("AuthorizationCodeGrant", () => {
         new Request("http://localhost/authorize"),
       );
 
-      assertStrictEquals(
-        code.challenge,
+      expect(code.challenge).toBe(
         "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
       );
-      assertStrictEquals(code.challengeMethod, "S256");
+      expect(code.challengeMethod).toBe("S256");
     });
 
     it("should save the authorization code", async () => {
@@ -476,7 +473,7 @@ describe("AuthorizationCodeGrant", () => {
       );
 
       const saved = await authorizationCodeService.get(code.code);
-      assertStrictEquals(saved?.client.id, code.client.id);
+      expect(saved?.client.id).toBe(code.client.id);
     });
   });
 
@@ -489,8 +486,8 @@ describe("AuthorizationCodeGrant", () => {
       });
 
       const credentials = grant.getClientCredentials(request, new FormData());
-      assertStrictEquals(credentials.clientId, "client-1");
-      assertStrictEquals(credentials.clientSecret, "secret");
+      expect(credentials.clientId).toBe("client-1");
+      expect(credentials.clientSecret).toBe("secret");
     });
 
     it("should extract credentials with code_verifier from body", async () => {
@@ -504,16 +501,16 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(credentials.clientId, "public-client");
-      assertStrictEquals(credentials.codeVerifier, "test-verifier");
-      assertStrictEquals(credentials.clientSecret, undefined);
+      expect(credentials.clientId).toBe("public-client");
+      expect(credentials.codeVerifier).toBe("test-verifier");
+      expect(credentials.clientSecret).toBe(undefined);
     });
 
     it("should throw InvalidClientError when no credentials", async () => {
       const { grant } = await createTestGrant();
       const request = tokenRequest({});
 
-      assertThrows(
+      thrown(
         () => grant.getClientCredentials(request, new FormData()),
         InvalidClientError,
         "client authentication required",
@@ -533,22 +530,25 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(credentials.clientId, "client-1");
-      assertStrictEquals(credentials.clientSecret, "secret");
-      assertStrictEquals(credentials.codeVerifier, "test-verifier");
+      expect(credentials.clientId).toBe("client-1");
+      expect(credentials.clientSecret).toBe("secret");
+      expect(credentials.codeVerifier).toBe("test-verifier");
     });
 
     it("should fall back to body client_id when Basic auth is invalid", async () => {
       const { grant } = await createTestGrant();
-      const request = tokenRequest({ client_id: "body-client" }, {
-        Authorization: "Basic invalid!!!",
-      });
+      const request = tokenRequest(
+        { client_id: "body-client" },
+        {
+          Authorization: "Basic invalid!!!",
+        },
+      );
 
       const credentials = grant.getClientCredentials(
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(credentials.clientId, "body-client");
+      expect(credentials.clientId).toBe("body-client");
     });
   });
 
@@ -566,7 +566,7 @@ describe("AuthorizationCodeGrant", () => {
         request,
         new FormData(),
       );
-      assertStrictEquals(client.id, "client-1");
+      expect(client.id).toBe("client-1");
     });
 
     it("should get client for PKCE without secret", async () => {
@@ -582,7 +582,7 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(client.id, "public-client");
+      expect(client.id).toBe("public-client");
     });
 
     it("refuses a public client that attaches a secret to its PKCE exchange", async () => {
@@ -596,7 +596,7 @@ describe("AuthorizationCodeGrant", () => {
       });
       const body = await request.clone().formData();
 
-      await assertRejects(
+      await rejection(
         () => grant.getAuthenticatedClient(request, body),
         InvalidClientError,
         "client authentication failed",
@@ -612,7 +612,7 @@ describe("AuthorizationCodeGrant", () => {
       });
       const body = await request.clone().formData();
 
-      await assertRejects(
+      await rejection(
         () => grant.getAuthenticatedClient(request, body),
         InvalidClientError,
         "client authentication failed",
@@ -634,7 +634,7 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(client.id, "client-1");
+      expect(client.id).toBe("client-1");
     });
 
     it("requires confidential client authentication by default alongside PKCE", async () => {
@@ -647,7 +647,7 @@ describe("AuthorizationCodeGrant", () => {
       });
       const body = await request.clone().formData();
 
-      await assertRejects(
+      await rejection(
         () => grant.getAuthenticatedClient(request, body),
         InvalidClientError,
         "client authentication failed",
@@ -669,7 +669,7 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(client.id, "client-1");
+      expect(client.id).toBe("client-1");
     });
 
     it("accepts a public client that sends a code_verifier when client authentication is required", async () => {
@@ -687,7 +687,7 @@ describe("AuthorizationCodeGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertStrictEquals(client.id, "public-client");
+      expect(client.id).toBe("public-client");
     });
   });
 
@@ -698,7 +698,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const request = tokenRequest({ grant_type: "authorization_code" });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "code parameter required",
@@ -714,7 +714,7 @@ describe("AuthorizationCodeGrant", () => {
         code: "non-existent",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "invalid code",
@@ -739,7 +739,7 @@ describe("AuthorizationCodeGrant", () => {
         code: "expired-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "invalid code",
@@ -766,7 +766,7 @@ describe("AuthorizationCodeGrant", () => {
         code: "test-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidClientError,
         "code was issued to another client",
@@ -793,9 +793,9 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.client.id, testClient.id);
-      assertStrictEquals(token.user?.id, testUser.id);
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.client.id).toBe(testClient.id);
+      expect(token.user?.id).toBe(testUser.id);
     });
 
     it("should preserve scope from authorization code", async () => {
@@ -820,7 +820,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(token.scope?.toString(), "read write");
+      expect(token.scope?.toString()).toBe("read write");
     });
 
     it("should verify PKCE code_verifier", async () => {
@@ -849,7 +849,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, publicClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
+      expect(typeof token.accessToken).toBe("string");
     });
 
     it("should reject code_verifier with invalid format per RFC 7636", async () => {
@@ -876,7 +876,7 @@ describe("AuthorizationCodeGrant", () => {
         code_verifier: "wrong-verifier",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, publicClient),
         InvalidRequestError,
         "code_verifier must be 43-128 characters",
@@ -908,7 +908,7 @@ describe("AuthorizationCodeGrant", () => {
         code_verifier: wrongVerifier,
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, publicClient),
         InvalidGrantError,
         "code_verifier verification failed",
@@ -938,7 +938,7 @@ describe("AuthorizationCodeGrant", () => {
         code: "pkce-missing-verifier-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "code_verifier required",
@@ -976,7 +976,7 @@ describe("AuthorizationCodeGrant", () => {
         user: testUser,
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -1002,7 +1002,7 @@ describe("AuthorizationCodeGrant", () => {
         user: testUser,
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -1031,7 +1031,7 @@ describe("AuthorizationCodeGrant", () => {
         challengeMethod: "S256",
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -1071,7 +1071,7 @@ describe("AuthorizationCodeGrant", () => {
         testClient,
       );
 
-      assertStrictEquals(token.client.id, testClient.id);
+      expect(token.client.id).toBe(testClient.id);
     });
 
     it("should require redirect_uri when authorization code has one", async () => {
@@ -1093,7 +1093,7 @@ describe("AuthorizationCodeGrant", () => {
         code: "redirect-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "redirect_uri parameter required",
@@ -1120,7 +1120,7 @@ describe("AuthorizationCodeGrant", () => {
         redirect_uri: "https://different.com/callback",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "incorrect redirect_uri",
@@ -1146,7 +1146,7 @@ describe("AuthorizationCodeGrant", () => {
         redirect_uri: "https://example.com/callback",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "did not expect redirect_uri parameter",
@@ -1175,7 +1175,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
+      expect(typeof token.accessToken).toBe("string");
     });
 
     it("should revoke authorization code after use", async () => {
@@ -1198,10 +1198,8 @@ describe("AuthorizationCodeGrant", () => {
 
       await exchangeToken(grant, request, testClient);
 
-      const revokedCode = await authorizationCodeService.get(
-        "single-use-code",
-      );
-      assertStrictEquals(revokedCode, undefined);
+      const revokedCode = await authorizationCodeService.get("single-use-code");
+      expect(revokedCode).toBe(undefined);
     });
 
     it("should save the new token", async () => {
@@ -1225,7 +1223,7 @@ describe("AuthorizationCodeGrant", () => {
       const token = await exchangeToken(grant, request, testClient);
 
       const savedToken = await tokenService.getToken(token.accessToken);
-      assertStrictEquals(savedToken?.accessToken, token.accessToken);
+      expect(savedToken?.accessToken).toBe(token.accessToken);
     });
 
     it("should include refresh token by default", async () => {
@@ -1246,15 +1244,14 @@ describe("AuthorizationCodeGrant", () => {
         code: "refresh-code",
       });
 
-      const token =
-        (await exchangeToken(grant, request, testClient)) as RefreshToken<
-          TestClient,
-          TestUser,
-          BasicScope
-        >;
+      const token = (await exchangeToken(
+        grant,
+        request,
+        testClient,
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals("refreshToken" in token, true);
-      assertStrictEquals(typeof token.refreshToken, "string");
+      expect("refreshToken" in token).toBe(true);
+      expect(typeof token.refreshToken).toBe("string");
     });
 
     it("should not include refresh token when allowRefreshToken is false", async () => {
@@ -1277,7 +1274,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals("refreshToken" in token, false);
+      expect("refreshToken" in token).toBe(false);
     });
 
     it("should throw InvalidGrantError and revoke tokens when code is replayed (RFC 6819)", async () => {
@@ -1300,9 +1297,9 @@ describe("AuthorizationCodeGrant", () => {
       const request1 = tokenRequest(body1);
       const token = await exchangeToken(grant, request1, testClient);
 
-      assertStrictEquals(token.code, "reused-code");
+      expect(token.code).toBe("reused-code");
       const savedToken = await tokenService.getToken(token.accessToken);
-      assertStrictEquals(savedToken !== undefined, true);
+      expect(savedToken !== undefined).toBe(true);
 
       const body2 = new URLSearchParams({
         grant_type: "authorization_code",
@@ -1310,14 +1307,14 @@ describe("AuthorizationCodeGrant", () => {
       });
       const request2 = tokenRequest(body2);
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request2, testClient),
         InvalidGrantError,
         "code already used",
       );
 
       const revokedToken = await tokenService.getToken(token.accessToken);
-      assertStrictEquals(revokedToken, undefined);
+      expect(revokedToken).toBe(undefined);
     });
 
     it("issues no token for a code whose challenge_method is inherited from Object.prototype", async () => {
@@ -1340,7 +1337,7 @@ describe("AuthorizationCodeGrant", () => {
         code_verifier: generateCodeVerifier(),
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, publicClient),
         ServerError,
         "code_challenge_method not implemented",
@@ -1374,7 +1371,7 @@ describe("AuthorizationCodeGrant", () => {
 
       const token = await exchangeToken(grant, request, publicClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
+      expect(typeof token.accessToken).toBe("string");
     });
 
     it("issues a token to only one of two concurrent exchanges of the same code", async () => {
@@ -1424,9 +1421,9 @@ describe("AuthorizationCodeGrant", () => {
 
       const issued = results.filter((result) => result.status === "fulfilled");
       const refused = results.filter((result) => result.status === "rejected");
-      assertStrictEquals(issued.length, 1);
-      assertStrictEquals(refused.length, 1);
-      assertInstanceOf(
+      expect(issued.length).toBe(1);
+      expect(refused.length).toBe(1);
+      assert.instanceOf(
         (refused[0] as PromiseRejectedResult).reason,
         InvalidGrantError,
       );

@@ -1,14 +1,12 @@
-import { assertEquals, assertRejects, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
+import { rejection } from "../_test_assert.ts";
+import { serve } from "../_test_server.ts";
 import { BasicScope } from "../models/scope.ts";
 import { ServerError, TemporarilyUnavailableError } from "../errors.ts";
 import { IntrospectionTokenReader } from "./introspection-token-reader.ts";
 import { encodeBasicAuth, parseBasicAuth } from "../utils/basic-auth.ts";
-import {
-  generateTestCertificate,
-  runTrustingCertificate,
-  serveTls,
-} from "../utils/_test_tls.ts";
+import { hangUntilAborted, stubDenoRuntime } from "../_test_deno-runtime.ts";
+import { FakeTime } from "../_test_fake-time.ts";
 
 interface TestClient {
   id: string;
@@ -23,38 +21,30 @@ const getClient = (data: { client_id?: string }): TestClient => ({
   id: data.client_id ?? "",
 });
 
-const getUser = (
-  data: { sub?: string; username?: string },
-): TestUser | undefined =>
+const getUser = (data: {
+  sub?: string;
+  username?: string;
+}): TestUser | undefined =>
   data.sub ? { id: data.sub, username: data.username } : undefined;
 
 async function withMockServer(
   responses: Map<string, Record<string, unknown>>,
   fn: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
-  let port: number;
-  const server = Deno.serve(
-    {
-      port: 0,
-      onListen: (addr) => {
-        port = addr.port;
-      },
-    },
-    async (request) => {
-      const authorization = request.headers.get("authorization");
-      if (!authorization?.startsWith("Basic ")) {
-        return Response.json({ error: "invalid_client" }, { status: 401 });
-      }
+  const server = await serve(async (request) => {
+    const authorization = request.headers.get("authorization");
+    if (!authorization?.startsWith("Basic ")) {
+      return Response.json({ error: "invalid_client" }, { status: 401 });
+    }
 
-      const body = await request.formData();
-      const token = body.get("token") as string;
-      const responseData = responses.get(token) ?? { active: false };
-      return Response.json(responseData);
-    },
-  );
+    const body = await request.formData();
+    const token = body.get("token") as string;
+    const responseData = responses.get(token) ?? { active: false };
+    return Response.json(responseData);
+  });
 
   try {
-    await fn(`http://localhost:${port!}`);
+    await fn(server.origin);
   } finally {
     await server.shutdown();
   }
@@ -63,15 +53,18 @@ async function withMockServer(
 describe("IntrospectionTokenReader", () => {
   it("should return token for active introspection response", async () => {
     const responses = new Map([
-      ["valid-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-        sub: "user-1",
-        username: "testuser",
-        scope: "read write",
-        exp: Math.floor(Date.now() / 1000) + 3600,
-      }],
+      [
+        "valid-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+          sub: "user-1",
+          username: "testuser",
+          scope: "read write",
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -84,28 +77,31 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("valid-token");
 
-      assertStrictEquals(token?.accessToken, "valid-token");
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(token?.user?.id, "user-1");
-      assertStrictEquals(token?.user?.username, "testuser");
-      assertStrictEquals(token?.scope?.toString(), "read write");
-      assertEquals(token?.accessTokenExpiresAt instanceof Date, true);
+      expect(token?.accessToken).toBe("valid-token");
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user?.id).toBe("user-1");
+      expect(token?.user?.username).toBe("testuser");
+      expect(token?.scope?.toString()).toBe("read write");
+      expect(token?.accessTokenExpiresAt instanceof Date).toStrictEqual(true);
     });
   });
 
   it("surfaces the introspection response as the token's claims", async () => {
     const responses = new Map([
-      ["valid-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-        sub: "user-1",
-        scope: "read",
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        permissions: ["posts:write"],
-        org_id: "org-1",
-        org_roles: ["admin"],
-      }],
+      [
+        "valid-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+          sub: "user-1",
+          scope: "read",
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          permissions: ["posts:write"],
+          org_id: "org-1",
+          org_roles: ["admin"],
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -118,10 +114,10 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("valid-token");
 
-      assertEquals(token?.claims?.permissions, ["posts:write"]);
-      assertEquals(token?.claims?.org_id, "org-1");
-      assertEquals(token?.claims?.org_roles, ["admin"]);
-      assertEquals(token?.claims?.sub, "user-1");
+      expect(token?.claims?.permissions).toStrictEqual(["posts:write"]);
+      expect(token?.claims?.org_id).toStrictEqual("org-1");
+      expect(token?.claims?.org_roles).toStrictEqual(["admin"]);
+      expect(token?.claims?.sub).toStrictEqual("user-1");
     });
   });
 
@@ -140,7 +136,7 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("expired-token");
 
-      assertStrictEquals(token, undefined);
+      expect(token).toBe(undefined);
     });
   });
 
@@ -155,17 +151,20 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("unknown-token");
 
-      assertStrictEquals(token, undefined);
+      expect(token).toBe(undefined);
     });
   });
 
   it("should handle response without optional fields", async () => {
     const responses = new Map([
-      ["minimal-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-      }],
+      [
+        "minimal-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -178,22 +177,25 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("minimal-token");
 
-      assertStrictEquals(token?.accessToken, "minimal-token");
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(token?.user, undefined);
-      assertStrictEquals(token?.scope, undefined);
-      assertStrictEquals(token?.accessTokenExpiresAt, undefined);
+      expect(token?.accessToken).toBe("minimal-token");
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user).toBe(undefined);
+      expect(token?.scope).toBe(undefined);
+      expect(token?.accessTokenExpiresAt).toBe(undefined);
     });
   });
 
   it("should omit user when getUser is not provided", async () => {
     const responses = new Map([
-      ["user-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-        sub: "user-1",
-      }],
+      [
+        "user-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+          sub: "user-1",
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -205,8 +207,8 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("user-token");
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(token?.user, undefined);
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user).toBe(undefined);
     });
   });
 
@@ -218,14 +220,17 @@ describe("IntrospectionTokenReader", () => {
     }
 
     const responses = new Map([
-      ["rich-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-        sub: "user-1",
-        email: "alice@example.com",
-        roles: ["admin", "editor"],
-      }],
+      [
+        "rich-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+          sub: "user-1",
+          email: "alice@example.com",
+          roles: ["admin", "editor"],
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -242,9 +247,9 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("rich-token");
 
-      assertStrictEquals(token?.user?.id, "user-1");
-      assertStrictEquals(token?.user?.email, "alice@example.com");
-      assertEquals(token?.user?.roles, ["admin", "editor"]);
+      expect(token?.user?.id).toBe("user-1");
+      expect(token?.user?.email).toBe("alice@example.com");
+      expect(token?.user?.roles).toStrictEqual(["admin", "editor"]);
     });
   });
 
@@ -257,12 +262,15 @@ describe("IntrospectionTokenReader", () => {
     const userDb = new Map([["user-1", { email: "alice@example.com" }]]);
 
     const responses = new Map([
-      ["enrich-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-        sub: "user-1",
-      }],
+      [
+        "enrich-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "my-client",
+          sub: "user-1",
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -279,20 +287,23 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("enrich-token");
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(token?.user?.id, "user-1");
-      assertStrictEquals(token?.user?.email, "alice@example.com");
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user?.id).toBe("user-1");
+      expect(token?.user?.email).toBe("alice@example.com");
     });
   });
 
   it("should use custom Scope constructor", async () => {
     const responses = new Map([
-      ["scoped-token", {
-        active: true,
-        token_type: "Bearer",
-        client_id: "c",
-        scope: "admin",
-      }],
+      [
+        "scoped-token",
+        {
+          active: true,
+          token_type: "Bearer",
+          client_id: "c",
+          scope: "admin",
+        },
+      ],
     ]);
 
     await withMockServer(responses, async (baseUrl) => {
@@ -306,7 +317,7 @@ describe("IntrospectionTokenReader", () => {
       });
       const token = await reader.getToken("scoped-token");
 
-      assertStrictEquals(token?.scope?.toString(), "admin");
+      expect(token?.scope?.toString()).toBe("admin");
     });
   });
 
@@ -334,7 +345,7 @@ describe("IntrospectionTokenReader", () => {
           ),
       });
 
-      assertStrictEquals(await reader.getToken("a-refresh-token"), undefined);
+      expect(await reader.getToken("a-refresh-token")).toBe(undefined);
     });
 
     it("refuses an active response whose token_type is not a bearer token", async () => {
@@ -346,7 +357,7 @@ describe("IntrospectionTokenReader", () => {
           ),
       });
 
-      assertStrictEquals(await reader.getToken("t"), undefined);
+      expect(await reader.getToken("t")).toBe(undefined);
     });
 
     it("accepts a lowercase token_type, since RFC 6750 makes the scheme case-insensitive", async () => {
@@ -363,7 +374,7 @@ describe("IntrospectionTokenReader", () => {
           ),
       });
 
-      assertStrictEquals((await reader.getToken("t"))?.user?.id, "u1");
+      expect((await reader.getToken("t"))?.user?.id).toBe("u1");
     });
 
     it("uses the injected fetch instead of the global", async () => {
@@ -383,8 +394,8 @@ describe("IntrospectionTokenReader", () => {
         },
       });
       const token = await reader.getToken("t");
-      assertStrictEquals(called, 1);
-      assertStrictEquals(token?.user?.id, "u1");
+      expect(called).toBe(1);
+      expect(token?.user?.id).toBe("u1");
     });
 
     it("authenticates with the shared basic-auth encoding, so a reserved or non-ASCII secret survives", async () => {
@@ -409,8 +420,8 @@ describe("IntrospectionTokenReader", () => {
 
       await reader.getToken("t");
 
-      assertStrictEquals(captured[0], encodeBasicAuth(clientId, clientSecret));
-      assertEquals(parseBasicAuth(captured[0]!), {
+      expect(captured[0]).toBe(encodeBasicAuth(clientId, clientSecret));
+      expect(parseBasicAuth(captured[0]!)).toStrictEqual({
         name: clientId,
         pass: clientSecret,
       });
@@ -421,7 +432,7 @@ describe("IntrospectionTokenReader", () => {
         ...baseOptions,
         fetch: () => Promise.resolve(Response.json({ active: false })),
       });
-      assertStrictEquals(await reader.getToken("t"), undefined);
+      expect(await reader.getToken("t")).toBe(undefined);
     });
 
     it("abandons a request the endpoint never answers, at the configured deadline", async () => {
@@ -430,14 +441,13 @@ describe("IntrospectionTokenReader", () => {
         fetchTimeoutMs: 10,
         fetch: (_input, init) =>
           new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener(
-              "abort",
-              () => reject(new DOMException("request aborted", "AbortError")),
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("request aborted", "AbortError")),
             );
           }),
       });
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken("t"),
         TemporarilyUnavailableError,
         "token introspection request failed",
@@ -466,7 +476,7 @@ describe("IntrospectionTokenReader", () => {
         },
       });
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken("t"),
         TemporarilyUnavailableError,
         "token introspection request failed",
@@ -478,10 +488,7 @@ describe("IntrospectionTokenReader", () => {
         ...baseOptions,
         fetch: () => Promise.reject(new TypeError("network down")),
       });
-      await assertRejects(
-        () => reader.getToken("t"),
-        TemporarilyUnavailableError,
-      );
+      await rejection(() => reader.getToken("t"), TemporarilyUnavailableError);
     });
 
     it("throws temporarily_unavailable on a 5xx from the endpoint", async () => {
@@ -489,10 +496,7 @@ describe("IntrospectionTokenReader", () => {
         ...baseOptions,
         fetch: () => Promise.resolve(new Response("boom", { status: 503 })),
       });
-      await assertRejects(
-        () => reader.getToken("t"),
-        TemporarilyUnavailableError,
-      );
+      await rejection(() => reader.getToken("t"), TemporarilyUnavailableError);
     });
 
     it("throws server_error on a 4xx (reader misconfiguration)", async () => {
@@ -500,31 +504,50 @@ describe("IntrospectionTokenReader", () => {
         ...baseOptions,
         fetch: () => Promise.resolve(new Response("nope", { status: 401 })),
       });
-      await assertRejects(() => reader.getToken("t"), ServerError);
+      await rejection(() => reader.getToken("t"), ServerError);
     });
   });
 
-  it("sends the request after a timed-out one on a new HTTP/2 connection", async () => {
-    const certificate = await generateTestCertificate();
-    await using server = serveTls(certificate, async (_request, connection) => {
-      if (connection.stalled) {
-        await connection.released;
-        return new Response(null, { status: 503 });
-      }
-      server.stall();
-      return Response.json({
-        active: true,
-        token_type: "Bearer",
-        client_id: "my-client",
-      });
+  it("sends the request after a timed-out one on a new connection", async () => {
+    const reader = new IntrospectionTokenReader<TestClient, TestUser>({
+      introspectionEndpoint:
+        "https://introspect-reconnect.example.com/introspect",
+      clientId: "rs",
+      clientSecret: "rs-secret",
+      getClient,
+      getUser,
     });
-
-    const outcomes = await runTrustingCertificate(
-      new URL("./_test_introspection_stalled_connection.ts", import.meta.url),
-      certificate,
-      [`${server.url}/introspect`, "3"],
+    const introspect = () =>
+      reader.getToken("token-1").then(
+        (found) => (found ? "active" : "inactive"),
+        (error: unknown) =>
+          error instanceof TemporarilyUnavailableError
+            ? "unavailable"
+            : String(error),
+      );
+    using runtime = stubDenoRuntime((_input, init) =>
+      runtime.requests.length === 2
+        ? hangUntilAborted(init?.signal)
+        : Promise.resolve(
+            Response.json({
+              active: true,
+              token_type: "Bearer",
+              client_id: "my-client",
+            }),
+          ),
     );
+    using time = new FakeTime();
 
-    assertEquals(outcomes, ["active", "unavailable", "active"]);
+    const outcomes = [await introspect()];
+    const stalled = introspect();
+    await time.tickAsync(5_000);
+    outcomes.push(await stalled, await introspect());
+
+    expect(outcomes).toStrictEqual(["active", "unavailable", "active"]);
+    expect(runtime.clients).toHaveLength(1);
+    expect(runtime.requests[2]?.init).toHaveProperty(
+      "client",
+      runtime.clients[0],
+    );
   });
 });

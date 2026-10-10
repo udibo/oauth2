@@ -1,7 +1,4 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
-
+import { assert, describe, expect, it, vi } from "vitest";
 import type { IdentityEvent } from "./events.ts";
 import { breachedPasswordValidator, sha1Hex } from "./hibp.ts";
 
@@ -16,19 +13,18 @@ function rangeFetch(
   }) as typeof fetch;
 }
 
-const rejectingFetch =
-  (() => Promise.reject(new Error("offline"))) as typeof fetch;
+const rejectingFetch = (() =>
+  Promise.reject(new Error("offline"))) as typeof fetch;
 
 const respondingFetch = (status: number) =>
   (() => Promise.resolve(new Response("nope", { status }))) as typeof fetch;
 
 /** Never settles on its own — only the caller's timeout signal ends it. */
-const hangingFetch =
-  ((_input: URL | RequestInfo, init?: RequestInit) =>
-    new Promise((_resolve, reject) => {
-      const signal = init?.signal;
-      signal?.addEventListener("abort", () => reject(signal.reason));
-    })) as typeof fetch;
+const hangingFetch = ((_input: URL | RequestInfo, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    const signal = init?.signal;
+    signal?.addEventListener("abort", () => reject(signal.reason));
+  })) as typeof fetch;
 
 type CheckUnavailable = Extract<
   IdentityEvent,
@@ -47,9 +43,9 @@ function eventCollector(): {
       events.push(event);
     },
     unavailable: () => {
-      assertEquals(events.length, 1);
+      expect(events.length).toStrictEqual(1);
       const [event] = events;
-      assertEquals(event.type, "password_policy.check_unavailable");
+      expect(event.type).toStrictEqual("password_policy.check_unavailable");
       return event as CheckUnavailable;
     },
   };
@@ -68,18 +64,17 @@ describe("breachedPasswordValidator", () => {
 
     const issue = await validate("password123");
     assert(issue?.includes("data breach"));
-    assertEquals(
-      captured.url,
+    expect(captured.url).toStrictEqual(
       `https://api.pwnedpasswords.com/range/${hash.slice(0, 5)}`,
     );
-    assertEquals(captured.padding, "true");
+    expect(captured.padding).toStrictEqual("true");
   });
 
   it("allows a password not in the range", async () => {
     const validate = breachedPasswordValidator({
       fetch: rangeFetch(["00000AAAA:2"], {}),
     });
-    assertEquals(await validate("unique-enough-password"), undefined);
+    expect(await validate("unique-enough-password")).toStrictEqual(undefined);
   });
 
   it("honors the breach-count threshold", async () => {
@@ -89,7 +84,7 @@ describe("breachedPasswordValidator", () => {
       fetch: rangeFetch(lines, {}),
       threshold: 5,
     });
-    assertEquals(await strict("borderline"), undefined);
+    expect(await strict("borderline")).toStrictEqual(undefined);
 
     const loose = breachedPasswordValidator({
       fetch: rangeFetch(lines, {}),
@@ -99,13 +94,13 @@ describe("breachedPasswordValidator", () => {
   });
 
   it("fails open on transport errors by default", async () => {
-    using _warn = stub(console, "warn");
+    using _warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const validate = breachedPasswordValidator({ fetch: rejectingFetch });
-    assertEquals(await validate("whatever-password"), undefined);
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
   });
 
   it("fails closed when configured", async () => {
-    using _warn = stub(console, "warn");
+    using _warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const validate = breachedPasswordValidator({
       fetch: rejectingFetch,
       failOpen: false,
@@ -114,7 +109,7 @@ describe("breachedPasswordValidator", () => {
   });
 
   it("treats a non-2xx range response as a transport failure", async () => {
-    using _warn = stub(console, "warn");
+    using _warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const validate = breachedPasswordValidator({
       fetch: respondingFetch(503),
       failOpen: false,
@@ -123,10 +118,10 @@ describe("breachedPasswordValidator", () => {
   });
 
   it("warns to the console when no onEvent hook is wired", async () => {
-    using warn = stub(console, "warn");
+    using warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const validate = breachedPasswordValidator({ fetch: rejectingFetch });
-    assertEquals(await validate("whatever-password"), undefined);
-    assertEquals(warn.calls.length, 1);
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
+    expect(warn.mock.calls.length).toStrictEqual(1);
   });
 });
 
@@ -138,11 +133,11 @@ describe("breachedPasswordValidator onEvent", () => {
       onEvent: collector.onEvent,
     });
 
-    assertEquals(await validate("whatever-password"), undefined);
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
     const event = collector.unavailable();
-    assertEquals(event.validator, "breached_password");
-    assertEquals(event.failedOpen, true);
-    assertEquals(event.error, "offline");
+    expect(event.validator).toStrictEqual("breached_password");
+    expect(event.failedOpen).toStrictEqual(true);
+    expect(event.error).toStrictEqual("offline");
   });
 
   it("reports a non-2xx range response as check_unavailable", async () => {
@@ -152,8 +147,8 @@ describe("breachedPasswordValidator onEvent", () => {
       onEvent: collector.onEvent,
     });
 
-    assertEquals(await validate("whatever-password"), undefined);
-    assertStringIncludes(collector.unavailable().error, "503");
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
+    expect(collector.unavailable().error).toContain("503");
   });
 
   it("reports a timed-out range request as check_unavailable", async () => {
@@ -164,8 +159,8 @@ describe("breachedPasswordValidator onEvent", () => {
       onEvent: collector.onEvent,
     });
 
-    assertEquals(await validate("whatever-password"), undefined);
-    assertEquals(collector.unavailable().failedOpen, true);
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
+    expect(collector.unavailable().failedOpen).toStrictEqual(true);
   });
 
   it("reports failedOpen false when the password was rejected instead", async () => {
@@ -177,7 +172,7 @@ describe("breachedPasswordValidator onEvent", () => {
     });
 
     assert((await validate("whatever-password"))?.includes("try again"));
-    assertEquals(collector.unavailable().failedOpen, false);
+    expect(collector.unavailable().failedOpen).toStrictEqual(false);
   });
 
   it("emits nothing when the range lookup succeeds", async () => {
@@ -187,12 +182,12 @@ describe("breachedPasswordValidator onEvent", () => {
       onEvent: collector.onEvent,
     });
 
-    assertEquals(await validate("unique-enough-password"), undefined);
-    assertEquals(collector.events.length, 0);
+    expect(await validate("unique-enough-password")).toStrictEqual(undefined);
+    expect(collector.events.length).toStrictEqual(0);
   });
 
   it("replaces the console warning rather than doubling it", async () => {
-    using warn = stub(console, "warn");
+    using warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const collector = eventCollector();
     const validate = breachedPasswordValidator({
       fetch: rejectingFetch,
@@ -200,12 +195,12 @@ describe("breachedPasswordValidator onEvent", () => {
     });
 
     await validate("whatever-password");
-    assertEquals(collector.events.length, 1);
-    assertEquals(warn.calls.length, 0);
+    expect(collector.events.length).toStrictEqual(1);
+    expect(warn.mock.calls.length).toStrictEqual(0);
   });
 
   it("keeps the password decision when the hook itself throws", async () => {
-    using error = stub(console, "error");
+    using error = vi.spyOn(console, "error").mockImplementation(() => {});
     const validate = breachedPasswordValidator({
       fetch: rejectingFetch,
       onEvent: () => {
@@ -213,7 +208,7 @@ describe("breachedPasswordValidator onEvent", () => {
       },
     });
 
-    assertEquals(await validate("whatever-password"), undefined);
-    assertEquals(error.calls.length, 1);
+    expect(await validate("whatever-password")).toStrictEqual(undefined);
+    expect(error.mock.calls.length).toStrictEqual(1);
   });
 });

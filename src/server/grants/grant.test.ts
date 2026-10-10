@@ -1,10 +1,5 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
+import { rejection, thrown } from "../../_test_assert.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import { BasicScope } from "../../models/scope.ts";
@@ -61,10 +56,7 @@ class MockClientService implements ClientServiceInterface<Client, User> {
     return Promise.resolve(this.clients.get(id));
   }
 
-  getAuthenticated(
-    id: string,
-    secret?: string,
-  ): Promise<Client | undefined> {
+  getAuthenticated(id: string, secret?: string): Promise<Client | undefined> {
     const client = this.clients.get(id);
     if (!client) return Promise.resolve(undefined);
     if (!client.secret) {
@@ -86,15 +78,9 @@ class MockClientService implements ClientServiceInterface<Client, User> {
 class MockTokenService implements TokenServiceInterface<Client, User> {
   accessTokenLifetime = 3600;
   refreshTokenLifetime = 86400;
-  private acceptedScopeResult:
-    | BasicScope
-    | null
-    | undefined
-    | false;
+  private acceptedScopeResult: BasicScope | null | undefined | false;
 
-  constructor(
-    acceptedScopeResult?: BasicScope | null | undefined | false,
-  ) {
+  constructor(acceptedScopeResult?: BasicScope | null | undefined | false) {
     this.acceptedScopeResult = acceptedScopeResult;
   }
 
@@ -134,9 +120,7 @@ class MockTokenService implements TokenServiceInterface<Client, User> {
     return Promise.resolve(undefined);
   }
 
-  save(
-    token: RefreshToken<Client, User>,
-  ): Promise<RefreshToken<Client, User>>;
+  save(token: RefreshToken<Client, User>): Promise<RefreshToken<Client, User>>;
   save(token: Token<Client, User>): Promise<Token<Client, User>>;
   save(
     token: Token<Client, User> | RefreshToken<Client, User>,
@@ -149,10 +133,7 @@ class MockTokenService implements TokenServiceInterface<Client, User> {
   ): Promise<boolean>;
   revoke(token: string, hint?: string | null): Promise<boolean>;
   revoke(
-    _token:
-      | Token<Client, User>
-      | RefreshToken<Client, User>
-      | string,
+    _token: Token<Client, User> | RefreshToken<Client, User> | string,
     _hint?: string | null,
   ): Promise<boolean> {
     return Promise.resolve(true);
@@ -187,25 +168,25 @@ describe("AbstractGrant", () => {
   describe("constructor", () => {
     it("should set default allowRefreshToken to false", () => {
       const { grant } = createTestGrant();
-      assertStrictEquals(grant.allowRefreshToken, false);
+      expect(grant.allowRefreshToken).toBe(false);
     });
 
     it("should set allowRefreshToken when specified", () => {
       const { grant } = createTestGrant({ allowRefreshToken: true });
-      assertStrictEquals(grant.allowRefreshToken, true);
+      expect(grant.allowRefreshToken).toBe(true);
     });
 
     it("should use default Scope class", () => {
       const { grant } = createTestGrant();
       const scope = new grant.Scope("read write");
-      assertStrictEquals(scope.toString(), "read write");
+      expect(scope.toString()).toBe("read write");
     });
   });
 
   describe("grantType", () => {
     it("should return the grant type", () => {
       const { grant } = createTestGrant();
-      assertStrictEquals(grant.grantType, "test");
+      expect(grant.grantType).toBe("test");
     });
   });
 
@@ -213,25 +194,25 @@ describe("AbstractGrant", () => {
     it("should return undefined for null scope", () => {
       const { grant } = createTestGrant();
       const scope = grant.parseScope(null);
-      assertStrictEquals(scope, undefined);
+      expect(scope).toBe(undefined);
     });
 
     it("should return undefined for undefined scope", () => {
       const { grant } = createTestGrant();
       const scope = grant.parseScope(undefined);
-      assertStrictEquals(scope, undefined);
+      expect(scope).toBe(undefined);
     });
 
     it("should return undefined for empty string", () => {
       const { grant } = createTestGrant();
       const scope = grant.parseScope("");
-      assertStrictEquals(scope, undefined);
+      expect(scope).toBe(undefined);
     });
 
     it("should parse valid scope string", () => {
       const { grant } = createTestGrant();
       const scope = grant.parseScope("read write");
-      assertStrictEquals(scope?.toString(), "read write");
+      expect(scope?.toString()).toBe("read write");
     });
   });
 
@@ -247,7 +228,7 @@ describe("AbstractGrant", () => {
         new BasicScope("read write"),
         tokenService,
       );
-      assertStrictEquals(result, acceptedScope);
+      expect(result).toBe(acceptedScope);
     });
 
     it("should accept the requested scope as-is when token service returns null", async () => {
@@ -261,7 +242,7 @@ describe("AbstractGrant", () => {
         requested,
         tokenService,
       );
-      assertStrictEquals(result, requested);
+      expect(result).toBe(requested);
     });
 
     it("should accept the requested scope as-is when token service returns undefined", async () => {
@@ -275,7 +256,7 @@ describe("AbstractGrant", () => {
         requested,
         tokenService,
       );
-      assertStrictEquals(result, requested);
+      expect(result).toBe(requested);
     });
 
     it("should return undefined when no scope was requested and none granted", async () => {
@@ -288,14 +269,14 @@ describe("AbstractGrant", () => {
         undefined,
         tokenService,
       );
-      assertStrictEquals(result, undefined);
+      expect(result).toBe(undefined);
     });
 
     it("should throw InvalidScopeError when token service returns false with scope", async () => {
       const { grant, tokenService } = createTestGrant({
         acceptedScopeResult: false,
       });
-      await assertRejects(
+      await rejection(
         () =>
           grant.acceptedScope(
             testClient,
@@ -312,7 +293,7 @@ describe("AbstractGrant", () => {
       const { grant, tokenService } = createTestGrant({
         acceptedScopeResult: false,
       });
-      await assertRejects(
+      await rejection(
         () =>
           grant.acceptedScope(testClient, testUser, undefined, tokenService),
         InvalidScopeError,
@@ -330,7 +311,7 @@ describe("AbstractGrant", () => {
       });
 
       const credentials = grant.getClientCredentials(request, new FormData());
-      assertEquals(credentials, {
+      expect(credentials).toStrictEqual({
         clientId: "client-1",
         clientSecret: "secret",
       });
@@ -347,7 +328,7 @@ describe("AbstractGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertEquals(credentials, {
+      expect(credentials).toStrictEqual({
         clientId: "client-1",
         clientSecret: "secret",
       });
@@ -361,14 +342,14 @@ describe("AbstractGrant", () => {
         request,
         await request.clone().formData(),
       );
-      assertEquals(credentials, { clientId: "public-client" });
+      expect(credentials).toStrictEqual({ clientId: "public-client" });
     });
 
     it("should throw InvalidClientError when no credentials", () => {
       const { grant } = createTestGrant();
       const request = new Request("http://localhost/token", { method: "POST" });
 
-      assertThrows(
+      thrown(
         () => grant.getClientCredentials(request, new FormData()),
         InvalidClientError,
         "client authentication required",
@@ -377,16 +358,19 @@ describe("AbstractGrant", () => {
 
     it("should prefer Basic Auth over POST body", async () => {
       const { grant } = createTestGrant();
-      const request = tokenRequest({
-        client_id: "body-client",
-        client_secret: "body-secret",
-      }, basicAuthHeader("header-client", "header-secret"));
+      const request = tokenRequest(
+        {
+          client_id: "body-client",
+          client_secret: "body-secret",
+        },
+        basicAuthHeader("header-client", "header-secret"),
+      );
 
       const credentials = grant.getClientCredentials(
         request,
         await request.clone().formData(),
       );
-      assertEquals(credentials, {
+      expect(credentials).toStrictEqual({
         clientId: "header-client",
         clientSecret: "header-secret",
       });
@@ -407,7 +391,7 @@ describe("AbstractGrant", () => {
         request,
         new FormData(),
       );
-      assertStrictEquals(client.id, "client-1");
+      expect(client.id).toBe("client-1");
     });
 
     it("should throw InvalidClientError for non-existent client", async () => {
@@ -418,7 +402,7 @@ describe("AbstractGrant", () => {
         headers: basicAuthHeader("unknown", "secret"),
       });
 
-      await assertRejects(
+      await rejection(
         () => grant.getAuthenticatedClient(request, new FormData()),
         InvalidClientError,
         "client authentication failed",
@@ -434,7 +418,7 @@ describe("AbstractGrant", () => {
         headers: basicAuthHeader("client-1", "wrong"),
       });
 
-      await assertRejects(
+      await rejection(
         () => grant.getAuthenticatedClient(request, new FormData()),
         InvalidClientError,
         "client authentication failed",
@@ -454,9 +438,9 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.client.id, testClient.id);
-      assertStrictEquals(token.user?.id, testUser.id);
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.client.id).toBe(testClient.id);
+      expect(token.user?.id).toBe(testUser.id);
     });
 
     it("should include scope in token when provided", async () => {
@@ -471,7 +455,7 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals(token.scope?.toString(), "read write");
+      expect(token.scope?.toString()).toBe("read write");
     });
 
     it("should include expiration date", async () => {
@@ -487,13 +471,11 @@ describe("AbstractGrant", () => {
       );
       const after = Date.now();
 
-      assertStrictEquals(token.accessTokenExpiresAt instanceof Date, true);
-      assertStrictEquals(
+      expect(token.accessTokenExpiresAt instanceof Date).toBe(true);
+      expect(
         token.accessTokenExpiresAt!.getTime() >= before + 3600 * 1000,
-        true,
-      );
-      assertStrictEquals(
-        token.accessTokenExpiresAt!.getTime() <= after + 3600 * 1000,
+      ).toBe(true);
+      expect(token.accessTokenExpiresAt!.getTime() <= after + 3600 * 1000).toBe(
         true,
       );
     });
@@ -511,13 +493,14 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals("refreshToken" in token, true);
-      assertStrictEquals(
-        typeof (token as Token<Client, User> & {
-          refreshToken: string;
-        }).refreshToken,
-        "string",
-      );
+      expect("refreshToken" in token).toBe(true);
+      expect(
+        typeof (
+          token as Token<Client, User> & {
+            refreshToken: string;
+          }
+        ).refreshToken,
+      ).toBe("string");
     });
 
     it("should not include refresh token when allowRefreshToken is false", async () => {
@@ -533,7 +516,7 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals("refreshToken" in token, false);
+      expect("refreshToken" in token).toBe(false);
     });
 
     it("should omit the user key entirely when no user is given", async () => {
@@ -547,9 +530,9 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.client.id, testClient.id);
-      assertStrictEquals("user" in token, false);
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.client.id).toBe(testClient.id);
+      expect("user" in token).toBe(false);
     });
 
     it("should not include refresh token without a user, even when allowRefreshToken is true", async () => {
@@ -565,7 +548,7 @@ describe("AbstractGrant", () => {
         tokenService,
       );
 
-      assertStrictEquals("refreshToken" in token, false);
+      expect("refreshToken" in token).toBe(false);
     });
   });
 
@@ -585,7 +568,7 @@ describe("AbstractGrant", () => {
         altTokenService,
       );
 
-      assertStrictEquals(token.accessToken, "sentinel-access-token");
+      expect(token.accessToken).toBe("sentinel-access-token");
     });
 
     it("acceptedScope uses services passed per call, not this.services", async () => {
@@ -599,7 +582,7 @@ describe("AbstractGrant", () => {
         altTokenService,
       );
 
-      assertStrictEquals(result?.toString(), "alt");
+      expect(result?.toString()).toBe("alt");
     });
   });
 });

@@ -1,11 +1,5 @@
-import {
-  assertEquals,
-  assertFalse,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { ExternalAuthFlow } from "./flow.ts";
 import { discordProvider } from "./discord.ts";
@@ -23,28 +17,33 @@ const discordUser = {
   verified: true,
 };
 
-function createDiscordStub(options: {
-  tokenResponse?: Record<string, unknown>;
-  tokenStatus?: number;
-  user?: Record<string, unknown>;
-  userStatus?: number;
-} = {}) {
+function createDiscordStub(
+  options: {
+    tokenResponse?: Record<string, unknown>;
+    tokenStatus?: number;
+    user?: Record<string, unknown>;
+    userStatus?: number;
+  } = {},
+) {
   const context = {
     tokenRequest: undefined as URLSearchParams | undefined,
     userAuthorization: undefined as string | null | undefined,
   };
   const fetchStub: typeof fetch = async (input, init) => {
-    const request = input instanceof Request
-      ? new Request(input, init)
-      : new Request(String(input), init);
+    const request =
+      input instanceof Request
+        ? new Request(input, init)
+        : new Request(String(input), init);
     if (request.url === "https://discord.com/api/oauth2/token") {
       context.tokenRequest = new URLSearchParams(await request.text());
       if (options.tokenStatus) {
         return new Response("bad", { status: options.tokenStatus });
       }
       return Response.json(
-        options.tokenResponse ??
-          { access_token: "discord-token", token_type: "Bearer" },
+        options.tokenResponse ?? {
+          access_token: "discord-token",
+          token_type: "Bearer",
+        },
       );
     }
     if (request.url === "https://discord.com/api/users/@me") {
@@ -65,18 +64,21 @@ async function signIn(stub: ReturnType<typeof createDiscordStub>) {
   });
   const { url, transient } = await flow.start({ redirectUri });
   const authorizeUrl = new URL(url);
-  assertEquals(
-    authorizeUrl.origin + authorizeUrl.pathname,
+  expect(authorizeUrl.origin + authorizeUrl.pathname).toStrictEqual(
     "https://discord.com/oauth2/authorize",
   );
-  assertEquals(authorizeUrl.searchParams.get("response_type"), "code");
-  assertEquals(authorizeUrl.searchParams.get("client_id"), clientId);
-  assertEquals(authorizeUrl.searchParams.get("redirect_uri"), redirectUri);
-  assertEquals(authorizeUrl.searchParams.get("scope"), "identify email");
-  assertEquals(authorizeUrl.searchParams.get("state"), transient.state);
-  assertFalse(authorizeUrl.searchParams.has("code_challenge"));
-  assertEquals(transient.codeVerifier, undefined);
-  assertEquals(transient.nonce, undefined);
+  expect(authorizeUrl.searchParams.get("response_type")).toStrictEqual("code");
+  expect(authorizeUrl.searchParams.get("client_id")).toStrictEqual(clientId);
+  expect(authorizeUrl.searchParams.get("redirect_uri")).toStrictEqual(
+    redirectUri,
+  );
+  expect(authorizeUrl.searchParams.get("scope")).toStrictEqual(
+    "identify email",
+  );
+  expect(authorizeUrl.searchParams.get("state")).toStrictEqual(transient.state);
+  expect(authorizeUrl.searchParams.has("code_challenge")).toBeFalsy();
+  expect(transient.codeVerifier).toStrictEqual(undefined);
+  expect(transient.nonce).toStrictEqual(undefined);
   const profile = await flow.finish({
     params: new URLSearchParams({
       code: "discord-code",
@@ -92,26 +94,24 @@ describe("discordProvider", () => {
     const stub = createDiscordStub();
     const profile = await signIn(stub);
 
-    assertEquals(profile.provider, "discord");
-    assertEquals(profile.subject, "80351110224678912");
-    assertEquals(profile.email, "nelly@example.com");
-    assertEquals(profile.emailVerified, true);
-    assertEquals(profile.name, "Nelly");
-    assertEquals(
-      profile.picture,
+    expect(profile.provider).toStrictEqual("discord");
+    expect(profile.subject).toStrictEqual("80351110224678912");
+    expect(profile.email).toStrictEqual("nelly@example.com");
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(profile.name).toStrictEqual("Nelly");
+    expect(profile.picture).toStrictEqual(
       "https://cdn.discordapp.com/avatars/80351110224678912/" +
         "8342729096ea3675442027381ff50dfe.png",
     );
-    assertEquals(profile.raw.username, "nelly");
+    expect(profile.raw.username).toStrictEqual("nelly");
 
     const token = stub.context.tokenRequest!;
-    assertEquals(token.get("grant_type"), "authorization_code");
-    assertEquals(token.get("client_id"), clientId);
-    assertEquals(token.get("client_secret"), clientSecret);
-    assertEquals(token.get("code"), "discord-code");
-    assertEquals(token.get("redirect_uri"), redirectUri);
-    assertEquals(
-      stub.context.userAuthorization,
+    expect(token.get("grant_type")).toStrictEqual("authorization_code");
+    expect(token.get("client_id")).toStrictEqual(clientId);
+    expect(token.get("client_secret")).toStrictEqual(clientSecret);
+    expect(token.get("code")).toStrictEqual("discord-code");
+    expect(token.get("redirect_uri")).toStrictEqual(redirectUri);
+    expect(stub.context.userAuthorization).toStrictEqual(
       "Bearer discord-token",
     );
   });
@@ -121,7 +121,7 @@ describe("discordProvider", () => {
       user: { ...discordUser, global_name: undefined },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.name, "nelly");
+    expect(profile.name).toStrictEqual("nelly");
   });
 
   it("reports emailVerified false when Discord has not verified the email", async () => {
@@ -129,8 +129,8 @@ describe("discordProvider", () => {
       user: { ...discordUser, verified: false },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "nelly@example.com");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("nelly@example.com");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("uses an animated avatar's gif extension", async () => {
@@ -138,31 +138,31 @@ describe("discordProvider", () => {
       user: { ...discordUser, avatar: "a_1234567890" },
     });
     const profile = await signIn(stub);
-    assertStringIncludes(profile.picture!, ".gif");
+    expect(profile.picture!).toContain(".gif");
   });
 
   it("surfaces a token endpoint failure diagnosably", async () => {
     const stub = createDiscordStub({ tokenStatus: 401 });
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[discord]");
-    assertStringIncludes(error.message, "401");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[discord]");
+    expect(error.message).toContain("401");
   });
 
   it("surfaces a missing access token diagnosably", async () => {
     const stub = createDiscordStub({
       tokenResponse: { error: "invalid_grant" },
     });
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "invalid_grant");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("invalid_grant");
   });
 
   it("surfaces a profile endpoint failure diagnosably", async () => {
     const stub = createDiscordStub({ userStatus: 403 });
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[discord]");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[discord]");
   });
 
   it("wraps a network failure instead of leaking it", async () => {
@@ -174,7 +174,7 @@ describe("discordProvider", () => {
       }),
     });
     const { transient } = await flow.start({ redirectUri });
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({
@@ -185,7 +185,7 @@ describe("discordProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[discord]");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[discord]");
   });
 });

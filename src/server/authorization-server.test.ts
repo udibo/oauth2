@@ -1,11 +1,5 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { beforeEach, describe, expect, it } from "vitest";
+import { rejection, thrown } from "../_test_assert.ts";
 import { BasicScope } from "../models/scope.ts";
 import { OAuth2Error, ServerError } from "../errors.ts";
 import type { Token } from "../models/token.ts";
@@ -40,9 +34,16 @@ import type { IsPublicSuffix } from "./redirect-uri.ts";
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
 /** A grant that dispatches token requests but serves no endpoint of its own. */
-class TokenOnlyGrant
-  implements DispatchableGrant<TestClient, TestUser, BasicScope> {
-  constructor(readonly grantType: string) {}
+class TokenOnlyGrant implements DispatchableGrant<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
+  readonly grantType: string;
+
+  constructor(grantType: string) {
+    this.grantType = grantType;
+  }
 
   getAuthenticatedClient(): Promise<TestClient> {
     return Promise.resolve(testClient);
@@ -176,9 +177,7 @@ function createTestServer(
   };
 }
 
-async function setupTestData(
-  services: ReturnType<typeof createTestServices>,
-) {
+async function setupTestData(services: ReturnType<typeof createTestServices>) {
   await services.userService.add(testUser, "password");
   await services.clientService.add(testClient, "secret", testUser.id);
 }
@@ -187,7 +186,7 @@ describe("AuthorizationServer", () => {
   describe("constructor", () => {
     it("should inherit from ResourceServer", () => {
       const { server } = createTestServer();
-      assertStrictEquals(typeof server.authenticate, "function");
+      expect(typeof server.authenticate).toBe("function");
     });
 
     it("should set issuer", async () => {
@@ -195,15 +194,12 @@ describe("AuthorizationServer", () => {
       const context = await server.authorizationContext(
         new Request("http://localhost/token"),
       );
-      assertStrictEquals(context.issuer, "https://auth.example.com");
+      expect(context.issuer).toBe("https://auth.example.com");
     });
 
     it("should copy grants", () => {
       const { server } = createTestServer();
-      assertStrictEquals(
-        typeof server.grants["client_credentials"],
-        "object",
-      );
+      expect(typeof server.grants["client_credentials"]).toBe("object");
     });
 
     it("throws when a grant is registered under a mismatched key", () => {
@@ -214,7 +210,7 @@ describe("AuthorizationServer", () => {
           tokenService: services.tokenService,
         }),
       });
-      assertThrows(
+      thrown(
         () =>
           new AuthorizationServer({
             resolve: () => ({
@@ -244,9 +240,9 @@ describe("AuthorizationServer", () => {
 
       const body = server.bearerToken(token, { clientService, tokenService });
 
-      assertStrictEquals(body.token_type, "Bearer");
-      assertStrictEquals(body.access_token, "access-123");
-      assertStrictEquals(body.expires_in, 3600);
+      expect(body.token_type).toBe("Bearer");
+      expect(body.access_token).toBe("access-123");
+      expect(body.expires_in).toBe(3600);
     });
 
     it("derives expires_in from the token's own expiry, not the service default", () => {
@@ -260,7 +256,7 @@ describe("AuthorizationServer", () => {
 
       const body = server.bearerToken(token, { clientService, tokenService });
 
-      assertStrictEquals(body.expires_in, 120);
+      expect(body.expires_in).toBe(120);
     });
 
     it("falls back to the service lifetime when the token has no expiry", () => {
@@ -273,7 +269,7 @@ describe("AuthorizationServer", () => {
 
       const body = server.bearerToken(token, { clientService, tokenService });
 
-      assertStrictEquals(body.expires_in, tokenService.accessTokenLifetime);
+      expect(body.expires_in).toBe(tokenService.accessTokenLifetime);
     });
 
     it("should include refresh-token when present", () => {
@@ -289,7 +285,7 @@ describe("AuthorizationServer", () => {
 
       const body = server.bearerToken(token, { clientService, tokenService });
 
-      assertStrictEquals(body.refresh_token, "refresh-123");
+      expect(body.refresh_token).toBe("refresh-123");
     });
 
     it("should include scope when present", () => {
@@ -304,7 +300,7 @@ describe("AuthorizationServer", () => {
 
       const body = server.bearerToken(token, { clientService, tokenService });
 
-      assertStrictEquals(body.scope, "read write");
+      expect(body.scope).toBe("read write");
     });
   });
 
@@ -322,16 +318,15 @@ describe("AuthorizationServer", () => {
         services: { clientService, tokenService },
       });
 
-      assertStrictEquals(response.status, 200);
-      assertStrictEquals(
-        response.headers.get("Content-Type"),
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe(
         "application/json;charset=UTF-8",
       );
-      assertStrictEquals(response.headers.get("Cache-Control"), "no-store");
-      assertStrictEquals(response.headers.get("Pragma"), "no-cache");
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("Pragma")).toBe("no-cache");
 
       const body = await response.json();
-      assertStrictEquals(body.access_token, "access-123");
+      expect(body.access_token).toBe("access-123");
     });
   });
 
@@ -342,9 +337,9 @@ describe("AuthorizationServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
+      expect(body.error).toBe("server_error");
     });
 
     it("should create Problem Details response when errorFormat is problem-details", async () => {
@@ -363,15 +358,14 @@ describe("AuthorizationServer", () => {
 
       const response = server.createErrorResponse(error);
 
-      assertStrictEquals(response.status, 500);
-      assertStrictEquals(
-        response.headers.get("content-type"),
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).toBe(
         "application/problem+json",
       );
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
-      assertStrictEquals(body.status, 500);
-      assertStrictEquals(body.title, "OAuth2 Error");
+      expect(body.error).toBe("server_error");
+      expect(body.status).toBe(500);
+      expect(body.title).toBe("OAuth2 Error");
     });
   });
 
@@ -400,10 +394,10 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_request");
-      assertStrictEquals(body.error_description, "method must be POST");
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description).toBe("method must be POST");
     });
 
     it("should reject wrong content type", async () => {
@@ -415,12 +409,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(
-        body.error_description?.includes("content-type"),
-        true,
-      );
+      expect(body.error_description?.includes("content-type")).toBe(true);
     });
 
     it("should require grant_type parameter", async () => {
@@ -428,12 +419,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(
-        body.error_description,
-        "grant_type parameter required",
-      );
+      expect(body.error_description).toBe("grant_type parameter required");
     });
 
     it("leaves the request body unread for the caller", async () => {
@@ -444,10 +432,10 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 200);
-      assertStrictEquals(request.bodyUsed, false);
+      expect(response.status).toBe(200);
+      expect(request.bodyUsed).toBe(false);
       const body = await request.formData();
-      assertStrictEquals(body.get("grant_type"), "client_credentials");
+      expect(body.get("grant_type")).toBe("client_credentials");
     });
 
     it("answers invalid_client when a public client presents a secret it was never issued", async () => {
@@ -457,28 +445,29 @@ describe("AuthorizationServer", () => {
       };
       await clientService.add(publicClient);
 
-      const asPublic = await server.handleTokenRequest(tokenRequest({
-        grant_type: "refresh_token",
-        client_id: publicClient.id,
-        refresh_token: "unknown",
-      }));
-      assertStrictEquals(asPublic.status, 400);
-      assertStrictEquals((await asPublic.json()).error, "invalid_grant");
-
-      const response = await server.handleTokenRequest(tokenRequest({
-        grant_type: "refresh_token",
-        client_id: publicClient.id,
-        client_secret: "never-issued",
-        refresh_token: "unknown",
-      }));
-
-      assertStrictEquals(response.status, 401);
-      const body = await response.json();
-      assertStrictEquals(body.error, "invalid_client");
-      assertStrictEquals(
-        body.error_description,
-        "client authentication failed",
+      const asPublic = await server.handleTokenRequest(
+        tokenRequest({
+          grant_type: "refresh_token",
+          client_id: publicClient.id,
+          refresh_token: "unknown",
+        }),
       );
+      expect(asPublic.status).toBe(400);
+      expect((await asPublic.json()).error).toBe("invalid_grant");
+
+      const response = await server.handleTokenRequest(
+        tokenRequest({
+          grant_type: "refresh_token",
+          client_id: publicClient.id,
+          client_secret: "never-issued",
+          refresh_token: "unknown",
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBe("invalid_client");
+      expect(body.error_description).toBe("client authentication failed");
     });
 
     it("should reject unsupported grant type", async () => {
@@ -486,9 +475,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const responseBody = await response.json();
-      assertStrictEquals(responseBody.error, "unsupported_grant_type");
+      expect(responseBody.error).toBe("unsupported_grant_type");
     });
 
     it("should reject client not authorized for grant type", async () => {
@@ -506,9 +495,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const responseBody = await response.json();
-      assertStrictEquals(responseBody.error, "unauthorized_client");
+      expect(responseBody.error).toBe("unauthorized_client");
     });
 
     it("sends WWW-Authenticate on 401 when Basic credentials are invalid", async () => {
@@ -519,13 +508,10 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const responseBody = await response.json();
-      assertStrictEquals(responseBody.error, "invalid_client");
-      assertStringIncludes(
-        response.headers.get("WWW-Authenticate") ?? "",
-        "Basic",
-      );
+      expect(responseBody.error).toBe("invalid_client");
+      expect(response.headers.get("WWW-Authenticate") ?? "").toContain("Basic");
     });
 
     it("should handle client-credentials grant", async () => {
@@ -536,10 +522,10 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const responseBody = await response.json();
-      assertStrictEquals(responseBody.token_type, "Bearer");
-      assertStrictEquals(typeof responseBody.access_token, "string");
+      expect(responseBody.token_type).toBe("Bearer");
+      expect(typeof responseBody.access_token).toBe("string");
     });
 
     it("should handle refresh-token grant", async () => {
@@ -553,16 +539,19 @@ describe("AuthorizationServer", () => {
       };
       await tokenService.save(existingToken);
 
-      const request = tokenRequest({
-        grant_type: "refresh_token",
-        refresh_token: "refresh-123",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = tokenRequest(
+        {
+          grant_type: "refresh_token",
+          refresh_token: "refresh-123",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const responseBody = await response.json();
-      assertStrictEquals(typeof responseBody.access_token, "string");
+      expect(typeof responseBody.access_token).toBe("string");
     });
 
     it("should handle authorization-code grant", async () => {
@@ -574,17 +563,20 @@ describe("AuthorizationServer", () => {
       };
       await authorizationCodeService.save(authCode);
 
-      const request = tokenRequest({
-        grant_type: "authorization_code",
-        code: "auth-code-123",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = tokenRequest(
+        {
+          grant_type: "authorization_code",
+          code: "auth-code-123",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleTokenRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const responseBody = await response.json();
-      assertStrictEquals(typeof responseBody.access_token, "string");
-      assertStrictEquals(typeof responseBody.refresh_token, "string");
+      expect(typeof responseBody.access_token).toBe("string");
+      expect(typeof responseBody.refresh_token).toBe("string");
     });
   });
 
@@ -597,13 +589,13 @@ describe("AuthorizationServer", () => {
 
       const params = server.parseAuthorizeParameters(request);
 
-      assertStrictEquals(params.responseType, "code");
-      assertStrictEquals(params.clientId, "client-1");
-      assertStrictEquals(params.redirectUri, "https://example.com/callback");
-      assertStrictEquals(params.state, "xyz");
-      assertStrictEquals(params.scope, "read write");
-      assertStrictEquals(params.challenge, "challenge");
-      assertStrictEquals(params.challengeMethod, "S256");
+      expect(params.responseType).toBe("code");
+      expect(params.clientId).toBe("client-1");
+      expect(params.redirectUri).toBe("https://example.com/callback");
+      expect(params.state).toBe("xyz");
+      expect(params.scope).toBe("read write");
+      expect(params.challenge).toBe("challenge");
+      expect(params.challengeMethod).toBe("S256");
     });
 
     it("should return undefined for missing parameters", () => {
@@ -612,8 +604,8 @@ describe("AuthorizationServer", () => {
 
       const params = server.parseAuthorizeParameters(request);
 
-      assertStrictEquals(params.responseType, undefined);
-      assertStrictEquals(params.clientId, undefined);
+      expect(params.responseType).toBe(undefined);
+      expect(params.clientId).toBe(undefined);
     });
   });
 
@@ -644,12 +636,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(
-        body.error_description,
-        "client_id parameter required",
-      );
+      expect(body.error_description).toBe("client_id parameter required");
     });
 
     it("should validate client has redirect URIs", async () => {
@@ -668,9 +657,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error_description, "no authorized redirect_uri");
+      expect(body.error_description).toBe("no authorized redirect_uri");
     });
 
     it("should validate redirect_uri is authorized", async () => {
@@ -683,9 +672,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error_description, "redirect_uri not authorized");
+      expect(body.error_description).toBe("redirect_uri not authorized");
     });
 
     it("should authorize a redirect_uri covered by a wildcard registration", async () => {
@@ -704,11 +693,11 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const url = new URL(response.headers.get("Location")!);
-      assertStrictEquals(url.origin, "https://myapp-a1b2.myorg.deno.net");
-      assertStrictEquals(url.pathname, "/auth/callback");
-      assertStrictEquals(url.searchParams.has("code"), true);
+      expect(url.origin).toBe("https://myapp-a1b2.myorg.deno.net");
+      expect(url.pathname).toBe("/auth/callback");
+      expect(url.searchParams.has("code")).toBe(true);
     });
 
     it("should refuse a wildcard registration when no public suffix list is configured", async () => {
@@ -729,9 +718,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error_description, "redirect_uri not authorized");
+      expect(body.error_description).toBe("redirect_uri not authorized");
     });
 
     it("should refuse a host a wildcard registration cannot reach", async () => {
@@ -741,17 +730,15 @@ describe("AuthorizationServer", () => {
         redirectUris: ["https://myapp-*.myorg.deno.net/auth/callback"],
       });
 
-      for (
-        const redirectUri of [
-          "https://myapp-a1.evil.myorg.deno.net/auth/callback",
-          "http://myapp-a1.myorg.deno.net/auth/callback",
-          "https://myapp-a1.myorg.deno.net/auth/callback?next=x",
-        ]
-      ) {
+      for (const redirectUri of [
+        "https://myapp-a1.evil.myorg.deno.net/auth/callback",
+        "http://myapp-a1.myorg.deno.net/auth/callback",
+        "https://myapp-a1.myorg.deno.net/auth/callback?next=x",
+      ]) {
         const request = new Request(
-          `http://localhost/authorize?response_type=code&client_id=preview-client-2&redirect_uri=${
-            encodeURIComponent(redirectUri)
-          }&state=xyz`,
+          `http://localhost/authorize?response_type=code&client_id=preview-client-2&redirect_uri=${encodeURIComponent(
+            redirectUri,
+          )}&state=xyz`,
         );
 
         const response = await server.handleAuthorizeRequest(
@@ -759,12 +746,10 @@ describe("AuthorizationServer", () => {
           authenticateUser,
         );
 
-        assertStrictEquals(response.status, 401, redirectUri);
+        expect(response.status, redirectUri).toBe(401);
         const body = await response.json();
-        assertStrictEquals(
-          body.error_description,
+        expect(body.error_description, redirectUri).toBe(
           "redirect_uri not authorized",
-          redirectUri,
         );
       }
     });
@@ -785,10 +770,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(
-        body.error_description,
+      expect(body.error_description).toBe(
         "redirect_uri required when every registered redirect_uri is a pattern",
       );
     });
@@ -812,9 +796,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const url = new URL(response.headers.get("Location")!);
-      assertStrictEquals(url.origin, "https://myapp.myorg.deno.net");
+      expect(url.origin).toBe("https://myapp.myorg.deno.net");
     });
 
     it("should require state parameter", async () => {
@@ -827,10 +811,10 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.get("error"), "invalid_request");
+      expect(url.searchParams.get("error")).toBe("invalid_request");
     });
 
     it("should require response_type parameter", async () => {
@@ -843,11 +827,11 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.get("error"), "invalid_request");
-      assertStrictEquals(url.searchParams.get("state"), "xyz");
+      expect(url.searchParams.get("error")).toBe("invalid_request");
+      expect(url.searchParams.get("state")).toBe("xyz");
     });
 
     it("should validate response_type is 'code'", async () => {
@@ -860,15 +844,11 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(
-        url.searchParams.get("error"),
-        "unsupported_response_type",
-      );
-      assertStrictEquals(
-        url.searchParams.get("error_description"),
+      expect(url.searchParams.get("error")).toBe("unsupported_response_type");
+      expect(url.searchParams.get("error_description")).toBe(
         "response_type not supported",
       );
     });
@@ -884,10 +864,10 @@ describe("AuthorizationServer", () => {
         unauthenticatedUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.get("error"), "access_denied");
+      expect(url.searchParams.get("error")).toBe("access_denied");
     });
 
     it("should generate authorization code on success", async () => {
@@ -900,12 +880,12 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.has("code"), true);
-      assertStrictEquals(url.searchParams.get("state"), "xyz");
-      assertStrictEquals(url.origin, "https://example.com");
+      expect(url.searchParams.has("code")).toBe(true);
+      expect(url.searchParams.get("state")).toBe("xyz");
+      expect(url.origin).toBe("https://example.com");
     });
 
     it("should use provided redirect_uri", async () => {
@@ -918,12 +898,9 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
-      assertStrictEquals(
-        location.startsWith("https://example.com/callback"),
-        true,
-      );
+      expect(location.startsWith("https://example.com/callback")).toBe(true);
     });
 
     it("should validate PKCE challenge_method", async () => {
@@ -936,11 +913,10 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(
-        url.searchParams.get("error_description"),
+      expect(url.searchParams.get("error_description")).toBe(
         "unsupported code_challenge_method",
       );
     });
@@ -955,15 +931,14 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(
-        url.searchParams.get("error_description")?.includes(
-          "code_challenge required",
-        ),
-        true,
-      );
+      expect(
+        url.searchParams
+          .get("error_description")
+          ?.includes("code_challenge required"),
+      ).toBe(true);
     });
 
     it("rejects a missing code_challenge at authorize-time when PKCE is required", async () => {
@@ -979,14 +954,13 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const url = new URL(response.headers.get("Location")!);
-      assertStrictEquals(url.searchParams.get("error"), "invalid_request");
-      assertStringIncludes(
-        url.searchParams.get("error_description") ?? "",
+      expect(url.searchParams.get("error")).toBe("invalid_request");
+      expect(url.searchParams.get("error_description") ?? "").toContain(
         "PKCE is required",
       );
-      assertStrictEquals(url.searchParams.has("code"), false);
+      expect(url.searchParams.has("code")).toBe(false);
     });
 
     it("does not leak an internal server_error message into the redirect", async () => {
@@ -997,13 +971,12 @@ describe("AuthorizationServer", () => {
       );
       const response = await server.handleAuthorizeRequest(request, leakyAuth);
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const url = new URL(response.headers.get("Location")!);
-      assertStrictEquals(url.searchParams.get("error"), "server_error");
-      assertEquals(
+      expect(url.searchParams.get("error")).toBe("server_error");
+      expect(
         (url.searchParams.get("error_description") ?? "").includes("secret"),
-        false,
-      );
+      ).toStrictEqual(false);
     });
 
     it("should handle consent flow", async () => {
@@ -1029,10 +1002,10 @@ describe("AuthorizationServer", () => {
         handleConsent,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.has("code"), true);
+      expect(url.searchParams.has("code")).toBe(true);
     });
 
     it("should reject when user denies consent", async () => {
@@ -1057,10 +1030,10 @@ describe("AuthorizationServer", () => {
         handleConsent,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.get("error"), "access_denied");
+      expect(url.searchParams.get("error")).toBe("access_denied");
     });
 
     it("should return Response from authenticateUser directly", async () => {
@@ -1081,9 +1054,8 @@ describe("AuthorizationServer", () => {
         loginRedirect,
       );
 
-      assertStrictEquals(response.status, 302);
-      assertStrictEquals(
-        response.headers.get("Location"),
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(
         "/login?return_to=%2Fauthorize",
       );
     });
@@ -1112,9 +1084,9 @@ describe("AuthorizationServer", () => {
         renderConsent,
       );
 
-      assertStrictEquals(response.status, 200);
-      assertStrictEquals(response.headers.get("Content-Type"), "text/html");
-      assertStrictEquals(await response.text(), "<html>consent</html>");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("text/html");
+      expect(await response.text()).toBe("<html>consent</html>");
     });
 
     it("auto-grants when no consent handler is configured (assumes consent)", async () => {
@@ -1135,14 +1107,14 @@ describe("AuthorizationServer", () => {
         limitedAuth,
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const url = new URL(response.headers.get("Location")!);
       const code = url.searchParams.get("code");
-      assertStrictEquals(typeof code, "string");
-      assertStrictEquals(url.searchParams.get("error"), null);
+      expect(typeof code).toBe("string");
+      expect(url.searchParams.get("error")).toBe(null);
 
       const saved = await result.authorizationCodeService.get(code!);
-      assertStrictEquals(saved?.scope?.toString(), "write");
+      expect(saved?.scope?.toString()).toBe("write");
     });
 
     it("should reject client not authorized for authorization_code grant", async () => {
@@ -1162,11 +1134,10 @@ describe("AuthorizationServer", () => {
         authenticateUser,
       );
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error, "unauthorized_client");
-      assertStrictEquals(
-        body.error_description,
+      expect(body.error).toBe("unauthorized_client");
+      expect(body.error_description).toBe(
         "client is not authorized to use the authorization_code grant type",
       );
     });
@@ -1190,9 +1161,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_request");
+      expect(body.error).toBe("invalid_request");
     });
 
     it("should reject wrong content type", async () => {
@@ -1207,13 +1178,10 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_request");
-      assertStrictEquals(
-        body.error_description?.includes("content-type"),
-        true,
-      );
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description?.includes("content-type")).toBe(true);
     });
 
     it("should require client authentication per RFC 7009", async () => {
@@ -1221,9 +1189,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_client");
+      expect(body.error).toBe("invalid_client");
     });
 
     it("should require token parameter", async () => {
@@ -1235,9 +1203,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error_description, "token parameter required");
+      expect(body.error_description).toBe("token parameter required");
     });
 
     it("should revoke token and return 200", async () => {
@@ -1249,26 +1217,34 @@ describe("AuthorizationServer", () => {
       };
       await tokenService.save(token);
 
-      const request = formRequest("http://localhost/revoke", {
-        token: "revoke-me",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/revoke",
+        {
+          token: "revoke-me",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
 
       const revokedToken = await tokenService.getToken("revoke-me");
-      assertStrictEquals(revokedToken, undefined);
+      expect(revokedToken).toBe(undefined);
     });
 
     it("should return 200 even for non-existent token", async () => {
-      const request = formRequest("http://localhost/revoke", {
-        token: "non-existent",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/revoke",
+        {
+          token: "non-existent",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
     });
 
     it("should pass token_type_hint to service", async () => {
@@ -1282,14 +1258,18 @@ describe("AuthorizationServer", () => {
       };
       await tokenService.save(token);
 
-      const request = formRequest("http://localhost/revoke", {
-        token: "refresh-revoke",
-        token_type_hint: "refresh_token",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/revoke",
+        {
+          token: "refresh-revoke",
+          token_type_hint: "refresh_token",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleRevocationRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
     });
   });
 
@@ -1303,17 +1283,19 @@ describe("AuthorizationServer", () => {
       );
       const metadata = result.server.getMetadata(context);
 
-      assertStrictEquals(metadata.issuer, "https://auth.example.com");
-      assertEquals(
-        metadata.grant_types_supported,
-        ["client_credentials", "refresh_token", "authorization_code"],
-      );
-      assertEquals(
-        metadata.token_endpoint_auth_methods_supported,
-        ["client_secret_basic", "client_secret_post", "none"],
-      );
-      assertEquals(metadata.code_challenge_methods_supported, ["S256"]);
-      assertEquals(metadata.response_types_supported, ["code"]);
+      expect(metadata.issuer).toBe("https://auth.example.com");
+      expect(metadata.grant_types_supported).toStrictEqual([
+        "client_credentials",
+        "refresh_token",
+        "authorization_code",
+      ]);
+      expect(metadata.token_endpoint_auth_methods_supported).toStrictEqual([
+        "client_secret_basic",
+        "client_secret_post",
+        "none",
+      ]);
+      expect(metadata.code_challenge_methods_supported).toStrictEqual(["S256"]);
+      expect(metadata.response_types_supported).toStrictEqual(["code"]);
     });
 
     it("advertises `none`, the method it accepts from a client with no secret", async () => {
@@ -1338,19 +1320,22 @@ describe("AuthorizationServer", () => {
       );
       const metadata = result.server.getMetadata(context);
 
-      assertEquals(
-        metadata.token_endpoint_auth_methods_supported,
-        ["client_secret_basic", "client_secret_post", "none"],
+      expect(metadata.token_endpoint_auth_methods_supported).toStrictEqual([
+        "client_secret_basic",
+        "client_secret_post",
+        "none",
+      ]);
+
+      const response = await result.server.handleTokenRequest(
+        tokenRequest({
+          grant_type: "authorization_code",
+          code: "public-code",
+          client_id: "public-client",
+        }),
       );
 
-      const response = await result.server.handleTokenRequest(tokenRequest({
-        grant_type: "authorization_code",
-        code: "public-code",
-        client_id: "public-client",
-      }));
-
-      assertStrictEquals(response.status, 200);
-      assertStrictEquals(typeof (await response.json()).access_token, "string");
+      expect(response.status).toBe(200);
+      expect(typeof (await response.json()).access_token).toBe("string");
     });
 
     it("should return empty response_types when no authorization-code grant", async () => {
@@ -1381,7 +1366,7 @@ describe("AuthorizationServer", () => {
       );
       const metadata = server.getMetadata(context);
 
-      assertEquals(metadata.response_types_supported, []);
+      expect(metadata.response_types_supported).toStrictEqual([]);
     });
 
     it("throws when issuer is not configured (RFC 8414)", async () => {
@@ -1405,7 +1390,7 @@ describe("AuthorizationServer", () => {
       const context = await server.authorizationContext(
         new Request("http://localhost/.well-known/oauth-authorization-server"),
       );
-      assertThrows(
+      thrown(
         () => server.getMetadata(context),
         Error,
         "issuer must be configured",
@@ -1436,18 +1421,15 @@ describe("AuthorizationServer", () => {
         throwOnError: true,
       });
 
-      const error = await assertRejects(
+      const error = await rejection(
         () =>
           server.handleDeviceAuthorizationRequest(
             deviceRequest({ client_id: "device-public" }),
           ),
         ServerError,
       );
-      assertStringIncludes(error.message, "TokenOnlyGrant");
-      assertStringIncludes(
-        error.message,
-        "must extend DeviceAuthorizationGrant",
-      );
+      expect(error.message).toContain("TokenOnlyGrant");
+      expect(error.message).toContain("must extend DeviceAuthorizationGrant");
     });
 
     it("authenticates a public client with client_id only", async () => {
@@ -1463,14 +1445,11 @@ describe("AuthorizationServer", () => {
         deviceRequest({ client_id: "device-public" }),
       );
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(typeof body.device_code, "string");
-      assertStrictEquals(typeof body.user_code, "string");
-      assertStrictEquals(
-        body.verification_uri,
-        "https://auth.example.com/device",
-      );
+      expect(typeof body.device_code).toBe("string");
+      expect(typeof body.user_code).toBe("string");
+      expect(body.verification_uri).toBe("https://auth.example.com/device");
     });
 
     it("rejects a confidential client that does not authenticate (RFC 8628 Section 3.1)", async () => {
@@ -1486,9 +1465,9 @@ describe("AuthorizationServer", () => {
         deviceRequest({ client_id: "device-confidential" }),
       );
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_client");
+      expect(body.error).toBe("invalid_client");
     });
 
     it("accepts a confidential client with valid Basic credentials", async () => {
@@ -1507,9 +1486,9 @@ describe("AuthorizationServer", () => {
         ),
       );
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(typeof body.device_code, "string");
+      expect(typeof body.device_code).toBe("string");
     });
 
     it("challenges with WWW-Authenticate when Basic credentials are wrong", async () => {
@@ -1525,11 +1504,8 @@ describe("AuthorizationServer", () => {
         deviceRequest({}, basicAuthHeader("device-confidential-3", "wrong")),
       );
 
-      assertStrictEquals(response.status, 401);
-      assertStringIncludes(
-        response.headers.get("WWW-Authenticate") ?? "",
-        "Basic",
-      );
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate") ?? "").toContain("Basic");
     });
 
     it("fails fast when verificationUri is not configured (RFC 8628)", async () => {
@@ -1545,9 +1521,9 @@ describe("AuthorizationServer", () => {
         deviceRequest({ client_id: "device-no-vuri" }),
       );
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
+      expect(body.error).toBe("server_error");
     });
   });
 
@@ -1636,11 +1612,7 @@ describe("AuthorizationServer", () => {
           const result = createEndpointServer();
           server = result.server;
           await result.userService.add(testUser, "password");
-          await result.clientService.add(
-            endpointClient,
-            "secret",
-            testUser.id,
-          );
+          await result.clientService.add(endpointClient, "secret", testUser.id);
         });
 
         function request(
@@ -1660,9 +1632,12 @@ describe("AuthorizationServer", () => {
         function authenticated(
           body: Record<string, string> = endpoint.body,
         ): Request {
-          return request({
-            headers: basicAuthHeader("endpoint-client", "secret"),
-          }, body);
+          return request(
+            {
+              headers: basicAuthHeader("endpoint-client", "secret"),
+            },
+            body,
+          );
         }
 
         it("rejects a request that is not POST", async () => {
@@ -1671,10 +1646,10 @@ describe("AuthorizationServer", () => {
             request({ method: "GET" }),
           );
 
-          assertStrictEquals(response.status, 400);
+          expect(response.status).toBe(400);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_request");
-          assertStrictEquals(body.error_description, "method must be POST");
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe("method must be POST");
         });
 
         it("rejects a content type that is not form-urlencoded", async () => {
@@ -1690,11 +1665,10 @@ describe("AuthorizationServer", () => {
             }),
           );
 
-          assertStrictEquals(response.status, 400);
+          expect(response.status).toBe(400);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_request");
-          assertStrictEquals(
-            body.error_description,
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
             "content-type header must be application/x-www-form-urlencoded",
           );
         });
@@ -1713,11 +1687,10 @@ describe("AuthorizationServer", () => {
             }),
           );
 
-          assertStrictEquals(response.status, 400);
+          expect(response.status).toBe(400);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_request");
-          assertStrictEquals(
-            body.error_description,
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
             "body must be application/x-www-form-urlencoded",
           );
         });
@@ -1725,13 +1698,10 @@ describe("AuthorizationServer", () => {
         it("rejects a request presenting no client credentials", async () => {
           const response = await endpoint.handle(server, request());
 
-          assertStrictEquals(response.status, 401);
+          expect(response.status).toBe(401);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_client");
-          assertStrictEquals(
-            body.error_description,
-            "client authentication required",
-          );
+          expect(body.error).toBe("invalid_client");
+          expect(body.error_description).toBe("client authentication required");
         });
 
         it("rejects wrong Basic credentials with a challenge", async () => {
@@ -1742,15 +1712,11 @@ describe("AuthorizationServer", () => {
             }),
           );
 
-          assertStrictEquals(response.status, 401);
+          expect(response.status).toBe(401);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_client");
-          assertStrictEquals(
-            body.error_description,
-            "client authentication failed",
-          );
-          assertStringIncludes(
-            response.headers.get("WWW-Authenticate") ?? "",
+          expect(body.error).toBe("invalid_client");
+          expect(body.error_description).toBe("client authentication failed");
+          expect(response.headers.get("WWW-Authenticate") ?? "").toContain(
             "Basic",
           );
         });
@@ -1758,20 +1724,20 @@ describe("AuthorizationServer", () => {
         it("rejects wrong body credentials", async () => {
           const response = await endpoint.handle(
             server,
-            request({}, {
-              ...endpoint.body,
-              client_id: "endpoint-client",
-              client_secret: "wrong",
-            }),
+            request(
+              {},
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "wrong",
+              },
+            ),
           );
 
-          assertStrictEquals(response.status, 401);
+          expect(response.status).toBe(401);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_client");
-          assertStrictEquals(
-            body.error_description,
-            "client authentication failed",
-          );
+          expect(body.error).toBe("invalid_client");
+          expect(body.error_description).toBe("client authentication failed");
         });
 
         it("rejects an unsupported Authorization header", async () => {
@@ -1780,11 +1746,10 @@ describe("AuthorizationServer", () => {
             request({ headers: { authorization: "Bearer some-token" } }),
           );
 
-          assertStrictEquals(response.status, 401);
+          expect(response.status).toBe(401);
           const body = await response.json();
-          assertStrictEquals(body.error, "invalid_client");
-          assertStrictEquals(
-            body.error_description,
+          expect(body.error).toBe("invalid_client");
+          expect(body.error_description).toBe(
             "unsupported authorization header",
           );
         });
@@ -1792,20 +1757,23 @@ describe("AuthorizationServer", () => {
         it("falls back to body credentials when the Authorization header is not Basic", async () => {
           const response = await endpoint.handle(
             server,
-            request({ headers: { authorization: "Bearer some-token" } }, {
-              ...endpoint.body,
-              client_id: "endpoint-client",
-              client_secret: "secret",
-            }),
+            request(
+              { headers: { authorization: "Bearer some-token" } },
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+              },
+            ),
           );
 
-          assertStrictEquals(response.status, 200);
+          expect(response.status).toBe(200);
         });
 
         it("accepts a well-formed authenticated request", async () => {
           const response = await endpoint.handle(server, authenticated());
 
-          assertStrictEquals(response.status, 200);
+          expect(response.status).toBe(200);
         });
       });
     }
@@ -1839,20 +1807,17 @@ describe("AuthorizationServer", () => {
         "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz",
       );
 
-      const response = await server.handleAuthorizeRequest(
-        request,
-        () =>
-          Promise.resolve({
-            user: testUser,
-            authorizedScope: new BasicScope("read"),
-          }),
+      const response = await server.handleAuthorizeRequest(request, () =>
+        Promise.resolve({
+          user: testUser,
+          authorizedScope: new BasicScope("read"),
+        }),
       );
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
-      assertStrictEquals(
-        body.error_description,
+      expect(body.error).toBe("server_error");
+      expect(body.error_description).toBe(
         "The server encountered an unexpected condition.",
       );
     });
@@ -1874,7 +1839,7 @@ describe("AuthorizationServer", () => {
         throwOnError: true,
       });
 
-      const error = await assertRejects(
+      const error = await rejection(
         () =>
           server.handleAuthorizeRequest(
             new Request(
@@ -1884,11 +1849,8 @@ describe("AuthorizationServer", () => {
           ),
         ServerError,
       );
-      assertStringIncludes(error.message, "TokenOnlyGrant");
-      assertStringIncludes(
-        error.message,
-        "must extend AuthorizationCodeGrant",
-      );
+      expect(error.message).toContain("TokenOnlyGrant");
+      expect(error.message).toContain("must extend AuthorizationCodeGrant");
     });
 
     it("should include error_uri in redirect when present", async () => {
@@ -1918,21 +1880,18 @@ describe("AuthorizationServer", () => {
         "http://localhost/authorize?response_type=code&client_id=error-uri-client&state=xyz&code_challenge=test",
       );
 
-      const response = await result.server.handleAuthorizeRequest(
-        request,
-        () =>
-          Promise.resolve({
-            user: testUser,
-            authorizedScope: new BasicScope("read"),
-          }),
+      const response = await result.server.handleAuthorizeRequest(request, () =>
+        Promise.resolve({
+          user: testUser,
+          authorizedScope: new BasicScope("read"),
+        }),
       );
 
-      assertStrictEquals(response.status, 302);
+      expect(response.status).toBe(302);
       const location = response.headers.get("Location")!;
       const url = new URL(location);
-      assertStrictEquals(url.searchParams.get("error"), "test_error");
-      assertStrictEquals(
-        url.searchParams.get("error_uri"),
+      expect(url.searchParams.get("error")).toBe("test_error");
+      expect(url.searchParams.get("error_uri")).toBe(
         "https://example.com/docs/error",
       );
     });
@@ -1972,15 +1931,15 @@ describe("AuthorizationServer", () => {
             ...(hint ? { token_type_hint: hint } : {}),
           };
           const denied = await result.server.handleIntrospectionRequest(
-            formRequest(
-              "http://localhost/introspect",
-              { ...fields, client_id: "public-client" },
-            ),
+            formRequest("http://localhost/introspect", {
+              ...fields,
+              client_id: "public-client",
+            }),
           );
-          assertStrictEquals(denied.status, 200);
-          assertEquals(await denied.json(), { active: false });
-          assertStrictEquals(claimCalls, 0);
-          assertStrictEquals(denied.headers.get("Cache-Control"), "no-store");
+          expect(denied.status).toBe(200);
+          expect(await denied.json()).toStrictEqual({ active: false });
+          expect(claimCalls).toBe(0);
+          expect(denied.headers.get("Cache-Control")).toBe("no-store");
           const allowed = await result.server.handleIntrospectionRequest(
             formRequest(
               "http://localhost/introspect",
@@ -1988,36 +1947,33 @@ describe("AuthorizationServer", () => {
               basicAuthHeader("client-1", "secret"),
             ),
           );
-          assertStrictEquals(allowed.status, 200);
+          expect(allowed.status).toBe(200);
           const body = await allowed.json();
-          assertStrictEquals(body.active, true);
-          assertStrictEquals(body.private_claim, "owner-only");
-          assertStrictEquals(claimCalls, 1);
-          const tokenType = kind === "accessToken"
-            ? "access_token"
-            : "refresh_token";
-          assertEquals(decisions, [
+          expect(body.active).toBe(true);
+          expect(body.private_claim).toBe("owner-only");
+          expect(claimCalls).toBe(1);
+          const tokenType =
+            kind === "accessToken" ? "access_token" : "refresh_token";
+          expect(decisions).toStrictEqual([
             `public-client:${tokenType}`,
             `client-1:${tokenType}`,
           ]);
           const revoked = await result.server.handleRevocationRequest(
-            formRequest(
-              "http://localhost/revoke",
-              { ...fields, client_id: "public-client" },
-            ),
+            formRequest("http://localhost/revoke", {
+              ...fields,
+              client_id: "public-client",
+            }),
           );
-          assertStrictEquals(revoked.status, 200);
-          assertStrictEquals(await revoked.text(), "");
-          assertStrictEquals(
+          expect(revoked.status).toBe(200);
+          expect(await revoked.text()).toBe("");
+          expect(
             (await result.tokenService.getToken(token.accessToken))
               ?.accessToken,
-            token.accessToken,
-          );
-          assertStrictEquals(
+          ).toBe(token.accessToken);
+          expect(
             (await result.tokenService.getRefreshToken(token.refreshToken))
               ?.refreshToken,
-            token.refreshToken,
-          );
+          ).toBe(token.refreshToken);
         });
       }
     }
@@ -2027,7 +1983,7 @@ describe("AuthorizationServer", () => {
         const result = createTestServer({
           canIntrospectToken: explicitPolicy
             ? (client, _token, tokenType) =>
-              client.id === "resource-server" && tokenType === "access_token"
+                client.id === "resource-server" && tokenType === "access_token"
             : undefined,
         });
         await setupTestData(result);
@@ -2047,8 +2003,8 @@ describe("AuthorizationServer", () => {
             basicAuthHeader("resource-server", "resource-secret"),
           ),
         );
-        assertStrictEquals(response.status, 200);
-        assertStrictEquals((await response.json()).active, true);
+        expect(response.status).toBe(200);
+        expect((await response.json()).active).toBe(true);
       });
     }
 
@@ -2070,11 +2026,11 @@ describe("AuthorizationServer", () => {
           basicAuthHeader("client-1", "secret"),
         ),
       );
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
-      assertStrictEquals(body.active, undefined);
-      assertStrictEquals(body.sub, undefined);
+      expect(body.error).toBe("server_error");
+      expect(body.active).toBe(undefined);
+      expect(body.sub).toBe(undefined);
     });
 
     let server: ReturnType<typeof createTestServer>["server"];
@@ -2094,9 +2050,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_request");
+      expect(body.error).toBe("invalid_request");
     });
 
     it("should reject wrong content type", async () => {
@@ -2108,12 +2064,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(
-        body.error_description?.includes("content-type"),
-        true,
-      );
+      expect(body.error_description?.includes("content-type")).toBe(true);
     });
 
     it("should require client authentication", async () => {
@@ -2123,9 +2076,9 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 401);
+      expect(response.status).toBe(401);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_client");
+      expect(body.error).toBe("invalid_client");
     });
 
     it("should require token parameter", async () => {
@@ -2137,21 +2090,25 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error_description, "token parameter required");
+      expect(body.error_description).toBe("token parameter required");
     });
 
     it("should return inactive for non-existent token", async () => {
-      const request = formRequest("http://localhost/introspect", {
-        token: "non-existent",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/introspect",
+        {
+          token: "non-existent",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.active, false);
+      expect(body.active).toBe(false);
     });
 
     it("should return inactive for expired token", async () => {
@@ -2163,15 +2120,19 @@ describe("AuthorizationServer", () => {
       };
       await tokenService.save(expiredToken);
 
-      const request = formRequest("http://localhost/introspect", {
-        token: "expired-token",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/introspect",
+        {
+          token: "expired-token",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.active, false);
+      expect(body.active).toBe(false);
     });
 
     it("should return active with token info for valid token", async () => {
@@ -2184,22 +2145,26 @@ describe("AuthorizationServer", () => {
       };
       await tokenService.save(validToken);
 
-      const request = formRequest("http://localhost/introspect", {
-        token: "valid-token",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/introspect",
+        {
+          token: "valid-token",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.active, true);
-      assertStrictEquals(body.client_id, "client-1");
-      assertStrictEquals(body.token_type, "Bearer");
-      assertStrictEquals(body.scope, "read write");
-      assertStrictEquals(body.iss, "https://auth.example.com");
-      assertStrictEquals(body.sub, "user-1");
-      assertStrictEquals(body.username, "testuser");
-      assertStrictEquals(typeof body.exp, "number");
+      expect(body.active).toBe(true);
+      expect(body.client_id).toBe("client-1");
+      expect(body.token_type).toBe("Bearer");
+      expect(body.scope).toBe("read write");
+      expect(body.iss).toBe("https://auth.example.com");
+      expect(body.sub).toBe("user-1");
+      expect(body.username).toBe("testuser");
+      expect(typeof body.exp).toBe("number");
     });
 
     it("merges introspectionClaims into an active response, protocol fields winning", async () => {
@@ -2226,21 +2191,25 @@ describe("AuthorizationServer", () => {
       };
       await result.tokenService.save(validToken);
 
-      const request = formRequest("http://localhost/introspect", {
-        token: "claimed-token",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/introspect",
+        {
+          token: "claimed-token",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
       const response = await result.server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertEquals(body.permissions, ["posts:write"]);
-      assertStrictEquals(body.org_id, "org-1");
-      assertEquals(body.org_roles, ["admin"]);
-      assertStrictEquals(body.subject_marker, "user-1");
-      assertStrictEquals(body.active, true);
-      assertStrictEquals(body.scope, "read");
-      assertStrictEquals(body.client_id, "client-1");
-      assertStrictEquals(body.sub, "user-1");
+      expect(body.permissions).toStrictEqual(["posts:write"]);
+      expect(body.org_id).toBe("org-1");
+      expect(body.org_roles).toStrictEqual(["admin"]);
+      expect(body.subject_marker).toBe("user-1");
+      expect(body.active).toBe(true);
+      expect(body.scope).toBe("read");
+      expect(body.client_id).toBe("client-1");
+      expect(body.sub).toBe("user-1");
     });
 
     it("derives sub from subjectOf, so introspection agrees with the id_token and UserInfo", async () => {
@@ -2258,15 +2227,19 @@ describe("AuthorizationServer", () => {
       });
 
       const response = await result.server.handleIntrospectionRequest(
-        formRequest("http://localhost/introspect", {
-          token: "subject-token",
-        }, basicAuthHeader("client-1", "secret")),
+        formRequest(
+          "http://localhost/introspect",
+          {
+            token: "subject-token",
+          },
+          basicAuthHeader("client-1", "secret"),
+        ),
       );
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.sub, "acct:user-1");
-      assertStrictEquals(body.username, "testuser");
+      expect(body.sub).toBe("acct:user-1");
+      expect(body.username).toBe("testuser");
     });
 
     it("keeps sub and username off a token with no user even when introspectionClaims supplies them", async () => {
@@ -2287,21 +2260,24 @@ describe("AuthorizationServer", () => {
       });
 
       const response = await result.server.handleIntrospectionRequest(
-        formRequest("http://localhost/introspect", {
-          token: "machine-token-with-hook",
-        }, basicAuthHeader("client-1", "secret")),
+        formRequest(
+          "http://localhost/introspect",
+          {
+            token: "machine-token-with-hook",
+          },
+          basicAuthHeader("client-1", "secret"),
+        ),
       );
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.active, true);
-      assertEquals(body.permissions, ["posts:write"]);
-      assertStrictEquals(
+      expect(body.active).toBe(true);
+      expect(body.permissions).toStrictEqual(["posts:write"]);
+      expect(
         body.sub,
-        undefined,
         "a hook must not make a machine token look like it has a resource owner",
-      );
-      assertStrictEquals(body.username, undefined);
+      ).toBe(undefined);
+      expect(body.username).toBe(undefined);
     });
 
     it("should omit sub and username for a token with no user, identifying it by client_id alone", async () => {
@@ -2324,23 +2300,27 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       const body = await response.json();
-      assertStrictEquals(body.active, true);
-      assertStrictEquals(body.client_id, "client-1");
-      assertStrictEquals(body.sub, undefined);
-      assertStrictEquals(body.username, undefined);
+      expect(body.active).toBe(true);
+      expect(body.client_id).toBe("client-1");
+      expect(body.sub).toBe(undefined);
+      expect(body.username).toBe(undefined);
     });
 
     it("should include cache headers", async () => {
-      const request = formRequest("http://localhost/introspect", {
-        token: "any-token",
-      }, basicAuthHeader("client-1", "secret"));
+      const request = formRequest(
+        "http://localhost/introspect",
+        {
+          token: "any-token",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
 
       const response = await server.handleIntrospectionRequest(request);
 
-      assertStrictEquals(response.headers.get("Cache-Control"), "no-store");
-      assertStrictEquals(response.headers.get("Pragma"), "no-cache");
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("Pragma")).toBe("no-cache");
     });
   });
 
@@ -2389,33 +2369,27 @@ describe("AuthorizationServer", () => {
 
       const response = await server.handleMetadataRequest(request);
 
-      assertStrictEquals(response.status, 200);
-      assertStrictEquals(
-        response.headers.get("Content-Type"),
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe(
         "application/json;charset=UTF-8",
       );
 
       const body = await response.json();
-      assertStrictEquals(body.issuer, "https://auth.example.com");
-      assertStrictEquals(
-        body.authorization_endpoint,
+      expect(body.issuer).toBe("https://auth.example.com");
+      expect(body.authorization_endpoint).toBe(
         "https://auth.example.com/authorize",
       );
-      assertStrictEquals(body.token_endpoint, "https://auth.example.com/token");
-      assertStrictEquals(
-        body.revocation_endpoint,
-        "https://auth.example.com/revoke",
-      );
-      assertStrictEquals(
-        body.introspection_endpoint,
+      expect(body.token_endpoint).toBe("https://auth.example.com/token");
+      expect(body.revocation_endpoint).toBe("https://auth.example.com/revoke");
+      expect(body.introspection_endpoint).toBe(
         "https://auth.example.com/introspect",
       );
-      assertEquals(body.grant_types_supported, [
+      expect(body.grant_types_supported).toStrictEqual([
         "client_credentials",
         "authorization_code",
       ]);
-      assertEquals(body.response_types_supported, ["code"]);
-      assertEquals(body.scopes_supported, ["read", "write", "admin"]);
+      expect(body.response_types_supported).toStrictEqual(["code"]);
+      expect(body.scopes_supported).toStrictEqual(["read", "write", "admin"]);
     });
   });
 
@@ -2462,9 +2436,10 @@ describe("AuthorizationServer", () => {
 
       const ccGrant = new ClientCredentialsGrant({
         resolve: (request) => {
-          const t = new URL(request.url).searchParams.get("tenant") === "b"
-            ? tenantB
-            : tenantA;
+          const t =
+            new URL(request.url).searchParams.get("tenant") === "b"
+              ? tenantB
+              : tenantA;
           return {
             clientService: t.clientService,
             tokenService: t.tokenService,
@@ -2475,17 +2450,17 @@ describe("AuthorizationServer", () => {
       const server = new AuthorizationServer({
         grants: { client_credentials: ccGrant },
         resolve: (request) => {
-          const t = new URL(request.url).searchParams.get("tenant") === "b"
-            ? tenantB
-            : tenantA;
+          const t =
+            new URL(request.url).searchParams.get("tenant") === "b"
+              ? tenantB
+              : tenantA;
           return {
             services: {
               clientService: t.clientService,
               tokenService: t.tokenService,
             },
-            issuer: t === tenantB
-              ? "https://b.example.com"
-              : "https://a.example.com",
+            issuer:
+              t === tenantB ? "https://b.example.com" : "https://a.example.com",
           };
         },
       });
@@ -2504,12 +2479,12 @@ describe("AuthorizationServer", () => {
       const server = await buildServer();
 
       const resB = await server.handleTokenRequest(tenantTokenRequest("b"));
-      assertStrictEquals(resB.status, 200);
-      assertStrictEquals((await resB.json()).expires_in, 2222);
+      expect(resB.status).toBe(200);
+      expect((await resB.json()).expires_in).toBe(2222);
 
       const resA = await server.handleTokenRequest(tenantTokenRequest("a"));
-      assertStrictEquals(resA.status, 200);
-      assertStrictEquals((await resA.json()).expires_in, 1111);
+      expect(resA.status).toBe(200);
+      expect((await resA.json()).expires_in).toBe(1111);
     });
 
     it("serves metadata with the per-request issuer", async () => {
@@ -2520,10 +2495,10 @@ describe("AuthorizationServer", () => {
         );
 
       const resB = await server.handleMetadataRequest(metaRequest("b"));
-      assertStrictEquals((await resB.json()).issuer, "https://b.example.com");
+      expect((await resB.json()).issuer).toBe("https://b.example.com");
 
       const resA = await server.handleMetadataRequest(metaRequest("a"));
-      assertStrictEquals((await resA.json()).issuer, "https://a.example.com");
+      expect((await resA.json()).issuer).toBe("https://a.example.com");
     });
   });
 });
@@ -2569,7 +2544,7 @@ describe("discovery scopes from per-request context", () => {
         const response = oidc
           ? await server.handleOidcMetadataRequest(request(host))
           : await server.handleMetadataRequest(request(host));
-        assertEquals(response.status, 200);
+        expect(response.status).toStrictEqual(200);
         return await response.json();
       };
       const hosts = [
@@ -2580,21 +2555,21 @@ describe("discovery scopes from per-request context", () => {
       ];
       const documents = await Promise.all(hosts.map(metadata));
 
-      assertEquals(
-        documents.map((document) => document.issuer),
+      expect(documents.map((document) => document.issuer)).toStrictEqual(
         hosts.map((host) => `https://${host}`),
       );
-      assertEquals(documents.map((document) => document.scopes_supported), [
+      expect(
+        documents.map((document) => document.scopes_supported),
+      ).toStrictEqual([
         defaults,
         ["openid", "profile"],
         ["openid", "email"],
         [],
       ]);
-      assertEquals(server.scopesSupported, defaults);
-      assertEquals(
+      expect(server.scopesSupported).toStrictEqual(defaults);
+      expect(
         (await metadata("default.example.com")).scopes_supported,
-        defaults,
-      );
+      ).toStrictEqual(defaults);
     });
   }
 
@@ -2616,7 +2591,7 @@ describe("discovery scopes from per-request context", () => {
         "https://auth.example.com/.well-known/oauth-authorization-server",
       ),
     );
-    assertEquals(response.status, 200);
-    assertEquals("scopes_supported" in await response.json(), false);
+    expect(response.status).toStrictEqual(200);
+    expect("scopes_supported" in (await response.json())).toStrictEqual(false);
   });
 });

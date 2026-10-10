@@ -7,7 +7,7 @@ import {
   sessionFixture,
   userFixture,
 } from "./_test_identity_contract_fixtures.ts";
-const fault = Deno.env.get("IDENTITY_CONTRACT_FAULT");
+const fault = process.env.IDENTITY_CONTRACT_FAULT;
 if (fault?.startsWith("revoke-")) {
   runRevocableSessionServiceContractTests({
     makeFixture: () => sessionFixture(fault),

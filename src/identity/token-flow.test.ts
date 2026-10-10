@@ -1,6 +1,4 @@
-import { assertEquals, assertNotEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import {
   MemoryTokenFlowStore,
   TokenFlowService,
@@ -23,7 +21,7 @@ describe("TokenFlowService", () => {
       subject: "u1",
       ttlMs: HOUR,
     });
-    assertEquals(await store.get(token), null);
+    expect(await store.get(token)).toStrictEqual(null);
   });
 
   it("validates idempotently, then consumes once (single-use)", async () => {
@@ -34,22 +32,21 @@ describe("TokenFlowService", () => {
       data: { email: "a@b.co" },
       ttlMs: HOUR,
     });
-    assertEquals(
+    expect(
       (await tokens.validate(TokenPurpose.PasswordReset, token))?.subject,
-      "u1",
-    );
-    assertEquals(
+    ).toStrictEqual("u1");
+    expect(
       (await tokens.validate(TokenPurpose.PasswordReset, token))?.subject,
-      "u1",
-    );
+    ).toStrictEqual("u1");
     const consumed = await tokens.consume(TokenPurpose.PasswordReset, token);
-    assertEquals(consumed?.subject, "u1");
-    assertEquals(consumed?.data?.email, "a@b.co");
-    assertEquals(await tokens.consume(TokenPurpose.PasswordReset, token), null);
-    assertEquals(
+    expect(consumed?.subject).toStrictEqual("u1");
+    expect(consumed?.data?.email).toStrictEqual("a@b.co");
+    expect(
+      await tokens.consume(TokenPurpose.PasswordReset, token),
+    ).toStrictEqual(null);
+    expect(
       await tokens.validate(TokenPurpose.PasswordReset, token),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("hands the token to exactly one of two racing consumers", async () => {
@@ -64,7 +61,7 @@ describe("TokenFlowService", () => {
       tokens.consume(TokenPurpose.PasswordReset, token),
       tokens.consume(TokenPurpose.PasswordReset, token),
     ]);
-    assertEquals(results.filter((result) => result !== null).length, 1);
+    expect(results.filter((result) => result !== null).length).toStrictEqual(1);
   });
 
   it("only the claiming markConsumed call reports success", async () => {
@@ -78,38 +75,39 @@ describe("TokenFlowService", () => {
     };
     await store.save(record);
 
-    assertEquals(await store.markConsumed("hash", Date.now()), true);
-    assertEquals(await store.markConsumed("hash", Date.now()), false);
-    assertEquals(await store.markConsumed("unknown", Date.now()), false);
+    expect(await store.markConsumed("hash", Date.now())).toStrictEqual(true);
+    expect(await store.markConsumed("hash", Date.now())).toStrictEqual(false);
+    expect(await store.markConsumed("unknown", Date.now())).toStrictEqual(
+      false,
+    );
   });
 
   it("rejects unknown, wrong-purpose, and expired tokens", async () => {
     const { tokens } = setup();
-    assertEquals(
+    expect(
       await tokens.consume(TokenPurpose.PasswordReset, "nope"),
-      null,
-    );
+    ).toStrictEqual(null);
 
     const { token } = await tokens.create({
       purpose: TokenPurpose.EmailVerification,
       subject: "u2",
       ttlMs: HOUR,
     });
-    assertEquals(await tokens.consume(TokenPurpose.PasswordReset, token), null);
-    assertEquals(
+    expect(
+      await tokens.consume(TokenPurpose.PasswordReset, token),
+    ).toStrictEqual(null);
+    expect(
       (await tokens.validate(TokenPurpose.EmailVerification, token))?.subject,
-      "u2",
-    );
+    ).toStrictEqual("u2");
 
     const expired = await tokens.create({
       purpose: TokenPurpose.EmailVerification,
       subject: "u3",
       ttlMs: -1000,
     });
-    assertEquals(
+    expect(
       await tokens.consume(TokenPurpose.EmailVerification, expired.token),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("inspect distinguishes valid / invalid / expired / consumed / wrong-purpose", async () => {
@@ -122,34 +120,30 @@ describe("TokenFlowService", () => {
     });
 
     const valid = await tokens.inspect(TokenPurpose.EmailVerification, token);
-    assertEquals(valid.status, "valid");
-    assertEquals(valid.status === "valid" ? valid.subject : null, "u1");
+    expect(valid.status).toStrictEqual("valid");
+    expect(valid.status === "valid" ? valid.subject : null).toStrictEqual("u1");
 
-    assertEquals(
+    expect(
       (await tokens.inspect(TokenPurpose.EmailVerification, "nope")).status,
-      "invalid",
-    );
-    assertEquals(
+    ).toStrictEqual("invalid");
+    expect(
       (await tokens.inspect(TokenPurpose.PasswordReset, token)).status,
-      "invalid",
-    );
+    ).toStrictEqual("invalid");
 
     const expired = await tokens.create({
       purpose: TokenPurpose.EmailVerification,
       subject: "u2",
       ttlMs: -1000,
     });
-    assertEquals(
+    expect(
       (await tokens.inspect(TokenPurpose.EmailVerification, expired.token))
         .status,
-      "expired",
-    );
+    ).toStrictEqual("expired");
 
     await tokens.consume(TokenPurpose.EmailVerification, token);
-    assertEquals(
+    expect(
       (await tokens.inspect(TokenPurpose.EmailVerification, token)).status,
-      "consumed",
-    );
+    ).toStrictEqual("consumed");
   });
 
   it("issues distinct tokens and can invalidate prior ones", async () => {
@@ -165,15 +159,13 @@ describe("TokenFlowService", () => {
       ttlMs: HOUR,
       invalidateExisting: true,
     });
-    assertNotEquals(a.token, b.token);
-    assertEquals(
+    expect(a.token).not.toStrictEqual(b.token);
+    expect(
       await tokens.consume(TokenPurpose.PasswordReset, a.token),
-      null,
-    );
-    assertEquals(
+    ).toStrictEqual(null);
+    expect(
       (await tokens.consume(TokenPurpose.PasswordReset, b.token))?.subject,
-      "u1",
-    );
+    ).toStrictEqual("u1");
   });
   it("invalidate drops the subject's pending tokens for that purpose only", async () => {
     const { tokens } = setup();
@@ -193,17 +185,19 @@ describe("TokenFlowService", () => {
       ttlMs: HOUR,
     });
 
-    assertEquals(await tokens.invalidate(TokenPurpose.SignIn, "u1"), true);
+    expect(await tokens.invalidate(TokenPurpose.SignIn, "u1")).toStrictEqual(
+      true,
+    );
 
-    assertEquals(await tokens.consume(TokenPurpose.SignIn, link.token), null);
-    assertEquals(
+    expect(await tokens.consume(TokenPurpose.SignIn, link.token)).toStrictEqual(
+      null,
+    );
+    expect(
       (await tokens.consume(TokenPurpose.SignIn, otherUser.token))?.subject,
-      "u2",
-    );
-    assertEquals(
+    ).toStrictEqual("u2");
+    expect(
       (await tokens.consume(TokenPurpose.PasswordReset, reset.token))?.subject,
-      "u1",
-    );
+    ).toStrictEqual("u1");
   });
 
   it("invalidate reports false, and leaves tokens live, on a store without deleteBySubject", async () => {
@@ -220,10 +214,11 @@ describe("TokenFlowService", () => {
       ttlMs: HOUR,
     });
 
-    assertEquals(await tokens.invalidate(TokenPurpose.SignIn, "u1"), false);
-    assertEquals(
-      (await tokens.consume(TokenPurpose.SignIn, link.token))?.subject,
-      "u1",
+    expect(await tokens.invalidate(TokenPurpose.SignIn, "u1")).toStrictEqual(
+      false,
     );
+    expect(
+      (await tokens.consume(TokenPurpose.SignIn, link.token))?.subject,
+    ).toStrictEqual("u1");
   });
 });

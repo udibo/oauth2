@@ -1,5 +1,5 @@
-import { assertNotEquals, assertStringIncludes } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
+import { runSuiteInChild } from "./_test_child.ts";
 import {
   runIdentityUserStoreContractTests,
   runListableSessionServiceContractTests,
@@ -57,34 +57,22 @@ describe("identity contracts reject faulty stores", () => {
   ];
   for (const [fault, expected] of cases) {
     it(fault, async () => {
-      const result = await new Deno.Command(Deno.execPath(), {
-        args: [
-          "task",
-          "test",
-          "--quiet",
-          "--no-check",
-          "testing/contract/_test_identity_contract_faults.ts",
-        ],
-        cwd: new URL("../../../", import.meta.url),
-        env: { IDENTITY_CONTRACT_FAULT: fault, NO_COLOR: "1" },
-        stdout: "piped",
-        stderr: "piped",
-        signal: AbortSignal.timeout(60_000),
-      }).output();
-      const decoder = new TextDecoder();
-      const output = decoder.decode(result.stdout) +
-        decoder.decode(result.stderr);
-      assertNotEquals(
-        result.code,
-        0,
-        `faulty store unexpectedly passed: ${fault}\n${output}`,
+      const run = await runSuiteInChild(
+        "src/testing/contract/_test_identity_contract_faults.ts",
+        { IDENTITY_CONTRACT_FAULT: fault },
       );
-      assertStringIncludes(
-        output,
-        expected,
-        `must fail the intended contract, not setup: ${output}`,
-      );
-      assertStringIncludes(output, "FAILED", output);
+      const failures = run.tests
+        .filter((test) => test.status === "failed")
+        .flatMap((test) => [test.fullName, ...test.failureMessages])
+        .join("\n");
+      expect(
+        run.exitCode,
+        `faulty store unexpectedly passed: ${fault}\n${run.output}`,
+      ).not.toBe(0);
+      expect(
+        failures,
+        `must fail the intended contract, not setup: ${run.output}`,
+      ).toContain(expected);
     });
   }
 });

@@ -1,12 +1,6 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { encodeBase64Url } from "@std/encoding/base64url";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
+import { rejection, thrown } from "../../_test_assert.ts";
+import { encodeBase64Url } from "../../utils/_encoding.ts";
 import { MemoryDiscoveryCache } from "../../client/discovery-cache.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { ExternalAuthFlow } from "./flow.ts";
@@ -53,12 +47,14 @@ function tokenStub(issuer: string, claims: Record<string, unknown>) {
       nonce: context.nonce,
       ...claims,
     });
-    return Promise.resolve(Response.json({
-      token_type: "Bearer",
-      access_token: "sso-access-token",
-      expires_in: 3600,
-      id_token: `${segment({ alg: "ES256", typ: "JWT" })}.${payload}.sig`,
-    }));
+    return Promise.resolve(
+      Response.json({
+        token_type: "Bearer",
+        access_token: "sso-access-token",
+        expires_in: 3600,
+        id_token: `${segment({ alg: "ES256", typ: "JWT" })}.${payload}.sig`,
+      }),
+    );
   };
   return { fetch: fetchStub, context };
 }
@@ -89,7 +85,7 @@ function signIn(
 
 describe("oidcProvider", () => {
   it("rejects a non-https issuer at construction", () => {
-    const error = assertThrows(
+    const error = thrown(
       () =>
         oidcProvider({
           issuer: "http://sso.example",
@@ -98,8 +94,8 @@ describe("oidcProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "https");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("https");
   });
 
   it("allows an http issuer on localhost for development", () => {
@@ -108,12 +104,12 @@ describe("oidcProvider", () => {
       clientId,
       clientSecret,
     });
-    assertEquals(provider.id, "oidc");
+    expect(provider.id).toStrictEqual("oidc");
   });
 
   it("constructs a public provider when clientSecret is omitted", () => {
     const provider = oidcProvider({ issuer: "https://sso.example", clientId });
-    assertEquals(provider.id, "oidc");
+    expect(provider.id).toStrictEqual("oidc");
   });
 
   it("constructs a public provider when clientSecret is explicitly undefined", () => {
@@ -122,7 +118,7 @@ describe("oidcProvider", () => {
       clientId,
       clientSecret: undefined,
     };
-    assertEquals(oidcProvider(config).id, "oidc");
+    expect(oidcProvider(config).id).toStrictEqual("oidc");
   });
 
   it("authenticates a secretless provider with a body client_id, no Authorization", async () => {
@@ -145,23 +141,21 @@ describe("oidcProvider", () => {
     const flow = new ExternalAuthFlow({ provider });
     const { transient } = await flow.start({ redirectUri });
 
-    await assertRejects(() =>
+    await rejection(() =>
       flow.finish({
         params: new URLSearchParams({ code: "c", state: transient.state }),
         transient,
-      })
+      }),
     );
 
     const headers = new Headers(tokenInit?.headers);
-    assertEquals(
+    expect(
       headers.has("Authorization"),
-      false,
       "a secretless provider must not send Basic credentials",
-    );
-    assertEquals(
+    ).toStrictEqual(false);
+    expect(
       new URLSearchParams(tokenInit?.body as string).get("client_id"),
-      clientId,
-    );
+    ).toStrictEqual(clientId);
   });
 
   it("rejects a discovery document whose issuer differs from the configured issuer", async () => {
@@ -173,13 +167,13 @@ describe("oidcProvider", () => {
     });
     const flow = new ExternalAuthFlow({ provider });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.start({ redirectUri }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "https://evil.example");
-    assertStringIncludes(error.message, "https://real.example");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("https://evil.example");
+    expect(error.message).toContain("https://real.example");
   });
 
   it("tolerates a trailing-slash difference between configured and document issuer", async () => {
@@ -192,7 +186,7 @@ describe("oidcProvider", () => {
     const flow = new ExternalAuthFlow({ provider });
 
     const { url } = await flow.start({ redirectUri });
-    assertStringIncludes(url, "https://real.example/authorize");
+    expect(url).toContain("https://real.example/authorize");
   });
 
   it("shares one discovery fetch across connectors given the same cache", async () => {
@@ -219,7 +213,7 @@ describe("oidcProvider", () => {
     await startFlow();
     await startFlow();
 
-    assertEquals(discoveries, 1);
+    expect(discoveries).toStrictEqual(1);
   });
 
   it("re-discovers per connector without a shared cache", async () => {
@@ -244,20 +238,20 @@ describe("oidcProvider", () => {
     await startFlow();
     await startFlow();
 
-    assertEquals(discoveries, 2);
+    expect(discoveries).toStrictEqual(2);
   });
 
   it("rejects an id_token whose azp names a different client", async () => {
-    const error = await assertRejects(
+    const error = await rejection(
       () => signIn({ azp: "another-client" }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "azp");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("azp");
   });
 
   it("accepts a foreign azp when the config opts out of the check", async () => {
     const profile = await signIn({ azp: "another-client" }, { azp: "ignore" });
-    assertEquals(profile.subject, "sso-1");
+    expect(profile.subject).toStrictEqual("sso-1");
   });
 });

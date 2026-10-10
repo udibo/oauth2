@@ -1,4 +1,5 @@
-import { stub } from "@std/testing/mock";
+import { expect, it, vi } from "vitest";
+import { rejection } from "./_test_assert.ts";
 import { Hono } from "hono";
 import { HonoBff } from "./adapters/hono/bff/bff.ts";
 import { IdentityService } from "./identity/service.ts";
@@ -11,7 +12,6 @@ import {
   TokenFlowService,
   TokenPurpose,
 } from "./identity/token-flow.ts";
-import { assertEquals, assertRejects } from "@std/assert";
 import { DirectClient } from "./client/direct-client.ts";
 import {
   MemoryRefreshTokenStorage,
@@ -60,7 +60,7 @@ async function refreshFixture() {
   return { grant, tokenService, client, token: { ...token, refreshToken } };
 }
 
-Deno.test("release: a refresh token has only one concurrent successor", async () => {
+it("release: a refresh token has only one concurrent successor", async () => {
   const { grant, tokenService, client, token } = await refreshFixture();
   const results = await Promise.allSettled(
     [1, 2].map(() =>
@@ -68,42 +68,41 @@ Deno.test("release: a refresh token has only one concurrent successor", async ()
         grant,
         tokenRequest({ refresh_token: token.refreshToken }),
         client,
-      )
+      ),
     ),
   );
-  assertEquals(results.filter((r) => r.status === "fulfilled").length, 1);
+  expect(results.filter((r) => r.status === "fulfilled").length).toStrictEqual(
+    1,
+  );
   const failure = results.find((r) => r.status === "rejected");
-  assertEquals(
+  expect(
     failure?.status === "rejected" &&
       failure.reason instanceof InvalidGrantError,
-    true,
-  );
-  assertEquals(
-    await tokenService.getRefreshToken(token.refreshToken),
+  ).toStrictEqual(true);
+  expect(await tokenService.getRefreshToken(token.refreshToken)).toStrictEqual(
     undefined,
   );
 });
 
-Deno.test("release: another client cannot revoke a replayed token's family", async () => {
+it("release: another client cannot revoke a replayed token's family", async () => {
   const { grant, tokenService, client, token } = await refreshFixture();
   const successor = await exchangeToken(
     grant,
     tokenRequest({ refresh_token: token.refreshToken }),
     client,
   );
-  await assertRejects(() =>
+  await rejection(() =>
     exchangeToken(grant, tokenRequest({ refresh_token: token.refreshToken }), {
       id: "client-2",
       confidential: true,
-    })
+    }),
   );
-  assertEquals(
+  expect(
     Boolean(await tokenService.getToken(successor.accessToken)),
-    true,
-  );
+  ).toStrictEqual(true);
 });
 
-Deno.test("release: a fresh login clears the previous grant's refresh token", async () => {
+it("release: a fresh login clears the previous grant's refresh token", async () => {
   const refreshTokenStorage = new MemoryRefreshTokenStorage();
   await refreshTokenStorage.set("alice-refresh");
   const client = new DirectClient({
@@ -123,10 +122,10 @@ Deno.test("release: a fresh login clears the previous grant's refresh token", as
   await client.handleAuthorizationCallback(
     new URLSearchParams({ code: "bob-code", state }),
   );
-  assertEquals(await refreshTokenStorage.get(), null);
+  expect(await refreshTokenStorage.get()).toStrictEqual(null);
 });
 
-Deno.test("release: an email code succeeds only once under concurrency", async () => {
+it("release: an email code succeeds only once under concurrency", async () => {
   const service = new EmailOtpService({ store: new MemoryOtpStore() });
   let code = "";
   const email = "user@example.test";
@@ -140,10 +139,10 @@ Deno.test("release: an email code succeeds only once under concurrency", async (
   const results = await Promise.all(
     [1, 2].map(() => service.verify({ email, purpose: "signin", code })),
   );
-  assertEquals(results.filter((r) => r.status === "success").length, 1);
+  expect(results.filter((r) => r.status === "success").length).toStrictEqual(1);
 });
 
-Deno.test("release: a session update cannot restore a destroyed session", async () => {
+it("release: a session update cannot restore a destroyed session", async () => {
   const store = new MemorySessionStore();
   const data: SessionData = {
     tokens: { accessToken: "access", tokenType: "Bearer" },
@@ -152,18 +151,16 @@ Deno.test("release: a session update cannot restore a destroyed session", async 
   };
   const cookie = await store.create(data);
   await store.destroy(cookie);
-  await assertRejects(() => store.update(cookie, data), InvalidGrantError);
-  assertEquals(await store.read(cookie), null);
+  await rejection(() => store.update(cookie, data), InvalidGrantError);
+  expect(await store.read(cookie)).toStrictEqual(null);
 });
 
-for (
-  const endpoint of [
-    "authorization_endpoint",
-    "token_endpoint",
-    "userinfo_endpoint",
-  ]
-) {
-  Deno.test(`release: OIDC rejects insecure ${endpoint} before credential exchange`, async () => {
+for (const endpoint of [
+  "authorization_endpoint",
+  "token_endpoint",
+  "userinfo_endpoint",
+]) {
+  it(`release: OIDC rejects insecure ${endpoint} before credential exchange`, async () => {
     let calls = 0;
     const issuer = "https://issuer.example";
     const provider = oidcProvider({
@@ -182,7 +179,7 @@ for (
         );
       },
     });
-    await assertRejects(
+    await rejection(
       () =>
         provider.buildAuthorizationUrl({
           redirectUri: "https://app.example/callback",
@@ -191,19 +188,21 @@ for (
         }),
       ExternalAuthError,
     );
-    assertEquals(calls, 1);
+    expect(calls).toStrictEqual(1);
   });
 }
 
-Deno.test("release: revoking a hydrated refresh record removes its paired access token", async () => {
+it("release: revoking a hydrated refresh record removes its paired access token", async () => {
   const { tokenService, token } = await refreshFixture();
   const hydrated = await tokenService.getRefreshToken(token.refreshToken);
   if (!hydrated) throw new Error("missing fixture token");
   await tokenService.revoke(hydrated);
-  assertEquals(await tokenService.getToken(token.accessToken), undefined);
+  expect(await tokenService.getToken(token.accessToken)).toStrictEqual(
+    undefined,
+  );
 });
 
-Deno.test("release: an outstanding refresh cannot reverse logout", async () => {
+it("release: an outstanding refresh cannot reverse logout", async () => {
   const refreshTokenStorage = new MemoryRefreshTokenStorage();
   await refreshTokenStorage.set("refresh");
   const pending = Promise.withResolvers<Response>();
@@ -224,7 +223,7 @@ Deno.test("release: an outstanding refresh cannot reverse logout", async () => {
     },
   });
   const refreshing = client.refresh();
-  const rejected = assertRejects(() => refreshing, InvalidGrantError);
+  const rejected = rejection(() => refreshing, InvalidGrantError);
   await started.promise;
   await client.logout();
   pending.resolve(
@@ -235,11 +234,11 @@ Deno.test("release: an outstanding refresh cannot reverse logout", async () => {
     }),
   );
   await rejected;
-  assertEquals(await refreshTokenStorage.get(), null);
+  expect(await refreshTokenStorage.get()).toStrictEqual(null);
 });
 
 for (const legacy of [false, true]) {
-  Deno.test(`release: a ${legacy ? "legacy upgrade" : "password rehash"} cannot overwrite a completed password reset`, async () => {
+  it(`release: a ${legacy ? "legacy upgrade" : "password rehash"} cannot overwrite a completed password reset`, async () => {
     const started = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
     const user = { id: "user" };
@@ -284,11 +283,13 @@ for (const legacy of [false, true]) {
       passwords,
       tokens,
       failedSignInFloorMs: 0,
-      legacyVerifiers: [{
-        id: "legacy-test",
-        canVerify: () => true,
-        verify: () => Promise.resolve(true),
-      }],
+      legacyVerifiers: [
+        {
+          id: "legacy-test",
+          canVerify: () => true,
+          verify: () => Promise.resolve(true),
+        },
+      ],
     });
     const reset = await tokens.create({
       purpose: TokenPurpose.PasswordReset,
@@ -308,12 +309,12 @@ for (const legacy of [false, true]) {
     } finally {
       resume.resolve();
     }
-    assertEquals(await signingIn, null);
-    assertEquals(credential?.hash, "new-password");
+    expect(await signingIn).toStrictEqual(null);
+    expect(credential?.hash).toStrictEqual("new-password");
   });
 }
 
-Deno.test("release: backchannel logout wins against an in-flight BFF refresh", async () => {
+it("release: backchannel logout wins against an in-flight BFF refresh", async () => {
   const started = Promise.withResolvers<void>();
   const resume = Promise.withResolvers<void>();
   const store = new MemorySessionStore();
@@ -322,14 +323,16 @@ Deno.test("release: backchannel logout wins against an in-flight BFF refresh", a
     clientSecret: "secret",
     endpoints: { token: "https://issuer.test/token" },
   });
-  using _refresh = stub(client, "exchangeRefreshToken", async () => {
-    started.resolve();
-    await resume.promise;
-    return {
-      tokens: { accessToken: "renewed", tokenType: "Bearer" as const },
-      raw: { access_token: "renewed", token_type: "Bearer" as const },
-    };
-  });
+  using _refresh = vi
+    .spyOn(client, "exchangeRefreshToken")
+    .mockImplementation(async () => {
+      started.resolve();
+      await resume.promise;
+      return {
+        tokens: { accessToken: "renewed", tokenType: "Bearer" as const },
+        raw: { access_token: "renewed", token_type: "Bearer" as const },
+      };
+    });
   const bff = new HonoBff({
     client,
     sessionStore: store,
@@ -361,18 +364,18 @@ Deno.test("release: backchannel logout wins against an in-flight BFF refresh", a
       method: "POST",
       body: new URLSearchParams({ logout_token: "verified" }),
     });
-    assertEquals(logout.status, 200);
+    expect(logout.status).toStrictEqual(200);
     await logout.body?.cancel();
-    assertEquals(await store.read(cookie), null);
+    expect(await store.read(cookie)).toStrictEqual(null);
   } finally {
     resume.resolve();
   }
   const response = await pending;
-  assertEquals(await response.text(), "none");
-  assertEquals(await store.read(cookie), null);
+  expect(await response.text()).toStrictEqual("none");
+  expect(await store.read(cookie)).toStrictEqual(null);
 });
 
-Deno.test("release: a rotation-specific claim also permits only one successor", async () => {
+it("release: a rotation-specific claim also permits only one successor", async () => {
   const { grant, tokenService, client, token } = await refreshFixture();
   Object.assign(tokenService, {
     revokeRotated: tokenService.revoke.bind(tokenService),
@@ -383,14 +386,16 @@ Deno.test("release: a rotation-specific claim also permits only one successor", 
         grant,
         tokenRequest({ refresh_token: token.refreshToken }),
         client,
-      )
+      ),
     ),
   );
-  assertEquals(results.filter((r) => r.status === "fulfilled").length, 1);
+  expect(results.filter((r) => r.status === "fulfilled").length).toStrictEqual(
+    1,
+  );
 });
 
 for (const fails of [false, true]) {
-  Deno.test(`release: a refresh started during replacement cannot ${fails ? "clear" : "overwrite"} the new login`, async () => {
+  it(`release: a refresh started during replacement cannot ${fails ? "clear" : "overwrite"} the new login`, async () => {
     const refreshTokenStorage = new MemoryRefreshTokenStorage();
     const tokenStorage = new MemoryTokenStorage();
     await refreshTokenStorage.set("alice-refresh");
@@ -410,7 +415,7 @@ for (const fails of [false, true]) {
       fetch: (_url, init) => {
         if (
           new URLSearchParams(String(init?.body)).get("grant_type") ===
-            "refresh_token"
+          "refresh_token"
         ) {
           refreshStarted.resolve();
           return refreshResponse.promise;
@@ -425,7 +430,7 @@ for (const fails of [false, true]) {
     );
     await codeStarted.promise;
     const refreshing = client.refresh();
-    const rejected = assertRejects(() => refreshing, InvalidGrantError);
+    const rejected = rejection(() => refreshing, InvalidGrantError);
     await refreshStarted.promise;
     codeResponse.resolve(
       Response.json({
@@ -439,18 +444,18 @@ for (const fails of [false, true]) {
       fails
         ? Response.json({ error: "invalid_grant" }, { status: 400 })
         : Response.json({
-          access_token: "alice-new",
-          refresh_token: "alice-refresh-new",
-          token_type: "Bearer",
-        }),
+            access_token: "alice-new",
+            refresh_token: "alice-refresh-new",
+            token_type: "Bearer",
+          }),
     );
     await rejected;
-    assertEquals((await tokenStorage.get())?.accessToken, "bob-access");
-    assertEquals(await refreshTokenStorage.get(), "bob-refresh");
+    expect((await tokenStorage.get())?.accessToken).toStrictEqual("bob-access");
+    expect(await refreshTokenStorage.get()).toStrictEqual("bob-refresh");
   });
 }
 
-Deno.test("release: refresh waits for an asynchronous login save to finish", async () => {
+it("release: refresh waits for an asynchronous login save to finish", async () => {
   const written = Promise.withResolvers<void>();
   const finishSet = Promise.withResolvers<void>();
   class PausedRefreshStorage extends MemoryRefreshTokenStorage {
@@ -478,11 +483,13 @@ Deno.test("release: refresh waits for an asynchronous login save to finish", asy
       const body = new URLSearchParams(String(init?.body));
       const refresh = body.get("grant_type") === "refresh_token";
       if (refresh) requests.push(body.get("refresh_token")!);
-      return Promise.resolve(Response.json({
-        access_token: refresh ? "bob-new-access" : "bob-access",
-        refresh_token: refresh ? "bob-new-refresh" : "bob-refresh",
-        token_type: "Bearer",
-      }));
+      return Promise.resolve(
+        Response.json({
+          access_token: refresh ? "bob-new-access" : "bob-access",
+          refresh_token: refresh ? "bob-new-refresh" : "bob-refresh",
+          token_type: "Bearer",
+        }),
+      );
     },
   });
   const { state } = await client.login();
@@ -493,13 +500,15 @@ Deno.test("release: refresh waits for an asynchronous login save to finish", asy
   const refreshing = client.refresh();
   finishSet.resolve();
   const [, accessToken] = await Promise.all([loggingIn, refreshing]);
-  assertEquals(accessToken, "bob-new-access");
-  assertEquals(requests, ["bob-refresh"]);
-  assertEquals(await refreshTokenStorage.get(), "bob-new-refresh");
-  assertEquals((await tokenStorage.get())?.accessToken, "bob-new-access");
+  expect(accessToken).toStrictEqual("bob-new-access");
+  expect(requests).toStrictEqual(["bob-refresh"]);
+  expect(await refreshTokenStorage.get()).toStrictEqual("bob-new-refresh");
+  expect((await tokenStorage.get())?.accessToken).toStrictEqual(
+    "bob-new-access",
+  );
 });
 
-Deno.test("release: refresh queued behind login remains single-flight", async () => {
+it("release: refresh queued behind login remains single-flight", async () => {
   const written = Promise.withResolvers<void>();
   const finishSet = Promise.withResolvers<void>();
   const readStarted = Promise.withResolvers<void>();
@@ -541,11 +550,13 @@ Deno.test("release: refresh queued behind login remains single-flight", async ()
       const body = new URLSearchParams(String(init?.body));
       const refresh = body.get("grant_type") === "refresh_token";
       if (refresh) requests.push(body.get("refresh_token")!);
-      return Promise.resolve(Response.json({
-        access_token: refresh ? "bob-new-access" : "bob-access",
-        refresh_token: refresh ? "bob-new-refresh" : "bob-refresh",
-        token_type: "Bearer",
-      }));
+      return Promise.resolve(
+        Response.json({
+          access_token: refresh ? "bob-new-access" : "bob-access",
+          refresh_token: refresh ? "bob-new-refresh" : "bob-refresh",
+          token_type: "Bearer",
+        }),
+      );
     },
   });
   const { state } = await client.login();
@@ -559,14 +570,16 @@ Deno.test("release: refresh queued behind login remains single-flight", async ()
   await readStarted.promise;
   const second = client.refresh();
   try {
-    assertEquals(refreshing === second, true);
+    expect(refreshing === second).toStrictEqual(true);
   } finally {
     finishRead.resolve();
     await Promise.allSettled([refreshing, second]);
   }
   const accessToken = await refreshing;
-  assertEquals(accessToken, "bob-new-access");
-  assertEquals(requests, ["bob-refresh"]);
-  assertEquals(await refreshTokenStorage.get(), "bob-new-refresh");
-  assertEquals((await tokenStorage.get())?.accessToken, "bob-new-access");
+  expect(accessToken).toStrictEqual("bob-new-access");
+  expect(requests).toStrictEqual(["bob-refresh"]);
+  expect(await refreshTokenStorage.get()).toStrictEqual("bob-new-refresh");
+  expect((await tokenStorage.get())?.accessToken).toStrictEqual(
+    "bob-new-access",
+  );
 });

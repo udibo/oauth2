@@ -8,6 +8,7 @@
  * fixture quietly drifts from the contract, this catches it.
  */
 
+import { vi } from "vitest";
 import {
   MemoryAuthorizationCodeService,
   MemoryClientService,
@@ -16,6 +17,7 @@ import {
   MemoryUserService,
 } from "../services.ts";
 import type { TestClient, TestUser } from "../_test_fixtures.ts";
+import { serve } from "../../_test_server.ts";
 import { IntrospectionTokenReader } from "../../server/introspection-token-reader.ts";
 import { JwksTokenReader } from "../../server/jwks-token-reader.ts";
 import { generateSigningKey, signJwt } from "../../server/signing-keys.ts";
@@ -168,13 +170,13 @@ runTokenReaderContractTests<TestClient, TestUser>({
           Response.json(
             token === "valid-token"
               ? {
-                active: true,
-                token_type: "Bearer",
-                client_id: "my-client",
-                sub: "u1",
-                scope: "read write",
-                exp: Math.floor(Date.now() / 1000) + 3600,
-              }
+                  active: true,
+                  token_type: "Bearer",
+                  client_id: "my-client",
+                  sub: "u1",
+                  scope: "read write",
+                  exp: Math.floor(Date.now() / 1000) + 3600,
+                }
               : { active: false },
           ),
         );
@@ -206,16 +208,20 @@ runTokenReaderContractTests<TestClient, TestUser>({
         audience: AUDIENCE,
         jwksUri: `${ISSUER}/jwks`,
         getClient: (c) => ({ id: String(c.client_id) }),
-        getUser: (c) => c.sub ? { id: c.sub, username: "user-1" } : undefined,
+        getUser: (c) => (c.sub ? { id: c.sub, username: "user-1" } : undefined),
         fetch: () => Promise.resolve(Response.json({ keys: [key.publicJwk] })),
       }),
       validAccessToken: await signJwt(key, claims, { typ: "at+jwt" }),
       expected: { clientId: "my-client", userId: "u1", scope: "read write" },
       invalidAccessTokens: [
         "not-a-jwt",
-        await signJwt(key, { ...claims, iss: "https://evil.example.com" }, {
-          typ: "at+jwt",
-        }),
+        await signJwt(
+          key,
+          { ...claims, iss: "https://evil.example.com" },
+          {
+            typ: "at+jwt",
+          },
+        ),
         await signJwt(key, { ...claims, exp: now - 3600 }, { typ: "at+jwt" }),
       ],
     };
@@ -227,6 +233,26 @@ runAuthRequestStorageContractTests({
     "MemoryAuthRequestStorage satisfies AuthRequestStorage contract",
   makeStore: () => new MemoryAuthRequestStorage(),
 });
+
+function memoryStorage(): Storage {
+  const backing = new Map<string, string>();
+  return {
+    get length() {
+      return backing.size;
+    },
+    getItem: (key) => backing.get(key) ?? null,
+    setItem: (key, value) => {
+      backing.set(key, String(value));
+    },
+    removeItem: (key) => {
+      backing.delete(key);
+    },
+    clear: () => backing.clear(),
+    key: (index) => [...backing.keys()][index] ?? null,
+  };
+}
+
+vi.stubGlobal("sessionStorage", memoryStorage());
 
 runAuthRequestStorageContractTests({
   describeName:
@@ -299,13 +325,8 @@ runTenantContractTests({
   setup: async () => {
     const client = { id: "contract-app", secret: "contract-secret" };
     const redirectUri = "http://app.localhost/callback";
-    const server = Deno.serve(
-      { hostname: "127.0.0.1", port: 0, onListen() {} },
-      (request) => tenant.fetch(request),
-    );
-    const tenant = await createFakeTenant({
-      issuer: `http://127.0.0.1:${server.addr.port}`,
-    });
+    const server = await serve((request) => tenant.fetch(request));
+    const tenant = await createFakeTenant({ issuer: server.origin });
     await tenant.addClient({ ...client, redirectUris: [redirectUri] });
     let signedIn: string | null = null;
     let browserCookie: string | null = null;
@@ -354,9 +375,11 @@ runTenantContractTests({
         tenant.grant(grant);
         return Promise.resolve();
       },
-      addMachineClient: async (
-        { scopes, permissions, confidential = true },
-      ) => {
+      addMachineClient: async ({
+        scopes,
+        permissions,
+        confidential = true,
+      }) => {
         const id = `contract-machine-${crypto.randomUUID().slice(0, 8)}`;
         const secret = confidential ? crypto.randomUUID() : undefined;
         await tenant.addClient({
@@ -386,19 +409,20 @@ runTenantContractTests({
           state: "contract",
           code_challenge: await generateCodeChallenge(verifier),
           code_challenge_method: "S256",
-          ...options.sameBrowser && organizationId
+          ...(options.sameBrowser && organizationId
             ? { organization: organizationId }
-            : {},
+            : {}),
         }).toString();
         const redirect = await fetch(authorize, {
           redirect: "manual",
           headers: browserCookie ? { cookie: browserCookie } : {},
         });
         await redirect.body?.cancel();
-        browserCookie = redirect.headers.get("set-cookie")?.split(";")[0] ??
-          browserCookie;
-        const code = new URL(redirect.headers.get("location")!).searchParams
-          .get("code")!;
+        browserCookie =
+          redirect.headers.get("set-cookie")?.split(";")[0] ?? browserCookie;
+        const code = new URL(
+          redirect.headers.get("location")!,
+        ).searchParams.get("code")!;
         const response = await fetch(
           new URL("/api/oauth2/token", tenant.issuer),
           {

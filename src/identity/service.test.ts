@@ -1,9 +1,7 @@
-import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
-import { delay } from "@std/async/delay";
-import { describe, it } from "@std/testing/bdd";
-import { spy, stub } from "@std/testing/mock";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, describe, expect, it, vi } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
+import { delay } from "../utils/_delay.ts";
+import { rejection } from "../_test_assert.ts";
 import type { CodeDeliveryMessage, DeliveryMessage } from "./delivery.ts";
 import type { IdentityEvent } from "./events.ts";
 import { MemoryOtpStore } from "./otp.ts";
@@ -116,8 +114,9 @@ function eventsOfType<T extends IdentityEvent["type"]>(
   events: IdentityEvent[],
   type: T,
 ): Extract<IdentityEvent, { type: T }>[] {
-  return events.filter((event): event is Extract<IdentityEvent, { type: T }> =>
-    event.type === type
+  return events.filter(
+    (event): event is Extract<IdentityEvent, { type: T }> =>
+      event.type === type,
   );
 }
 
@@ -126,7 +125,7 @@ function lastEventOfType<T extends IdentityEvent["type"]>(
   type: T,
 ): Extract<IdentityEvent, { type: T }> {
   const last = eventsOfType(events, type).at(-1);
-  assertExists(last, `expected a ${type} event`);
+  assert.exists(last, `expected a ${type} event`);
   return last;
 }
 
@@ -166,12 +165,15 @@ function makeEventService(options?: {
         minted.signInLink.push(msg.token);
       },
     },
-    rateLimiter: options?.limit !== undefined
-      ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
-      : undefined,
-    onEvent: options?.onEvent ?? ((event) => {
-      events.push(event);
-    }),
+    rateLimiter:
+      options?.limit !== undefined
+        ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
+        : undefined,
+    onEvent:
+      options?.onEvent ??
+      ((event) => {
+        events.push(event);
+      }),
   });
   return { service, events, verified, minted };
 }
@@ -209,7 +211,7 @@ describe("IdentityService", () => {
   it("signUp rejects a non-string password with no policy configured", async () => {
     const { service } = makeService();
     for (const password of [{}, { a: 1 }, 12345678901234, ["x"], true, null]) {
-      const err = await assertRejects(
+      const err = await rejection(
         () =>
           service.signUp({
             password: password as unknown as string,
@@ -219,7 +221,7 @@ describe("IdentityService", () => {
         undefined,
         `${JSON.stringify(password)} must not reach the hash`,
       );
-      assertEquals((err as IdentityError).code, "weak_password");
+      expect((err as IdentityError).code).toStrictEqual("weak_password");
     }
   });
 
@@ -232,7 +234,7 @@ describe("IdentityService", () => {
     await service.requestPasswordReset("a@b.co");
     const token = sent[0].msg.token;
 
-    const err = await assertRejects(
+    const err = await rejection(
       () =>
         service.resetPassword({
           token,
@@ -240,10 +242,12 @@ describe("IdentityService", () => {
         }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "weak_password");
+    expect((err as IdentityError).code).toStrictEqual("weak_password");
 
-    assertExists(await service.resetPassword({ token, password: "goodpass1" }));
-    assertExists(
+    assert.exists(
+      await service.resetPassword({ token, password: "goodpass1" }),
+    );
+    assert.exists(
       await service.signIn({ identifier: "a@b.co", password: "goodpass1" }),
     );
   });
@@ -251,15 +255,15 @@ describe("IdentityService", () => {
   it("signUp applies the default password policy when none is configured", async () => {
     const { service } = makeService();
     for (const password of ["short", "a".repeat(257)]) {
-      const err = await assertRejects(
+      const err = await rejection(
         () => service.signUp({ password, profile: { email: "a@b.co" } }),
         IdentityError,
         undefined,
         `${password.length}-character password must not reach the hash`,
       );
-      assertEquals(err.code, "weak_password");
+      expect(err.code).toStrictEqual("weak_password");
     }
-    assertExists(
+    assert.exists(
       await service.signUp({
         password: "a".repeat(256),
         profile: { email: "a@b.co" },
@@ -277,17 +281,19 @@ describe("IdentityService", () => {
     const token = sent[0].msg.token;
 
     for (const password of ["short", "a".repeat(257)]) {
-      const err = await assertRejects(
+      const err = await rejection(
         () => service.resetPassword({ token, password }),
         IdentityError,
         undefined,
         `${password.length}-character password must not reach the hash`,
       );
-      assertEquals(err.code, "weak_password");
+      expect(err.code).toStrictEqual("weak_password");
     }
 
-    assertExists(await service.resetPassword({ token, password: "goodpass1" }));
-    assertExists(
+    assert.exists(
+      await service.resetPassword({ token, password: "goodpass1" }),
+    );
+    assert.exists(
       await service.signIn({ identifier: "a@b.co", password: "goodpass1" }),
     );
   });
@@ -298,37 +304,35 @@ describe("IdentityService", () => {
       password: "hunter2hunter2",
       profile: { email: "a@b.co", username: "alice" },
     });
-    assertExists(user.id);
+    assert.exists(user.id);
 
-    assertEquals(
-      (await service.signIn({
-        identifier: "a@b.co",
-        password: "hunter2hunter2",
-      }))
-        ?.id,
-      user.id,
-    );
-    assertEquals(
-      (await service.signIn({
-        identifier: "alice",
-        password: "hunter2hunter2",
-      }))
-        ?.id,
-      user.id,
-    );
-    assertEquals(
+    expect(
+      (
+        await service.signIn({
+          identifier: "a@b.co",
+          password: "hunter2hunter2",
+        })
+      )?.id,
+    ).toStrictEqual(user.id);
+    expect(
+      (
+        await service.signIn({
+          identifier: "alice",
+          password: "hunter2hunter2",
+        })
+      )?.id,
+    ).toStrictEqual(user.id);
+    expect(
       await service.signIn({ identifier: "a@b.co", password: "nope" }),
-      null,
-    );
-    assertEquals(
+    ).toStrictEqual(null);
+    expect(
       await service.signIn({ identifier: "ghost", password: "hunter2hunter2" }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("signIn spends a hash even when the user has no stored credential", async () => {
     const passwords = new PasswordIdentityService();
-    using hashSpy = spy(passwords, "hash");
+    using hashSpy = vi.spyOn(passwords, "hash");
     const store: IdentityUserStore<TestUser> = {
       create() {
         throw new Error("unused");
@@ -352,11 +356,10 @@ describe("IdentityService", () => {
     };
     const service = serviceWithoutSignInFloor({ users: store, passwords });
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "sso@b.co", password: "whatever12" }),
-      null,
-    );
-    assertEquals(hashSpy.calls.length, 1);
+    ).toStrictEqual(null);
+    expect(hashSpy.mock.calls.length).toStrictEqual(1);
   });
 
   it("password reset is enumeration-safe and rotates the credential + sessions", async () => {
@@ -367,36 +370,37 @@ describe("IdentityService", () => {
     });
 
     await service.requestPasswordReset("nobody@b.co");
-    assertEquals(sent.length, 0);
+    expect(sent.length).toStrictEqual(0);
 
     await service.requestPasswordReset("a@b.co");
-    assertEquals(sent.length, 1);
-    assertEquals(sent[0].hook, "reset");
+    expect(sent.length).toStrictEqual(1);
+    expect(sent[0].hook).toStrictEqual("reset");
     const { token, url } = sent[0].msg;
-    assertEquals(url, `https://app.example/reset-password?token=${token}`);
+    expect(url).toStrictEqual(
+      `https://app.example/reset-password?token=${token}`,
+    );
 
     const result = await service.resetPassword({
       token,
       password: "newpassword1",
     });
-    assertExists(result);
-    assertEquals(revoked.length, 1);
-    assertEquals(
+    assert.exists(result);
+    expect(revoked.length).toStrictEqual(1);
+    expect(
       await service.signIn({ identifier: "a@b.co", password: "oldpassword1" }),
-      null,
-    );
-    assertEquals(
-      (await service.signIn({
-        identifier: "a@b.co",
-        password: "newpassword1",
-      }))?.id,
-      result!.userId,
-    );
+    ).toStrictEqual(null);
+    expect(
+      (
+        await service.signIn({
+          identifier: "a@b.co",
+          password: "newpassword1",
+        })
+      )?.id,
+    ).toStrictEqual(result!.userId);
 
-    assertEquals(
+    expect(
       await service.resetPassword({ token, password: "again12345" }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("email verification delivers a link and marks verified on consume", async () => {
@@ -409,21 +413,25 @@ describe("IdentityService", () => {
       userId: user.id,
       email: "a@b.co",
     });
-    assertEquals(sent.length, 1);
-    assertEquals(sent[0].hook, "verify");
+    expect(sent.length).toStrictEqual(1);
+    expect(sent[0].hook).toStrictEqual("verify");
     const { token, url } = sent[0].msg;
-    assertEquals(url, `https://app.example/verify-email?token=${token}`);
+    expect(url).toStrictEqual(
+      `https://app.example/verify-email?token=${token}`,
+    );
 
     const result = await service.verifyEmail(token);
-    assertEquals(result.status, "success");
+    expect(result.status).toStrictEqual("success");
     if (result.status === "success") {
-      assertEquals(result.userId, user.id);
-      assertEquals(result.email, "a@b.co");
+      expect(result.userId).toStrictEqual(user.id);
+      expect(result.email).toStrictEqual("a@b.co");
     }
-    assertEquals(verified.has(user.id), true);
+    expect(verified.has(user.id)).toStrictEqual(true);
 
-    assertEquals((await service.verifyEmail(token)).status, "invalid");
-    assertEquals((await service.verifyEmail("garbage")).status, "invalid");
+    expect((await service.verifyEmail(token)).status).toStrictEqual("invalid");
+    expect((await service.verifyEmail("garbage")).status).toStrictEqual(
+      "invalid",
+    );
   });
 
   it("verifyEmail passes the address the token was issued for, so a link cannot verify an address swapped in afterwards", async () => {
@@ -441,8 +449,8 @@ describe("IdentityService", () => {
     changeEmail(user.id, "victim@corp.example");
     const result = await service.verifyEmail(token);
 
-    assertEquals(result.status, "success");
-    assertEquals(verified.has(user.id), false);
+    expect(result.status).toStrictEqual("success");
+    expect(verified.has(user.id)).toStrictEqual(false);
   });
 
   it("verifyEmail reports an expired token distinctly", async () => {
@@ -459,7 +467,7 @@ describe("IdentityService", () => {
     const { token } = sent[0].msg;
 
     await time.tickAsync(24 * 60 * 60 * 1000 + 1000);
-    assertEquals((await service.verifyEmail(token)).status, "expired");
+    expect((await service.verifyEmail(token)).status).toStrictEqual("expired");
   });
 
   it("invalidates the minted token and stays uniform when delivery throws", async () => {
@@ -484,13 +492,12 @@ describe("IdentityService", () => {
     await service.requestPasswordReset("a@b.co");
     assert(capturedToken.length > 0);
 
-    assertEquals(
+    expect(
       await service.resetPassword({
         token: capturedToken,
         password: "newpassword1",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("reports invalidated: false and leaves the token live when cleanup fails too", async () => {
@@ -525,14 +532,16 @@ describe("IdentityService", () => {
       profile: { email: "a@b.co" },
     });
 
-    assertEquals(await service.requestPasswordReset("a@b.co"), undefined);
-    assertEquals(lastEventOfType(events, "delivery.failed"), {
+    expect(await service.requestPasswordReset("a@b.co")).toStrictEqual(
+      undefined,
+    );
+    expect(lastEventOfType(events, "delivery.failed")).toStrictEqual({
       type: "delivery.failed",
       hook: "sendPasswordReset",
       invalidated: false,
       error: "mailer down",
     });
-    assertExists(
+    assert.exists(
       await service.resetPassword({
         token: capturedToken,
         password: "newpassword1",
@@ -573,15 +582,15 @@ describe("IdentityService", () => {
       email: "a@b.co",
     });
 
-    await assertRejects(
+    await rejection(
       () => service.verifyEmail(capturedToken),
       Error,
       "db write failed",
     );
 
     const result = await service.verifyEmail(capturedToken);
-    assertEquals(result.status, "success");
-    assertEquals(marked, [user.id]);
+    expect(result.status).toStrictEqual("success");
+    expect(marked).toStrictEqual([user.id]);
   });
 
   it("resetPassword reports failed and rethrows when session revocation throws", async () => {
@@ -597,7 +606,7 @@ describe("IdentityService", () => {
     });
     await service.requestPasswordReset("a@b.co");
 
-    await assertRejects(
+    await rejection(
       () =>
         service.resetPassword({
           token: minted.passwordReset[0],
@@ -607,20 +616,19 @@ describe("IdentityService", () => {
       "session store down",
     );
 
-    assertEquals(eventsOfType(events, "password_reset.completed"), []);
-    assertEquals(
+    expect(eventsOfType(events, "password_reset.completed")).toStrictEqual([]);
+    expect(
       lastEventOfType(events, "password_reset.failed").reason,
-      "session_revocation_failed",
-    );
+    ).toStrictEqual("session_revocation_failed");
 
-    assertEquals(
+    expect(
       (await service.signIn({ identifier: "a@b.co", password: "newpassword1" }))
         ?.id,
-      user.id,
-    );
+    ).toStrictEqual(user.id);
   });
 
   it("resetPassword lets exactly one of two concurrent submissions of a link set the password", async () => {
+    using time = new FakeTime();
     const { store } = makeStore();
     const events: IdentityEvent[] = [];
     let resetToken = "";
@@ -650,32 +658,35 @@ describe("IdentityService", () => {
     await service.requestPasswordReset("a@b.co");
     const passwords = ["firstpassword1", "secondpassword2"];
 
-    const results = await Promise.all(
+    const pending = Promise.all(
       passwords.map((password) =>
-        service.resetPassword({ token: resetToken, password })
+        service.resetPassword({ token: resetToken, password }),
       ),
     );
+    const results = await time.settle(pending);
 
-    const winners = results.flatMap((result, i) => result ? [i] : []);
-    assertEquals(winners.length, 1);
+    const winners = results.flatMap((result, i) => (result ? [i] : []));
+    expect(winners.length).toStrictEqual(1);
     const [winner] = winners;
-    assertEquals(results[winner], { userId: user.id });
-    assertEquals(credentialWrites, 1);
-    assertEquals(
-      (await service.signIn({
-        identifier: "a@b.co",
-        password: passwords[winner],
-      }))?.id,
-      user.id,
-    );
-    assertEquals(
+    expect(results[winner]).toStrictEqual({ userId: user.id });
+    expect(credentialWrites).toStrictEqual(1);
+    expect(
+      (
+        await service.signIn({
+          identifier: "a@b.co",
+          password: passwords[winner],
+        })
+      )?.id,
+    ).toStrictEqual(user.id);
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: passwords[1 - winner],
       }),
-      null,
-    );
-    assertEquals(eventsOfType(events, "password_reset.completed").length, 1);
+    ).toStrictEqual(null);
+    expect(
+      eventsOfType(events, "password_reset.completed").length,
+    ).toStrictEqual(1);
   });
 
   it("enforces the password policy on signUp and resetPassword", async () => {
@@ -693,30 +704,30 @@ describe("IdentityService", () => {
       },
     });
 
-    const signUpErr = await assertRejects(
+    const signUpErr = await rejection(
       () => service.signUp({ password: "short", profile: { email: "a@b.co" } }),
       IdentityError,
     );
-    assertEquals((signUpErr as IdentityError).code, "weak_password");
+    expect((signUpErr as IdentityError).code).toStrictEqual("weak_password");
 
     const user = await service.signUp({
       password: "longenough1",
       profile: { email: "a@b.co" },
     });
-    assertExists(user.id);
+    assert.exists(user.id);
 
     await service.requestPasswordReset("a@b.co");
-    const resetErr = await assertRejects(
+    const resetErr = await rejection(
       () => service.resetPassword({ token: resetToken, password: "short" }),
       IdentityError,
     );
-    assertEquals((resetErr as IdentityError).code, "weak_password");
+    expect((resetErr as IdentityError).code).toStrictEqual("weak_password");
 
     const result = await service.resetPassword({
       token: resetToken,
       password: "newlongpass1",
     });
-    assertExists(result);
+    assert.exists(result);
   });
 
   it("throttles signIn per identifier (429 + retryAfterMs)", async () => {
@@ -731,22 +742,20 @@ describe("IdentityService", () => {
     });
 
     for (let i = 0; i < 3; i++) {
-      assertEquals(
+      expect(
         await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-        null,
-      );
+      ).toStrictEqual(null);
     }
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.signIn({ identifier: "a@b.co", password: "wrong" }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
-    assertEquals(typeof (err as IdentityError).retryAfterMs, "number");
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
+    expect(typeof (err as IdentityError).retryAfterMs).toStrictEqual("number");
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "other@b.co", password: "x" }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("throttles an unknown identifier identically (no enumeration via 429)", async () => {
@@ -755,19 +764,17 @@ describe("IdentityService", () => {
       users: store,
       rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
     });
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "ghost@b.co", password: "x" }),
-      null,
-    );
-    assertEquals(
+    ).toStrictEqual(null);
+    expect(
       await service.signIn({ identifier: "ghost@b.co", password: "x" }),
-      null,
-    );
-    const err = await assertRejects(
+    ).toStrictEqual(null);
+    const err = await rejection(
       () => service.signIn({ identifier: "ghost@b.co", password: "x" }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
   });
 
   it("resets the signIn throttle on a successful sign-in", async () => {
@@ -781,24 +788,21 @@ describe("IdentityService", () => {
       profile: { email: "a@b.co" },
     });
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-      null,
-    );
-    assertExists(
+    ).toStrictEqual(null);
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
     );
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-      null,
-    );
-    assertEquals(
+    ).toStrictEqual(null);
+    expect(
       await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 
   it("throttles requestPasswordReset per email, known and unknown alike", async () => {
@@ -821,24 +825,24 @@ describe("IdentityService", () => {
 
     await service.requestPasswordReset("a@b.co");
     await service.requestPasswordReset("a@b.co");
-    assertEquals(sent.length, 2);
+    expect(sent.length).toStrictEqual(2);
 
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.requestPasswordReset("a@b.co"),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
-    assertEquals(typeof (err as IdentityError).retryAfterMs, "number");
-    assertEquals(sent.length, 2);
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
+    expect(typeof (err as IdentityError).retryAfterMs).toStrictEqual("number");
+    expect(sent.length).toStrictEqual(2);
 
     await service.requestPasswordReset("ghost@b.co");
     await service.requestPasswordReset("ghost@b.co");
-    const ghostErr = await assertRejects(
+    const ghostErr = await rejection(
       () => service.requestPasswordReset("ghost@b.co"),
       IdentityError,
     );
-    assertEquals((ghostErr as IdentityError).code, "rate_limited");
-    assertEquals(sent.length, 2);
+    expect((ghostErr as IdentityError).code).toStrictEqual("rate_limited");
+    expect(sent.length).toStrictEqual(2);
   });
 
   it("throttles requestEmailVerification per user", async () => {
@@ -867,16 +871,16 @@ describe("IdentityService", () => {
       userId: alice.id,
       email: "a@b.co",
     });
-    const err = await assertRejects(
+    const err = await rejection(
       () =>
         service.requestEmailVerification({ userId: alice.id, email: "a@b.co" }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
-    assertEquals(sent.length, 1);
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
+    expect(sent.length).toStrictEqual(1);
 
     await service.requestEmailVerification({ userId: bob.id, email: "b@b.co" });
-    assertEquals(sent.length, 2);
+    expect(sent.length).toStrictEqual(2);
   });
 
   it("case-folds the requestPasswordReset throttle key so casing variants share one window", async () => {
@@ -895,12 +899,12 @@ describe("IdentityService", () => {
 
     await service.requestPasswordReset("ghost@b.co");
     await service.requestPasswordReset("Ghost@B.Co");
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.requestPasswordReset("GHOST@B.CO"),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
-    assertEquals(sent.length, 0);
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
+    expect(sent.length).toStrictEqual(0);
   });
 
   it("throttles requestAccountUnlock per user", async () => {
@@ -922,12 +926,12 @@ describe("IdentityService", () => {
     });
 
     await service.requestAccountUnlock({ userId: alice.id, email: "a@b.co" });
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.requestAccountUnlock({ userId: alice.id, email: "a@b.co" }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
-    assertEquals(sent.length, 1);
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
+    expect(sent.length).toStrictEqual(1);
   });
 
   it("log-only mode sends the email and never throws on the email-flow throttle", async () => {
@@ -955,11 +959,11 @@ describe("IdentityService", () => {
 
     await service.requestPasswordReset("a@b.co");
     await service.requestPasswordReset("a@b.co");
-    assertEquals(sent.length, 2);
+    expect(sent.length).toStrictEqual(2);
 
     const limited = lastEventOfType(events, "password_reset.rate_limited");
-    assertEquals(limited.email, "a@b.co");
-    assertEquals(limited.enforced, false);
+    expect(limited.email).toStrictEqual("a@b.co");
+    expect(limited.enforced).toStrictEqual(false);
   });
 });
 
@@ -975,11 +979,11 @@ describe("IdentityService events", () => {
       password: "hunter2hunter2",
     });
 
-    assertEquals(lastEventOfType(events, "sign_up"), {
+    expect(lastEventOfType(events, "sign_up")).toStrictEqual({
       type: "sign_up",
       userId: user.id,
     });
-    assertEquals(lastEventOfType(events, "sign_in.succeeded"), {
+    expect(lastEventOfType(events, "sign_in.succeeded")).toStrictEqual({
       type: "sign_in.succeeded",
       userId: user.id,
       identifier: "a@b.co",
@@ -996,7 +1000,7 @@ describe("IdentityService events", () => {
     await service.signIn({ identifier: "ghost@b.co", password: "x" });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
 
-    assertEquals(eventsOfType(events, "sign_in.failed"), [
+    expect(eventsOfType(events, "sign_in.failed")).toStrictEqual([
       {
         type: "sign_in.failed",
         identifier: "ghost@b.co",
@@ -1014,14 +1018,14 @@ describe("IdentityService events", () => {
   it("emits sign_in.rate_limited before throwing", async () => {
     const { service, events } = makeEventService({ limit: 1 });
     await service.signIn({ identifier: "ghost@b.co", password: "x" });
-    await assertRejects(
+    await rejection(
       () => service.signIn({ identifier: "ghost@b.co", password: "x" }),
       IdentityError,
     );
 
     const limited = lastEventOfType(events, "sign_in.rate_limited");
-    assertEquals(limited.identifier, "ghost@b.co");
-    assertEquals(typeof limited.retryAfterMs, "number");
+    expect(limited.identifier).toStrictEqual("ghost@b.co");
+    expect(typeof limited.retryAfterMs).toStrictEqual("number");
   });
 
   it("emits a rate_limited event for each email flow before throwing", async () => {
@@ -1032,20 +1036,20 @@ describe("IdentityService events", () => {
     });
 
     await service.requestPasswordReset("a@b.co");
-    await assertRejects(
+    await rejection(
       () => service.requestPasswordReset("a@b.co"),
       IdentityError,
     );
     const resetLimited = lastEventOfType(events, "password_reset.rate_limited");
-    assertEquals(resetLimited.email, "a@b.co");
-    assertEquals(resetLimited.enforced, true);
-    assertEquals(typeof resetLimited.retryAfterMs, "number");
+    expect(resetLimited.email).toStrictEqual("a@b.co");
+    expect(resetLimited.enforced).toStrictEqual(true);
+    expect(typeof resetLimited.retryAfterMs).toStrictEqual("number");
 
     await service.requestEmailVerification({
       userId: user.id,
       email: "a@b.co",
     });
-    await assertRejects(
+    await rejection(
       () =>
         service.requestEmailVerification({ userId: user.id, email: "a@b.co" }),
       IdentityError,
@@ -1054,11 +1058,11 @@ describe("IdentityService events", () => {
       events,
       "email_verification.rate_limited",
     );
-    assertEquals(verifyLimited.userId, user.id);
-    assertEquals(verifyLimited.enforced, true);
+    expect(verifyLimited.userId).toStrictEqual(user.id);
+    expect(verifyLimited.enforced).toStrictEqual(true);
 
     await service.requestAccountUnlock({ userId: user.id, email: "a@b.co" });
-    await assertRejects(
+    await rejection(
       () => service.requestAccountUnlock({ userId: user.id, email: "a@b.co" }),
       IdentityError,
     );
@@ -1066,9 +1070,9 @@ describe("IdentityService events", () => {
       events,
       "account_unlock.rate_limited",
     );
-    assertEquals(unlockLimited.userId, user.id);
-    assertEquals(unlockLimited.enforced, true);
-    assertEquals(typeof unlockLimited.retryAfterMs, "number");
+    expect(unlockLimited.userId).toStrictEqual(user.id);
+    expect(unlockLimited.enforced).toStrictEqual(true);
+    expect(typeof unlockLimited.retryAfterMs).toStrictEqual("number");
   });
 
   it("emits password_reset.requested with userId only for a known email", async () => {
@@ -1081,7 +1085,7 @@ describe("IdentityService events", () => {
     await service.requestPasswordReset("a@b.co");
     await service.requestPasswordReset("ghost@b.co");
 
-    assertEquals(eventsOfType(events, "password_reset.requested"), [
+    expect(eventsOfType(events, "password_reset.requested")).toStrictEqual([
       { type: "password_reset.requested", email: "a@b.co", userId: user.id },
       { type: "password_reset.requested", email: "ghost@b.co" },
     ]);
@@ -1100,13 +1104,13 @@ describe("IdentityService events", () => {
       token: minted.passwordReset[0],
       password: "newpass123",
     });
-    assertExists(result);
+    assert.exists(result);
 
-    assertEquals(lastEventOfType(events, "password_reset.failed"), {
+    expect(lastEventOfType(events, "password_reset.failed")).toStrictEqual({
       type: "password_reset.failed",
       reason: "invalid_token",
     });
-    assertEquals(lastEventOfType(events, "password_reset.completed"), {
+    expect(lastEventOfType(events, "password_reset.completed")).toStrictEqual({
       type: "password_reset.completed",
       userId: user.id,
     });
@@ -1122,14 +1126,13 @@ describe("IdentityService events", () => {
     await service.requestPasswordReset("a@b.co");
 
     await time.tickAsync(60 * 60 * 1000 + 1000);
-    assertEquals(
+    expect(
       await service.resetPassword({
         token: minted.passwordReset[0],
         password: "newpass123",
       }),
-      null,
-    );
-    assertEquals(lastEventOfType(events, "password_reset.failed"), {
+    ).toStrictEqual(null);
+    expect(lastEventOfType(events, "password_reset.failed")).toStrictEqual({
       type: "password_reset.failed",
       reason: "invalid_token",
     });
@@ -1148,16 +1151,20 @@ describe("IdentityService events", () => {
     await service.verifyEmail("garbage");
     await service.verifyEmail(minted.emailVerification[0]);
 
-    assertEquals(lastEventOfType(events, "email_verification.requested"), {
+    expect(
+      lastEventOfType(events, "email_verification.requested"),
+    ).toStrictEqual({
       type: "email_verification.requested",
       userId: user.id,
       email: "a@b.co",
     });
-    assertEquals(lastEventOfType(events, "email_verification.failed"), {
+    expect(lastEventOfType(events, "email_verification.failed")).toStrictEqual({
       type: "email_verification.failed",
       reason: "invalid",
     });
-    assertEquals(lastEventOfType(events, "email_verification.completed"), {
+    expect(
+      lastEventOfType(events, "email_verification.completed"),
+    ).toStrictEqual({
       type: "email_verification.completed",
       userId: user.id,
       email: "a@b.co",
@@ -1180,8 +1187,8 @@ describe("IdentityService events", () => {
     time.tick(2000);
     const result = await service.verifyEmail(minted.emailVerification[0]);
 
-    assertEquals(result.status, "expired");
-    assertEquals(lastEventOfType(events, "email_verification.failed"), {
+    expect(result.status).toStrictEqual("expired");
+    expect(lastEventOfType(events, "email_verification.failed")).toStrictEqual({
       type: "email_verification.failed",
       reason: "expired",
     });
@@ -1201,8 +1208,8 @@ describe("IdentityService events", () => {
         password: "hunter2hunter2",
         profile: { email: "a@b.co" },
       });
-      assertExists(user.id);
-      assertExists(
+      assert.exists(user.id);
+      assert.exists(
         await service.signIn({
           identifier: "a@b.co",
           password: "hunter2hunter2",
@@ -1211,7 +1218,7 @@ describe("IdentityService events", () => {
     } finally {
       console.error = original;
     }
-    assertEquals(errors.length, 2);
+    expect(errors.length).toStrictEqual(2);
   });
 
   it("flows behave identically with no hook configured", async () => {
@@ -1221,13 +1228,13 @@ describe("IdentityService events", () => {
       password: "hunter2hunter2",
       profile: { email: "a@b.co" },
     });
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
     );
-    assertEquals(user.email, "a@b.co");
+    expect(user.email).toStrictEqual("a@b.co");
   });
 });
 
@@ -1264,24 +1271,22 @@ describe("IdentityService lockout", () => {
     const user = await signUpAlice(service);
 
     for (let i = 0; i < 3; i++) {
-      assertEquals(
+      expect(
         await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-        null,
-      );
+      ).toStrictEqual(null);
     }
 
     const lockEvent = lastEventOfType(events, "lockout");
-    assertEquals(lockEvent.userId, user.id);
-    assertEquals(lockEvent.failures, 3);
-    assertEquals(lockEvent.enforced, true);
+    expect(lockEvent.userId).toStrictEqual(user.id);
+    expect(lockEvent.failures).toStrictEqual(3);
+    expect(lockEvent.enforced).toStrictEqual(true);
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
     lastEventOfType(events, "sign_in.locked");
   });
 
@@ -1291,7 +1296,7 @@ describe("IdentityService lockout", () => {
 
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -1299,13 +1304,13 @@ describe("IdentityService lockout", () => {
     );
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
     );
-    assertEquals(eventsOfType(events, "lockout"), []);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
   });
 
   it("log-only mode records lockout events but never blocks", async () => {
@@ -1318,10 +1323,12 @@ describe("IdentityService lockout", () => {
       await service.signIn({ identifier: "a@b.co", password: "wrong" });
     }
 
-    assertEquals(lastEventOfType(events, "lockout").enforced, false);
-    assertEquals(lastEventOfType(events, "sign_in.locked").enforced, false);
+    expect(lastEventOfType(events, "lockout").enforced).toStrictEqual(false);
+    expect(lastEventOfType(events, "sign_in.locked").enforced).toStrictEqual(
+      false,
+    );
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -1343,10 +1350,9 @@ describe("IdentityService lockout", () => {
     await service.signIn({ identifier: "ghost@b.co", password: "x" });
     await service.signIn({ identifier: "ghost@b.co", password: "x" });
 
-    assertEquals(
+    expect(
       lastEventOfType(events, "sign_in.rate_limited").enforced,
-      false,
-    );
+    ).toStrictEqual(false);
   });
 
   it("unlockAccount clears the lock via the emailed single-use token", async () => {
@@ -1363,38 +1369,37 @@ describe("IdentityService lockout", () => {
     for (let i = 0; i < 3; i++) {
       await service.signIn({ identifier: "a@b.co", password: "wrong" });
     }
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
 
     await service.requestAccountUnlock({ userId: user.id, email: "a@b.co" });
-    assertExists(unlockMessage);
-    assertEquals(
-      unlockMessage!.url,
+    assert.exists(unlockMessage);
+    expect(unlockMessage!.url).toStrictEqual(
       `https://app.example/unlock-account?token=${unlockMessage!.token}`,
     );
     lastEventOfType(events, "account_unlock.requested");
 
     const result = await service.unlockAccount(unlockMessage!.token);
-    assertEquals(result, { status: "success", userId: user.id });
+    expect(result).toStrictEqual({ status: "success", userId: user.id });
     lastEventOfType(events, "account_unlock.completed");
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
     );
 
-    assertEquals(
+    expect(
       (await service.unlockAccount(unlockMessage!.token)).status,
+    ).toStrictEqual("invalid");
+    expect((await service.unlockAccount("garbage")).status).toStrictEqual(
       "invalid",
     );
-    assertEquals((await service.unlockAccount("garbage")).status, "invalid");
   });
 
   it("resetPassword clears an active lockout", async () => {
@@ -1417,24 +1422,23 @@ describe("IdentityService lockout", () => {
     for (let i = 0; i < 3; i++) {
       await service.signIn({ identifier: "a@b.co", password: "wrong" });
     }
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
 
     await service.requestPasswordReset("a@b.co");
-    assertExists(resetMessage);
-    assertExists(
+    assert.exists(resetMessage);
+    assert.exists(
       await service.resetPassword({
         token: resetMessage!.token,
         password: "brand-new-pass-1",
       }),
     );
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "brand-new-pass-1",
@@ -1454,14 +1458,14 @@ describe("IdentityService lockout", () => {
     });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
-    await assertRejects(
+    await rejection(
       () =>
         service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" }),
       IdentityError,
     );
 
     await service.resetSignInThrottle("a@b.co");
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -1482,7 +1486,7 @@ describe("IdentityService lockout", () => {
 
     await service.signIn({ identifier: " a@b.co ", password: "wrong" });
     await service.signIn({ identifier: "a@b.co", password: "wrong" });
-    await assertRejects(
+    await rejection(
       () =>
         service.signIn({ identifier: "a@b.co ", password: "hunter2hunter2" }),
       IdentityError,
@@ -1491,7 +1495,7 @@ describe("IdentityService lockout", () => {
     );
 
     await service.resetSignInThrottle("  a@b.co  ");
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -1618,7 +1622,7 @@ describe("IdentityService password rehash on sign-in", () => {
       password: "hunter2hunter2",
     });
 
-    assertEquals(signedIn?.id, user.id);
+    expect(signedIn?.id).toStrictEqual(user.id);
   });
 
   it("rehashes a credential weaker than the current configuration after it verifies", async () => {
@@ -1632,7 +1636,7 @@ describe("IdentityService password rehash on sign-in", () => {
     });
 
     const stored = creds.get(user.id)!;
-    assertEquals(stored.params, {
+    expect(stored.params).toStrictEqual({
       algorithm: PBKDF2_SHA256,
       iterations: DEFAULT_PBKDF2_ITERATIONS,
     });
@@ -1649,14 +1653,13 @@ describe("IdentityService password rehash on sign-in", () => {
 
     await service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" });
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "wrong-password",
       }),
-      null,
-    );
-    assertExists(
+    ).toStrictEqual(null);
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -1672,14 +1675,14 @@ describe("IdentityService password rehash on sign-in", () => {
       await passwords.hash("hunter2hunter2"),
     );
     const service = serviceWithoutSignInFloor({ users: store, passwords });
-    using setCredential = spy(store, "setCredential");
+    using setCredential = vi.spyOn(store, "setCredential");
 
     await service.signIn({
       identifier: "a@b.co",
       password: "hunter2hunter2",
     });
 
-    assertEquals(setCredential.calls.length, 0);
+    expect(setCredential.mock.calls.length).toStrictEqual(0);
   });
 
   it("rejects an unavailable credential read after losing a rehash comparison", async () => {
@@ -1699,7 +1702,7 @@ describe("IdentityService password rehash on sign-in", () => {
         events.push(event);
       },
     });
-    await assertRejects(
+    await rejection(
       () =>
         service.signIn({
           identifier: "a@b.co",
@@ -1708,8 +1711,8 @@ describe("IdentityService password rehash on sign-in", () => {
       Error,
       "credential read unavailable",
     );
-    assertEquals(events, []);
-    assertEquals(failures, []);
+    expect(events).toStrictEqual([]);
+    expect(failures).toStrictEqual([]);
   });
 
   it("signs the user in even when persisting the rehash fails", async () => {
@@ -1717,15 +1720,15 @@ describe("IdentityService password rehash on sign-in", () => {
     const { user } = await seedLegacyUser(store);
     store.replaceCredential = () => Promise.reject(new Error("db down"));
     const service = serviceWithoutSignInFloor({ users: store });
-    using errorLog = stub(console, "error");
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const signedIn = await service.signIn({
       identifier: "a@b.co",
       password: "hunter2hunter2",
     });
 
-    assertEquals(signedIn?.id, user.id);
-    assertEquals(errorLog.calls.length, 1);
+    expect(signedIn?.id).toStrictEqual(user.id);
+    expect(errorLog.mock.calls.length).toStrictEqual(1);
   });
   it("signs in both of two overlapping correct sign-ins when only one rehash can win the compare-and-set", async () => {
     const { store, creds } = makeLegacyStore();
@@ -1746,20 +1749,23 @@ describe("IdentityService password rehash on sign-in", () => {
       service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" }),
     ]);
 
-    assertEquals(replace.calls, 2);
-    assertEquals(replace.wins, 1, "exactly one rehash may win the race");
-    assertEquals(
+    expect(replace.calls).toStrictEqual(2);
+    expect(replace.wins, "exactly one rehash may win the race").toStrictEqual(
+      1,
+    );
+    expect(
       [first?.id, second?.id],
-      [user.id, user.id],
       "the compare-and-set loser verified the same correct password",
-    );
-    assertEquals(
-      events.map((e) => e.type),
-      ["sign_in.succeeded", "sign_in.succeeded"],
-    );
-    assertEquals(failures, [], "a lost rehash race is not a failed attempt");
-    assertEquals(
-      creds.get(user.id)!.params?.iterations,
+    ).toStrictEqual([user.id, user.id]);
+    expect(events.map((e) => e.type)).toStrictEqual([
+      "sign_in.succeeded",
+      "sign_in.succeeded",
+    ]);
+    expect(
+      failures,
+      "a lost rehash race is not a failed attempt",
+    ).toStrictEqual([]);
+    expect(creds.get(user.id)!.params?.iterations).toStrictEqual(
       DEFAULT_PBKDF2_ITERATIONS,
     );
   });
@@ -1783,21 +1789,19 @@ describe("IdentityService password rehash on sign-in", () => {
       },
     });
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
 
-    assertEquals(
+    expect(
       eventsOfType(events, "sign_in.failed").map((e) => e.reason),
-      ["wrong_password"],
-    );
-    assertEquals(failures, [user.id]);
+    ).toStrictEqual(["wrong_password"]);
+    expect(failures).toStrictEqual([user.id]);
     assert(creds.get(user.id) === changed, "the miss must not write");
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "changed-pw-1234",
@@ -1823,22 +1827,20 @@ describe("IdentityService password rehash on sign-in", () => {
       },
     });
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
       "an absent credential authenticates nobody",
-    );
+    ).toStrictEqual(null);
 
-    assertEquals(
+    expect(
       eventsOfType(events, "sign_in.failed").map((e) => e.reason),
-      ["wrong_password"],
-    );
-    assertEquals(eventsOfType(events, "sign_in.succeeded"), []);
-    assertEquals(failures, [user.id]);
-    assertEquals(creds.has(user.id), false, "the miss must not write");
+    ).toStrictEqual(["wrong_password"]);
+    expect(eventsOfType(events, "sign_in.succeeded")).toStrictEqual([]);
+    expect(failures).toStrictEqual([user.id]);
+    expect(creds.has(user.id), "the miss must not write").toStrictEqual(false);
   });
 });
 
@@ -1860,23 +1862,22 @@ describe("IdentityService upgrade-on-login", () => {
       identifier: "dev@b.co",
       password: "s3cret-pw",
     });
-    assertEquals(user?.id, userId);
+    expect(user?.id).toStrictEqual(userId);
 
     const upgraded = creds.get(userId);
-    assertExists(upgraded);
-    assertEquals(upgraded.hash.length, 64);
-    assertEquals(upgraded.salt.length, 32);
-    assertEquals(legacy.has(userId), false);
+    assert.exists(upgraded);
+    expect(upgraded.hash.length).toStrictEqual(64);
+    expect(upgraded.salt.length).toStrictEqual(32);
+    expect(legacy.has(userId)).toStrictEqual(false);
 
-    assertEquals(bcrypt.calls(), 1);
-    assertEquals(
-      events.map((e) => e.type),
-      ["password.upgraded", "sign_in.succeeded"],
-    );
-    assertEquals(
+    expect(bcrypt.calls()).toStrictEqual(1);
+    expect(events.map((e) => e.type)).toStrictEqual([
+      "password.upgraded",
+      "sign_in.succeeded",
+    ]);
+    expect(
       lastEventOfType(events, "password.upgraded").verifierId,
-      "bcrypt",
-    );
+    ).toStrictEqual("bcrypt");
   });
 
   it("resetPassword clears the imported hash so the old password can't resurrect it", async () => {
@@ -1900,14 +1901,13 @@ describe("IdentityService upgrade-on-login", () => {
       token: sent[0],
       password: "brand-new-pw-1",
     });
-    assertExists(result);
-    assertEquals(legacy.has(userId), false);
+    assert.exists(result);
+    expect(legacy.has(userId)).toStrictEqual(false);
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "reset@b.co", password: "old-pw" }),
-      null,
-    );
-    assertExists(
+    ).toStrictEqual(null);
+    assert.exists(
       await service.signIn({
         identifier: "reset@b.co",
         password: "brand-new-pw-1",
@@ -1934,7 +1934,7 @@ describe("IdentityService upgrade-on-login", () => {
         events.push(event);
       },
     });
-    await assertRejects(
+    await rejection(
       () =>
         service.signIn({
           identifier: "dev@b.co",
@@ -1943,8 +1943,8 @@ describe("IdentityService upgrade-on-login", () => {
       Error,
       "credential read unavailable",
     );
-    assertEquals(events, []);
-    assertEquals(failures, []);
+    expect(events).toStrictEqual([]);
+    expect(failures).toStrictEqual([]);
   });
 
   it("signs in but does not emit password.upgraded when the upgrade persist fails", async () => {
@@ -1965,8 +1965,8 @@ describe("IdentityService upgrade-on-login", () => {
       identifier: "dev@b.co",
       password: "s3cret-pw",
     });
-    assertEquals(user?.id, userId);
-    assertEquals(events.map((e) => e.type), ["sign_in.succeeded"]);
+    expect(user?.id).toStrictEqual(userId);
+    expect(events.map((e) => e.type)).toStrictEqual(["sign_in.succeeded"]);
   });
 
   it("signs in both of two overlapping correct sign-ins on an imported hash and upgrades it once", async () => {
@@ -1990,19 +1990,23 @@ describe("IdentityService upgrade-on-login", () => {
       service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
     ]);
 
-    assertEquals(replace.calls, 2);
-    assertEquals(replace.wins, 1, "exactly one upgrade may win the race");
-    assertEquals(
-      [first?.id, second?.id],
-      [userId, userId],
-      "the compare-and-set loser verified the same correct password",
+    expect(replace.calls).toStrictEqual(2);
+    expect(replace.wins, "exactly one upgrade may win the race").toStrictEqual(
+      1,
     );
-    assertEquals(eventsOfType(events, "password.upgraded").length, 1);
-    assertEquals(eventsOfType(events, "sign_in.succeeded").length, 2);
-    assertEquals(eventsOfType(events, "sign_in.failed"), []);
-    assertEquals(failures, [], "a lost upgrade race is not a failed attempt");
-    assertExists(creds.get(userId));
-    assertEquals(legacy.has(userId), false);
+    expect(
+      [first?.id, second?.id],
+      "the compare-and-set loser verified the same correct password",
+    ).toStrictEqual([userId, userId]);
+    expect(eventsOfType(events, "password.upgraded").length).toStrictEqual(1);
+    expect(eventsOfType(events, "sign_in.succeeded").length).toStrictEqual(2);
+    expect(eventsOfType(events, "sign_in.failed")).toStrictEqual([]);
+    expect(
+      failures,
+      "a lost upgrade race is not a failed attempt",
+    ).toStrictEqual([]);
+    assert.exists(creds.get(userId));
+    expect(legacy.has(userId)).toStrictEqual(false);
   });
 
   it("still rejects the imported-hash sign-in when the compare-and-set misses because a different password was set", async () => {
@@ -2026,23 +2030,20 @@ describe("IdentityService upgrade-on-login", () => {
       },
     });
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
-      null,
-    );
+    ).toStrictEqual(null);
 
-    assertEquals(
+    expect(
       events.map((e) => e.type),
-      ["sign_in.failed"],
       "a miss that fails re-verification upgrades nothing",
-    );
-    assertEquals(
+    ).toStrictEqual(["sign_in.failed"]);
+    expect(
       eventsOfType(events, "sign_in.failed").map((e) => e.reason),
-      ["wrong_password"],
-    );
-    assertEquals(failures, [userId]);
+    ).toStrictEqual(["wrong_password"]);
+    expect(failures).toStrictEqual([userId]);
     assert(creds.get(userId) === changed, "the miss must not write");
-    assertEquals(legacy.get(userId), "fakebcrypt$s3cret-pw");
+    expect(legacy.get(userId)).toStrictEqual("fakebcrypt$s3cret-pw");
   });
 
   it("resetPassword still revokes sessions and completes when clearLegacyCredential throws", async () => {
@@ -2079,8 +2080,8 @@ describe("IdentityService upgrade-on-login", () => {
       token: sent[0],
       password: "brand-new-pw-1",
     });
-    assertEquals(result, { userId });
-    assertEquals(revoked, [userId]);
+    expect(result).toStrictEqual({ userId });
+    expect(revoked).toStrictEqual([userId]);
     lastEventOfType(events, "password_reset.completed");
   });
 
@@ -2093,15 +2094,15 @@ describe("IdentityService upgrade-on-login", () => {
       legacyVerifiers: [bcrypt.verifier],
     });
 
-    assertExists(
+    assert.exists(
       await service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
     );
-    assertEquals(bcrypt.calls(), 1);
+    expect(bcrypt.calls()).toStrictEqual(1);
 
-    assertExists(
+    assert.exists(
       await service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
     );
-    assertEquals(bcrypt.calls(), 1);
+    expect(bcrypt.calls()).toStrictEqual(1);
   });
 
   it("never consults a stale legacy hash once a native credential exists (no downgrade)", async () => {
@@ -2119,20 +2120,18 @@ describe("IdentityService upgrade-on-login", () => {
     // A stale legacy hash for a DIFFERENT (old) password lingers on the row.
     legacy.set(user.id, "fakebcrypt$old-legacy-pw");
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "dev@b.co",
         password: "old-legacy-pw",
       }),
-      null,
       "the old imported password must not resurrect via the legacy path",
-    );
-    assertEquals(
+    ).toStrictEqual(null);
+    expect(
       bcrypt.calls(),
-      0,
       "the legacy verifier is never consulted when a native credential exists",
-    );
-    assertExists(
+    ).toStrictEqual(0);
+    assert.exists(
       await service.signIn({
         identifier: "dev@b.co",
         password: "current-native-pw",
@@ -2153,13 +2152,12 @@ describe("IdentityService upgrade-on-login", () => {
       },
     });
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "dev@b.co", password: "wrong" }),
-      null,
-    );
-    assertEquals(creds.has(userId), false);
-    assertEquals(legacy.get(userId), "fakebcrypt$s3cret-pw");
-    assertEquals(events.map((e) => e.type), ["sign_in.failed"]);
+    ).toStrictEqual(null);
+    expect(creds.has(userId)).toStrictEqual(false);
+    expect(legacy.get(userId)).toStrictEqual("fakebcrypt$s3cret-pw");
+    expect(events.map((e) => e.type)).toStrictEqual(["sign_in.failed"]);
   });
 
   it("selects the verifier whose canVerify matches; none matching fails", async () => {
@@ -2174,22 +2172,21 @@ describe("IdentityService upgrade-on-login", () => {
       legacyVerifiers: [bcrypt.verifier, argon.verifier],
     });
 
-    assertExists(
+    assert.exists(
       await service.signIn({ identifier: "b@b.co", password: "pw-one" }),
     );
-    assertExists(
+    assert.exists(
       await service.signIn({ identifier: "a@b.co", password: "pw-two" }),
     );
-    assertEquals(bcrypt.calls(), 1);
-    assertEquals(argon.calls(), 1);
-    assertExists(creds.get(bcryptId));
-    assertExists(creds.get(argonId));
+    expect(bcrypt.calls()).toStrictEqual(1);
+    expect(argon.calls()).toStrictEqual(1);
+    assert.exists(creds.get(bcryptId));
+    assert.exists(creds.get(argonId));
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "o@b.co", password: "pw-three" }),
-      null,
-    );
-    assertEquals(creds.has(orphanId), false);
+    ).toStrictEqual(null);
+    expect(creds.has(orphanId)).toStrictEqual(false);
   });
 
   it("verifies and upgrades a built-in PBKDF2 (Django) imported hash", async () => {
@@ -2203,14 +2200,14 @@ describe("IdentityService upgrade-on-login", () => {
       legacyVerifiers: [pbkdf2Verifier()],
     });
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "dj@b.co",
         password: "correct horse battery staple",
       }),
     );
-    assertExists(creds.get(userId));
-    assertEquals(legacy.has(userId), false);
+    assert.exists(creds.get(userId));
+    expect(legacy.has(userId)).toStrictEqual(false);
   });
 
   it("without legacyVerifiers, an imported-only user has no usable password", async () => {
@@ -2218,10 +2215,9 @@ describe("IdentityService upgrade-on-login", () => {
     importUser("dev@b.co", "fakebcrypt$s3cret-pw");
     const service = serviceWithoutSignInFloor({ users: store });
 
-    assertEquals(
+    expect(
       await service.signIn({ identifier: "dev@b.co", password: "s3cret-pw" }),
-      null,
-    );
+    ).toStrictEqual(null);
   });
 });
 
@@ -2229,9 +2225,6 @@ const DEFAULT_FLOOR_MS = 250;
 const FLOOR_MS = 150;
 const NATIVE_KDF_MS = 6;
 const LEGACY_KDF_MS = 120;
-const TIMING_SAMPLES = 5;
-const MAX_BRANCH_RATIO = 1.5;
-const FLOOR_TOLERANCE_MS = 25;
 const RATIO_BRANCHES = [
   "unknown identifier",
   "wrong native password",
@@ -2276,17 +2269,13 @@ function costedVerifier(costMs: number): LegacyPasswordVerifier {
   };
 }
 
-async function elapsedMs(run: () => Promise<unknown>): Promise<number> {
+async function elapsedMs(
+  time: FakeTime,
+  run: () => Promise<unknown>,
+): Promise<number> {
   const startedAt = performance.now();
-  await run();
+  await time.settle(run());
   return performance.now() - startedAt;
-}
-
-async function medianElapsedMs(run: () => Promise<unknown>): Promise<number> {
-  const samples: number[] = [];
-  for (let i = 0; i < TIMING_SAMPLES; i++) samples.push(await elapsedMs(run));
-  samples.sort((a, b) => a - b);
-  return samples[(samples.length - 1) / 2];
 }
 
 describe("IdentityService failed sign-in timing", () => {
@@ -2314,10 +2303,13 @@ describe("IdentityService failed sign-in timing", () => {
     );
     importUser("imported@b.co", "costed-legacy$right-password");
     importUser("unreadable@b.co", "no-verifier-claims-this");
-    const passwordless = await store.create({ email: "none@b.co" }, {
-      hash: "x",
-      salt: "x",
-    });
+    const passwordless = await store.create(
+      { email: "none@b.co" },
+      {
+        hash: "x",
+        salt: "x",
+      },
+    );
     creds.delete(passwordless.id);
     const lockedOut = await store.create(
       { email: "locked@b.co" },
@@ -2338,79 +2330,63 @@ describe("IdentityService failed sign-in timing", () => {
   }
 
   it("holds every rejected branch to the floor, measured from entry", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { service, branches } = await seedBranches();
 
     for (const [branch, identifier] of Object.entries(branches)) {
-      const took = await elapsedMs(async () =>
-        assertEquals(
+      const took = await elapsedMs(time, async () =>
+        expect(
           await service.signIn({ identifier, password: "wrong-password" }),
-          null,
-        )
+        ).toStrictEqual(null),
       );
-      assert(
-        took >= FLOOR_MS * 0.95,
-        `${branch} returned after ${
-          took.toFixed(1)
-        }ms, under the ${FLOOR_MS}ms floor`,
+      expect(took, `${branch} returned off the ${FLOOR_MS}ms floor`).toBe(
+        FLOOR_MS,
       );
     }
   });
 
   it("costs the same whether the account is unknown, native, or still on an imported hash", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { service, branches } = await seedBranches();
-    const medians = new Map<string, number>();
+    const timings = new Map<string, number>();
 
     for (const branch of RATIO_BRANCHES) {
-      medians.set(
+      timings.set(
         branch,
-        await medianElapsedMs(() =>
+        await elapsedMs(time, () =>
           service.signIn({
             identifier: branches[branch],
             password: "wrong-password",
-          })
+          }),
         ),
       );
     }
 
-    const timings = [...medians.values()];
-    const ratio = Math.max(...timings) / Math.min(...timings);
-    const report = [...medians].map(([branch, ms]) =>
-      `${branch} ${ms.toFixed(1)}ms`
-    ).join(", ");
-    assert(
-      ratio <= MAX_BRANCH_RATIO,
-      `rejected branches differ by ${
-        ratio.toFixed(2)
-      }x (bound ${MAX_BRANCH_RATIO}x): ${report}`,
-    );
-    assert(
-      Math.max(...timings) <= FLOOR_MS + FLOOR_TOLERANCE_MS,
-      `the slowest branch took ${
-        Math.max(...timings).toFixed(1)
-      }ms against a ${FLOOR_MS}ms floor — every branch that fits inside the floor lands exactly on it, so anything past it is a branch becoming visible: ${report}`,
+    expect(
+      Object.fromEntries(timings),
+      "every branch that fits inside the floor lands exactly on it, so any difference is a branch becoming visible",
+    ).toStrictEqual(
+      Object.fromEntries(RATIO_BRANCHES.map((branch) => [branch, FLOOR_MS])),
     );
   });
 
   it("floors a rejection at 250ms with no option set", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { store } = makeLegacyStore();
     const service = new IdentityService<TestUser>({
       users: store,
       passwords: costedHasher(NATIVE_KDF_MS),
     });
 
-    const took = await elapsedMs(() =>
-      service.signIn({ identifier: "ghost@b.co", password: "wrong-password" })
+    const took = await elapsedMs(time, () =>
+      service.signIn({ identifier: "ghost@b.co", password: "wrong-password" }),
     );
 
-    assert(
-      took >= DEFAULT_FLOOR_MS * 0.95,
-      `a rejection returned after ${
-        took.toFixed(1)
-      }ms; the default floor is ${DEFAULT_FLOOR_MS}ms`,
-    );
+    expect(took).toBe(DEFAULT_FLOOR_MS);
   });
 
   it("falls back to the default floor when the option is out of range", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { store } = makeLegacyStore();
     const service = new IdentityService<TestUser>({
       users: store,
@@ -2418,19 +2394,17 @@ describe("IdentityService failed sign-in timing", () => {
       failedSignInFloorMs: -1,
     });
 
-    const took = await elapsedMs(() =>
-      service.signIn({ identifier: "ghost@b.co", password: "wrong-password" })
+    const took = await elapsedMs(time, () =>
+      service.signIn({ identifier: "ghost@b.co", password: "wrong-password" }),
     );
 
-    assert(
-      took >= DEFAULT_FLOOR_MS * 0.95,
-      `a negative floor turned padding off: the rejection returned after ${
-        took.toFixed(1)
-      }ms`,
+    expect(took, "a negative floor must not turn padding off").toBe(
+      DEFAULT_FLOOR_MS,
     );
   });
 
   it("does not delay a successful sign-in", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { store, service } = makeTimingService({
       failedSignInFloorMs: 5_000,
     });
@@ -2439,33 +2413,31 @@ describe("IdentityService failed sign-in timing", () => {
       { hash: "costed:right-password", salt: "salt" },
     );
 
-    const took = await elapsedMs(async () =>
-      assertExists(
+    const took = await elapsedMs(time, async () =>
+      assert.exists(
         await service.signIn({
           identifier: "native@b.co",
           password: "right-password",
         }),
-      )
+      ),
     );
 
-    assert(took < 5_000, `a successful sign-in waited ${took.toFixed(1)}ms`);
+    expect(took).toBeLessThan(5_000);
   });
 
   it("returns as soon as the work is done when the floor is disabled", async () => {
+    using time = new FakeTime(undefined, { performance: true });
     const { store, service } = makeTimingService({ failedSignInFloorMs: 0 });
     await store.create(
       { email: "native@b.co" },
       { hash: "costed:right-password", salt: "salt" },
     );
 
-    const median = await medianElapsedMs(() =>
-      service.signIn({ identifier: "native@b.co", password: "wrong-password" })
+    const took = await elapsedMs(time, () =>
+      service.signIn({ identifier: "native@b.co", password: "wrong-password" }),
     );
 
-    assert(
-      median < FLOOR_MS / 2,
-      `a rejection took ${median.toFixed(1)}ms with the floor disabled`,
-    );
+    expect(took).toBe(NATIVE_KDF_MS);
   });
 });
 
@@ -2498,9 +2470,10 @@ describe("IdentityService passwordless", () => {
         },
       },
       baseUrl: "https://app.example",
-      rateLimiter: options?.limit !== undefined
-        ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
-        : undefined,
+      rateLimiter:
+        options?.limit !== undefined
+          ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
+          : undefined,
       protectionMode: options?.protectionMode,
       onEvent: (event) => {
         events.push(event);
@@ -2519,19 +2492,18 @@ describe("IdentityService passwordless", () => {
     const user = await signUp();
 
     await service.requestSignInLink("a@b.co");
-    assertEquals(links.length, 1);
-    assertEquals(links[0].to, "a@b.co");
-    assertEquals(links[0].subject, user.id);
-    assertEquals(
-      links[0].url,
+    expect(links.length).toStrictEqual(1);
+    expect(links[0].to).toStrictEqual("a@b.co");
+    expect(links[0].subject).toStrictEqual(user.id);
+    expect(links[0].url).toStrictEqual(
       `https://app.example/signin-link?token=${links[0].token}`,
     );
 
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
     });
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "invalid",
     });
   });
@@ -2540,11 +2512,13 @@ describe("IdentityService passwordless", () => {
     const { service, links, events, signUp } = makePasswordlessService();
     const user = await signUp();
 
-    assertEquals(await service.requestSignInLink("ghost@b.co"), undefined);
-    assertEquals(await service.requestSignInLink("a@b.co"), undefined);
-    assertEquals(links.length, 1);
+    expect(await service.requestSignInLink("ghost@b.co")).toStrictEqual(
+      undefined,
+    );
+    expect(await service.requestSignInLink("a@b.co")).toStrictEqual(undefined);
+    expect(links.length).toStrictEqual(1);
 
-    assertEquals(eventsOfType(events, "signin_link.requested"), [
+    expect(eventsOfType(events, "signin_link.requested")).toStrictEqual([
       { type: "signin_link.requested", email: "ghost@b.co" },
       { type: "signin_link.requested", email: "a@b.co", userId: user.id },
     ]);
@@ -2555,17 +2529,17 @@ describe("IdentityService passwordless", () => {
     const { service, links, events, signUp } = makePasswordlessService();
     await signUp();
 
-    assertEquals(await service.consumeSignInLink("garbage"), {
+    expect(await service.consumeSignInLink("garbage")).toStrictEqual({
       status: "invalid",
     });
 
     await service.requestSignInLink("a@b.co");
     time.tick(15 * 60 * 1000 + 1);
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "expired",
     });
 
-    assertEquals(eventsOfType(events, "signin_link.failed"), [
+    expect(eventsOfType(events, "signin_link.failed")).toStrictEqual([
       { type: "signin_link.failed", reason: "invalid" },
       { type: "signin_link.failed", reason: "expired" },
     ]);
@@ -2577,9 +2551,9 @@ describe("IdentityService passwordless", () => {
     const user = await signUp();
 
     await service.requestSignInLink("a@b.co", { ttlMs: 60_000 });
-    assertEquals(links[0].expiresAt, time.now + 60_000);
+    expect(links[0].expiresAt).toStrictEqual(time.now + 60_000);
     time.tick(59_999);
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
     });
@@ -2593,13 +2567,13 @@ describe("IdentityService passwordless", () => {
     await signUp();
 
     await service.requestSignInLink("a@b.co");
-    assertEquals(links[0].expiresAt, time.now + 60_000);
+    expect(links[0].expiresAt).toStrictEqual(time.now + 60_000);
 
     await service.requestSignInLink("a@b.co", { ttlMs: 5_000 });
-    assertEquals(links[1].expiresAt, time.now + 5_000);
+    expect(links[1].expiresAt).toStrictEqual(time.now + 5_000);
 
     time.tick(5_001);
-    assertEquals(await service.consumeSignInLink(links[1].token), {
+    expect(await service.consumeSignInLink(links[1].token)).toStrictEqual({
       status: "expired",
     });
   });
@@ -2610,10 +2584,10 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInLink("a@b.co");
     await service.requestSignInLink("a@b.co");
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "invalid",
     });
-    assertEquals(await service.consumeSignInLink(links[1].token), {
+    expect(await service.consumeSignInLink(links[1].token)).toStrictEqual({
       status: "success",
       userId: user.id,
     });
@@ -2627,18 +2601,18 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInLink("a@b.co");
     await service.requestSignInLink("a@b.co");
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.requestSignInLink("a@b.co"),
       IdentityError,
     );
-    assertEquals(err.code, "rate_limited");
-    assertEquals(typeof err.retryAfterMs, "number");
-    assertEquals(links.length, 2);
+    expect(err.code).toStrictEqual("rate_limited");
+    expect(typeof err.retryAfterMs).toStrictEqual("number");
+    expect(links.length).toStrictEqual(2);
     lastEventOfType(events, "signin_link.rate_limited");
 
     await service.requestSignInLink("ghost@b.co");
     await service.requestSignInLink("ghost@b.co");
-    await assertRejects(
+    await rejection(
       () => service.requestSignInLink("ghost@b.co"),
       IdentityError,
     );
@@ -2650,15 +2624,14 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInLink("a@b.co");
     await service.requestSignInLink("A@B.co");
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.requestSignInLink("a@B.CO"),
       IdentityError,
     );
-    assertEquals(
+    expect(
       err.code,
-      "rate_limited",
       "casing variants must not each get a fresh rate bucket",
-    );
+    ).toStrictEqual("rate_limited");
   });
 
   it("log-only mode emits signin_link.rate_limited without blocking", async () => {
@@ -2670,10 +2643,10 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInLink("a@b.co");
     await service.requestSignInLink("a@b.co");
-    assertEquals(links.length, 2);
+    expect(links.length).toStrictEqual(2);
     const limited = lastEventOfType(events, "signin_link.rate_limited");
-    assertEquals(limited.email, "a@b.co");
-    assertEquals(limited.enforced, false);
+    expect(limited.email).toStrictEqual("a@b.co");
+    expect(limited.enforced).toStrictEqual(false);
   });
 
   it("requestSignInCode delivers a code that verifySignInCode redeems once", async () => {
@@ -2681,35 +2654,33 @@ describe("IdentityService passwordless", () => {
     const user = await signUp();
 
     await service.requestSignInCode("a@b.co");
-    assertEquals(codes.length, 1);
-    assertEquals(codes[0].to, "a@b.co");
-    assertEquals(codes[0].subject, user.id);
+    expect(codes.length).toStrictEqual(1);
+    expect(codes[0].to).toStrictEqual("a@b.co");
+    expect(codes[0].subject).toStrictEqual(user.id);
 
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[0].code,
       }),
-      { status: "success", userId: user.id },
-    );
-    assertEquals(
+    ).toStrictEqual({ status: "success", userId: user.id });
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[0].code,
       }),
-      { status: "invalid" },
-    );
+    ).toStrictEqual({ status: "invalid" });
 
-    assertEquals(lastEventOfType(events, "signin_code.requested"), {
+    expect(lastEventOfType(events, "signin_code.requested")).toStrictEqual({
       type: "signin_code.requested",
       email: "a@b.co",
       userId: user.id,
     });
-    assertEquals(lastEventOfType(events, "signin_code.verified"), {
+    expect(lastEventOfType(events, "signin_code.verified")).toStrictEqual({
       type: "signin_code.verified",
       userId: user.id,
     });
-    assertEquals(lastEventOfType(events, "signin_code.failed"), {
+    expect(lastEventOfType(events, "signin_code.failed")).toStrictEqual({
       type: "signin_code.failed",
       email: "a@b.co",
       reason: "invalid",
@@ -2738,20 +2709,19 @@ describe("IdentityService passwordless", () => {
       profile: { email: "a@b.co" },
     });
 
-    assertEquals(await service.requestSignInCode("a@b.co"), undefined);
+    expect(await service.requestSignInCode("a@b.co")).toStrictEqual(undefined);
     assert(capturedCode.length > 0);
 
-    assertEquals(
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: capturedCode }),
-      { status: "invalid" },
-    );
-    assertEquals(lastEventOfType(events, "delivery.failed"), {
+    ).toStrictEqual({ status: "invalid" });
+    expect(lastEventOfType(events, "delivery.failed")).toStrictEqual({
       type: "delivery.failed",
       hook: "sendSignInCode",
       invalidated: true,
       error: "mailer down",
     });
-    assertEquals(lastEventOfType(events, "signin_code.requested"), {
+    expect(lastEventOfType(events, "signin_code.requested")).toStrictEqual({
       type: "signin_code.requested",
       email: "a@b.co",
       userId: user.id,
@@ -2774,8 +2744,10 @@ describe("IdentityService passwordless", () => {
       profile: { email: "a@b.co" },
     });
 
-    assertEquals(await service.requestSignInCode("a@b.co"), undefined);
-    assertEquals(await service.requestSignInCode("ghost@b.co"), undefined);
+    expect(await service.requestSignInCode("a@b.co")).toStrictEqual(undefined);
+    expect(await service.requestSignInCode("ghost@b.co")).toStrictEqual(
+      undefined,
+    );
   });
 
   it("a slow failing send does not invalidate a resend's delivered code", async () => {
@@ -2816,11 +2788,10 @@ describe("IdentityService passwordless", () => {
     releaseFirstSend();
     await stalled;
 
-    assertEquals(delivered.length, 1);
-    assertEquals(
+    expect(delivered.length).toStrictEqual(1);
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: delivered[0] }),
-      { status: "success", userId: user.id },
-    );
+    ).toStrictEqual({ status: "success", userId: user.id });
   });
 
   it("reports invalidated: false and leaves the code live when cleanup fails too", async () => {
@@ -2847,18 +2818,17 @@ describe("IdentityService passwordless", () => {
       profile: { email: "a@b.co" },
     });
 
-    assertEquals(await service.requestSignInCode("a@b.co"), undefined);
-    assertEquals(lastEventOfType(events, "delivery.failed"), {
+    expect(await service.requestSignInCode("a@b.co")).toStrictEqual(undefined);
+    expect(lastEventOfType(events, "delivery.failed")).toStrictEqual({
       type: "delivery.failed",
       hook: "sendSignInCode",
       invalidated: false,
       error: "mailer down",
     });
-    assertEquals(
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: capturedCode }),
-      { status: "success", userId: user.id },
       "invalidated: false means exactly this — an undelivered code stays live",
-    );
+    ).toStrictEqual({ status: "success", userId: user.id });
   });
 
   it("calls a delivery hook bound to its object, so a class instance keeps `this`", async () => {
@@ -2883,23 +2853,24 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInCode("a@b.co");
 
-    assertEquals(mailer.sent.length, 1);
-    assertEquals(
+    expect(mailer.sent.length).toStrictEqual(1);
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: mailer.sent[0].replace("outbox:", ""),
       }),
-      { status: "success", userId: user.id },
-    );
+    ).toStrictEqual({ status: "success", userId: user.id });
   });
 
   it("requestSignInCode for an unknown email resolves identically but sends nothing", async () => {
     const { service, codes, events, signUp } = makePasswordlessService();
     await signUp();
 
-    assertEquals(await service.requestSignInCode("ghost@b.co"), undefined);
-    assertEquals(codes.length, 0);
-    assertEquals(lastEventOfType(events, "signin_code.requested"), {
+    expect(await service.requestSignInCode("ghost@b.co")).toStrictEqual(
+      undefined,
+    );
+    expect(codes.length).toStrictEqual(0);
+    expect(lastEventOfType(events, "signin_code.requested")).toStrictEqual({
       type: "signin_code.requested",
       email: "ghost@b.co",
     });
@@ -2909,14 +2880,13 @@ describe("IdentityService passwordless", () => {
     const { service, events, signUp } = makePasswordlessService();
     await signUp();
 
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "ghost@b.co",
         code: "123456",
       }),
-      { status: "invalid" },
-    );
-    assertEquals(lastEventOfType(events, "signin_code.failed"), {
+    ).toStrictEqual({ status: "invalid" });
+    expect(lastEventOfType(events, "signin_code.failed")).toStrictEqual({
       type: "signin_code.failed",
       email: "ghost@b.co",
       reason: "unknown_email",
@@ -2931,37 +2901,33 @@ describe("IdentityService passwordless", () => {
     await signUp();
 
     await service.requestSignInCode("a@b.co");
-    assertEquals(
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: "000000" }),
-      { status: "invalid" },
-    );
-    assertEquals(
+    ).toStrictEqual({ status: "invalid" });
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: "000000" }),
-      { status: "invalid" },
-    );
-    assertEquals(lastEventOfType(events, "signin_code.failed"), {
+    ).toStrictEqual({ status: "invalid" });
+    expect(lastEventOfType(events, "signin_code.failed")).toStrictEqual({
       type: "signin_code.failed",
       email: "a@b.co",
       reason: "locked",
     });
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[0].code,
       }),
-      { status: "invalid" },
-    );
+    ).toStrictEqual({ status: "invalid" });
 
     await service.requestSignInCode("a@b.co");
     time.tick(60_001);
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[1].code,
       }),
-      { status: "invalid" },
-    );
-    assertEquals(lastEventOfType(events, "signin_code.failed"), {
+    ).toStrictEqual({ status: "invalid" });
+    expect(lastEventOfType(events, "signin_code.failed")).toStrictEqual({
       type: "signin_code.failed",
       email: "a@b.co",
       reason: "expired",
@@ -2974,20 +2940,18 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInCode("a@b.co");
     await service.requestSignInCode("a@b.co");
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[0].code,
       }),
-      { status: "invalid" },
-    );
-    assertEquals(
+    ).toStrictEqual({ status: "invalid" });
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[1].code,
       }),
-      { status: "success", userId: user.id },
-    );
+    ).toStrictEqual({ status: "success", userId: user.id });
   });
 
   it("request and verify share the code throttle window; success resets it", async () => {
@@ -2999,27 +2963,26 @@ describe("IdentityService passwordless", () => {
     await service.requestSignInCode("a@b.co");
     await service.verifySignInCode({ email: "a@b.co", code: "000000" });
     await service.verifySignInCode({ email: "a@b.co", code: "000000" });
-    const err = await assertRejects(
+    const err = await rejection(
       () => service.verifySignInCode({ email: "a@b.co", code: "000000" }),
       IdentityError,
     );
-    assertEquals(err.code, "rate_limited");
+    expect(err.code).toStrictEqual("rate_limited");
     lastEventOfType(events, "signin_code.rate_limited");
 
     const other = makePasswordlessService({ limit: 3 });
     const otherUser = await other.signUp();
     await other.service.requestSignInCode("a@b.co");
     await other.service.verifySignInCode({ email: "a@b.co", code: "000000" });
-    assertEquals(
+    expect(
       await other.service.verifySignInCode({
         email: "a@b.co",
         code: other.codes[0].code,
       }),
-      { status: "success", userId: otherUser.id },
-    );
+    ).toStrictEqual({ status: "success", userId: otherUser.id });
     await other.service.requestSignInCode("a@b.co");
     await other.service.requestSignInCode("a@b.co");
-    assertEquals(other.codes.length, 3);
+    expect(other.codes.length).toStrictEqual(3);
   });
 
   it("log-only mode emits signin_code.rate_limited without blocking", async () => {
@@ -3031,10 +2994,10 @@ describe("IdentityService passwordless", () => {
 
     await service.requestSignInCode("a@b.co");
     await service.requestSignInCode("a@b.co");
-    assertEquals(codes.length, 2);
+    expect(codes.length).toStrictEqual(2);
     const limited = lastEventOfType(events, "signin_code.rate_limited");
-    assertEquals(limited.email, "a@b.co");
-    assertEquals(limited.enforced, false);
+    expect(limited.email).toStrictEqual("a@b.co");
+    expect(limited.enforced).toStrictEqual(false);
   });
 
   it("rate-limits a code request identically for a known and an unknown email", async () => {
@@ -3044,15 +3007,15 @@ describe("IdentityService passwordless", () => {
 
     for (const { service } of [known, unknown]) {
       await service.requestSignInCode("a@b.co");
-      const error = await assertRejects(
+      const error = await rejection(
         () => service.requestSignInCode("a@b.co"),
         IdentityError,
       );
-      assertEquals(error.code, "rate_limited");
+      expect(error.code).toStrictEqual("rate_limited");
     }
 
-    assertEquals(known.codes.length, 1);
-    assertEquals(unknown.codes.length, 0);
+    expect(known.codes.length).toStrictEqual(1);
+    expect(unknown.codes.length).toStrictEqual(0);
   });
 
   function makeStoreOutageService() {
@@ -3101,43 +3064,43 @@ describe("IdentityService passwordless", () => {
     return { service, events, signUp, takeDown: () => (down = true) };
   }
 
-  for (
-    const [method, flow] of [
-      ["requestPasswordReset", "password_reset"],
-      ["requestSignInLink", "signin_link"],
-      ["requestSignInCode", "signin_code"],
-    ] as const
-  ) {
+  for (const [method, flow] of [
+    ["requestPasswordReset", "password_reset"],
+    ["requestSignInLink", "signin_link"],
+    ["requestSignInCode", "signin_code"],
+  ] as const) {
     it(`${method} resolves for a known email when its store throws, as it does for an unknown one`, async () => {
-      using consoleError = stub(console, "error");
+      using consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
       const { service, events, signUp, takeDown } = makeStoreOutageService();
       await signUp();
       takeDown();
 
-      assertEquals(await service[method]("ghost@b.co"), undefined);
-      assertEquals(await service[method]("a@b.co"), undefined);
+      expect(await service[method]("ghost@b.co")).toStrictEqual(undefined);
+      expect(await service[method]("a@b.co")).toStrictEqual(undefined);
 
       const failed = eventsOfType(events, "credential_mint.failed");
-      assertEquals(failed.length, 1);
-      assertEquals(failed[0].flow, flow);
-      assertEquals(consoleError.calls.length, 1);
+      expect(failed.length).toStrictEqual(1);
+      expect(failed[0].flow).toStrictEqual(flow);
+      expect(consoleError.mock.calls.length).toStrictEqual(1);
     });
   }
 
   it("requires the tokens/otp options for the flows that need them", async () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({ users: store });
-    await assertRejects(
+    await rejection(
       () => service.requestSignInLink("a@b.co"),
       Error,
       "requires a `tokens` option",
     );
-    await assertRejects(
+    await rejection(
       () => service.requestSignInCode("a@b.co"),
       Error,
       "requires an `otp` option",
     );
-    await assertRejects(
+    await rejection(
       () => service.verifySignInCode({ email: "a@b.co", code: "1" }),
       Error,
       "requires an `otp` option",
@@ -3179,22 +3142,22 @@ describe("IdentityService bring-your-own protections", () => {
     });
     await signUpAlice(service);
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
     );
-    assertEquals(checked, ["signin:a@b.co"]);
-    assertEquals(cleared, ["signin:a@b.co"]);
+    expect(checked).toStrictEqual(["signin:a@b.co"]);
+    expect(cleared).toStrictEqual(["signin:a@b.co"]);
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         service.signIn({ identifier: "a@b.co", password: "hunter2hunter2" }),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
-    assertEquals(error.retryAfterMs, 90_000);
+    expect(error.code).toStrictEqual("rate_limited");
+    expect(error.retryAfterMs).toStrictEqual(90_000);
   });
 
   it("accepts a plain-object lockout and drives it from signIn", async () => {
@@ -3238,21 +3201,19 @@ describe("IdentityService bring-your-own protections", () => {
     await signUpAlice(service);
 
     for (let i = 0; i < 2; i++) {
-      assertEquals(
+      expect(
         await service.signIn({ identifier: "a@b.co", password: "wrong" }),
-        null,
-      );
+      ).toStrictEqual(null);
     }
-    assertEquals(failures, 2);
+    expect(failures).toStrictEqual(2);
     lastEventOfType(events, "lockout");
 
-    assertEquals(
+    expect(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
       }),
-      null,
-    );
+    ).toStrictEqual(null);
     lastEventOfType(events, "sign_in.locked");
   });
 });
@@ -3341,13 +3302,13 @@ describe("IdentityService per-flow rate limiters", () => {
 
     await runEveryFlow(service, user.id);
 
-    assertEquals(shared.checked, []);
-    assertEquals(signIn.checked, ["signin:a@b.co"]);
-    assertEquals(passwordReset.checked, ["pwreset:a@b.co"]);
-    assertEquals(emailVerification.checked, [`verifyemail:${user.id}`]);
-    assertEquals(accountUnlock.checked, [`unlock:${user.id}`]);
-    assertEquals(signInLink.checked, ["pwless:a@b.co"]);
-    assertEquals(signInCode.checked, ["otp:signin:a@b.co"]);
+    expect(shared.checked).toStrictEqual([]);
+    expect(signIn.checked).toStrictEqual(["signin:a@b.co"]);
+    expect(passwordReset.checked).toStrictEqual(["pwreset:a@b.co"]);
+    expect(emailVerification.checked).toStrictEqual([`verifyemail:${user.id}`]);
+    expect(accountUnlock.checked).toStrictEqual([`unlock:${user.id}`]);
+    expect(signInLink.checked).toStrictEqual(["pwless:a@b.co"]);
+    expect(signInCode.checked).toStrictEqual(["otp:signin:a@b.co"]);
   });
 
   it("falls back to the shared limiter for every unset flow", async () => {
@@ -3359,7 +3320,7 @@ describe("IdentityService per-flow rate limiters", () => {
 
     await runEveryFlow(service, user.id);
 
-    assertEquals(shared.checked, [
+    expect(shared.checked).toStrictEqual([
       "signin:a@b.co",
       "pwreset:a@b.co",
       `verifyemail:${user.id}`,
@@ -3384,7 +3345,7 @@ describe("IdentityService per-flow rate limiters", () => {
       email: "A@B.co",
     });
 
-    assertEquals(shared.checked, [
+    expect(shared.checked).toStrictEqual([
       "pwreset:a@b.co",
       "pwless:a@b.co",
       "otp:signin:a@b.co",
@@ -3402,11 +3363,10 @@ describe("IdentityService per-flow rate limiters", () => {
     await service.signIn({ identifier: "A@b.co", password: "x" });
     await service.signIn({ identifier: " a@b.co ", password: "x" });
 
-    assertEquals(
+    expect(
       shared.checked,
-      ["signin:A@b.co", "signin:a@b.co"],
       "identifier equality is the app's to define, so only whitespace is normalized",
-    );
+    ).toStrictEqual(["signin:A@b.co", "signin:a@b.co"]);
   });
 
   it("falls back per flow, overriding only the keys that are set", async () => {
@@ -3420,8 +3380,8 @@ describe("IdentityService per-flow rate limiters", () => {
 
     await runEveryFlow(service, user.id);
 
-    assertEquals(passwordReset.checked, ["pwreset:a@b.co"]);
-    assertEquals(shared.checked, [
+    expect(passwordReset.checked).toStrictEqual(["pwreset:a@b.co"]);
+    expect(shared.checked).toStrictEqual([
       "signin:a@b.co",
       `verifyemail:${user.id}`,
       `unlock:${user.id}`,
@@ -3440,14 +3400,14 @@ describe("IdentityService per-flow rate limiters", () => {
     await signUp();
 
     await service.requestPasswordReset("a@b.co");
-    const error = await assertRejects(
+    const error = await rejection(
       () => service.requestPasswordReset("a@b.co"),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
+    expect(error.code).toStrictEqual("rate_limited");
 
     for (let i = 0; i < 3; i++) {
-      assertExists(
+      assert.exists(
         await service.signIn({
           identifier: "a@b.co",
           password: "hunter2hunter2",
@@ -3466,11 +3426,11 @@ describe("IdentityService per-flow rate limiters", () => {
     await service.requestSignInCode("a@b.co");
     await service.requestSignInCode("nobody@b.co");
 
-    assertEquals(signInCode.checked, [
+    expect(signInCode.checked).toStrictEqual([
       "otp:signin:a@b.co",
       "otp:signin:nobody@b.co",
     ]);
-    assertEquals(codes.length, 1);
+    expect(codes.length).toStrictEqual(1);
   });
 
   it("offers no second limiter seam on the otp option", async () => {
@@ -3502,9 +3462,9 @@ describe("IdentityService per-flow rate limiters", () => {
 
     await service.requestSignInCode("a@b.co");
 
-    assertEquals(stray.checked, []);
-    assertEquals(signInCode.checked, ["otp:signin:a@b.co"]);
-    assertEquals(codes.length, 1);
+    expect(stray.checked).toStrictEqual([]);
+    expect(signInCode.checked).toStrictEqual(["otp:signin:a@b.co"]);
+    expect(codes.length).toStrictEqual(1);
   });
 
   it("offers no protection mode of its own on the otp option", () => {
@@ -3519,7 +3479,7 @@ describe("IdentityService per-flow rate limiters", () => {
       },
     };
 
-    assertExists(serviceWithoutSignInFloor(options));
+    assert.exists(serviceWithoutSignInFloor(options));
   });
 
   it("applies a per-flow limiter with no shared limiter configured", async () => {
@@ -3531,7 +3491,7 @@ describe("IdentityService per-flow rate limiters", () => {
 
     await runEveryFlow(service, user.id);
 
-    assertEquals(passwordReset.checked, ["pwreset:a@b.co"]);
+    expect(passwordReset.checked).toStrictEqual(["pwreset:a@b.co"]);
   });
 
   it("resets the sign-in window on the signIn limiter, not the shared one", async () => {
@@ -3543,7 +3503,7 @@ describe("IdentityService per-flow rate limiters", () => {
     });
     await signUp();
 
-    assertExists(
+    assert.exists(
       await service.signIn({
         identifier: "a@b.co",
         password: "hunter2hunter2",
@@ -3551,8 +3511,8 @@ describe("IdentityService per-flow rate limiters", () => {
     );
     await service.resetSignInThrottle("a@b.co");
 
-    assertEquals(signIn.cleared, ["signin:a@b.co", "signin:a@b.co"]);
-    assertEquals(shared.cleared, []);
+    expect(signIn.cleared).toStrictEqual(["signin:a@b.co", "signin:a@b.co"]);
+    expect(shared.cleared).toStrictEqual([]);
   });
 
   it("resets the sign-in code window on the signInCode limiter", async () => {
@@ -3565,16 +3525,15 @@ describe("IdentityService per-flow rate limiters", () => {
     const user = await signUp();
 
     await service.requestSignInCode("a@b.co");
-    assertEquals(
+    expect(
       await service.verifySignInCode({
         email: "a@b.co",
         code: codes[0].code,
       }),
-      { status: "success", userId: user.id },
-    );
+    ).toStrictEqual({ status: "success", userId: user.id });
 
-    assertEquals(signInCode.cleared, ["otp:signin:a@b.co"]);
-    assertEquals(shared.cleared, []);
+    expect(signInCode.cleared).toStrictEqual(["otp:signin:a@b.co"]);
+    expect(shared.cleared).toStrictEqual([]);
   });
 
   it("blocks a flow whose own limiter denies even when the shared one allows", async () => {
@@ -3586,12 +3545,12 @@ describe("IdentityService per-flow rate limiters", () => {
     });
     await signUp();
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => service.requestSignInLink("a@b.co"),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
-    assertEquals(error.retryAfterMs, 60_000);
+    expect(error.code).toStrictEqual("rate_limited");
+    expect(error.retryAfterMs).toStrictEqual(60_000);
     await service.requestPasswordReset("a@b.co");
   });
 });
@@ -3640,9 +3599,9 @@ describe("IdentityService resetPassword voids other credentials", () => {
     await signUp();
     await service.requestSignInLink("a@b.co");
 
-    assertExists(await reset("newpassword1"));
+    assert.exists(await reset("newpassword1"));
 
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "invalid",
     });
   });
@@ -3652,12 +3611,11 @@ describe("IdentityService resetPassword voids other credentials", () => {
     await signUp();
     await service.requestSignInCode("a@b.co");
 
-    assertExists(await reset("newpassword1"));
+    assert.exists(await reset("newpassword1"));
 
-    assertEquals(
+    expect(
       await service.verifySignInCode({ email: "a@b.co", code: codes[0].code }),
-      { status: "invalid" },
-    );
+    ).toStrictEqual({ status: "invalid" });
   });
 
   it("still resets on a token store that cannot delete by subject", async () => {
@@ -3670,18 +3628,20 @@ describe("IdentityService resetPassword voids other credentials", () => {
     const user = await signUp();
     await service.requestSignInLink("a@b.co");
 
-    assertEquals(await reset("newpassword1"), { userId: user.id });
-    assertExists(
+    expect(await reset("newpassword1")).toStrictEqual({ userId: user.id });
+    assert.exists(
       await service.signIn({ identifier: "a@b.co", password: "newpassword1" }),
     );
-    assertEquals(await service.consumeSignInLink(links[0].token), {
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
     });
   });
 
   it("still resets when the token store throws while deleting by subject", async () => {
-    using consoleError = stub(console, "error");
+    using consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     const backing = new MemoryTokenFlowStore();
     const { service, signUp, reset } = makeResetService({
       save: (record) => backing.save(record),
@@ -3694,10 +3654,10 @@ describe("IdentityService resetPassword voids other credentials", () => {
     });
     const user = await signUp();
 
-    assertEquals(await reset("newpassword1"), { userId: user.id });
-    assertExists(
+    expect(await reset("newpassword1")).toStrictEqual({ userId: user.id });
+    assert.exists(
       await service.signIn({ identifier: "a@b.co", password: "newpassword1" }),
     );
-    assertEquals(consoleError.calls.length, 1);
+    expect(consoleError.mock.calls.length).toStrictEqual(1);
   });
 });

@@ -1,6 +1,5 @@
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
+import { thrown } from "../_test_assert.ts";
 import { BffClient } from "./bff-client.ts";
 import type { OAuth2ClientEvent } from "./events.ts";
 
@@ -43,16 +42,16 @@ describe("BffClient", () => {
       const client = new BffClient({ endpoints: { baseUrl: BASE_URL } });
       const { url } = await client.login({ returnTo: "/dashboard" });
       const parsed = new URL(url);
-      assertStrictEquals(parsed.origin, BASE_URL);
-      assertStrictEquals(parsed.pathname, "/auth/login");
-      assertStrictEquals(parsed.searchParams.get("return_to"), "/dashboard");
+      expect(parsed.origin).toBe(BASE_URL);
+      expect(parsed.pathname).toBe("/auth/login");
+      expect(parsed.searchParams.get("return_to")).toBe("/dashboard");
     });
 
     it("defaults to the same-origin /auth/login path", async () => {
       const client = new BffClient();
       const { url } = await client.login();
-      assertStrictEquals(new URL(url).pathname, "/auth/login");
-      assertStrictEquals(new URL(url).searchParams.get("return_to"), null);
+      expect(new URL(url).pathname).toBe("/auth/login");
+      expect(new URL(url).searchParams.get("return_to")).toBe(null);
     });
   });
 
@@ -63,9 +62,9 @@ describe("BffClient", () => {
       client.subscribe((event) => events.push(event));
 
       const { url } = await client.logout({ returnTo: "/bye" });
-      assertStrictEquals(url, `${BASE_URL}/auth/logout?return_to=%2Fbye`);
-      assertStrictEquals(events.length, 1);
-      assertStrictEquals(events[0].type, "logged_out");
+      expect(url).toBe(`${BASE_URL}/auth/logout?return_to=%2Fbye`);
+      expect(events.length).toBe(1);
+      expect(events[0].type).toBe("logged_out");
     });
   });
 
@@ -80,7 +79,7 @@ describe("BffClient", () => {
           logoutUrl: "/auth/logout",
         }),
       });
-      assertEquals(await client.getSession(), {
+      expect(await client.getSession()).toStrictEqual({
         isAuthenticated: true,
         user: { sub: "u1" },
         sessionExpiresIn: 300,
@@ -93,7 +92,7 @@ describe("BffClient", () => {
         endpoints: { baseUrl: BASE_URL },
         fetch: sessionResponder({ isAuthenticated: false, user: null }),
       });
-      assertEquals(await client.getSession(), {
+      expect(await client.getSession()).toStrictEqual({
         isAuthenticated: false,
         user: null,
         sessionExpiresIn: null,
@@ -109,8 +108,8 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
-      assertEquals(events, [], "401 is the normal anonymous answer");
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+      expect(events, "401 is the normal anonymous answer").toStrictEqual([]);
     });
 
     it("reads a 503 as signed out and reports it", async () => {
@@ -121,12 +120,11 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
-      assertEquals(
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+      expect(
         events.map((event) => event.type),
-        ["error"],
         "a broken BFF is not the same as an anonymous visitor",
-      );
+      ).toStrictEqual(["error"]);
     });
 
     it("reads an HTML 200 as signed out rather than rejecting", async () => {
@@ -143,12 +141,11 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
-      assertEquals(
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+      expect(
         events.map((event) => event.type),
-        ["error"],
         "an unparseable probe is reported, not swallowed silently",
-      );
+      ).toStrictEqual(["error"]);
     });
 
     it("reads an unreachable BFF as signed out and emits error", async () => {
@@ -159,8 +156,8 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
-      assertEquals(events.map((event) => event.type), ["error"]);
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+      expect(events.map((event) => event.type)).toStrictEqual(["error"]);
     });
 
     it("drops user, expiry, and logoutUrl from an anonymous payload", async () => {
@@ -173,7 +170,7 @@ describe("BffClient", () => {
           logoutUrl: "/auth/logout",
         }),
       });
-      assertEquals(await client.getSession(), {
+      expect(await client.getSession()).toStrictEqual({
         isAuthenticated: false,
         user: null,
         sessionExpiresIn: null,
@@ -186,11 +183,11 @@ describe("BffClient", () => {
         endpoints: { baseUrl: BASE_URL },
         fetch: sessionResponder({ isAuthenticated: false }),
       });
-      const first = await client.getSession() as { isAuthenticated: boolean };
-      assertThrows(() => {
+      const first = (await client.getSession()) as { isAuthenticated: boolean };
+      thrown(() => {
         first.isAuthenticated = true;
       });
-      assertStrictEquals((await client.getSession()).isAuthenticated, false);
+      expect((await client.getSession()).isAuthenticated).toBe(false);
     });
 
     it("sends credentials and the CSRF header on the probe", async () => {
@@ -203,11 +200,8 @@ describe("BffClient", () => {
         ),
       });
       await client.getSession();
-      assertStrictEquals(captures[0].init?.credentials, "include");
-      assertStrictEquals(
-        new Headers(captures[0].init?.headers).get("x-csrf"),
-        "1",
-      );
+      expect(captures[0].init?.credentials).toBe("include");
+      expect(new Headers(captures[0].init?.headers).get("x-csrf")).toBe("1");
     });
 
     it("honors a custom CSRF header name and value", async () => {
@@ -222,8 +216,8 @@ describe("BffClient", () => {
       });
       await client.getSession();
       const headers = new Headers(captures[0].init?.headers);
-      assertStrictEquals(headers.get("x-requested-with"), "spa");
-      assertStrictEquals(headers.get("x-csrf"), null);
+      expect(headers.get("x-requested-with")).toBe("spa");
+      expect(headers.get("x-csrf")).toBe(null);
     });
 
     it("sends no CSRF header when the guard is disabled", async () => {
@@ -237,10 +231,7 @@ describe("BffClient", () => {
         ),
       });
       await client.getSession();
-      assertStrictEquals(
-        new Headers(captures[0].init?.headers).get("x-csrf"),
-        null,
-      );
+      expect(new Headers(captures[0].init?.headers).get("x-csrf")).toBe(null);
     });
   });
 
@@ -251,7 +242,7 @@ describe("BffClient", () => {
         endpoints: { baseUrl: BASE_URL },
         fetch: sessionResponder({ isAuthenticated: true, user: sessionUser }),
       });
-      assertEquals(await client.getUser(), sessionUser);
+      expect(await client.getUser()).toStrictEqual(sessionUser);
     });
 
     it("returns null when the probe says signed out", async () => {
@@ -259,7 +250,7 @@ describe("BffClient", () => {
         endpoints: { baseUrl: BASE_URL },
         fetch: sessionResponder({ isAuthenticated: false, user: { sub: "x" } }),
       });
-      assertStrictEquals(await client.getUser(), null);
+      expect(await client.getUser()).toBe(null);
     });
   });
 
@@ -272,19 +263,17 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.renewSession()).isAuthenticated, false);
-      assertEquals(
+      expect((await client.renewSession()).isAuthenticated).toBe(false);
+      expect(
         events,
-        [],
         "a background renew owes the UI no error state for a blip",
-      );
+      ).toStrictEqual([]);
 
       await client.getSession();
-      assertEquals(
+      expect(
         events.map((event) => event.type),
-        ["error"],
         "a foreground probe still reports it",
-      );
+      ).toStrictEqual(["error"]);
     });
 
     it("re-probes the session endpoint", async () => {
@@ -297,8 +286,8 @@ describe("BffClient", () => {
         ),
       });
       const session = await client.renewSession();
-      assertStrictEquals(session.sessionExpiresIn, 60);
-      assertStrictEquals(captures.length, 1);
+      expect(session.sessionExpiresIn).toBe(60);
+      expect(captures.length).toBe(1);
     });
   });
 
@@ -312,11 +301,8 @@ describe("BffClient", () => {
         }) as typeof fetch,
       });
       await client.fetch("/api/items");
-      assertStrictEquals(captures[0].init?.credentials, "include");
-      assertStrictEquals(
-        new Headers(captures[0].init?.headers).get("x-csrf"),
-        "1",
-      );
+      expect(captures[0].init?.credentials).toBe("include");
+      expect(new Headers(captures[0].init?.headers).get("x-csrf")).toBe("1");
     });
 
     it("leaves a caller-set CSRF header alone", async () => {
@@ -328,8 +314,7 @@ describe("BffClient", () => {
         }) as typeof fetch,
       });
       await client.fetch("/api/items", { headers: { "x-csrf": "custom" } });
-      assertStrictEquals(
-        new Headers(captures[0].init?.headers).get("x-csrf"),
+      expect(new Headers(captures[0].init?.headers).get("x-csrf")).toBe(
         "custom",
       );
     });
@@ -349,9 +334,9 @@ describe("BffClient", () => {
         }),
       );
 
-      assertStrictEquals(sent?.get("x-trace"), "abc");
-      assertStrictEquals(sent?.get("accept"), "application/json");
-      assertStrictEquals(sent?.get("x-csrf"), "1");
+      expect(sent?.get("x-trace")).toBe("abc");
+      expect(sent?.get("accept")).toBe("application/json");
+      expect(sent?.get("x-csrf")).toBe("1");
     });
 
     it("lets init.headers override a same-named Request header, keeping the rest", async () => {
@@ -370,8 +355,8 @@ describe("BffClient", () => {
         { headers: { "x-trace": "from-init" } },
       );
 
-      assertStrictEquals(sent?.get("x-trace"), "from-init");
-      assertStrictEquals(sent?.get("x-keep"), "kept");
+      expect(sent?.get("x-trace")).toBe("from-init");
+      expect(sent?.get("x-keep")).toBe("kept");
     });
 
     it("leaves a CSRF header set on a Request input alone", async () => {
@@ -389,7 +374,7 @@ describe("BffClient", () => {
         }),
       );
 
-      assertStrictEquals(sent?.get("x-csrf"), "custom");
+      expect(sent?.get("x-csrf")).toBe("custom");
     });
 
     it("emits logged_out on a 401 and returns the response as-is", async () => {
@@ -401,13 +386,12 @@ describe("BffClient", () => {
       client.subscribe((event) => events.push(event));
 
       const res = await client.fetch("/api/items");
-      assertStrictEquals(res.status, 401);
-      assertEquals(
+      expect(res.status).toBe(401);
+      expect(
         events.map((event) =>
-          event.type === "logged_out" ? event.reason : event.type
+          event.type === "logged_out" ? event.reason : event.type,
         ),
-        ["session_expired"],
-      );
+      ).toStrictEqual(["session_expired"]);
     });
 
     it("leaves a non-401 response untouched", async () => {
@@ -418,8 +402,8 @@ describe("BffClient", () => {
       const events: OAuth2ClientEvent[] = [];
       client.subscribe((event) => events.push(event));
 
-      assertStrictEquals((await client.fetch("/api/items")).status, 403);
-      assertStrictEquals(events.length, 0);
+      expect((await client.fetch("/api/items")).status).toBe(403);
+      expect(events.length).toBe(0);
     });
   });
 
@@ -429,9 +413,8 @@ describe("BffClient", () => {
         authorizePath: "/api/oauth2/authorize",
       });
       const authorizeUrl = "/api/oauth2/authorize?response_type=code&state=s";
-      assertStrictEquals(client.loginContinuation(authorizeUrl), authorizeUrl);
-      assertStrictEquals(
-        client.loginContinuation("/dashboard"),
+      expect(client.loginContinuation(authorizeUrl)).toBe(authorizeUrl);
+      expect(client.loginContinuation("/dashboard")).toBe(
         "/auth/login?return_to=%2Fdashboard",
       );
     });
@@ -440,16 +423,14 @@ describe("BffClient", () => {
       const client = new BffClient({
         endpoints: { baseUrl: BASE_URL, login: "/auth/signin" },
       });
-      assertStrictEquals(
-        client.loginContinuation("/x"),
+      expect(client.loginContinuation("/x")).toBe(
         `${BASE_URL}/auth/signin?return_to=%2Fx`,
       );
     });
 
     it("starts a fresh login for an authorize URL when authorizePath is unset", () => {
       const client = new BffClient();
-      assertStrictEquals(
-        client.loginContinuation("/api/oauth2/authorize?state=s"),
+      expect(client.loginContinuation("/api/oauth2/authorize?state=s")).toBe(
         "/auth/login?return_to=%2Fapi%2Foauth2%2Fauthorize%3Fstate%3Ds",
       );
     });

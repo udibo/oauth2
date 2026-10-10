@@ -1,6 +1,5 @@
-import { assertEquals, assertRejects, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { describe, expect, it, vi } from "vitest";
+import { rejection } from "../_test_assert.ts";
 import { Hono } from "hono";
 
 import { HonoAuthorizationServer } from "../adapters/hono/authorization-server.ts";
@@ -76,7 +75,7 @@ async function createFixture(
     authorizationCodeService,
     deviceAuthorizationService,
   };
-  const grantResolve = spy(() => services);
+  const grantResolve = vi.fn(() => services);
   const clientCredentials = new ClientCredentialsGrant({
     resolve: grantResolve,
   });
@@ -94,36 +93,39 @@ async function createFixture(
         clientCredentials.getAuthenticatedClient(request, body),
       token: (request, authenticatedClient, body) => {
         extensions = Object.fromEntries(
-          ["resource", "audience", "custom"].map((
+          ["resource", "audience", "custom"].map((name) => [
             name,
-          ) => [name, body.getAll(name)]),
+            body.getAll(name),
+          ]),
         );
         return clientCredentials.token(request, authenticatedClient, body);
       },
     },
   };
-  const resolve = spy(() => ({
+  const resolve = vi.fn(() => ({
     services,
     issuer: "https://auth.example.com",
     verificationUri: "https://auth.example.com/device",
   }));
   const serverOptions = { ...options, resolve, grants };
-  const server = transport === "hono"
-    ? new HonoAuthorizationServer(serverOptions)
-    : new AuthorizationServer(serverOptions);
+  const server =
+    transport === "hono"
+      ? new HonoAuthorizationServer(serverOptions)
+      : new AuthorizationServer(serverOptions);
   const observers = [
-    spy(clientService, "getAuthenticated"),
-    spy(clientService, "get"),
-    spy(tokenService, "getToken"),
-    spy(tokenService, "getRefreshToken"),
-    spy(tokenService, "save"),
-    spy(tokenService, "revoke"),
-    spy(authorizationCodeService, "get"),
-    spy(deviceAuthorizationService, "getByDeviceCode"),
-    spy(deviceAuthorizationService, "save"),
-    ...Object.values(grants).flatMap((
-      grant,
-    ) => [spy(grant, "getAuthenticatedClient"), spy(grant, "token")]),
+    vi.spyOn(clientService, "getAuthenticated"),
+    vi.spyOn(clientService, "get"),
+    vi.spyOn(tokenService, "getToken"),
+    vi.spyOn(tokenService, "getRefreshToken"),
+    vi.spyOn(tokenService, "save"),
+    vi.spyOn(tokenService, "revoke"),
+    vi.spyOn(authorizationCodeService, "get"),
+    vi.spyOn(deviceAuthorizationService, "getByDeviceCode"),
+    vi.spyOn(deviceAuthorizationService, "save"),
+    ...Object.values(grants).flatMap((grant) => [
+      vi.spyOn(grant, "getAuthenticatedClient"),
+      vi.spyOn(grant, "token"),
+    ]),
   ];
   const handlers = {
     token: server.handleTokenRequest.bind(server),
@@ -155,15 +157,15 @@ async function createFixture(
       return await (app ? app.request(request) : handlers[endpoint](request));
     },
     assertNoWork(): void {
-      assertEquals([
-        resolve.calls.length,
-        grantResolve.calls.length,
-        ...observers.map((observer) => observer.calls.length),
-      ], Array.from({ length: observers.length + 2 }, () => 0));
+      expect([
+        resolve.mock.calls.length,
+        grantResolve.mock.calls.length,
+        ...observers.map((observer) => observer.mock.calls.length),
+      ]).toStrictEqual(Array.from({ length: observers.length + 2 }, () => 0));
     },
     extensions: () => extensions,
     [Symbol.dispose](): void {
-      for (const observer of observers.toReversed()) observer.restore();
+      for (const observer of observers.toReversed()) observer.mockRestore();
     },
   };
 }
@@ -177,19 +179,18 @@ function fieldsFor(
     client_secret: "fixture-secret",
   });
   if (endpoint === "token") {
-    for (
-      const [name, value] of Object.entries({
-        grant_type: grantType,
-        scope: "read",
-        code: "fixture-code",
-        redirect_uri: "https://example.com/callback",
-        code_verifier: "A".repeat(43),
-        refresh_token: "fixture-refresh",
-        username: "fixture-user",
-        password: "fixture-password",
-        device_code: "fixture-device",
-      })
-    ) fields.set(name, value);
+    for (const [name, value] of Object.entries({
+      grant_type: grantType,
+      scope: "read",
+      code: "fixture-code",
+      redirect_uri: "https://example.com/callback",
+      code_verifier: "A".repeat(43),
+      refresh_token: "fixture-refresh",
+      username: "fixture-user",
+      password: "fixture-password",
+      device_code: "fixture-device",
+    }))
+      fields.set(name, value);
   } else if (endpoint === "device") {
     fields.set("scope", "read");
   } else {
@@ -203,21 +204,20 @@ async function assertRefusal(
   response: Response,
   errorFormat: "oauth2" | "problem-details" = "oauth2",
 ): Promise<void> {
-  assertStrictEquals(response.status, 400);
-  assertStrictEquals(response.headers.get("cache-control"), "no-store");
-  assertStrictEquals(response.headers.get("pragma"), "no-cache");
-  assertStrictEquals(response.headers.get("www-authenticate"), null);
+  expect(response.status).toBe(400);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("pragma")).toBe("no-cache");
+  expect(response.headers.get("www-authenticate")).toBe(null);
   const body = await response.json();
-  assertStrictEquals(body.error, "invalid_request");
-  assertStrictEquals(
-    response.headers.get("content-type"),
+  expect(body.error).toBe("invalid_request");
+  expect(response.headers.get("content-type")).toBe(
     errorFormat === "oauth2"
       ? "application/json;charset=UTF-8"
       : "application/problem+json",
   );
-  assertStrictEquals(JSON.stringify(body).includes("fixture-secret"), false);
-  assertStrictEquals(JSON.stringify(body).includes("conflicting-value"), false);
-  if (errorFormat === "problem-details") assertStrictEquals(body.status, 400);
+  expect(JSON.stringify(body).includes("fixture-secret")).toBe(false);
+  expect(JSON.stringify(body).includes("conflicting-value")).toBe(false);
+  if (errorFormat === "problem-details") expect(body.status).toBe(400);
 }
 
 const cases: {
@@ -273,24 +273,21 @@ describe("singleton protocol form parameters", () => {
             );
             await assertRefusal(await fixture.send(endpoint, fields));
             fixture.assertNoWork();
-            assertStrictEquals(
+            expect(
               (await fixture.tokenService.getToken("fixture-token"))
                 ?.accessToken,
-              "fixture-token",
-            );
+            ).toBe("fixture-token");
           });
         }
       }
     }
 
-    for (
-      const endpoint of [
-        "token",
-        "revocation",
-        "introspection",
-        "device",
-      ] as const
-    ) {
+    for (const endpoint of [
+      "token",
+      "revocation",
+      "introspection",
+      "device",
+    ] as const) {
       for (const secret of ["fixture-secret", "invalid-secret"]) {
         it(`${transport} refuses repeated client_id before Basic authentication on ${endpoint} with ${secret === "fixture-secret" ? "valid" : "invalid"} header credentials`, async () => {
           using fixture = await createFixture(transport);
@@ -314,13 +311,13 @@ describe("singleton protocol form parameters", () => {
           fields.append(parameter, "second");
         }
         const response = await fixture.send(endpoint, fields);
-        assertStrictEquals(response.status, 200);
+        expect(response.status).toBe(200);
         await response.arrayBuffer();
       });
       it(`${transport} preserves valid singleton ${endpoint} requests`, async () => {
         using fixture = await createFixture(transport);
         const response = await fixture.send(endpoint, fieldsFor(endpoint));
-        assertStrictEquals(response.status, 200);
+        expect(response.status).toBe(200);
         await response.arrayBuffer();
       });
       it(`${transport} keeps problem details and cache headers on malformed ${endpoint} forms`, async () => {
@@ -340,15 +337,13 @@ describe("singleton protocol form parameters", () => {
     it(`${transport} keeps unrelated and multivalue extension parameters on the client-credentials grant`, async () => {
       using fixture = await createFixture(transport);
       const fields = fieldsFor("token");
-      for (
-        const parameter of [
-          "resource",
-          "audience",
-          "custom",
-          "code",
-          "token_type_hint",
-        ]
-      ) {
+      for (const parameter of [
+        "resource",
+        "audience",
+        "custom",
+        "code",
+        "token_type_hint",
+      ]) {
         fields.delete(parameter);
         fields.append(parameter, "first");
         fields.append(parameter, "second");
@@ -358,7 +353,7 @@ describe("singleton protocol form parameters", () => {
         fields,
         basicAuthHeader("fixture-client", "fixture-secret"),
       );
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       await response.arrayBuffer();
     });
 
@@ -370,9 +365,9 @@ describe("singleton protocol form parameters", () => {
         fields.append(parameter, "second");
       }
       const response = await fixture.send("token", fields);
-      assertStrictEquals(response.status, 200);
+      expect(response.status).toBe(200);
       await response.arrayBuffer();
-      assertEquals(fixture.extensions(), {
+      expect(fixture.extensions()).toStrictEqual({
         resource: ["first", "second"],
         audience: ["first", "second"],
         custom: ["first", "second"],
@@ -384,12 +379,12 @@ describe("singleton protocol form parameters", () => {
     using fixture = await createFixture("core", { throwOnError: true });
     const fields = fieldsFor("token");
     fields.append("grant_type", "client_credentials");
-    const error = await assertRejects(
+    const error = await rejection(
       () => fixture.send("token", fields),
       InvalidRequestError,
     );
-    assertStrictEquals(error.headers.get("cache-control"), "no-store");
-    assertStrictEquals(error.headers.get("pragma"), "no-cache");
+    expect(error.headers.get("cache-control")).toBe("no-store");
+    expect(error.headers.get("pragma")).toBe("no-cache");
     fixture.assertNoWork();
   });
 });

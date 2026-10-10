@@ -1,6 +1,4 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import {
   IdentityError,
   identityErrorStatus,
@@ -12,35 +10,35 @@ describe("IdentityError", () => {
     const err = new IdentityError("rate_limited", "slow down", {
       retryAfterMs: 5000,
     });
-    assertEquals(err.code, "rate_limited");
-    assertEquals(err.retryAfterMs, 5000);
-    assertEquals(err.name, "IdentityError");
-    assertEquals(isIdentityError(err), true);
-    assertEquals(isIdentityError(new Error("x")), false);
+    expect(err.code).toStrictEqual("rate_limited");
+    expect(err.retryAfterMs).toStrictEqual(5000);
+    expect(err.name).toStrictEqual("IdentityError");
+    expect(isIdentityError(err)).toStrictEqual(true);
+    expect(isIdentityError(new Error("x"))).toStrictEqual(false);
   });
 
   it("maps codes to conventional statuses", () => {
-    assertEquals(identityErrorStatus("invalid_credentials"), 401);
-    assertEquals(identityErrorStatus("invalid_token"), 400);
-    assertEquals(identityErrorStatus("rate_limited"), 429);
-    assertEquals(identityErrorStatus("weak_password"), 422);
-    assertEquals(identityErrorStatus("identifier_taken"), 409);
-    assertEquals(identityErrorStatus("email_not_verified"), 403);
-    assertEquals(identityErrorStatus("mfa_not_enrolled"), 409);
-    assertEquals(identityErrorStatus("mfa_already_enrolled"), 409);
+    expect(identityErrorStatus("invalid_credentials")).toStrictEqual(401);
+    expect(identityErrorStatus("invalid_token")).toStrictEqual(400);
+    expect(identityErrorStatus("rate_limited")).toStrictEqual(429);
+    expect(identityErrorStatus("weak_password")).toStrictEqual(422);
+    expect(identityErrorStatus("identifier_taken")).toStrictEqual(409);
+    expect(identityErrorStatus("email_not_verified")).toStrictEqual(403);
+    expect(identityErrorStatus("mfa_not_enrolled")).toStrictEqual(409);
+    expect(identityErrorStatus("mfa_already_enrolled")).toStrictEqual(409);
   });
 
   it("carries a captcha_failed code that maps to 403", () => {
     const err = new IdentityError("captcha_failed");
-    assertEquals(err.code, "captcha_failed");
-    assertEquals(err.message, "captcha_failed");
-    assertEquals(identityErrorStatus("captcha_failed"), 403);
+    expect(err.code).toStrictEqual("captcha_failed");
+    expect(err.message).toStrictEqual("captcha_failed");
+    expect(identityErrorStatus("captcha_failed")).toStrictEqual(403);
   });
 
   it("carries a forbidden_origin code that maps to 403", () => {
     const err = new IdentityError("forbidden_origin");
-    assertEquals(err.code, "forbidden_origin");
-    assertEquals(err.message, "forbidden_origin");
-    assertEquals(identityErrorStatus("forbidden_origin"), 403);
+    expect(err.code).toStrictEqual("forbidden_origin");
+    expect(err.message).toStrictEqual("forbidden_origin");
+    expect(identityErrorStatus("forbidden_origin")).toStrictEqual(403);
   });
 });
