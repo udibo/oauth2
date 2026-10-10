@@ -31,15 +31,17 @@ semantic-release from Conventional Commits (see
 
 ## Runtime support
 
-Deno runs the complete test suite. CI also builds an npm-format artifact and
-smoke-tests 20 entrypoints with TypeScript and Node. The generic testing exports
-(`/testing`, `/testing/contract`) rely on Deno's test runner and are not
-verified on Node. `/cli` uses Deno runtime APIs and is Deno-only.
+The supported runtime is Node.js 22 and later. CI runs the complete test suite
+on Node 22, 24, and 26, and smoke-tests the packed npm tarball from a clean
+consumer: it type checks every entrypoint under NodeNext resolution and imports
+each one. The testing exports (`/testing`, `/testing/contract`,
+`/hono/bff/testing`, `/react/testing`) register tests through Vitest, an
+optional peer dependency. The `udibo-oauth2` command is Node-only.
 
 Client and React exports are intended for browser use. Server exports belong on
-the backend, where client secrets and token storage can remain private. Bun has
-not been verified. See the [runtime table](../README.md#runtime-support) for the
-entrypoint groups and the difference between full tests and import/type checks.
+the backend, where client secrets and token storage can remain private. Deno and
+Bun have not been verified. See the [runtime table](../README.md#runtime-support)
+for the entrypoint groups.
 
 The legacy-password symbols live in `/identity/migration`; `/identity` does not
 re-export them. Narrowing a documented runtime target or removing an exported
@@ -47,8 +49,10 @@ subpath is a compatibility change.
 
 ## What is public API
 
-- Every subpath export listed in `src/deno.json` `exports`, and every symbol
-  those modules export, including their documented types.
+- Every subpath export listed in `package.json` `exports` (and in `jsr.json`),
+  and every symbol those modules export, including their documented types. The
+  `udibo-oauth2` command and its subcommands (`oidc keygen`, `idp dev`) are
+  public too.
 - The **wire behavior** of the servers and adapters: endpoint request/response
   shapes, error codes, and challenge headers are API — a change that breaks a
   conforming OAuth2/OIDC client is a breaking change even if no TypeScript

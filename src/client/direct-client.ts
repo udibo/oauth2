@@ -302,7 +302,7 @@ const REFRESH_SKEW_MS = 30_000;
  *
  * const client = new DirectClient({
  *   clientId: "worker",
- *   clientSecret: Deno.env.get("CLIENT_SECRET")!,
+ *   clientSecret: process.env.CLIENT_SECRET!,
  *   endpoints: { token: "https://auth.example.com/token" },
  * });
  *

@@ -1,48 +1,52 @@
 # Publishing @udibo/oauth2
 
-The package is published to both [JSR](https://jsr.io/@udibo/oauth2) and
-[npm](https://www.npmjs.com/package/@udibo/oauth2) from the same
-semantic-release run; the first release was **0.1.0**. Repository layout and
-releases follow Juniper: a root Deno workspace, the published package in `src/`,
-examples and templates alongside it, Conventional Commits, and semantic-release
-on `main`.
+The package is published to both [npm](https://www.npmjs.com/package/@udibo/oauth2)
+and [JSR](https://jsr.io/@udibo/oauth2) from the same semantic-release run. npm
+gets the `tsc` build in `dist/`; JSR gets the TypeScript sources in `src/` as
+`jsr.json` lists them. The first release was **0.1.0**, and the first release
+from the Node toolchain is **0.15.0** (`0.14.1` is the last Deno-built tag).
 
-Every push to `main` whose commits call for a release publishes one, as long as
-the repository variable `OAUTH2_RELEASE_ENABLED` is `true`. Setting it to
-anything else is the off switch. Nothing in the preparation tasks publishes a
-package.
+Every push to `main` whose [Conventional Commits](https://www.conventionalcommits.org)
+call for a release publishes one, as long as the repository variable
+`OAUTH2_RELEASE_ENABLED` is `true`. Setting it to anything else is the off
+switch. Nothing in the validation commands below publishes a package.
 
-## Validate a release
+## Before the first npm release
 
-From this directory, with Deno 2 installed:
+This is the release blocker for the Node migration. `@udibo/http-error` is
+still declared as
+`npm:@jsr/udibo__http-error@^0.11.1` in `package.json`, which installs it
+through the JSR npm mirror, and `.npmrc` routes the `@jsr` scope to
+`https://npm.jsr.io` so that works inside this repository. A published
+`@udibo/oauth2` cannot ship that: an adopter's `npm install` has no such
+registry rule and would fail on the dependency. Do these in order:
 
-```sh
-deno ci
-deno task check
-deno task test:all
-```
+1. **Publish `@udibo/http-error@0.12.0` to npm and JSR** from its own repository
+   (see its `PUBLISHING.md`). Confirm `npm view @udibo/http-error@0.12.0 version`
+   answers.
+2. **Switch this package to it.** In `package.json` set
+   `"@udibo/http-error": "^0.12.0"`; in `jsr.json` set the import to
+   `jsr:@udibo/http-error@^0.12.0`; delete the `@jsr:registry` line from `.npmrc`
+   (remove the file when it is empty); run `pnpm install` and commit the
+   lockfile.
+3. **Check the result.** `node scripts/verify-release.ts --dependencies-only`
+   and `pnpm build && node scripts/npm-smoke.ts --release` must both pass. The
+   second installs the packed tarball into an empty project that has no JSR
+   registry configured.
 
-`check` includes type checking, formatting, lint, all 23 public entrypoints'
-JSDoc, documentation examples, links, and a JSR dry run. It first copies the
-README, license, security policy, contributor guide, guides and AI documentation
-into `src/`. Generated copies are ignored by Git but explicitly included in the
-publish manifest. Links in these copies point to the public repository so they
-remain usable from the JSR package root.
+Until step 2 is done the release job refuses to publish. It runs
+`node scripts/verify-release.ts --dependencies-only` and
+`node scripts/npm-smoke.ts --release` before building, and semantic-release runs
+the same dependency guard again from `verifyReleaseCmd` before it generates
+notes, edits files, pushes, or publishes. The failure reads
+`Refusing to release: dependencies resolve through JSR`. Because
+`OAUTH2_RELEASE_ENABLED` is currently `true`, merging the Node migration to
+`main` runs that job; set the variable to `false` first if you want the merge
+to run only the checks.
 
-Run these commands from a clean checkout. The standalone CI workflow also runs
-package, script, example and template tests on Linux, macOS and Windows. A
-separate React browser job runs `deno task test:browser` with an explicit Chrome
-path, so a missing browser fails instead of skipping the suite. The release job
-requires both the package matrix and the browser job to succeed; a failed or
-skipped prerequisite prevents publication. The npm artifact is built and
-consumed under Node in CI on every run, which is what keeps the published npm
-build honest: `deno task npm:build` then `deno task npm:smoke` installs the
-packed tarball into `npm-smoke-consumer/` and proves the Node claims in the
-README's runtime table.
+## Release configuration in place
 
-## Release configuration
-
-The release job depends on these, all in place:
+The release job depends on these:
 
 1. The `oauth2` package in JSR's `@udibo` scope, linked to `udibo/oauth2` in the
    package settings. The release job uses GitHub OIDC; no JSR token is stored.
@@ -74,19 +78,73 @@ The release job depends on these, all in place:
    ruleset that requires no pull request, `GITHUB_TOKEN` would do and the key
    would be redundant.
 1. The repository variable `OAUTH2_RELEASE_ENABLED=true`.
+1. Optional: a `CODECOV_TOKEN` repository secret. The coverage upload from the
+   Node 24 job does not fail the build without it, but a token keeps uploads
+   from pull requests reliable.
 
 The `0.0.0` tag on the initial package import is a version baseline, not a
-published package; without it semantic-release would have chosen `1.0.0` for a
-repository with no release tags. `scripts/verify-release.ts` rejects any first
-version other than `0.1.0`; that version rule passes now that the `0.1.0` tag
-exists. The same guard checks commit messages since semantic-release's last
-release head and rejects references to the private application repository before
-notes are generated, release files are prepared, or packages are published. With
-no previous release, it checks all commits. Pull-request CI applies the same
-check to commits since the base head and the proposed squash title and body,
-including edits to that text. Keep commit footers and URLs public; these guards
-do not remove references from Git history or rewrite published release notes.
-The workflow prints a semantic-release dry run before the real run.
+published package. `scripts/verify-release.ts` rejects commits since
+semantic-release's last release head that reference the private application
+repository, before notes are generated, release files are prepared, or packages
+are published. With no previous release, it checks all commits. Pull-request CI
+applies the same check to commits since the base head and the proposed squash
+title and body, including edits to that text. Keep commit footers and URLs
+public; these guards do not remove references from Git history or rewrite
+published release notes. The workflow prints a semantic-release dry run before
+the real run.
+
+## Validate a release
+
+From this directory, with Node.js 22.18 or later and pnpm:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test:coverage
+pnpm test:browser
+pnpm build
+pnpm smoke
+pnpm jsr:dry-run
+```
+
+`pnpm check` runs the type-aware lint, formatting check, and `tsc`, then the
+documentation gates: `doc:lint` (JSDoc on every exported symbol and public
+member), `doc:check` (type-checks the fenced snippets in the Markdown and every
+JSDoc `@example`), `doc:links` (local links and headings), and `llms:check`
+(`llms-full.txt` matches `llms.txt`; regenerate with `pnpm llms:generate`).
+`pnpm smoke` packs the package, installs the tarball into an empty project, type
+checks a consumer of every subpath under NodeNext resolution, runs the
+`udibo-oauth2` command from the installed package, and imports each subpath on
+Node.
+
+The workflow in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
+runs `pnpm check` and `pnpm test` on Node 22, 24, and 26 on Linux and on Node 26
+on Windows and macOS; builds, smoke-tests, and dry-runs the JSR publish for the
+package on Node 22, 24, and 26; and runs `pnpm test:browser` in headless
+Chromium, installed with `playwright install --with-deps chromium`, so a missing
+browser fails instead of skipping the suite. The release job requires every one
+of those jobs to succeed; a failed or skipped prerequisite prevents publication.
+
+## Release configuration
+
+`.releaserc.json` runs, in order: the commit analyzer and release-notes
+generator (the `conventionalcommits` preset, so `feat!:` and `fix(scope)!:` are
+read as breaking), `@semantic-release/changelog` for `CHANGELOG.md`, the
+`verifyReleaseCmd` guard above, `@sebbo2002/semantic-release-jsr` (rewrites
+`jsr.json` and publishes to JSR over OIDC), `@semantic-release/npm` (rewrites
+`package.json` and publishes the repository root to npm over OIDC, with a
+provenance attestation), `@semantic-release/github`, and `@semantic-release/git`,
+which commits `CHANGELOG.md`, `package.json`, and `jsr.json`. `semantic-release`,
+each plugin, and the `conventional-changelog-conventionalcommits` preset are
+exact-pinned devDependencies, so the release job runs the versions in the
+lockfile. The preset stays on 9.x: 10.x needs `conventional-changelog-writer` 9,
+and the commit analyzer and notes generator bundled with semantic-release 25
+load writer 8.
+
+`pnpm build` runs before semantic-release because `@semantic-release/npm`
+verifies registry authentication during `verifyConditions`, which needs `dist/`
+to exist. That makes a credential problem fail before a release commit or tag
+exists.
 
 ## npm trusted publishing
 
@@ -94,39 +152,36 @@ The workflow prints a semantic-release dry run before the real run.
 attestation: npm cannot configure a trusted publisher for a package that does
 not exist yet. This repository stores no npm credential: the release job mints
 an OIDC token, `@semantic-release/npm` exchanges it with the registry for
-publish rights, and npm attaches a provenance attestation automatically — there
-is no `--provenance` flag to pass.
+publish rights, and npm attaches a provenance attestation automatically.
 
 The trust relationship is configured on npmjs.com, under the package's **Trusted
 Publisher** settings: organization `udibo`, repository `oauth2`, workflow
-filename `ci-cd.yml`, environment empty. Moving the release job into a named
-GitHub environment means naming it there too, or the exchange stops matching.
+filename `ci-cd.yml`, environment empty. The workflow file keeps that name for
+this reason; renaming it, or moving the release job into a named GitHub
+environment, means updating the trusted publisher to match, or the exchange
+stops matching.
 
-Two things follow from that, both enforced by
-`smoke-consumer/packaging.test.ts`:
+Two things follow from that, both enforced by `scripts/release-config.test.ts`:
 
 - The job needs `id-token: write`. Without it the runner cannot mint the token
   and the publish has nothing to fall back on.
 - No `NPM_TOKEN` belongs in the workflow. A stored credential would silently
   take precedence over the OIDC exchange, reintroducing the long-lived publish
-  secret it exists to remove.
+  secret it exists to remove. The release job also takes no dependency cache
+  and does not set `registry-url` on `actions/setup-node`, which would write an
+  `.npmrc` with a placeholder token.
 
-The exchange fails with `404 ... package not found` for a package that does not
-exist yet, which is why 0.1.0 could not use it.
+OIDC publishing needs npm 11.5.1 or later, so the release job upgrades npm
+before it runs.
 
 ## What the release does
 
-- Checks the proposed version and unreleased commit references against the rules
-  above.
-- Generates `CHANGELOG.md` and stamps `src/deno.json` and every example/template
-  dependency pin with the release version.
-- Stages the complete documentation payload using the same task exercised by the
-  publish dry run.
-- Builds the npm artifact from `src/` with dnt, stamped with the version being
-  released, and publishes it to npm alongside the JSR upload.
-- Commits release files and pushes the release commit/tag during
-  semantic-release's prepare/tag phases, then publishes to JSR and creates a
-  GitHub release.
+- Checks the unreleased commit references and the dependency rules above.
+- Generates `CHANGELOG.md` and stamps `package.json` and `jsr.json` with the
+  release version.
+- Publishes the TypeScript sources to JSR and `dist/` to npm.
+- Commits the release files, pushes the commit and tag with the deploy key, and
+  creates a GitHub release.
 
 A release is not a transaction across Git, JSR and npm. If publication fails
 after the release commit or tag was pushed, inspect all three before retrying.
@@ -135,32 +190,40 @@ are immutable, and so are npm versions in practice. If only Git advanced, or if
 JSR published and npm did not, resolve that partial release state deliberately
 before rerunning.
 
-Registry credentials are verified before anything is pushed: the release job
-builds `npm/` before semantic-release starts, so `@semantic-release/npm` checks
-npm authentication during `verifyConditions` rather than after the release
-commit exists.
-
 While 0.x, breaking changes increment the minor version under
-[the stability policy](docs/stability.md). This differs from Juniper's current
-major-version mapping intentionally.
+[the stability policy](docs/stability.md).
 
 ## Verify the published version
 
 In a fresh directory outside this repository:
 
 ```sh
-deno init
-deno add jsr:@udibo/oauth2@<version>
+npm init -y
+npm install @udibo/oauth2@<version>
+npx udibo-oauth2 --help
 ```
 
-Use `smoke-consumer/mod.tsx` and its compiler options as a consumer fixture, but
-**omit its `links` field** and point its `@udibo/oauth2` import at the version
-you are verifying, so it resolves the registry package. Check every subpath with
-`deno check`, inspect the JSR README and license, and confirm that test source
-is absent from the file listing. Then copy a template from the public
-repository, install its dependencies, and run its test task.
+Import a few subpaths from a Node ESM script and from a TypeScript file checked
+under `moduleResolution: NodeNext`; `pnpm smoke` does the same for every
+subpath against the local tarball. Then confirm on npm that the version shows a
+provenance badge and that the package file listing holds `dist/`, `README.md`,
+`LICENSE`, and `SECURITY.md` but no test source.
 
-JSR's [package rules](https://jsr.io/docs/publishing-packages#jsr-package-rules)
-and [immutable-version policy](https://jsr.io/docs/immutability) apply to the
+For JSR, run `npx jsr add @udibo/oauth2@<version>`, check every subpath type
+checks, and inspect the JSR page's README, license, and file listing, again
+confirming that test source is absent. JSR's
+[package rules](https://jsr.io/docs/publishing-packages#jsr-package-rules) and
+[immutable-version policy](https://jsr.io/docs/immutability) apply to the
 uploaded artifact. The local dry run verifies packaging, not account settings,
-repository permissions, or the eventual registry upload.
+repository permissions, or the eventual registry upload. It also cannot show how
+JSR renders the README's relative links.
+
+## The command name on npm
+
+The package's `bin` is `udibo-oauth2`. No npm package has that bare name, so
+`npx udibo-oauth2` run where `@udibo/oauth2` is not installed offers to download
+whatever package someone later registers under it. The guides tell readers to
+install `@udibo/oauth2` first or to use
+`npx --package @udibo/oauth2 udibo-oauth2`. Registering the unscoped name for
+Udibo, or deprecating a placeholder package that points at `@udibo/oauth2`,
+closes that gap.

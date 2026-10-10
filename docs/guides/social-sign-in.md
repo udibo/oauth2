@@ -55,15 +55,15 @@ import {
 
 export const google = new ExternalAuthFlow({
   provider: googleProvider({
-    clientId: Deno.env.get("GOOGLE_CLIENT_ID")!,
-    clientSecret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   }),
 });
 
 export const github = new ExternalAuthFlow({
   provider: githubProvider({
-    clientId: Deno.env.get("GITHUB_CLIENT_ID")!,
-    clientSecret: Deno.env.get("GITHUB_CLIENT_SECRET")!,
+    clientId: process.env.GITHUB_CLIENT_ID!,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET!,
   }),
 });
 ```
@@ -145,10 +145,10 @@ import {
 
 export const apple = new ExternalAuthFlow({
   provider: appleProvider({
-    clientId: Deno.env.get("APPLE_SERVICES_ID")!,
-    teamId: Deno.env.get("APPLE_TEAM_ID")!,
-    keyId: Deno.env.get("APPLE_KEY_ID")!,
-    privateKey: Deno.env.get("APPLE_PRIVATE_KEY")!,
+    clientId: process.env.APPLE_SERVICES_ID!,
+    teamId: process.env.APPLE_TEAM_ID!,
+    keyId: process.env.APPLE_KEY_ID!,
+    privateKey: process.env.APPLE_PRIVATE_KEY!,
   }),
 });
 ```
@@ -193,8 +193,8 @@ import {
 
 export const discord = new ExternalAuthFlow({
   provider: discordProvider({
-    clientId: Deno.env.get("DISCORD_CLIENT_ID")!,
-    clientSecret: Deno.env.get("DISCORD_CLIENT_SECRET")!,
+    clientId: process.env.DISCORD_CLIENT_ID!,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET!,
   }),
 });
 ```
@@ -218,8 +218,8 @@ export const twitch = new ExternalAuthFlow({
     authorizationEndpoint: "https://id.twitch.tv/oauth2/authorize",
     tokenEndpoint: "https://id.twitch.tv/oauth2/token",
     userInfoEndpoint: "https://id.twitch.tv/oauth2/userinfo",
-    clientId: Deno.env.get("TWITCH_CLIENT_ID")!,
-    clientSecret: Deno.env.get("TWITCH_CLIENT_SECRET")!,
+    clientId: process.env.TWITCH_CLIENT_ID!,
+    clientSecret: process.env.TWITCH_CLIENT_SECRET!,
     defaultScopes: ["openid", "user:read:email"],
     usesPkce: true,
     mapProfile: ({ profile }) => ({ subject: String(profile.sub) }),

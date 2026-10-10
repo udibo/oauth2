@@ -10,13 +10,16 @@ see [udibo.com](https://www.udibo.com/) for how to get one.
 
 ## Run the example
 
-Install Deno 2 and Git, then check out the public package repository:
+Install Node.js 24.2 or later, [pnpm](https://pnpm.io/installation), and Git,
+then check out the public package repository. The example is a workspace member
+that uses the package's built output, so build once before starting it:
 
 ```sh
 git clone https://github.com/udibo/oauth2.git
 cd oauth2
-deno ci
-deno task serve:app-with-own-auth
+pnpm install
+pnpm build
+pnpm --filter example-app-with-own-auth start
 ```
 
 Open <http://localhost:8001/>. Use `user` / `password` for the regular demo
@@ -56,7 +59,7 @@ then follow these files:
 Run its tests from the repository root:
 
 ```sh
-deno task test:app-with-own-auth
+pnpm --filter example-app-with-own-auth test
 ```
 
 ## Start your own application
@@ -66,8 +69,8 @@ For an existing Hono app, use
 [add login](guides/add-login.md). They explain which interfaces your database
 must implement and how to connect your existing session and login pages.
 
-For a new React app, start with the [Juniper](../templates/juniper/README.md) or
-[React Router](../templates/react-router/README.md) template. For an API without
+For a new React app, start with the
+[React Router template](../templates/react-router/README.md). For an API without
 a browser frontend, use [protect an API](guides/protect-an-api.md).
 
 Before deployment, replace the demo stores, credentials, console delivery, and

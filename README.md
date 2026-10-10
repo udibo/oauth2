@@ -16,7 +16,7 @@ run locally without a hosted account.
 | Udibo to handle sign-in                     | [Use Udibo's identity service](docs/guides/use-udibo.md) — requires a Udibo account                                       |
 | Its own login and authorization server      | [Run the quickstart](docs/quickstart.md), then [host authorization for your app](docs/guides/become-an-oauth-provider.md) |
 | An API that accepts access tokens           | [Protect an API](docs/guides/protect-an-api.md)                                                                           |
-| A React application with server-held tokens | [Juniper starter](templates/juniper/README.md) or [React Router starter](templates/react-router/README.md)                |
+| A React application with server-held tokens | [React Router starter](templates/react-router/README.md)                                                                  |
 
 [Documentation index](docs/index.md) ·
 [API reference](https://jsr.io/@udibo/oauth2/doc) · [Examples](#examples) ·
@@ -24,11 +24,28 @@ run locally without a hosted account.
 
 ## Install
 
-Requires Deno 2 for the development workflow:
+The package supports Node.js 22 and later and ships ESM with type declarations.
+Install it from npm:
 
 ```sh
+npm install @udibo/oauth2
+# or
+pnpm add @udibo/oauth2
+```
+
+It is also published to [JSR](https://jsr.io/@udibo/oauth2) as TypeScript
+source:
+
+```sh
+npx jsr add @udibo/oauth2
+# or, with Deno
 deno add jsr:@udibo/oauth2
 ```
+
+`hono`, `react`, and `react-dom` are optional peer dependencies. Install the
+ones for the entrypoints you import: `hono` for the `/hono/*` adapters, `react`
+and `react-dom` for `/react` and `/react/components`. `vitest` is an optional
+peer dependency of the testing helpers.
 
 Import the part you use; there is no root barrel or default export:
 
@@ -83,11 +100,12 @@ package does not include a challenge provider; see the
 
 ## Examples
 
-From a checkout of this repository:
+From a checkout of this repository, with Node.js 24.2 or later and pnpm:
 
 ```sh
-deno ci
-deno task serve:app-with-own-auth
+pnpm install
+pnpm build
+pnpm --filter example-app-with-own-auth start
 ```
 
 Open <http://localhost:8001/> and sign in as `user` / `password`. The
@@ -95,13 +113,11 @@ Open <http://localhost:8001/> and sign in as `user` / `password`. The
 All demo credentials, in-memory stores, and local HTTP settings are for
 development.
 
-| Example                                                                         | Demonstrates                                                    |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| [Hono with own auth](examples/hono/app-with-own-auth/README.md)                 | App login, OAuth2 server, BFF, and protected API in one process |
-| [Hono with external auth](examples/hono/app-with-external-auth/README.md)       | Delegated sign-in, token introspection, and a BFF proxy         |
-| [Standalone API](examples/hono/api-service/README.md)                           | Bearer-token validation without a frontend                      |
-| [Juniper with own auth](examples/juniper/app-with-own-auth/README.md)           | Server-rendered React with application-owned login              |
-| [Juniper with external auth](examples/juniper/app-with-external-auth/README.md) | Server-rendered React with delegated sign-in                    |
+| Example                                                                   | Demonstrates                                                    |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [Hono with own auth](examples/hono/app-with-own-auth/README.md)           | App login, OAuth2 server, BFF, and protected API in one process |
+| [Hono with external auth](examples/hono/app-with-external-auth/README.md) | Delegated sign-in, token introspection, and a BFF proxy         |
+| [Standalone API](examples/hono/api-service/README.md)                     | Bearer-token validation without a frontend                      |
 
 ## Package entrypoints
 
@@ -128,7 +144,6 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 | `/react/components`          | Optional forms for login, signup, password reset, and MFA                                       |
 | `/crypto`                    | Random tokens, hashing, encoding, authenticated encryption                                      |
 | `/url`                       | Safe return paths and login continuation                                                        |
-| `/cli`                       | Local test identity provider and OIDC signing-key generation                                    |
 | `/testing`                   | In-memory fixtures and authorization-server test helpers                                        |
 | `/testing/contract`          | Tests for app-owned service and storage implementations                                         |
 | `/hono/bff/testing`          | BFF session fixtures and session-store contract tests                                           |
@@ -136,17 +151,23 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 
 ## Runtime support
 
-The library uses Web APIs. The complete suite runs on Deno. CI also builds an
-npm-format compatibility artifact and verifies 20 entrypoints with TypeScript
-and Node; this does not publish an npm package.
+The library uses Web APIs and runs on Node.js 22 and later. CI runs the
+complete suite on Node 22, 24, and 26 on Linux, and on Node 26 on Windows and
+macOS. It also packs the npm tarball, installs it into an empty project, type
+checks a consumer of every entrypoint, and imports each one on Node.
 
-| Surface                                     | Deno                  | Node                     | Browser                                     | Bun           |
-| ------------------------------------------- | --------------------- | ------------------------ | ------------------------------------------- | ------------- |
-| Clients and React                           | Tested, including SSR | Import/type smoke-tested | Intended for client code; no secrets        | Not verified  |
-| Server, identity, Hono, crypto, URL helpers | Tested                | Import/type smoke-tested | Server functionality belongs on the backend | Not verified  |
-| `/hono/bff/testing`, `/react/testing`       | Tested                | Import/type smoke-tested | React test helpers only                     | Not verified  |
-| `/testing`, `/testing/contract`             | Tested                | Not verified             | Not supported                               | Not verified  |
-| `/cli`                                      | Deno only             | Not supported            | Not supported                               | Not supported |
+| Surface                                                                | Node 22+              | Browser                                     | Deno, Bun     |
+| ---------------------------------------------------------------------- | --------------------- | ------------------------------------------- | ------------- |
+| `/client`, `/react`, `/react/components`                               | Tested, including SSR | Intended for client code; no secrets        | Not verified  |
+| `/server/*`, `/identity/*`, `/hono/*`, `/crypto`, `/url`               | Tested                | Server functionality belongs on the backend | Not verified  |
+| `/testing`, `/testing/contract`, `/hono/bff/testing`, `/react/testing` | Tested; need Vitest   | Not supported                               | Not verified  |
+| `udibo-oauth2` command (`bin`)                                         | Tested                | Not supported                               | Not supported |
+
+The `udibo-oauth2` command is a development tool: `udibo-oauth2 oidc keygen`
+prints an OIDC signing key, and `udibo-oauth2 idp dev` runs a local identity
+provider. Run it with `npx udibo-oauth2` once the package is installed; the
+[local identity provider guide](docs/guides/run-a-local-identity-provider.md)
+covers its options. Nothing on the library path imports it.
 
 See [stability](docs/stability.md#runtime-support) for the support boundary.
 
@@ -173,7 +194,7 @@ implementing a custom store or callback.
 
 ## Contributing and security
 
-Run `deno task check` and `deno task test:all` before proposing changes. See
+Run `pnpm check` and `pnpm test` before proposing changes. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions,
 [SECURITY.md](SECURITY.md) for private vulnerability reports, and
 [CHANGELOG.md](CHANGELOG.md) for release history.

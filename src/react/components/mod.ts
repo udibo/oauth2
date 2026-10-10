@@ -1,7 +1,7 @@
 /**
  * Prebuilt React auth components for `@udibo/oauth2` — the composable,
  * headless-first, themeable form set an app assembles into its own auth
- * surface. Works in both plain React Router v7 and Juniper (SSR React).
+ * surface. Works with React Router v7 in data or framework mode.
  *
  * These components are **composed by your app**: you own the routes, storage,
  * session, and the submit wiring. Nothing here mounts routes, talks to a

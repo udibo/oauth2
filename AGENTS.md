@@ -5,14 +5,16 @@ This repository is the public `@udibo/oauth2` package: a pnpm package on Node
 alongside it. Source is erasable TypeScript with explicit `.ts` import
 extensions; `tsc` builds the npm package and the same files publish to JSR.
 
-- Run `pnpm test` for the package tests (Vitest) and `pnpm test:coverage` for
+- Run `pnpm test` for the package and script tests (Vitest) and `pnpm test:coverage` for
   coverage. Pass a path to run one file, for example
   `pnpm test src/utils/crypto.test.ts`.
 - Run `pnpm test:browser` after changing the React form components. It drives
   them in headless Chromium through Playwright (`pnpm exec playwright install
   chromium` once); jsdom cannot show where focus goes while a submit is pending.
-- Run `pnpm check` for lint (oxlint, type-aware), formatting (oxfmt) and types.
-  Run `pnpm fmt` to format changes.
+- Run `pnpm check` for lint (oxlint, type-aware), formatting (oxfmt), types and
+  the documentation gates (JSDoc coverage, snippet type-checking, links, and
+  `llms-full.txt`). Run `pnpm fmt` to format changes, and `pnpm llms:generate`
+  after editing a guide.
 - Run `pnpm build` then `pnpm smoke` to pack the package and prove it from a
   clean Node consumer. Run `pnpm jsr:dry-run` to check the JSR publish.
 - Use explicit exported return types, `expect` assertions from Vitest and

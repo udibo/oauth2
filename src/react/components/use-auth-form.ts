@@ -5,8 +5,8 @@
  * It owns field values, per-field and form-level errors, and the submit
  * lifecycle, and stays entirely presentation-free: no markup, no styling, no
  * router or network assumptions. The action is injected as `onSubmit`, so the
- * same hook drives a client-side `fetch` in a plain React Router app or a
- * router-action submit in Juniper. Reach for it directly when you want to own
+ * same hook drives a client-side `fetch` or a React Router action submit.
+ * Reach for it directly when you want to own
  * the markup completely (the "eject to headless" path); otherwise use a
  * default component, which is built on this hook.
  *

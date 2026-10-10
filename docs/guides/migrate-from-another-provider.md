@@ -68,7 +68,7 @@ That single constraint decides what can be built-in:
 | **PBKDF2** (SHA-1/256/512) | **Built-in** | PBKDF2 is a Web Crypto primitive (`crypto.subtle.deriveBits`); `pbkdf2Verifier()` handles it dep-free. |
 | **bcrypt**                 | BYO          | No Web Crypto primitive; needs a bcrypt implementation (Blowfish key schedule).                        |
 | **argon2** (id/i/d)        | BYO          | No Web Crypto primitive; memory-hard, needs a native/WASM argon2.                                      |
-| **scrypt**                 | BYO          | Not exposed by Web Crypto **or** `@std/crypto`; memory-hard (Salsa20/8 core).                          |
+| **scrypt**                 | BYO          | Not exposed by Web Crypto (Node has `node:crypto` `scrypt`); memory-hard (Salsa20/8 core).             |
 | **MD5-crypt / SHA-crypt**  | BYO          | `$1$` / `$5$` / `$6$` use custom multi-round mixing, not a single digest.                              |
 
 **Built-in** means the package can verify it dep-free. **BYO (bring-your-own)**
@@ -183,8 +183,7 @@ const argon2Verifier: LegacyPasswordVerifier = {
 scrypt dependency and compare:
 
 ```ts ignore
-import { scrypt } from "node:crypto";
-import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
+import { scrypt, timingSafeEqual } from "node:crypto";
 import {
   type LegacyPasswordVerifier,
   parsePhc,

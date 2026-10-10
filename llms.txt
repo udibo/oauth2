@@ -45,8 +45,11 @@
   and cannot immediately revoke a copied cookie. Offline JWT validation cannot
   immediately observe token revocation. Read known limitations before choosing.
 - Use exact deployed configuration and the actual store contract tests. The
-  complete suite runs on Deno; Node has import/type smoke coverage for 19 subpaths.
-  Bun is unverified. The CLI is Deno-only and is not a production dependency.
+  package targets Node 22 and later and is tested on Node 22, 24, and 26; client
+  and React entrypoints also run in browsers. Deno and Bun are unverified. The
+  `udibo-oauth2` command (`oidc keygen`, `idp dev`) is a Node-only development
+  tool, not a production dependency; install `@udibo/oauth2`, then run it with
+  `npx udibo-oauth2`.
 - Public docs cover application integration. Do not infer hosted-service admin
   APIs, tenant platform architecture, pricing, or account availability from this package.
 
@@ -78,25 +81,23 @@
 ## Examples
 
 These runnable examples use isolated development data and are tested in CI.
-Run their tasks from the repository root; see each README for ports and setup.
+Run them with `pnpm --filter <example-name> start` from the repository root after
+`pnpm install` and `pnpm build`; see each README for ports and setup.
 
 - [Hono with own auth](examples/hono/app-with-own-auth/README.md): authorization server, login, BFF, and API together
 - [Hono with external auth](examples/hono/app-with-external-auth/README.md): client/BFF integration with a separate issuer
 - [Hono API](examples/hono/api-service/README.md): a resource server without a frontend
-- [Juniper with own auth](examples/juniper/app-with-own-auth/README.md): SSR React with app-owned login
-- [Juniper with external auth](examples/juniper/app-with-external-auth/README.md): SSR React with delegated login
 
 ## Starter templates
 
-Templates are repository files, not JSR package exports. Read the template's
+Templates are repository files, not package exports. Read the template's
 README before copying; replace all development-only settings before deployment.
 
-- [Juniper](templates/juniper/README.md): SSR React with app-owned auth and a BFF
 - [React Router](templates/react-router/README.md): a React SPA with a Hono BFF
 
 ## API reference
 
 JSR renders the typed reference at https://jsr.io/@udibo/oauth2/doc. The 22
-exports are declared in src/deno.json. Full API documentation, code snippets,
-links, generated docs, and the publish payload are checked by deno task check.
-Run deno task test:all for package, script, example, and template suites.
+exports are declared in package.json and jsr.json. Full API documentation, code
+snippets, and links are checked by pnpm check. Run pnpm test for the package and
+script suites.

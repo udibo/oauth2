@@ -74,7 +74,7 @@ interface User {
 const tokenReader = new IntrospectionTokenReader<Client, User>({
   introspectionEndpoint: "https://auth.example.com/oauth2/introspect",
   clientId: "my-api",
-  clientSecret: Deno.env.get("INTROSPECTION_CLIENT_SECRET")!,
+  clientSecret: process.env.INTROSPECTION_CLIENT_SECRET!,
   getClient: (data) => ({ id: data.client_id ?? "" }),
   getUser: (data) =>
     data.sub ? { id: data.sub, username: data.username } : undefined,
@@ -520,7 +520,7 @@ import { DirectClient } from "@udibo/oauth2/client";
 
 const client = new DirectClient({
   clientId: "my-service",
-  clientSecret: Deno.env.get("CLIENT_SECRET")!,
+  clientSecret: process.env.CLIENT_SECRET!,
   endpoints: {
     authorization: "https://auth.example.com/oauth2/authorize",
     token: "https://auth.example.com/oauth2/token",
