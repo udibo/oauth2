@@ -1,5 +1,3 @@
-// deno-lint-ignore-file no-window -- browser-only; `window` used only after isBrowser() guards
-
 /**
  * `<RequireAuth>` — gate a subtree behind authentication. If the user is
  * not authenticated, calls `login({ returnTo })` (the {@link useOAuth2}
@@ -41,8 +39,8 @@ export function RequireAuth(props: RequireAuthProps): ReactNode {
   useEffect(() => {
     if (isLoading || isAuthenticated) return;
     if (!isBrowser()) return;
-    const target = returnTo ??
-      `${window.location.pathname}${window.location.search}`;
+    const target =
+      returnTo ?? `${window.location.pathname}${window.location.search}`;
     login({ returnTo: target }).catch(() => {});
   }, [isLoading, isAuthenticated, login, returnTo]);
 

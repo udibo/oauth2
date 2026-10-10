@@ -175,7 +175,8 @@ function rewriteUpstreamUrl(
   const basePath = base.pathname.endsWith("/")
     ? base.pathname.slice(0, -1)
     : base.pathname;
-  const underBase = basePath === "" ||
+  const underBase =
+    basePath === "" ||
     resolved.pathname === basePath ||
     resolved.pathname.startsWith(`${basePath}/`);
   if (!underBase) return value;
@@ -208,9 +209,11 @@ function forcePrivateCache(headers: Headers): void {
     .split(",")
     .map((directive) => directive.trim().toLowerCase());
   if (
-    directives.some((directive) =>
-      directive === "private" || directive === "no-store" ||
-      directive.startsWith("private=")
+    directives.some(
+      (directive) =>
+        directive === "private" ||
+        directive === "no-store" ||
+        directive.startsWith("private="),
     )
   ) {
     return;
@@ -248,11 +251,11 @@ export function buildDownstreamHeaders(
       name,
       urlValued.has(name.toLowerCase())
         ? rewriteUpstreamUrl(
-          value,
-          context.upstreamUrl,
-          context.base,
-          context.mountPrefix,
-        )
+            value,
+            context.upstreamUrl,
+            context.base,
+            context.mountPrefix,
+          )
         : value,
     );
   }

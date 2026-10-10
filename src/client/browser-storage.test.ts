@@ -1,13 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertStrictEquals,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { delay } from "@std/async/delay";
-import { describe, it } from "@std/testing/bdd";
-
+import { setTimeout as delay } from "node:timers/promises";
+import { assert, describe, expect, it } from "vitest";
+import { thrown } from "../_test_assert.ts";
 import {
   IndexedDBRefreshTokenStorage,
   SessionStorageAuthRequestStorage,
@@ -130,7 +123,8 @@ function installFakeIndexedDB(
           return;
         }
         if (
-          target > record.version && record.version > 0 &&
+          target > record.version &&
+          record.version > 0 &&
           options.blockVersionChangesUntil
         ) {
           request.onblocked?.();
@@ -160,25 +154,25 @@ function installFakeIndexedDB(
 describe("IndexedDBRefreshTokenStorage (SSR / no-IndexedDB runtime)", () => {
   it("get returns null when indexedDB is unavailable", async () => {
     const storage = new IndexedDBRefreshTokenStorage({ clientId: "web-app" });
-    assertStrictEquals(await storage.get(), null);
+    expect(await storage.get()).toBe(null);
   });
 
   it("set is a no-op when indexedDB is unavailable", async () => {
     const storage = new IndexedDBRefreshTokenStorage({ clientId: "web-app" });
     await storage.set("ignored");
-    assertStrictEquals(await storage.get(), null);
+    expect(await storage.get()).toBe(null);
   });
 
   it("clear is a no-op when indexedDB is unavailable", async () => {
     const storage = new IndexedDBRefreshTokenStorage({ clientId: "web-app" });
     await storage.clear();
-    assertStrictEquals(await storage.get(), null);
+    expect(await storage.get()).toBe(null);
   });
 });
 
 describe("IndexedDBRefreshTokenStorage", () => {
   it("refuses an empty clientId, which would put every client in one slot", () => {
-    assertThrows(
+    thrown(
       () => new IndexedDBRefreshTokenStorage({ clientId: "" }),
       TypeError,
       "`clientId` is required",
@@ -193,12 +187,12 @@ describe("IndexedDBRefreshTokenStorage", () => {
     await first.set("token-a");
     await second.set("token-b");
 
-    assertStrictEquals(await first.get(), "token-a");
-    assertStrictEquals(await second.get(), "token-b");
+    expect(await first.get()).toBe("token-a");
+    expect(await second.get()).toBe("token-b");
 
     await second.clear();
-    assertStrictEquals(await first.get(), "token-a");
-    assertStrictEquals(await second.get(), null);
+    expect(await first.get()).toBe("token-a");
+    expect(await second.get()).toBe(null);
   });
 
   it("creates a store the existing database does not have yet", async () => {
@@ -212,12 +206,11 @@ describe("IndexedDBRefreshTokenStorage", () => {
     });
 
     await renamed.set("token-v2");
-    assertStrictEquals(await renamed.get(), "token-v2");
-    assertStrictEquals(
+    expect(await renamed.get()).toBe("token-v2");
+    expect(
       await original.get(),
-      "token-a",
       "adding a store must not disturb the one already there",
-    );
+    ).toBe("token-a");
   });
 
   it("rejects a write while another connection blocks the store's creation", async () => {
@@ -243,7 +236,7 @@ describe("IndexedDBRefreshTokenStorage", () => {
       outcome instanceof DOMException,
       "a write that could not reach the store must not resolve as if it had",
     );
-    assertStringIncludes(outcome.message, "blocked");
+    expect(outcome.message).toContain("blocked");
   });
 
   it("closes the connection that opens after a blocked upgrade", async () => {
@@ -261,9 +254,9 @@ describe("IndexedDBRefreshTokenStorage", () => {
     unblock.resolve();
     await delay(0);
 
-    assertStrictEquals(indexedDB.openHandles("@udibo/oauth2"), 0);
+    expect(indexedDB.openHandles("@udibo/oauth2")).toBe(0);
     await storage.set("token-rotated");
-    assertStrictEquals(await storage.get(), "token-rotated");
+    expect(await storage.get()).toBe("token-rotated");
   });
 
   it("round-trips through a database that did not exist yet", async () => {
@@ -273,18 +266,18 @@ describe("IndexedDBRefreshTokenStorage", () => {
       databaseName: "other-db",
     });
 
-    assertStrictEquals(await storage.get(), null);
+    expect(await storage.get()).toBe(null);
     await storage.set("token-a");
-    assertStrictEquals(await storage.get(), "token-a");
+    expect(await storage.get()).toBe("token-a");
     await storage.clear();
-    assertStrictEquals(await storage.get(), null);
+    expect(await storage.get()).toBe(null);
   });
 });
 
 describe("SessionStorageAuthRequestStorage", () => {
   it("get returns null when sessionStorage is unavailable (SSR)", () => {
     const storage = new SessionStorageAuthRequestStorage();
-    assertStrictEquals(storage.get("any-state"), null);
+    expect(storage.get("any-state")).toBe(null);
   });
 
   it("set / delete / clear are no-ops without sessionStorage", () => {
@@ -323,16 +316,16 @@ describe("SessionStorageAuthRequestStorage", () => {
       };
       sStore.set("state-1", record);
       const fetched = sStore.get("state-1");
-      assertEquals(fetched?.codeVerifier, "v");
-      assertEquals(fetched?.returnTo, "/dashboard");
+      expect(fetched?.codeVerifier).toStrictEqual("v");
+      expect(fetched?.returnTo).toStrictEqual("/dashboard");
 
       sStore.delete("state-1");
-      assertStrictEquals(sStore.get("state-1"), null);
+      expect(sStore.get("state-1")).toBe(null);
 
       sStore.set("state-2", record);
-      assertEquals(sStore.take("state-2")?.codeVerifier, "v");
-      assertStrictEquals(sStore.take("state-2"), null);
-      assertStrictEquals(backing.has("oauth2:auth-req:state-2"), false);
+      expect(sStore.take("state-2")?.codeVerifier).toStrictEqual("v");
+      expect(sStore.take("state-2")).toBe(null);
+      expect(backing.has("oauth2:auth-req:state-2")).toBe(false);
     } finally {
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     }
@@ -363,8 +356,8 @@ describe("SessionStorageAuthRequestStorage", () => {
         codeVerifier: "v",
         createdAt: Date.now() - 10_000,
       });
-      assertStrictEquals(sStore.get("stale"), null);
-      assertStrictEquals(backing.has("oauth2:auth-req:stale"), false);
+      expect(sStore.get("stale")).toBe(null);
+      expect(backing.has("oauth2:auth-req:stale")).toBe(false);
     } finally {
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     }

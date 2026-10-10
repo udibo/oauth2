@@ -78,9 +78,7 @@ app.post("/", async (c) => {
 
 export default app;
 
-function entryPage(
-  options: { userCode?: string; error?: string },
-): string {
+function entryPage(options: { userCode?: string; error?: string }): string {
   const code = escapeHtml(options.userCode ?? "");
   const err = options.error
     ? `<p style="color:red">${escapeHtml(options.error)}</p>`
@@ -101,9 +99,7 @@ ${err}
 </p>`;
 }
 
-function approvalPage(
-  options: { userCode: string; clientId: string },
-): string {
+function approvalPage(options: { userCode: string; clientId: string }): string {
   return `<!doctype html>
 <title>Authorize device</title>
 <h1>Authorize <em>${escapeHtml(options.clientId)}</em>?</h1>

@@ -1,6 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
 import {
   isRecentlyAuthenticated,
   type ListableSessionService,
@@ -14,16 +12,19 @@ describe("isRecentlyAuthenticated", () => {
   const FIVE_MIN = 5 * 60_000;
 
   it("is true within the window, false past it", () => {
-    assertEquals(isRecentlyAuthenticated(NOW - 60_000, FIVE_MIN, NOW), true);
-    assertEquals(isRecentlyAuthenticated(NOW - FIVE_MIN, FIVE_MIN, NOW), true);
-    assertEquals(
-      isRecentlyAuthenticated(NOW - FIVE_MIN - 1, FIVE_MIN, NOW),
-      false,
+    expect(isRecentlyAuthenticated(NOW - 60_000, FIVE_MIN, NOW)).toStrictEqual(
+      true,
     );
+    expect(
+      isRecentlyAuthenticated(NOW - FIVE_MIN, FIVE_MIN, NOW),
+    ).toStrictEqual(true);
+    expect(
+      isRecentlyAuthenticated(NOW - FIVE_MIN - 1, FIVE_MIN, NOW),
+    ).toStrictEqual(false);
   });
 
   it("treats a missing/zero timestamp as not recent", () => {
-    assertEquals(isRecentlyAuthenticated(0, FIVE_MIN, NOW), false);
+    expect(isRecentlyAuthenticated(0, FIVE_MIN, NOW)).toStrictEqual(false);
   });
 });
 
@@ -55,10 +56,10 @@ describe("RevocableSessionService (contract shape)", () => {
       },
     };
 
-    assertEquals(await service.revokeOthers("u1", "s1"), 1);
-    assertEquals([...(byUser.get("u1") ?? [])], ["s1"]);
-    assertEquals(await service.revokeAllByUser("u2"), 1);
-    assertEquals(byUser.has("u2"), false);
+    expect(await service.revokeOthers("u1", "s1")).toStrictEqual(1);
+    expect([...(byUser.get("u1") ?? [])]).toStrictEqual(["s1"]);
+    expect(await service.revokeAllByUser("u2")).toStrictEqual(1);
+    expect(byUser.has("u2")).toStrictEqual(false);
   });
 });
 
@@ -85,10 +86,10 @@ describe("ListableSessionService (contract shape)", () => {
 
   it("a listing implementation satisfies the contract", async () => {
     const rows = await listable.listByUser("u1");
-    assertEquals(rows.map((row) => row.id), ["s2", "s1"]);
-    assertEquals(rows[1].userAgent, "Mozilla/5.0");
-    assertEquals(rows[1].location, "San Francisco, US");
-    assertEquals(await listable.listByUser("nobody"), []);
+    expect(rows.map((row) => row.id)).toStrictEqual(["s2", "s1"]);
+    expect(rows[1].userAgent).toStrictEqual("Mozilla/5.0");
+    expect(rows[1].location).toStrictEqual("San Francisco, US");
+    expect(await listable.listByUser("nobody")).toStrictEqual([]);
   });
 
   it("supportsSessionListing narrows a store that opts in", () => {
@@ -100,6 +101,6 @@ describe("ListableSessionService (contract shape)", () => {
       revokeAllByUser: () => Promise.resolve(0),
       revokeOthers: () => Promise.resolve(0),
     };
-    assertFalse(supportsSessionListing(revokeOnly));
+    expect(supportsSessionListing(revokeOnly)).toBeFalsy();
   });
 });

@@ -1,8 +1,5 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 
@@ -16,8 +13,6 @@ import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
 import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
 import { ResetPasswordForm } from "./reset-password-form.tsx";
-
-cleanupAfterEach();
 
 function classOf(container: HTMLElement, selector: string): string | null {
   return container.querySelector(selector)?.getAttribute("class") ?? null;
@@ -40,13 +35,17 @@ const RENDER_PROP_FORMS: [string, () => ReactNode][] = [
   [
     "SignInForm",
     () => (
-      <SignInForm onSubmit={() => {}} classNames={ownInput}>{probe}</SignInForm>
+      <SignInForm onSubmit={() => {}} classNames={ownInput}>
+        {probe}
+      </SignInForm>
     ),
   ],
   [
     "SignUpForm",
     () => (
-      <SignUpForm onSubmit={() => {}} classNames={ownInput}>{probe}</SignUpForm>
+      <SignUpForm onSubmit={() => {}} classNames={ownInput}>
+        {probe}
+      </SignUpForm>
     ),
   ],
   [
@@ -120,32 +119,43 @@ describe("auth form class-name context", () => {
       fireEvent.submit(getForm(container));
     });
 
-    assertEquals(
-      classOf(container, "[data-oauth2-form]"),
+    expect(classOf(container, "[data-oauth2-form]")).toStrictEqual(
       "root-cls root-slot-cls",
     );
-    assertEquals(classOf(container, "[data-oauth2-form-element]"), "form-cls");
-    assertEquals(
-      classOf(container, "[data-oauth2-error-summary]"),
+    expect(classOf(container, "[data-oauth2-form-element]")).toStrictEqual(
+      "form-cls",
+    );
+    expect(classOf(container, "[data-oauth2-error-summary]")).toStrictEqual(
       "summary-cls",
     );
-    assertEquals(classOf(container, "[data-oauth2-field]"), "field-cls");
-    assertEquals(classOf(container, "[data-oauth2-label]"), "label-cls");
-    assertEquals(classOf(container, "[data-oauth2-input]"), "input-cls");
-    assertEquals(classOf(container, "[data-oauth2-error]"), "error-cls");
-    assertEquals(
-      classOf(container, "[data-oauth2-forgot-password]"),
+    expect(classOf(container, "[data-oauth2-field]")).toStrictEqual(
+      "field-cls",
+    );
+    expect(classOf(container, "[data-oauth2-label]")).toStrictEqual(
+      "label-cls",
+    );
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "input-cls",
+    );
+    expect(classOf(container, "[data-oauth2-error]")).toStrictEqual(
+      "error-cls",
+    );
+    expect(classOf(container, "[data-oauth2-forgot-password]")).toStrictEqual(
       "hint-cls",
     );
-    assertEquals(classOf(container, "[data-oauth2-actions]"), "actions-cls");
-    assertEquals(classOf(container, "[data-oauth2-submit]"), "submit-cls");
-    assertEquals(classOf(container, "[data-oauth2-social]"), "social-cls");
-    assertEquals(
-      classOf(container, "[data-oauth2-social-divider]"),
+    expect(classOf(container, "[data-oauth2-actions]")).toStrictEqual(
+      "actions-cls",
+    );
+    expect(classOf(container, "[data-oauth2-submit]")).toStrictEqual(
+      "submit-cls",
+    );
+    expect(classOf(container, "[data-oauth2-social]")).toStrictEqual(
+      "social-cls",
+    );
+    expect(classOf(container, "[data-oauth2-social-divider]")).toStrictEqual(
       "divider-cls",
     );
-    assertEquals(
-      classOf(container, "[data-oauth2-social-button]"),
+    expect(classOf(container, "[data-oauth2-social-button]")).toStrictEqual(
       "social-button-cls",
     );
   });
@@ -161,15 +171,13 @@ describe("auth form class-name context", () => {
 
     const field = container.querySelector('[data-oauth2-field="remember"]');
     assert(field, "the remember checkbox should render its own field wrapper");
-    assertEquals(field.getAttribute("class"), "field-cls");
-    assertEquals(
+    expect(field.getAttribute("class")).toStrictEqual("field-cls");
+    expect(
       field.querySelector("[data-oauth2-label]")?.getAttribute("class"),
-      "label-cls",
-    );
-    assertEquals(
+    ).toStrictEqual("label-cls");
+    expect(
       field.querySelector("[data-oauth2-input]")?.getAttribute("class"),
-      "in-cls",
-    );
+    ).toStrictEqual("in-cls");
   });
 
   it("leaves aria wiring intact while the context supplies classes", async () => {
@@ -184,15 +192,17 @@ describe("auth form class-name context", () => {
     });
 
     const password = screen.getByLabelText("Password");
-    assertEquals(password.getAttribute("aria-invalid"), "true");
+    expect(password.getAttribute("aria-invalid")).toStrictEqual("true");
     const describedBy = password.getAttribute("aria-describedby");
     assert(describedBy, "the errored input should point at its error node");
     const error = document.getElementById(describedBy);
     assert(error, "aria-describedby should resolve to a rendered element");
-    assertEquals(error.getAttribute("role"), "alert");
-    assertEquals(error.textContent, "Too short");
-    assertEquals(error.getAttribute("class"), "error-cls");
-    assertEquals(classOf(container, "[data-oauth2-input]"), "input-cls");
+    expect(error.getAttribute("role")).toStrictEqual("alert");
+    expect(error.textContent).toStrictEqual("Too short");
+    expect(error.getAttribute("class")).toStrictEqual("error-cls");
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "input-cls",
+    );
   });
 
   it("themes every form under a provider without a per-form classNames", () => {
@@ -206,14 +216,14 @@ describe("auth form class-name context", () => {
     );
 
     const inputs = container.querySelectorAll("[data-oauth2-input]");
-    assertEquals(inputs.length, 5);
+    expect(inputs.length).toStrictEqual(5);
     for (const input of inputs) {
-      assertEquals(input.getAttribute("class"), "themed-input");
+      expect(input.getAttribute("class")).toStrictEqual("themed-input");
     }
     const submits = container.querySelectorAll("[data-oauth2-submit]");
-    assertEquals(submits.length, 2);
+    expect(submits.length).toStrictEqual(2);
     for (const submit of submits) {
-      assertEquals(submit.getAttribute("class"), "themed-submit");
+      expect(submit.getAttribute("class")).toStrictEqual("themed-submit");
     }
   });
 
@@ -226,8 +236,12 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-input]"), "themed-input");
-    assertEquals(classOf(container, "[data-oauth2-submit]"), "own-submit");
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "themed-input",
+    );
+    expect(classOf(container, "[data-oauth2-submit]")).toStrictEqual(
+      "own-submit",
+    );
   });
 
   it("lets a nested provider override the outer one slot by slot", () => {
@@ -241,8 +255,12 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-input]"), "outer-input");
-    assertEquals(classOf(container, "[data-oauth2-submit]"), "inner-submit");
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "outer-input",
+    );
+    expect(classOf(container, "[data-oauth2-submit]")).toStrictEqual(
+      "inner-submit",
+    );
   });
 
   it("keeps the inherited slot when a form passes it as undefined", () => {
@@ -252,14 +270,16 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-input]"), "themed-input");
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "themed-input",
+    );
   });
 
   it("renders no class attribute for slots nobody set", () => {
     const { container } = render(<SignInForm onSubmit={() => {}} />);
 
-    assertFalse(container.querySelector("[data-oauth2-input][class]"));
-    assertFalse(container.querySelector("[data-oauth2-submit][class]"));
+    expect(container.querySelector("[data-oauth2-input][class]")).toBeFalsy();
+    expect(container.querySelector("[data-oauth2-submit][class]")).toBeFalsy();
   });
 
   it("merges the root className with a provider-supplied root slot", () => {
@@ -269,8 +289,7 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(
-      classOf(container, "[data-oauth2-form]"),
+    expect(classOf(container, "[data-oauth2-form]")).toStrictEqual(
       "own-root themed-root",
     );
   });
@@ -285,9 +304,13 @@ describe("auth form class-name context", () => {
       />,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-form]"), "root-cls");
-    assertEquals(classOf(container, "[data-oauth2-input]"), "input-cls");
-    assertEquals(classOf(container, "[data-oauth2-submit]"), "submit-cls");
+    expect(classOf(container, "[data-oauth2-form]")).toStrictEqual("root-cls");
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "input-cls",
+    );
+    expect(classOf(container, "[data-oauth2-submit]")).toStrictEqual(
+      "submit-cls",
+    );
   });
 
   it("themes ResetPasswordForm from an inherited provider", () => {
@@ -300,11 +323,13 @@ describe("auth form class-name context", () => {
     );
 
     const inputs = container.querySelectorAll("[data-oauth2-input]");
-    assertEquals(inputs.length, 2);
+    expect(inputs.length).toStrictEqual(2);
     for (const input of inputs) {
-      assertEquals(input.getAttribute("class"), "themed-input");
+      expect(input.getAttribute("class")).toStrictEqual("themed-input");
     }
-    assertEquals(classOf(container, "[data-oauth2-label]"), "label-cls");
+    expect(classOf(container, "[data-oauth2-label]")).toStrictEqual(
+      "label-cls",
+    );
   });
 
   it("themes MfaChallengeForm, recovery toggle included, from a provider", () => {
@@ -316,9 +341,10 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-input]"), "themed-input");
-    assertEquals(
-      classOf(container, "[data-oauth2-toggle-recovery]"),
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "themed-input",
+    );
+    expect(classOf(container, "[data-oauth2-toggle-recovery]")).toStrictEqual(
       "secondary-cls",
     );
   });
@@ -346,14 +372,19 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(classOf(container, "[data-oauth2-secret]"), "secret-cls");
-    assertEquals(classOf(container, "[data-oauth2-qr]"), "qr-cls");
-    assertEquals(
-      classOf(container, "[data-oauth2-recovery-codes]"),
+    expect(classOf(container, "[data-oauth2-secret]")).toStrictEqual(
+      "secret-cls",
+    );
+    expect(classOf(container, "[data-oauth2-qr]")).toStrictEqual("qr-cls");
+    expect(classOf(container, "[data-oauth2-recovery-codes]")).toStrictEqual(
       "codes-cls",
     );
-    assertEquals(classOf(container, "[data-oauth2-recovery-code]"), "code-cls");
-    assertEquals(classOf(container, "[data-oauth2-input]"), "input-cls");
+    expect(classOf(container, "[data-oauth2-recovery-code]")).toStrictEqual(
+      "code-cls",
+    );
+    expect(classOf(container, "[data-oauth2-input]")).toStrictEqual(
+      "input-cls",
+    );
   });
 
   it("reaches the success panel that replaces the form", async () => {
@@ -366,7 +397,9 @@ describe("auth form class-name context", () => {
       fireEvent.submit(getForm(container));
     });
 
-    assertEquals(classOf(container, "[data-oauth2-success]"), "success-cls");
+    expect(classOf(container, "[data-oauth2-success]")).toStrictEqual(
+      "success-cls",
+    );
   });
 
   for (const [name, renderForm] of RENDER_PROP_FORMS) {
@@ -377,12 +410,10 @@ describe("auth form class-name context", () => {
         </AuthFormClassNamesProvider>,
       );
 
-      assertEquals(
-        screen.getByTestId("input").getAttribute("class"),
+      expect(screen.getByTestId("input").getAttribute("class")).toStrictEqual(
         "own-input",
       );
-      assertEquals(
-        screen.getByTestId("submit").getAttribute("class"),
+      expect(screen.getByTestId("submit").getAttribute("class")).toStrictEqual(
         "themed-submit",
       );
     });
@@ -407,12 +438,10 @@ describe("auth form class-name context", () => {
       </AuthFormClassNamesProvider>,
     );
 
-    assertEquals(
-      screen.getByTestId("input").getAttribute("class"),
+    expect(screen.getByTestId("input").getAttribute("class")).toStrictEqual(
       "themed-input",
     );
-    assertEquals(
-      screen.getByTestId("submit").getAttribute("class"),
+    expect(screen.getByTestId("submit").getAttribute("class")).toStrictEqual(
       "own-submit",
     );
   });
@@ -435,8 +464,8 @@ describe("auth form class-name context", () => {
     const { rerender } = render(<Host tick={1} />);
     rerender(<Host tick={2} />);
 
-    assertEquals(screen.getByTestId("tick").textContent, "2");
-    assertEquals(seen.length, 2);
+    expect(screen.getByTestId("tick").textContent).toStrictEqual("2");
+    expect(seen.length).toStrictEqual(2);
     assert(
       seen[0] === seen[1],
       "an equal classNames literal should resolve to the same map",
@@ -450,11 +479,17 @@ describe("auth form class-name context", () => {
   it("resolves an empty map with no provider above", () => {
     function Probe(): ReactNode {
       const classNames = useAuthFormClassNames();
-      return <p data-testid="probe" className={classNames.input}>Probe</p>;
+      return (
+        <p data-testid="probe" className={classNames.input}>
+          Probe
+        </p>
+      );
     }
 
     render(<Probe />);
 
-    assertEquals(screen.getByTestId("probe").getAttribute("class"), null);
+    expect(screen.getByTestId("probe").getAttribute("class")).toStrictEqual(
+      null,
+    );
   });
 });

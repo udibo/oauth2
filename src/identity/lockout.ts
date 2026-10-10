@@ -220,16 +220,17 @@ export class MemoryLockoutStore implements LockoutStore {
   /** Add one failure synchronously (atomic in a single-process store). */
   increment(userId: string, now: number): Promise<LockoutRecord> {
     const record = this.#records.get(userId);
-    const lockExpired = record?.lockedUntil !== undefined &&
-      record.lockedUntil <= now;
-    const next: LockoutRecord = record && !lockExpired
-      ? {
-        failures: record.failures + 1,
-        ...(record.lockedUntil !== undefined
-          ? { lockedUntil: record.lockedUntil }
-          : {}),
-      }
-      : { failures: 1 };
+    const lockExpired =
+      record?.lockedUntil !== undefined && record.lockedUntil <= now;
+    const next: LockoutRecord =
+      record && !lockExpired
+        ? {
+            failures: record.failures + 1,
+            ...(record.lockedUntil !== undefined
+              ? { lockedUntil: record.lockedUntil }
+              : {}),
+          }
+        : { failures: 1 };
     this.#records.set(userId, next);
     return Promise.resolve(next);
   }

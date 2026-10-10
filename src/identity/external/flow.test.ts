@@ -1,11 +1,5 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
 import type { BasicScope } from "../../models/scope.ts";
 import {
   AuthorizationServer,
@@ -92,11 +86,10 @@ async function createHarness(options: { maxTransientAgeMs?: number } = {}) {
     maxTransientAgeMs: options.maxTransientAgeMs,
   });
   const authorize = async (url: string): Promise<URL> => {
-    const response = await server.handleAuthorizeRequest(
-      new Request(url),
-      () => Promise.resolve({ user }),
+    const response = await server.handleAuthorizeRequest(new Request(url), () =>
+      Promise.resolve({ user }),
     );
-    assertEquals(response.status, 302);
+    expect(response.status).toStrictEqual(302);
     return new URL(response.headers.get("location")!);
   };
   return { flow, authorize };
@@ -108,39 +101,40 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
 
     const { url, transient } = await flow.start({ redirectUri });
     const authorizeUrl = new URL(url);
-    assertEquals(
-      authorizeUrl.origin + authorizeUrl.pathname,
+    expect(authorizeUrl.origin + authorizeUrl.pathname).toStrictEqual(
       `${issuer}/authorize`,
     );
-    assertEquals(authorizeUrl.searchParams.get("state"), transient.state);
-    assertEquals(authorizeUrl.searchParams.get("nonce"), transient.nonce);
-    assertEquals(
-      authorizeUrl.searchParams.get("scope"),
+    expect(authorizeUrl.searchParams.get("state")).toStrictEqual(
+      transient.state,
+    );
+    expect(authorizeUrl.searchParams.get("nonce")).toStrictEqual(
+      transient.nonce,
+    );
+    expect(authorizeUrl.searchParams.get("scope")).toStrictEqual(
       "openid email profile",
     );
-    assertEquals(
+    expect(
       authorizeUrl.searchParams.get("code_challenge_method"),
-      "S256",
-    );
+    ).toStrictEqual("S256");
     assert(authorizeUrl.searchParams.get("code_challenge"));
-    assertEquals(transient.provider, "test-idp");
-    assertEquals(transient.redirectUri, redirectUri);
+    expect(transient.provider).toStrictEqual("test-idp");
+    expect(transient.redirectUri).toStrictEqual(redirectUri);
     assert(transient.codeVerifier);
     assert(transient.nonce);
 
     const callback = await authorize(url);
     const profile = await flow.finish({ params: callback, transient });
 
-    assertEquals(profile.provider, "test-idp");
-    assertEquals(profile.subject, user.id);
-    assertEquals(profile.email, userClaims.email);
-    assertEquals(profile.emailVerified, true);
-    assertEquals(profile.name, userClaims.name);
-    assertEquals(profile.givenName, userClaims.given_name);
-    assertEquals(profile.familyName, userClaims.family_name);
-    assertEquals(profile.picture, userClaims.picture);
-    assertEquals(profile.raw.nonce, transient.nonce);
-    assertEquals(profile.raw.aud, webClient.id);
+    expect(profile.provider).toStrictEqual("test-idp");
+    expect(profile.subject).toStrictEqual(user.id);
+    expect(profile.email).toStrictEqual(userClaims.email);
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(profile.name).toStrictEqual(userClaims.name);
+    expect(profile.givenName).toStrictEqual(userClaims.given_name);
+    expect(profile.familyName).toStrictEqual(userClaims.family_name);
+    expect(profile.picture).toStrictEqual(userClaims.picture);
+    expect(profile.raw.nonce).toStrictEqual(transient.nonce);
+    expect(profile.raw.aud).toStrictEqual(webClient.id);
   });
 
   it("rejects a callback whose state does not match, timing-safely", async () => {
@@ -149,12 +143,12 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const callback = await authorize(url);
     callback.searchParams.set("state", "tampered-state");
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params: callback, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "state_mismatch");
-    assertStringIncludes(error.message, "[test-idp]");
+    expect(error.code).toStrictEqual("state_mismatch");
+    expect(error.message).toContain("[test-idp]");
   });
 
   it("rejects a transient older than the default 10 minute window", async () => {
@@ -163,12 +157,12 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const callback = await authorize(url);
     transient.createdAt = Date.now() - DEFAULT_MAX_TRANSIENT_AGE_MS - 1;
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params: callback, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "transient_expired");
-    assertStringIncludes(error.message, String(DEFAULT_MAX_TRANSIENT_AGE_MS));
+    expect(error.code).toStrictEqual("transient_expired");
+    expect(error.message).toContain(String(DEFAULT_MAX_TRANSIENT_AGE_MS));
   });
 
   it("honors a configured maxTransientAgeMs", async () => {
@@ -179,11 +173,11 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const callback = await authorize(url);
     transient.createdAt = Date.now() - 2000;
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params: callback, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "transient_expired");
+    expect(error.code).toStrictEqual("transient_expired");
   });
 
   it("surfaces a provider error callback diagnosably", async () => {
@@ -195,14 +189,14 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
       state: transient.state,
     });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[test-idp]");
-    assertStringIncludes(error.message, "access_denied");
-    assertStringIncludes(error.message, "User cancelled the request");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[test-idp]");
+    expect(error.message).toContain("access_denied");
+    expect(error.message).toContain("User cancelled the request");
   });
 
   it("rejects an id_token whose nonce does not match the transient", async () => {
@@ -211,11 +205,11 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const callback = await authorize(url);
     transient.nonce = "a-different-nonce";
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params: callback, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "nonce_mismatch");
+    expect(error.code).toStrictEqual("nonce_mismatch");
   });
 
   it("reports state_mismatch, not provider_error, for a forged error callback with a bad state", async () => {
@@ -227,11 +221,11 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
       state: "not-the-real-state",
     });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "state_mismatch");
+    expect(error.code).toStrictEqual("state_mismatch");
   });
 
   it("parses a path-relative callback URL string", async () => {
@@ -242,7 +236,7 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     assert(relative.startsWith("/"));
 
     const profile = await flow.finish({ params: relative, transient });
-    assertEquals(profile.subject, user.id);
+    expect(profile.subject).toStrictEqual(user.id);
   });
 
   it("rejects a callback missing the code parameter", async () => {
@@ -250,12 +244,12 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const { transient } = await flow.start({ redirectUri });
     const params = new URLSearchParams({ state: transient.state });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "invalid_callback");
-    assertStringIncludes(error.message, "code");
+    expect(error.code).toStrictEqual("invalid_callback");
+    expect(error.message).toContain("code");
   });
 
   it("rejects a transient started for a different provider", async () => {
@@ -264,12 +258,12 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     const callback = await authorize(url);
     transient.provider = "github";
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.finish({ params: callback, transient }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "github");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("github");
   });
 
   it("names the issuer and the well-known URL when discovery fails", async () => {
@@ -282,14 +276,13 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     });
     const flow = new ExternalAuthFlow({ provider });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () => flow.start({ redirectUri }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "https://missing.example");
-    assertStringIncludes(
-      error.message,
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("https://missing.example");
+    expect(error.message).toContain(
       "https://missing.example/.well-known/openid-configuration",
     );
   });

@@ -39,9 +39,7 @@
  * @module
  */
 
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   AuthRequestRecord,
   AuthRequestStorage,
@@ -117,35 +115,29 @@ export function runAuthRequestStorageContractTests(
 
     describe("set / get / delete / clear", () => {
       it("returns null for an unknown state", async () => {
-        assertStrictEquals(await store.get("no-such-state"), null);
+        expect(await store.get("no-such-state")).toBe(null);
       });
 
       it("round-trips every field of a stored record", async () => {
         const stored = record();
         await store.set("state-1", stored);
-        assertEquals(await store.get("state-1"), stored);
+        expect(await store.get("state-1")).toStrictEqual(stored);
       });
 
       it("keeps records under different states independent", async () => {
         await store.set("state-1", record({ codeVerifier: "verifier-1" }));
         await store.set("state-2", record({ codeVerifier: "verifier-2" }));
-        assertStrictEquals(
-          (await store.get("state-1"))?.codeVerifier,
-          "verifier-1",
-        );
-        assertStrictEquals(
-          (await store.get("state-2"))?.codeVerifier,
-          "verifier-2",
-        );
+        expect((await store.get("state-1"))?.codeVerifier).toBe("verifier-1");
+        expect((await store.get("state-2"))?.codeVerifier).toBe("verifier-2");
       });
 
       it("deletes one record and leaves the others", async () => {
         await store.set("state-1", record());
         await store.set("state-2", record());
         await store.delete("state-1");
-        assertStrictEquals(await store.get("state-1"), null);
+        expect(await store.get("state-1")).toBe(null);
         assert(
-          await store.get("state-2") !== null,
+          (await store.get("state-2")) !== null,
           "delete must remove only the named state",
         );
       });
@@ -155,8 +147,8 @@ export function runAuthRequestStorageContractTests(
           await store.set("state-1", record());
           await store.set("state-2", record());
           await store.clear();
-          assertStrictEquals(await store.get("state-1"), null);
-          assertStrictEquals(await store.get("state-2"), null);
+          expect(await store.get("state-1")).toBe(null);
+          expect(await store.get("state-2")).toBe(null);
         });
       } else {
         it('leaves every in-progress record in place (clear: "scoped")', async () => {
@@ -168,24 +160,22 @@ export function runAuthRequestStorageContractTests(
           const message =
             "clear() on a shared store must not cancel another user's sign-in " +
             "that is still in progress";
-          assertEquals(await store.get("state-2"), second, message);
-          assertEquals(
+          expect(await store.get("state-2"), message).toStrictEqual(second);
+          expect(
             expectTake
               ? await store.take!("state-1")
               : await store.get("state-1"),
-            first,
             message,
-          );
+          ).toStrictEqual(first);
         });
 
         it('removes a record past any lifetime (clear: "scoped")', async () => {
           await store.set("expired", record({ createdAt: 0 }));
           await store.clear();
-          assertStrictEquals(
+          expect(
             await store.get("expired"),
-            null,
             "a scoped clear() must still remove expired records",
-          );
+          ).toBe(null);
         });
       }
     });
@@ -205,17 +195,16 @@ export function runAuthRequestStorageContractTests(
         it("returns the record and removes it", async () => {
           const stored = record();
           await store.set("state-1", stored);
-          assertEquals(await store.take!("state-1"), stored);
-          assertStrictEquals(
+          expect(await store.take!("state-1")).toStrictEqual(stored);
+          expect(
             await store.get("state-1"),
-            null,
             "a taken record must not be readable again",
-          );
-          assertStrictEquals(await store.take!("state-1"), null);
+          ).toBe(null);
+          expect(await store.take!("state-1")).toBe(null);
         });
 
         it("returns null for an unknown state", async () => {
-          assertStrictEquals(await store.take!("no-such-state"), null);
+          expect(await store.take!("no-such-state")).toBe(null);
         });
 
         it(`hands one record to exactly one of ${CONCURRENT_CALLERS} concurrent takes`, async () => {
@@ -223,14 +212,13 @@ export function runAuthRequestStorageContractTests(
           await store.set("state-1", stored);
           const results = await race(() => store.take!("state-1"));
           const winners = results.filter((result) => result !== null);
-          assertStrictEquals(
+          expect(
             winners.length,
-            1,
             "a state is single-use — callbacks racing on it must not each " +
               "receive the PKCE verifier",
-          );
-          assertEquals(winners[0], stored);
-          assertStrictEquals(await store.get("state-1"), null);
+          ).toBe(1);
+          expect(winners[0]).toStrictEqual(stored);
+          expect(await store.get("state-1")).toBe(null);
         });
 
         it("hands each record to its own taker when two states are taken concurrently", async () => {
@@ -240,17 +228,12 @@ export function runAuthRequestStorageContractTests(
             store.take!("state-1"),
             store.take!("state-2"),
           ]);
-          assertStrictEquals(first?.codeVerifier, "verifier-1");
-          assertStrictEquals(second?.codeVerifier, "verifier-2");
+          expect(first?.codeVerifier).toBe("verifier-1");
+          expect(second?.codeVerifier).toBe("verifier-2");
         });
       });
     } else {
-      it({
-        name:
-          "take is not implemented — two callbacks racing on one state can both redeem it (take: false)",
-        ignore: true,
-        fn: () => {},
-      });
+      it.skip("take is not implemented — two callbacks racing on one state can both redeem it (take: false)", () => {});
     }
   });
 }

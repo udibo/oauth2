@@ -800,10 +800,8 @@ framework — or when you want your own request shapes — call the service meth
 directly from your handlers, as the flows are plain async methods. The
 [React Router template](../../templates/react-router/README.md) mounts the
 routes; the
-[Hono](https://github.com/udibo/oauth2/tree/main/examples/hono/app-with-own-auth)
-and
-[Juniper](https://github.com/udibo/oauth2/tree/main/examples/juniper/app-with-own-auth)
-examples show direct calls from server-rendered form routes.
+[Hono example](https://github.com/udibo/oauth2/tree/main/examples/hono/app-with-own-auth)
+shows direct calls from server-rendered form routes.
 
 The factory scope stops at the password path **by design**. Passwordless, MFA,
 and social carry policy the factory can't guess — where pending state lives, the

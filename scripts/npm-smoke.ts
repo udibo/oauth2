@@ -1,207 +1,336 @@
 /**
- * Proves the built npm artifact from Node, the way an adopter would consume
- * it. Run `deno task npm:build` first; then this script:
+ * Consumes the packed npm artifact the way an adopter would: packs the
+ * package, installs the tarball into an empty project with the peer
+ * dependencies pinned to the versions this repository tests with,
+ * type-checks a consumer that imports every subpath under NodeNext
+ * resolution, and imports every subpath on Node.
  *
- * 1. asserts the artifact's export map is exactly the JSR export map minus
- *    the Deno-only subpaths, and that its version matches `src/deno.json`;
- * 2. asserts every runtime dependency of the artifact is pinned in
- *    `npm-smoke-consumer/package.json` at a version satisfying the
- *    artifact's range, so the committed `package-lock.json` is the only
- *    source of registry code CI ever executes;
- * 3. asserts `npm-smoke-consumer/mod.tsx` statically imports every subpath
- *    the smoke must prove (the export map minus the `/testing` rows the
- *    README leaves unverified on Node), so type-check coverage cannot
- *    silently shrink;
- * 4. installs the frozen registry dependencies with `npm ci`, packs the
- *    artifact with `npm pack`, and installs the local tarball offline —
- *    every npm invocation with lifecycle scripts disabled;
- * 5. type-checks the consumer with its own `tsc` under NodeNext resolution;
- * 6. runs `npm-smoke-consumer/main.mjs` under Node, which imports every one
- *    of those subpaths at runtime and probes a known export from each.
- *
- * Nothing here publishes anywhere, and nothing here resolves a floating
- * version from the registry: `npm ci` installs exactly the committed
- * lockfile, and the tarball install runs `--offline` so an unpinned
- * dependency fails loudly instead of fetching fresh code onto the runner.
- *
- * Usage: `deno task npm:smoke`
+ * Run `pnpm build` first, then `pnpm smoke`. With `--release` the consumer is
+ * given no JSR registry, so the install itself fails when a runtime dependency
+ * can only come from JSR, and the run also fails when one resolves through JSR
+ * at all, which a published package must not do.
  */
-import { parse, parseRange, satisfies } from "@std/semver";
+import { execFileSync, spawn } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DENO_ONLY_EXPORTS } from "./build-npm.ts";
-
-/** Mirrors `UNVERIFIED_ON_NODE` in `npm-smoke-consumer/main.mjs`. */
-export const UNVERIFIED_ON_NODE: readonly string[] = [
-  "./testing",
-  "./testing/contract",
-];
-
-/**
- * Env for every npm spawn: no lifecycle script runs on this machine, in any
- * directory, whatever the local npm configuration says.
- */
-export const NPM_SPAWN_ENV: Readonly<Record<string, string>> = {
-  npm_config_ignore_scripts: "true",
-};
-
-/** `npm ci` — installs exactly the committed lockfile, nothing floating. */
-export const FROZEN_INSTALL_ARGS: readonly string[] = [
-  "ci",
-  "--no-audit",
-  "--no-fund",
-];
-
-/**
- * Installs the locally packed tarball on top of the frozen tree.
- * `--offline` turns any attempt to resolve a dependency from the registry —
- * an artifact dependency missing from the consumer's pins — into a hard
- * failure instead of a silent lockfile-less fetch.
- */
-export function tarballInstallArgs(tarball: string): string[] {
-  return [
-    "install",
-    "--no-save",
-    "--no-audit",
-    "--no-fund",
-    "--ignore-scripts",
-    "--offline",
-    tarball,
-  ];
+interface PackageManifest {
+  name: string;
+  version: string;
+  exports: Record<string, unknown>;
+  bin?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 }
 
 const packageDir = fileURLToPath(new URL("../", import.meta.url));
-const consumerDir = `${packageDir}npm-smoke-consumer`;
+const smokeDir = join(packageDir, "scripts", "npm-smoke");
+const tscPath = join(packageDir, "node_modules", "typescript", "bin", "tsc");
+const isWindows = process.platform === "win32";
+const releaseMode = process.argv.includes("--release");
+const CONSUMER_PINS = [
+  "hono",
+  "react",
+  "react-dom",
+  "@types/react",
+  "@types/react-dom",
+  "@types/node",
+  "typescript",
+  "vitest",
+];
 
 function fail(message: string): never {
   console.error(`npm smoke: ${message}`);
-  Deno.exit(1);
+  process.exit(1);
 }
 
-async function run(
+function run(
   command: string,
-  args: readonly string[],
+  args: string[],
   cwd: string,
-): Promise<void> {
-  const { code } = await new Deno.Command(command, {
-    args: [...args],
+  stderr: "inherit" | "pipe" = "inherit",
+): string {
+  return execFileSync(command, args, {
     cwd,
-    env: { ...NPM_SPAWN_ENV },
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
-  if (code !== 0) {
-    fail(`\`${command} ${args.join(" ")}\` exited with ${code}`);
+    encoding: "utf8",
+    shell: isWindows && command !== process.execPath,
+    stdio: ["ignore", "pipe", stderr],
+    env: { ...process.env, npm_config_ignore_scripts: "true" },
+  });
+}
+
+function readManifest(path: string): PackageManifest {
+  return JSON.parse(readFileSync(path, "utf8")) as PackageManifest;
+}
+
+function exactVersions(
+  devDependencies: Record<string, string>,
+): Record<string, string> {
+  const pinned: Record<string, string> = {};
+  for (const name of CONSUMER_PINS) {
+    const range = devDependencies[name];
+    if (range === undefined) fail(`devDependencies does not pin ${name}`);
+    const installed = readManifest(
+      join(packageDir, "node_modules", name, "package.json"),
+    );
+    pinned[name] = installed.version;
   }
+  return pinned;
 }
 
-async function readJson(path: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await Deno.readTextFile(path));
+/**
+ * Packs the exact `@udibo/*` runtime dependencies this checkout resolved, so
+ * the age-gated consumer install can use them: the release-age policy exempts
+ * the scope's own packages, which `npm install --before` cannot express.
+ */
+function ownDependencyTarballs(
+  dependencies: Record<string, string>,
+  destination: string,
+): string[] {
+  return Object.keys(dependencies)
+    .filter((name) => name.startsWith("@udibo/"))
+    .map((name) => {
+      const { version } = readManifest(
+        join(packageDir, "node_modules", name, "package.json"),
+      );
+      const file = run(
+        "npm",
+        ["pack", `${name}@${version}`, "--pack-destination", destination],
+        destination,
+        "pipe",
+      )
+        .trim()
+        .split("\n")
+        .at(-1)!;
+      return join(destination, file);
+    });
 }
 
-function assertArtifactDepsFrozen(
-  artifactDeps: Record<string, string>,
-  consumerDevDeps: Record<string, string>,
-): void {
-  for (const [name, range] of Object.entries(artifactDeps)) {
-    const pinned = consumerDevDeps[name];
-    if (pinned === undefined) {
-      fail(
-        `the artifact depends on ${name}@${range} but ` +
-          `npm-smoke-consumer/package.json does not pin it — add an exact ` +
-          `devDependency and regenerate package-lock.json ` +
-          `(cd npm-smoke-consumer && npm install --no-audit --no-fund)`,
-      );
-    }
-    if (!satisfies(parse(pinned), parseRange(range))) {
-      fail(
-        `${name}@${pinned} pinned in npm-smoke-consumer does not satisfy ` +
-          `the artifact's range ${range} — update the pin and regenerate ` +
-          `package-lock.json`,
-      );
-    }
+const BIN_NAME = "udibo-oauth2";
+
+function npx(args: string[], cwd: string): string {
+  return run("npx", ["--no-install", BIN_NAME, ...args], cwd, "pipe");
+}
+
+function checkBin(consumerDir: string, listing: string[]): void {
+  const installed = readManifest(
+    join(consumerDir, "node_modules", "@udibo", "oauth2", "package.json"),
+  );
+  const target = installed.bin?.[BIN_NAME];
+  if (!target || !listing.includes(target.replace(/^\.\//, ""))) {
+    fail(`bin ${BIN_NAME} points at ${target}, which is not in the tarball`);
+  }
+  const help = npx(["--help"], consumerDir);
+  if (!help.includes("oidc keygen") || !help.includes("idp dev")) {
+    fail(`${BIN_NAME} --help did not list its commands: ${help}`);
+  }
+  const jwk = JSON.parse(npx(["oidc", "keygen"], consumerDir)) as {
+    kty?: string;
+    d?: string;
+  };
+  if (jwk.kty !== "EC" || !jwk.d)
+    fail(`${BIN_NAME} oidc keygen printed no key`);
+}
+
+async function checkIdpDev(consumerDir: string): Promise<void> {
+  const entry = join(
+    consumerDir,
+    "node_modules",
+    "@udibo",
+    "oauth2",
+    "dist",
+    "cli",
+    "bin.js",
+  );
+  const child = spawn(process.execPath, [entry, "idp", "dev", "--port", "0"], {
+    cwd: consumerDir,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const exited = new Promise<void>((resolve) => child.once("close", resolve));
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      let output = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+        output += chunk;
+        const match = output.match(/Listening on (http:\/\/\S+)/);
+        if (match) resolve(match[1]!);
+      });
+      child.once("error", reject);
+      child.once("close", () => reject(new Error(`exited early:\n${output}`)));
+    });
+    const response = await fetch(`${url}/.well-known/openid-configuration`);
+    if (!response.ok)
+      fail(`idp dev answered discovery with ${response.status}`);
+  } finally {
+    child.kill("SIGTERM");
+    await exited;
   }
 }
 
 async function main(): Promise<void> {
-  const srcConfig = await readJson(`${packageDir}src/deno.json`);
-  const artifactConfig = await readJson(`${packageDir}npm/package.json`).catch(
-    () => fail("npm/package.json not found — run `deno task npm:build` first"),
-  );
-  const consumerConfig = await readJson(`${consumerDir}/package.json`);
-
-  const expectedExports = Object.keys(
-    srcConfig.exports as Record<string, string>,
-  ).filter((subpath) => !DENO_ONLY_EXPORTS.includes(subpath));
-  const actualExports = Object.keys(
-    artifactConfig.exports as Record<string, string>,
-  );
-  const missing = expectedExports.filter((s) => !actualExports.includes(s));
-  const extra = actualExports.filter((s) => !expectedExports.includes(s));
-  if (missing.length > 0 || extra.length > 0) {
-    fail(
-      `artifact export map drifted from src/deno.json — ` +
-        `missing: [${missing.join(", ")}], unexpected: [${extra.join(", ")}]`,
+  const manifest = readManifest(join(packageDir, "package.json"));
+  if (releaseMode) {
+    const viaJsr = Object.entries(manifest.dependencies ?? {}).filter(
+      ([, spec]) => spec.includes("jsr"),
     );
+    if (viaJsr.length > 0) {
+      fail(
+        `the package depends on JSR-resolved packages: ${viaJsr
+          .map(([name, spec]) => `${name}@${spec}`)
+          .join(", ")}; see PUBLISHING.md, "Before the first npm release"`,
+      );
+    }
   }
-  if (artifactConfig.version !== srcConfig.version) {
-    fail(
-      `artifact version ${artifactConfig.version} does not match ` +
-        `src/deno.json version ${srcConfig.version} — rebuild with ` +
-        "`deno task npm:build`",
+  const workDir = mkdtempSync(join(tmpdir(), "oauth2-smoke-"));
+  try {
+    const packDir = join(workDir, "pack");
+    const consumerDir = join(workDir, "consumer");
+    mkdirSync(packDir);
+    mkdirSync(consumerDir);
+
+    run("pnpm", ["pack", "--pack-destination", packDir], packageDir);
+    const tarballs = readdirSync(packDir).filter((name) =>
+      name.endsWith(".tgz"),
     );
-  }
+    if (tarballs.length !== 1) {
+      fail(`expected one tarball, found ${tarballs.length}`);
+    }
+    const tarball = join(packDir, tarballs[0]!);
 
-  assertArtifactDepsFrozen(
-    (artifactConfig.dependencies ?? {}) as Record<string, string>,
-    (consumerConfig.devDependencies ?? {}) as Record<string, string>,
-  );
-
-  const typeCheckedSubpaths = expectedExports.filter(
-    (subpath) => !UNVERIFIED_ON_NODE.includes(subpath),
-  );
-  const consumerSource = await Deno.readTextFile(`${consumerDir}/mod.tsx`);
-  const unimported = typeCheckedSubpaths.filter(
-    (subpath) => !consumerSource.includes(`"@udibo/oauth2${subpath.slice(1)}"`),
-  );
-  if (unimported.length > 0) {
-    fail(
-      `npm-smoke-consumer/mod.tsx does not import [${
-        unimported.join(", ")
-      }] — ` +
-        `every Node-supported subpath must be type-checked, or added to the ` +
-        `README runtime table's unverified rows and UNVERIFIED_ON_NODE`,
+    writeFileSync(
+      join(consumerDir, "package.json"),
+      JSON.stringify({
+        name: "oauth2-smoke-consumer",
+        private: true,
+        type: "module",
+        dependencies: exactVersions(manifest.devDependencies ?? {}),
+      }),
     );
+    if (!releaseMode) {
+      writeFileSync(
+        join(consumerDir, ".npmrc"),
+        "@jsr:registry=https://npm.jsr.io\n",
+      );
+    }
+    run(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--ignore-scripts",
+        "--before",
+        new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        ...ownDependencyTarballs(manifest.dependencies ?? {}, packDir),
+        tarball,
+      ],
+      consumerDir,
+    );
+
+    const installedDir = join(consumerDir, "node_modules", "@udibo", "oauth2");
+    const installed = readManifest(join(installedDir, "package.json"));
+    const listing = readdirSync(installedDir, { recursive: true })
+      .map(String)
+      .map((entry) => entry.replaceAll("\\", "/"));
+    for (const required of ["README.md", "LICENSE", "package.json"]) {
+      if (!listing.includes(required)) {
+        fail(`the tarball is missing ${required}`);
+      }
+    }
+    const unexpected = listing.filter(
+      (entry) =>
+        entry.includes(".test.") ||
+        entry.includes("_test_") ||
+        entry.startsWith("src/"),
+    );
+    if (unexpected.length > 0) {
+      fail(`the tarball contains ${unexpected.join(", ")}`);
+    }
+
+    const subpaths = Object.keys(manifest.exports).filter(
+      (subpath) => subpath !== "./package.json",
+    );
+    const consumerSource = readFileSync(join(smokeDir, "consumer.tsx"), "utf8");
+    const unimported = subpaths.filter(
+      (subpath) =>
+        !consumerSource.includes(`"${manifest.name}${subpath.slice(1)}"`),
+    );
+    if (unimported.length > 0) {
+      fail(
+        `scripts/npm-smoke/consumer.tsx does not import [${unimported.join(", ")}]`,
+      );
+    }
+    for (const subpath of subpaths) {
+      const target = installed.exports[subpath] as
+        | { types: string; default: string }
+        | undefined;
+      for (const file of [target?.types, target?.default]) {
+        if (!file || !listing.includes(file.replace(/^\.\//, ""))) {
+          fail(
+            `export ${subpath} points at ${file}, which is not in the tarball`,
+          );
+        }
+      }
+    }
+
+    checkBin(consumerDir, listing);
+    await checkIdpDev(consumerDir);
+
+    const nonNpm = Object.entries(installed.dependencies ?? {}).filter(
+      ([, spec]) => spec.includes("jsr"),
+    );
+    if (nonNpm.length > 0) {
+      const names = nonNpm.map(([name, spec]) => `${name}@${spec}`).join(", ");
+      if (releaseMode) {
+        fail(`the package depends on JSR-resolved packages: ${names}`);
+      }
+      console.warn(
+        `npm smoke: WARNING dependencies resolve through JSR (${names}); publish only after switching them to npm versions`,
+      );
+    }
+
+    copyFileSync(
+      join(smokeDir, "consumer.tsx"),
+      join(consumerDir, "consumer.tsx"),
+    );
+    copyFileSync(join(smokeDir, "main.mjs"), join(consumerDir, "main.mjs"));
+    writeFileSync(
+      join(consumerDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          lib: ["ESNext", "DOM", "DOM.Iterable"],
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          types: ["node"],
+          jsx: "react-jsx",
+          strict: true,
+          noEmit: true,
+          skipLibCheck: false,
+        },
+        include: ["consumer.tsx"],
+      }),
+    );
+    run(process.execPath, [tscPath, "-p", "."], consumerDir);
+
+    const output = run(process.execPath, ["main.mjs"], consumerDir);
+    if (!output.includes("imported")) fail(`unexpected output: ${output}`);
+    console.log(
+      `npm smoke: ${tarballs[0]} type-checked ${subpaths.length} subpaths and ran on Node ${process.version}`,
+    );
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
   }
-
-  await run("npm", FROZEN_INSTALL_ARGS, consumerDir);
-
-  const packOutput = await new Deno.Command("npm", {
-    args: ["pack", "--pack-destination", consumerDir],
-    cwd: `${packageDir}npm`,
-    env: { ...NPM_SPAWN_ENV },
-    stdout: "piped",
-    stderr: "inherit",
-  }).output();
-  if (packOutput.code !== 0) fail("`npm pack` failed");
-  const tarball = new TextDecoder().decode(packOutput.stdout).trim()
-    .split("\n").at(-1);
-  if (!tarball?.endsWith(".tgz")) {
-    fail(`npm pack printed no tarball: ${tarball}`);
-  }
-
-  await run("npm", tarballInstallArgs(`./${tarball}`), consumerDir);
-  await run(
-    "node",
-    ["node_modules/typescript/bin/tsc", "-p", "."],
-    consumerDir,
-  );
-  await run("node", ["main.mjs"], consumerDir);
-
-  console.log(
-    `npm smoke: ${typeCheckedSubpaths.length} subpaths type-checked and ` +
-      `imported from the ${tarball} artifact`,
-  );
 }
 
-if (import.meta.main) await main();
+await main();

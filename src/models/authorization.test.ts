@@ -1,6 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
 import { authorizationFromClaims } from "./authorization.ts";
 import { BasicScope } from "./scope.ts";
 
@@ -21,34 +19,34 @@ describe("authorizationFromClaims", () => {
 
     assert(authorization.hasScope("posts:read"));
     assert(authorization.hasScope("openid posts:read"));
-    assertFalse(authorization.hasScope("posts:write"));
+    expect(authorization.hasScope("posts:write")).toBeFalsy();
 
     assert(authorization.can("posts:write"));
-    assertFalse(authorization.can("posts:read"));
+    expect(authorization.can("posts:read")).toBeFalsy();
 
     assert(authorization.hasRole("editor"));
-    assertFalse(authorization.hasRole("admin"));
+    expect(authorization.hasRole("admin")).toBeFalsy();
 
     assert(authorization.hasOrgRole("admin"));
-    assertFalse(authorization.hasOrgRole("editor"));
+    expect(authorization.hasOrgRole("editor")).toBeFalsy();
 
     assert(authorization.inOrganization());
     assert(authorization.inOrganization("org-1"));
     assert(authorization.inOrganization("acme"));
-    assertFalse(authorization.inOrganization("northwind"));
+    expect(authorization.inOrganization("northwind")).toBeFalsy();
   });
 
   it("treats absent claims as no authorization, never as an error", () => {
     const authorization = authorizationFromClaims({});
 
-    assertFalse(authorization.hasScope("read"));
-    assertFalse(authorization.can("posts:write"));
-    assertFalse(authorization.hasRole("editor"));
-    assertFalse(authorization.hasOrgRole("admin"));
-    assertFalse(authorization.inOrganization());
-    assertEquals(authorization.organization, null);
-    assertEquals(authorization.roles.size, 0);
-    assertEquals(authorization.permissions.size, 0);
+    expect(authorization.hasScope("read")).toBeFalsy();
+    expect(authorization.can("posts:write")).toBeFalsy();
+    expect(authorization.hasRole("editor")).toBeFalsy();
+    expect(authorization.hasOrgRole("admin")).toBeFalsy();
+    expect(authorization.inOrganization()).toBeFalsy();
+    expect(authorization.organization).toStrictEqual(null);
+    expect(authorization.roles.size).toStrictEqual(0);
+    expect(authorization.permissions.size).toStrictEqual(0);
   });
 
   it("treats malformed claim shapes as absent", () => {
@@ -59,10 +57,10 @@ describe("authorizationFromClaims", () => {
       org_roles: ["admin"],
     });
 
-    assertFalse(authorization.hasRole("editor"));
-    assertEquals([...authorization.permissions], ["posts:write"]);
-    assertEquals(authorization.organization, null);
-    assertFalse(authorization.hasOrgRole("admin"));
+    expect(authorization.hasRole("editor")).toBeFalsy();
+    expect([...authorization.permissions]).toStrictEqual(["posts:write"]);
+    expect(authorization.organization).toStrictEqual(null);
+    expect(authorization.hasOrgRole("admin")).toBeFalsy();
   });
 
   it("has no organization without an org_id, whatever else is present", () => {
@@ -70,59 +68,66 @@ describe("authorizationFromClaims", () => {
       org_slug: "acme",
       org_roles: ["admin"],
     });
-    assertEquals(authorization.organization, null);
-    assertFalse(authorization.inOrganization("acme"));
+    expect(authorization.organization).toStrictEqual(null);
+    expect(authorization.inOrganization("acme")).toBeFalsy();
   });
 
   it("accepts null and undefined claims", () => {
-    assertFalse(authorizationFromClaims(null).inOrganization());
-    assertFalse(authorizationFromClaims(undefined).can("posts:write"));
+    expect(authorizationFromClaims(null).inOrganization()).toBeFalsy();
+    expect(authorizationFromClaims(undefined).can("posts:write")).toBeFalsy();
   });
 
   describe("unmet", () => {
     const authorization = authorizationFromClaims(claims);
 
     it("returns undefined when every condition holds", () => {
-      assertEquals(
+      expect(
         authorization.unmet({
           permission: ["posts:write", "billing:read"],
           role: "editor",
           orgRole: "admin",
           organization: "acme",
         }),
-        undefined,
-      );
+      ).toStrictEqual(undefined);
     });
 
     it("names the first failed check with what it required", () => {
-      assertEquals(authorization.unmet({ organization: "northwind" }), {
+      expect(authorization.unmet({ organization: "northwind" })).toStrictEqual({
         kind: "organization",
         required: "northwind",
       });
-      assertEquals(authorization.unmet({ role: ["editor", "owner"] }), {
+      expect(authorization.unmet({ role: ["editor", "owner"] })).toStrictEqual({
         kind: "role",
         required: "owner",
       });
-      assertEquals(authorization.unmet({ orgRole: "owner" }), {
+      expect(authorization.unmet({ orgRole: "owner" })).toStrictEqual({
         kind: "orgRole",
         required: "owner",
       });
-      assertEquals(authorization.unmet({ permission: "posts:delete" }), {
-        kind: "permission",
-        required: "posts:delete",
-      });
+      expect(authorization.unmet({ permission: "posts:delete" })).toStrictEqual(
+        {
+          kind: "permission",
+          required: "posts:delete",
+        },
+      );
     });
 
     it("requires any active organization for organization: true", () => {
-      assertEquals(authorization.unmet({ organization: true }), undefined);
-      assertEquals(authorizationFromClaims({}).unmet({ organization: true }), {
+      expect(authorization.unmet({ organization: true })).toStrictEqual(
+        undefined,
+      );
+      expect(
+        authorizationFromClaims({}).unmet({ organization: true }),
+      ).toStrictEqual({
         kind: "organization",
         required: true,
       });
     });
 
     it("ignores scope conditions — the resource server asserts those", () => {
-      assertEquals(authorization.unmet({ scope: "anything" }), undefined);
+      expect(authorization.unmet({ scope: "anything" })).toStrictEqual(
+        undefined,
+      );
     });
   });
 });

@@ -1,13 +1,6 @@
-import {
-  assertEquals,
-  assertNotStrictEquals,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { assertSpyCalls, spy } from "@std/testing/mock";
-import { FakeTime } from "@std/testing/time";
-
+import { describe, expect, it, vi } from "vitest";
+import { FakeTime } from "../../../_test_fake-time.ts";
+import { thrown } from "../../../_test_assert.ts";
 import { deriveAesKey, sealJson } from "../../../utils/crypto.ts";
 import {
   DEFAULT_SESSION_MAX_AGE_MS,
@@ -34,7 +27,7 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const store = new EncryptedCookieSessionStore({ secret });
     const data = makeSessionData();
-    assertEquals(await store.read(await store.create(data)), data);
+    expect(await store.read(await store.create(data))).toStrictEqual(data);
   });
 
   it("reads a cookie sealed under any secret in the list", async () => {
@@ -48,7 +41,7 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     const rotated = new EncryptedCookieSessionStore({
       secret: [current, previous],
     });
-    assertEquals(await rotated.read(cookieUnderPrevious), data);
+    expect(await rotated.read(cookieUnderPrevious)).toStrictEqual(data);
   });
 
   it("seals new cookies under the first secret during a rotation", async () => {
@@ -62,7 +55,7 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     const freshCookie = await rotated.create(data);
 
     const currentOnly = new EncryptedCookieSessionStore({ secret: current });
-    assertEquals(await currentOnly.read(freshCookie), data);
+    expect(await currentOnly.read(freshCookie)).toStrictEqual(data);
   });
 
   it("keeps an old cookie readable while its secret stays in the list, and drops it once removed", async () => {
@@ -76,12 +69,12 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     const duringGraceWindow = new EncryptedCookieSessionStore({
       secret: [current, previous],
     });
-    assertEquals(await duringGraceWindow.read(oldCookie), data);
+    expect(await duringGraceWindow.read(oldCookie)).toStrictEqual(data);
 
     const afterGraceWindow = new EncryptedCookieSessionStore({
       secret: current,
     });
-    assertStrictEquals(await afterGraceWindow.read(oldCookie), null);
+    expect(await afterGraceWindow.read(oldCookie)).toBe(null);
   });
 
   it("returns null for a cookie sealed under an unknown secret", async () => {
@@ -94,18 +87,18 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     const reader = new EncryptedCookieSessionStore({
       secret: crypto.getRandomValues(new Uint8Array(32)),
     });
-    assertStrictEquals(await reader.read(cookie), null);
+    expect(await reader.read(cookie)).toBe(null);
   });
 
   it("returns null for tampered or malformed cookies", async () => {
     const store = new EncryptedCookieSessionStore({
       secret: new Uint8Array(32),
     });
-    assertStrictEquals(await store.read("not-a-real-cookie"), null);
+    expect(await store.read("not-a-real-cookie")).toBe(null);
   });
 
   it("throws when the secret list is empty", () => {
-    assertThrows(
+    thrown(
       () => new EncryptedCookieSessionStore({ secret: [] }),
       Error,
       "secret must not be an empty list.",
@@ -113,20 +106,20 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
   });
 
   it("starts no key derivation until an operation needs the key", async () => {
-    using digest = spy(crypto.subtle, "digest");
+    using digest = vi.spyOn(crypto.subtle, "digest");
     const store = new EncryptedCookieSessionStore({
       secret: [
         crypto.getRandomValues(new Uint8Array(32)),
         crypto.getRandomValues(new Uint8Array(32)),
       ],
     });
-    assertSpyCalls(digest, 0);
+    expect(digest).toHaveBeenCalledTimes(0);
 
     const cookie = await store.create(makeSessionData());
-    assertSpyCalls(digest, 1);
+    expect(digest).toHaveBeenCalledTimes(1);
 
     await store.read(cookie);
-    assertSpyCalls(digest, 1);
+    expect(digest).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -135,7 +128,7 @@ describe("EncryptedCookieSessionStore bounded lifetime", () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
     const data = makeSessionData();
-    assertEquals(await store.read(await store.create(data)), data);
+    expect(await store.read(await store.create(data))).toStrictEqual(data);
   });
 
   it("returns null once a cookie is older than the max age", async () => {
@@ -145,29 +138,29 @@ describe("EncryptedCookieSessionStore bounded lifetime", () => {
     const cookie = await store.create(makeSessionData());
 
     time.tick(59_999);
-    assertEquals((await store.read(cookie))?.tokens.accessToken, "abc");
+    expect((await store.read(cookie))?.tokens.accessToken).toStrictEqual("abc");
 
     time.tick(2);
-    assertStrictEquals(await store.read(cookie), null);
+    expect(await store.read(cookie)).toBe(null);
   });
 
   it("bounds a store built without maxAgeMs by the 14-day default", async () => {
     using time = new FakeTime(1_700_000_000_000);
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const store = new EncryptedCookieSessionStore({ secret });
-    assertStrictEquals(store.maxAgeMs, DEFAULT_SESSION_MAX_AGE_MS);
+    expect(store.maxAgeMs).toBe(DEFAULT_SESSION_MAX_AGE_MS);
     const cookie = await store.create(makeSessionData());
 
     time.tick(DEFAULT_SESSION_MAX_AGE_MS - 1);
-    assertEquals((await store.read(cookie))?.tokens.accessToken, "abc");
+    expect((await store.read(cookie))?.tokens.accessToken).toStrictEqual("abc");
 
     time.tick(2);
-    assertStrictEquals(await store.read(cookie), null);
+    expect(await store.read(cookie)).toBe(null);
   });
 
   it("refuses a non-positive maxAgeMs instead of silently never expiring", () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
-    assertThrows(
+    thrown(
       () => new EncryptedCookieSessionStore({ secret, maxAgeMs: 0 }),
       Error,
       "maxAgeMs must be a positive number of milliseconds",
@@ -177,11 +170,8 @@ describe("EncryptedCookieSessionStore bounded lifetime", () => {
   it("reports its bound so a BFF can check its cookie outlives it", () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
-    assertStrictEquals(sessionStoreMaxAgeMs(store), 60_000);
-    assertStrictEquals(
-      sessionStoreMaxAgeMs(new MemorySessionStore()),
-      undefined,
-    );
+    expect(sessionStoreMaxAgeMs(store)).toBe(60_000);
+    expect(sessionStoreMaxAgeMs(new MemorySessionStore())).toBe(undefined);
   });
 });
 
@@ -192,7 +182,7 @@ describe("EncryptedCookieSessionStore legacy payload compatibility", () => {
     const legacyCookie = await sealJson(await deriveAesKey(secret), data);
 
     const store = new EncryptedCookieSessionStore({ secret });
-    assertEquals(await store.read(legacyCookie), data);
+    expect(await store.read(legacyCookie)).toStrictEqual(data);
   });
 
   it("bounds a legacy payload by its updatedAt when a max age is set", async () => {
@@ -205,7 +195,7 @@ describe("EncryptedCookieSessionStore legacy payload compatibility", () => {
     const legacyCookie = await sealJson(await deriveAesKey(secret), staleData);
 
     const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
-    assertStrictEquals(await store.read(legacyCookie), null);
+    expect(await store.read(legacyCookie)).toBe(null);
   });
 
   it("accepts a recent legacy payload within the max age", async () => {
@@ -218,26 +208,30 @@ describe("EncryptedCookieSessionStore legacy payload compatibility", () => {
     const legacyCookie = await sealJson(await deriveAesKey(secret), recentData);
 
     const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
-    assertEquals(await store.read(legacyCookie), recentData);
+    expect(await store.read(legacyCookie)).toStrictEqual(recentData);
   });
 });
 
 describe("MemorySessionStore", () => {
   it("separates sessions by cookie value", async () => {
     const store = new MemorySessionStore();
-    const a = await store.create(makeSessionData({
-      tokens: { accessToken: "a", tokenType: "Bearer" },
-    }));
-    const b = await store.create(makeSessionData({
-      tokens: { accessToken: "b", tokenType: "Bearer" },
-    }));
+    const a = await store.create(
+      makeSessionData({
+        tokens: { accessToken: "a", tokenType: "Bearer" },
+      }),
+    );
+    const b = await store.create(
+      makeSessionData({
+        tokens: { accessToken: "b", tokenType: "Bearer" },
+      }),
+    );
 
-    assertNotStrictEquals(a, b);
-    assertStrictEquals((await store.read(a))?.tokens.accessToken, "a");
-    assertStrictEquals((await store.read(b))?.tokens.accessToken, "b");
+    expect(a).not.toBe(b);
+    expect((await store.read(a))?.tokens.accessToken).toBe("a");
+    expect((await store.read(b))?.tokens.accessToken).toBe("b");
 
     await store.destroy(a);
-    assertStrictEquals(await store.read(a), null);
-    assertStrictEquals((await store.read(b))?.tokens.accessToken, "b");
+    expect(await store.read(a)).toBe(null);
+    expect((await store.read(b))?.tokens.accessToken).toBe("b");
   });
 });

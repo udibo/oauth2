@@ -6,7 +6,7 @@
  * {@link SessionStore} contract and two ready-to-use implementations
  * ({@link MemorySessionStore}, {@link EncryptedCookieSessionStore}).
  *
- * Need a server-side store (Postgres, Redis, Deno KV, …)? Implement the
+ * Need a server-side store (Postgres, Redis, …)? Implement the
  * {@link SessionStore} interface and verify it with
  * `runSessionStoreContractTests` from `@udibo/oauth2/hono/bff/testing`.
  *

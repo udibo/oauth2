@@ -1,15 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-  assertRejects,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, describe, expect, it, vi } from "vitest";
+import { FakeTime } from "../../_test_fake-time.ts";
+import { rejection, thrown } from "../../_test_assert.ts";
 import { IdentityError } from "../errors.ts";
 import type { IdentityEvent } from "../events.ts";
 import { RateLimiter } from "../rate-limit.ts";
@@ -49,66 +40,63 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertStringIncludes(start.otpauthUri, `secret=${start.base32}`);
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(start.otpauthUri).toContain(`secret=${start.base32}`);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
 
     const confirmation = await mfa.confirmEnrollment(
       "u1",
       await generateTotpCode({ secret: start.base32 }),
     );
     assert(confirmation.confirmed);
-    assertEquals(confirmation.recoveryCodes.length, 10);
-    assertEquals(await mfa.isEnrolled("u1"), true);
+    expect(confirmation.recoveryCodes.length).toStrictEqual(10);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(true);
 
     time.tick(PERIOD_MS);
     const code = await generateTotpCode({ secret: start.base32 });
-    assertEquals(await mfa.verify("u1", code), {
+    expect(await mfa.verify("u1", code)).toStrictEqual({
       valid: true,
       method: "totp",
     });
-    assertEquals(await mfa.verify("u1", code), {
+    expect(await mfa.verify("u1", code)).toStrictEqual({
       valid: false,
       reason: "replayed",
     });
 
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       (await mfa.verify("u1", await generateTotpCode({ secret: start.base32 })))
         .valid,
-      true,
-    );
+    ).toStrictEqual(true);
 
     const recoveryCode = confirmation.recoveryCodes[0];
-    assertEquals(await mfa.verify("u1", recoveryCode), {
+    expect(await mfa.verify("u1", recoveryCode)).toStrictEqual({
       valid: true,
       method: "recovery",
       remainingRecoveryCodes: 9,
     });
-    assertEquals(await mfa.verify("u1", recoveryCode), {
+    expect(await mfa.verify("u1", recoveryCode)).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
 
     const regenerated = await mfa.regenerateRecoveryCodes("u1");
-    assertEquals(regenerated.length, 10);
-    assertEquals(
-      await mfa.verify("u1", confirmation.recoveryCodes[1]),
+    expect(regenerated.length).toStrictEqual(10);
+    expect(await mfa.verify("u1", confirmation.recoveryCodes[1])).toStrictEqual(
       { valid: false, reason: "invalid" },
     );
-    assertEquals(await mfa.verify("u1", regenerated[0]), {
+    expect(await mfa.verify("u1", regenerated[0])).toStrictEqual({
       valid: true,
       method: "recovery",
       remainingRecoveryCodes: 9,
     });
 
     await mfa.disable("u1");
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: start.base32 })),
-      { valid: false, reason: "invalid" },
-    );
-    assertEquals(await mfa.verify("u1", regenerated[1]), {
+    ).toStrictEqual({ valid: false, reason: "invalid" });
+    expect(await mfa.verify("u1", regenerated[1])).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
@@ -119,7 +107,7 @@ describe("MfaService", () => {
     const { mfa } = setup();
     const { recoveryCodes } = await enroll(mfa, "u1");
     const submitted = recoveryCodes[0].toLowerCase().replaceAll("-", "");
-    assertEquals(await mfa.verify("u1", submitted), {
+    expect(await mfa.verify("u1", submitted)).toStrictEqual({
       valid: true,
       method: "recovery",
       remainingRecoveryCodes: 9,
@@ -133,10 +121,9 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: base32 })),
-      { valid: false, reason: "invalid" },
-    );
+    ).toStrictEqual({ valid: false, reason: "invalid" });
   });
 
   it("rejects a wrong confirmation code and stays unenrolled", async () => {
@@ -146,15 +133,15 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertEquals(await mfa.confirmEnrollment("u1", "000000"), {
+    expect(await mfa.confirmEnrollment("u1", "000000")).toStrictEqual({
       confirmed: false,
     });
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
   });
 
   it("rejects confirmation when no enrollment is pending", async () => {
     const { mfa } = setup();
-    assertEquals(await mfa.confirmEnrollment("u1", "123456"), {
+    expect(await mfa.confirmEnrollment("u1", "123456")).toStrictEqual({
       confirmed: false,
     });
   });
@@ -164,7 +151,7 @@ describe("MfaService", () => {
     const { mfa } = setup();
     await enroll(mfa, "u1");
 
-    const startError = await assertRejects(
+    const startError = await rejection(
       () =>
         mfa.startEnrollment("u1", {
           issuer: "Udibo",
@@ -172,13 +159,13 @@ describe("MfaService", () => {
         }),
       IdentityError,
     );
-    assertEquals(startError.code, "mfa_already_enrolled");
+    expect(startError.code).toStrictEqual("mfa_already_enrolled");
 
-    const confirmError = await assertRejects(
+    const confirmError = await rejection(
       () => mfa.confirmEnrollment("u1", "000000"),
       IdentityError,
     );
-    assertEquals(confirmError.code, "mfa_already_enrolled");
+    expect(confirmError.code).toStrictEqual("mfa_already_enrolled");
   });
 
   it("allows a fresh enrollment after disable", async () => {
@@ -189,16 +176,14 @@ describe("MfaService", () => {
 
     time.tick(PERIOD_MS);
     const { base32: newSecret } = await enroll(mfa, "u1");
-    assertNotEquals(newSecret, oldSecret);
+    expect(newSecret).not.toStrictEqual(oldSecret);
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: newSecret })),
-      { valid: true, method: "totp" },
-    );
-    assertEquals(
+    ).toStrictEqual({ valid: true, method: "totp" });
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: oldSecret })),
-      { valid: false, reason: "invalid" },
-    );
+    ).toStrictEqual({ valid: false, reason: "invalid" });
   });
 
   it("does not confirm with a code for a pending secret that was replaced", async () => {
@@ -213,10 +198,10 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertEquals(await mfa.confirmEnrollment("u1", firstCode), {
+    expect(await mfa.confirmEnrollment("u1", firstCode)).toStrictEqual({
       confirmed: false,
     });
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
   });
 
   it("rejects the confirmation code if replayed as the first verification", async () => {
@@ -227,8 +212,10 @@ describe("MfaService", () => {
       accountName: "u1@example.com",
     });
     const code = await generateTotpCode({ secret: base32 });
-    assertEquals((await mfa.confirmEnrollment("u1", code)).confirmed, true);
-    assertEquals(await mfa.verify("u1", code), {
+    expect((await mfa.confirmEnrollment("u1", code)).confirmed).toStrictEqual(
+      true,
+    );
+    expect(await mfa.verify("u1", code)).toStrictEqual({
       valid: false,
       reason: "replayed",
     });
@@ -239,23 +226,21 @@ describe("MfaService", () => {
     const { mfa } = setup();
     const { base32, recoveryCodes } = await enroll(mfa, "u1");
 
-    assertEquals(
+    expect(
       await mfa.verify("u1", recoveryCodes[0], { method: "totp" }),
-      { valid: false, reason: "invalid" },
-    );
-    assertEquals(await mfa.verify("u1", recoveryCodes[0]), {
+    ).toStrictEqual({ valid: false, reason: "invalid" });
+    expect(await mfa.verify("u1", recoveryCodes[0])).toStrictEqual({
       valid: true,
       method: "recovery",
       remainingRecoveryCodes: 9,
     });
 
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: base32 }), {
         method: "recovery",
       }),
-      { valid: false, reason: "invalid" },
-    );
+    ).toStrictEqual({ valid: false, reason: "invalid" });
   });
 
   it("leaves the replay guard unspent when a TOTP code is submitted as a recovery code", async () => {
@@ -265,11 +250,14 @@ describe("MfaService", () => {
 
     time.tick(PERIOD_MS);
     const code = await generateTotpCode({ secret: base32 });
-    assertEquals(await mfa.verify("u1", code, { method: "recovery" }), {
+    expect(await mfa.verify("u1", code, { method: "recovery" })).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
-    assertEquals(await mfa.verify("u1", code), { valid: true, method: "totp" });
+    expect(await mfa.verify("u1", code)).toStrictEqual({
+      valid: true,
+      method: "totp",
+    });
   });
 
   it("does not consume a recovery code when the attempt is scoped to TOTP", async () => {
@@ -278,21 +266,23 @@ describe("MfaService", () => {
     const mfa = new MfaService({ store });
     const { recoveryCodes } = await enroll(mfa, "u1");
 
-    assertEquals(await mfa.verify("u1", recoveryCodes[0], { method: "totp" }), {
+    expect(
+      await mfa.verify("u1", recoveryCodes[0], { method: "totp" }),
+    ).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
-    assertEquals((await store.getRecoveryHashes("u1")).length, 10);
+    expect((await store.getRecoveryHashes("u1")).length).toStrictEqual(10);
   });
 
   it("throws a typed error when regenerating recovery codes without an active enrollment", async () => {
     const { mfa } = setup();
-    const error = await assertRejects(
+    const error = await rejection(
       () => mfa.regenerateRecoveryCodes("u1"),
       IdentityError,
       "not enrolled",
     );
-    assertEquals(error.code, "mfa_not_enrolled");
+    expect(error.code).toStrictEqual("mfa_not_enrolled");
   });
 
   it("burns recovery codes before clearing TOTP so a failed disable fails closed", async () => {
@@ -306,17 +296,16 @@ describe("MfaService", () => {
     const mfa = new MfaService({ store });
     const { base32, recoveryCodes } = await enroll(mfa, "u1");
 
-    await assertRejects(() => mfa.disable("u1"), Error, "db down");
-    assertEquals(await mfa.isEnrolled("u1"), true);
-    assertEquals(await mfa.verify("u1", recoveryCodes[0]), {
+    await rejection(() => mfa.disable("u1"), Error, "db down");
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(true);
+    expect(await mfa.verify("u1", recoveryCodes[0])).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: base32 })),
-      { valid: true, method: "totp" },
-    );
+    ).toStrictEqual({ valid: true, method: "totp" });
   });
 
   it("rate limits verify per user and throws rate_limited when enforcing", async () => {
@@ -328,13 +317,13 @@ describe("MfaService", () => {
     });
     const { base32 } = await enroll(mfa, "u1");
 
-    assertEquals((await mfa.verify("u1", "000000")).valid, false);
+    expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
     const validCode = await generateTotpCode({ secret: base32 });
-    const error = await assertRejects(
+    const error = await rejection(
       () => mfa.verify("u1", validCode),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
+    expect(error.code).toStrictEqual("rate_limited");
     assert(error.retryAfterMs !== undefined && error.retryAfterMs > 0);
   });
 
@@ -352,15 +341,14 @@ describe("MfaService", () => {
     });
     const { base32 } = await enroll(mfa, "u1");
 
-    assertEquals((await mfa.verify("u1", "000000")).valid, false);
+    expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: base32 })),
-      { valid: true, method: "totp" },
-    );
+    ).toStrictEqual({ valid: true, method: "totp" });
     const limited = events.find((e) => e.type === "mfa.verify.rate_limited");
     assert(limited?.type === "mfa.verify.rate_limited");
-    assertEquals(limited.enforced, false);
+    expect(limited.enforced).toStrictEqual(false);
   });
 
   it("emits mfa events for the significant outcomes", async () => {
@@ -382,7 +370,7 @@ describe("MfaService", () => {
     await mfa.regenerateRecoveryCodes("u1");
     await mfa.disable("u1");
 
-    assertEquals(events.map((event) => event.type), [
+    expect(events.map((event) => event.type)).toStrictEqual([
       "mfa.enrollment.confirmed",
       "mfa.verify.succeeded",
       "mfa.verify.failed",
@@ -392,8 +380,8 @@ describe("MfaService", () => {
     ]);
     const recovery = events[3];
     assert(recovery.type === "mfa.verify.succeeded");
-    assertEquals(recovery.method, "recovery");
-    assertEquals(recovery.remainingRecoveryCodes, 9);
+    expect(recovery.method).toStrictEqual("recovery");
+    expect(recovery.remainingRecoveryCodes).toStrictEqual(9);
   });
 
   it("applies constructor TOTP options to enrollment and verification", async () => {
@@ -408,9 +396,9 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertStringIncludes(start.otpauthUri, "algorithm=SHA256");
-    assertStringIncludes(start.otpauthUri, "digits=8");
-    assertStringIncludes(start.otpauthUri, "period=60");
+    expect(start.otpauthUri).toContain("algorithm=SHA256");
+    expect(start.otpauthUri).toContain("digits=8");
+    expect(start.otpauthUri).toContain("period=60");
     const confirmation = await mfa.confirmEnrollment(
       "u1",
       await generateTotpCode({
@@ -421,10 +409,10 @@ describe("MfaService", () => {
       }),
     );
     assert(confirmation.confirmed);
-    assertEquals(confirmation.recoveryCodes.length, 4);
+    expect(confirmation.recoveryCodes.length).toStrictEqual(4);
 
     time.tick(60_000);
-    assertEquals(
+    expect(
       await mfa.verify(
         "u1",
         await generateTotpCode({
@@ -434,15 +422,10 @@ describe("MfaService", () => {
           algorithm: "SHA-256",
         }),
       ),
-      { valid: true, method: "totp" },
-    );
-    assertEquals(
-      await mfa.verify(
-        "u1",
-        await generateTotpCode({ secret: start.base32 }),
-      ),
-      { valid: false, reason: "invalid" },
-    );
+    ).toStrictEqual({ valid: true, method: "totp" });
+    expect(
+      await mfa.verify("u1", await generateTotpCode({ secret: start.base32 })),
+    ).toStrictEqual({ valid: false, reason: "invalid" });
   });
 
   it("scopes state per user", async () => {
@@ -453,15 +436,13 @@ describe("MfaService", () => {
     const u2 = await enroll(mfa, "u2");
 
     time.tick(PERIOD_MS);
-    assertEquals(
+    expect(
       await mfa.verify("u2", await generateTotpCode({ secret: u2.base32 })),
-      { valid: true, method: "totp" },
-    );
-    assertEquals(
+    ).toStrictEqual({ valid: true, method: "totp" });
+    expect(
       await mfa.verify("u1", await generateTotpCode({ secret: u2.base32 })),
-      { valid: false, reason: "invalid" },
-    );
-    assertEquals(await mfa.verify("u1", u2.recoveryCodes[0]), {
+    ).toStrictEqual({ valid: false, reason: "invalid" });
+    expect(await mfa.verify("u1", u2.recoveryCodes[0])).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
@@ -469,22 +450,13 @@ describe("MfaService", () => {
 
   it("rejects unusable configuration at construction", () => {
     const store = new MemoryMfaStore();
-    assertThrows(
-      () => new MfaService({ store, totp: { digits: 6.5 } }),
-      TypeError,
-    );
-    assertThrows(
+    thrown(() => new MfaService({ store, totp: { digits: 6.5 } }), TypeError);
+    thrown(
       () => new MfaService({ store, totp: { periodSeconds: 0 } }),
       TypeError,
     );
-    assertThrows(
-      () => new MfaService({ store, totp: { windows: -1 } }),
-      TypeError,
-    );
-    assertThrows(
-      () => new MfaService({ store, recoveryCodeCount: 0 }),
-      TypeError,
-    );
+    thrown(() => new MfaService({ store, totp: { windows: -1 } }), TypeError);
+    thrown(() => new MfaService({ store, recoveryCodeCount: 0 }), TypeError);
   });
 
   it("resets the rate-limit window on successful TOTP verification", async () => {
@@ -498,12 +470,11 @@ describe("MfaService", () => {
 
     for (let round = 0; round < 3; round++) {
       time.tick(PERIOD_MS);
-      assertEquals((await mfa.verify("u1", "000000")).valid, false);
-      assertEquals(
+      expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
+      expect(
         (await mfa.verify("u1", await generateTotpCode({ secret: base32 })))
           .valid,
-        true,
-      );
+      ).toStrictEqual(true);
     }
   });
 
@@ -517,8 +488,10 @@ describe("MfaService", () => {
     const { recoveryCodes } = await enroll(mfa, "u1");
 
     for (let round = 0; round < 3; round++) {
-      assertEquals((await mfa.verify("u1", "000000")).valid, false);
-      assertEquals((await mfa.verify("u1", recoveryCodes[round])).valid, true);
+      expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
+      expect(
+        (await mfa.verify("u1", recoveryCodes[round])).valid,
+      ).toStrictEqual(true);
     }
   });
 
@@ -529,11 +502,11 @@ describe("MfaService", () => {
     const { recoveryCodes } = await enroll(mfa, "u1");
     await store.clearTotp("u1");
 
-    assertEquals(await mfa.verify("u1", recoveryCodes[0]), {
+    expect(await mfa.verify("u1", recoveryCodes[0])).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
-    assertEquals((await store.getRecoveryHashes("u1")).length, 10);
+    expect((await store.getRecoveryHashes("u1")).length).toStrictEqual(10);
   });
 
   it("skips the recovery-code lookup for codes that cannot be recovery codes", async () => {
@@ -552,10 +525,12 @@ describe("MfaService", () => {
     const mfa = new MfaService({ store });
     const { recoveryCodes } = await enroll(mfa, "u1");
 
-    assertEquals((await mfa.verify("u1", "000000")).valid, false);
-    assertEquals(store.consumeCalls, 0);
-    assertEquals((await mfa.verify("u1", recoveryCodes[0])).valid, true);
-    assertEquals(store.consumeCalls, 1);
+    expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
+    expect(store.consumeCalls).toStrictEqual(0);
+    expect((await mfa.verify("u1", recoveryCodes[0])).valid).toStrictEqual(
+      true,
+    );
+    expect(store.consumeCalls).toStrictEqual(1);
   });
 
   it("rate limits confirmEnrollment per user and throws rate_limited when enforcing", async () => {
@@ -573,16 +548,16 @@ describe("MfaService", () => {
       accountName: "u1@example.com",
     });
 
-    assertEquals(await mfa.confirmEnrollment("u1", "000000"), {
+    expect(await mfa.confirmEnrollment("u1", "000000")).toStrictEqual({
       confirmed: false,
     });
     const validCode = await generateTotpCode({ secret: base32 });
-    const error = await assertRejects(
+    const error = await rejection(
       () => mfa.confirmEnrollment("u1", validCode),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(error.code).toStrictEqual("rate_limited");
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
     assert(events.some((e) => e.type === "mfa.verify.rate_limited"));
   });
 
@@ -596,24 +571,26 @@ describe("MfaService", () => {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertEquals(await mfa.confirmEnrollment("u1", "000000"), {
+    expect(await mfa.confirmEnrollment("u1", "000000")).toStrictEqual({
       confirmed: false,
     });
     const code = await generateTotpCode({ secret: base32 });
     assert((await mfa.confirmEnrollment("u1", code)).confirmed);
 
-    assertEquals((await mfa.verify("u1", "000000")).valid, false);
-    assertEquals((await mfa.verify("u1", "000001")).valid, false);
-    const error = await assertRejects(
+    expect((await mfa.verify("u1", "000000")).valid).toStrictEqual(false);
+    expect((await mfa.verify("u1", "000001")).valid).toStrictEqual(false);
+    const error = await rejection(
       () => mfa.verify("u1", "000002"),
       IdentityError,
     );
-    assertEquals(error.code, "rate_limited");
+    expect(error.code).toStrictEqual("rate_limited");
   });
 
   for (const method of ["totp", "recovery"] as const) {
     it(`completes a ${method} verification when the limiter's reset throws, so the spent code still signs the user in`, async () => {
-      using consoleError = stub(console, "error");
+      using consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
       using time = new FakeTime(START);
       const limiter = new RateLimiter({ limit: 5, windowMs: 60_000 });
       let resetBroken = false;
@@ -630,21 +607,21 @@ describe("MfaService", () => {
       const { base32, recoveryCodes } = await enroll(mfa, "u1");
       time.tick(PERIOD_MS);
       resetBroken = true;
-      const code = method === "totp"
-        ? await generateTotpCode({ secret: base32 })
-        : recoveryCodes[0];
+      const code =
+        method === "totp"
+          ? await generateTotpCode({ secret: base32 })
+          : recoveryCodes[0];
 
-      const outcome = await mfa.verify("u1", code, { method }).catch((
-        error,
-      ) => ({ threw: error.message }));
+      const outcome = await mfa
+        .verify("u1", code, { method })
+        .catch((error) => ({ threw: error.message }));
 
-      assertEquals(
-        outcome,
+      expect(outcome).toStrictEqual(
         method === "totp"
           ? { valid: true, method: "totp" }
           : { valid: true, method: "recovery", remainingRecoveryCodes: 9 },
       );
-      assertEquals(consoleError.calls.length, 1);
+      expect(consoleError.mock.calls.length).toStrictEqual(1);
     });
   }
 
@@ -667,12 +644,8 @@ describe("MfaService", () => {
       accountName: "u1@example.com",
     });
     const code = await generateTotpCode({ secret: start.base32 });
-    await assertRejects(
-      () => mfa.confirmEnrollment("u1", code),
-      Error,
-      "db down",
-    );
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    await rejection(() => mfa.confirmEnrollment("u1", code), Error, "db down");
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
 
     store.fail = false;
     const retry = await mfa.startEnrollment("u1", {
@@ -685,7 +658,7 @@ describe("MfaService", () => {
       await generateTotpCode({ secret: retry.base32 }),
     );
     assert(confirmation.confirmed);
-    assertEquals(await mfa.isEnrolled("u1"), true);
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(true);
   });
 
   it("labels failed verifications with a reason distinguishing replay from a wrong code", async () => {
@@ -702,18 +675,21 @@ describe("MfaService", () => {
 
     time.tick(PERIOD_MS);
     const code = await generateTotpCode({ secret: base32 });
-    assertEquals(await mfa.verify("u1", code), { valid: true, method: "totp" });
+    expect(await mfa.verify("u1", code)).toStrictEqual({
+      valid: true,
+      method: "totp",
+    });
     const replayed = await mfa.verify("u1", code);
-    assertEquals(replayed, { valid: false, reason: "replayed" });
+    expect(replayed).toStrictEqual({ valid: false, reason: "replayed" });
     const wrong = await mfa.verify("u1", "000000");
-    assertEquals(wrong, { valid: false, reason: "invalid" });
+    expect(wrong).toStrictEqual({ valid: false, reason: "invalid" });
 
     const eventReasons = events.flatMap((event) =>
-      event.type === "mfa.verify.failed" ? [event.reason] : []
+      event.type === "mfa.verify.failed" ? [event.reason] : [],
     );
-    assertEquals(eventReasons, ["replayed", "invalid"]);
+    expect(eventReasons).toStrictEqual(["replayed", "invalid"]);
     assert(!replayed.valid && !wrong.valid);
-    assertEquals([replayed.reason, wrong.reason], eventReasons);
+    expect([replayed.reason, wrong.reason]).toStrictEqual(eventReasons);
   });
 
   it("reports a no-credential failure as invalid on both result and event", async () => {
@@ -726,52 +702,52 @@ describe("MfaService", () => {
       },
     });
 
-    assertEquals(await mfa.verify("u1", "000000"), {
+    expect(await mfa.verify("u1", "000000")).toStrictEqual({
       valid: false,
       reason: "invalid",
     });
     const failed = events.filter((e) => e.type === "mfa.verify.failed");
-    assertEquals(failed.length, 1);
+    expect(failed.length).toStrictEqual(1);
     assert(failed[0].type === "mfa.verify.failed");
-    assertEquals(failed[0].reason, "invalid");
+    expect(failed[0].reason).toStrictEqual("invalid");
   });
 
   it("reports enrollment status across none, pending, and active", async () => {
     using _time = new FakeTime(START);
     const { mfa } = setup();
 
-    assertEquals(await mfa.enrollmentStatus("u1"), "none");
+    expect(await mfa.enrollmentStatus("u1")).toStrictEqual("none");
 
     const start = await mfa.startEnrollment("u1", {
       issuer: "Udibo",
       accountName: "u1@example.com",
     });
-    assertEquals(await mfa.enrollmentStatus("u1"), "pending");
-    assertEquals(await mfa.isEnrolled("u1"), false);
+    expect(await mfa.enrollmentStatus("u1")).toStrictEqual("pending");
+    expect(await mfa.isEnrolled("u1")).toStrictEqual(false);
 
     const confirmation = await mfa.confirmEnrollment(
       "u1",
       await generateTotpCode({ secret: start.base32 }),
     );
     assert(confirmation.confirmed);
-    assertEquals(await mfa.enrollmentStatus("u1"), "active");
+    expect(await mfa.enrollmentStatus("u1")).toStrictEqual("active");
 
     await mfa.disable("u1");
-    assertEquals(await mfa.enrollmentStatus("u1"), "none");
+    expect(await mfa.enrollmentStatus("u1")).toStrictEqual("none");
   });
 });
 
 describe("MemoryMfaStore", () => {
   it("activates only the still-pending secret", async () => {
     const store = new MemoryMfaStore();
-    assertEquals(await store.activateTotp("u1", "SECRET", 5), false);
+    expect(await store.activateTotp("u1", "SECRET", 5)).toStrictEqual(false);
 
     await store.setPendingTotp("u1", "FIRST");
     await store.setPendingTotp("u1", "SECOND");
-    assertEquals(await store.activateTotp("u1", "FIRST", 5), false);
-    assertEquals((await store.getTotp("u1"))?.secretBase32, undefined);
-    assertEquals(await store.activateTotp("u1", "SECOND", 5), true);
-    assertEquals(await store.getTotp("u1"), {
+    expect(await store.activateTotp("u1", "FIRST", 5)).toStrictEqual(false);
+    expect((await store.getTotp("u1"))?.secretBase32).toStrictEqual(undefined);
+    expect(await store.activateTotp("u1", "SECOND", 5)).toStrictEqual(true);
+    expect(await store.getTotp("u1")).toStrictEqual({
       secretBase32: "SECOND",
       lastStep: 5,
     });
@@ -779,23 +755,23 @@ describe("MemoryMfaStore", () => {
 
   it("advances the replay guard only forward", async () => {
     const store = new MemoryMfaStore();
-    assertEquals(await store.advanceLastStep("u1", 5), false);
+    expect(await store.advanceLastStep("u1", 5)).toStrictEqual(false);
 
     await store.setPendingTotp("u1", "SECRET");
     await store.activateTotp("u1", "SECRET", 5);
-    assertEquals(await store.advanceLastStep("u1", 5), false);
-    assertEquals(await store.advanceLastStep("u1", 4), false);
-    assertEquals(await store.advanceLastStep("u1", 6), true);
-    assertEquals((await store.getTotp("u1"))?.lastStep, 6);
+    expect(await store.advanceLastStep("u1", 5)).toStrictEqual(false);
+    expect(await store.advanceLastStep("u1", 4)).toStrictEqual(false);
+    expect(await store.advanceLastStep("u1", 6)).toStrictEqual(true);
+    expect((await store.getTotp("u1"))?.lastStep).toStrictEqual(6);
   });
 
   it("consumes a recovery hash exactly once", async () => {
     const store = new MemoryMfaStore();
     await store.setRecoveryHashes("u1", ["a", "b"]);
-    assertEquals(await store.consumeRecoveryHash("u1", "a"), true);
-    assertEquals(await store.consumeRecoveryHash("u1", "a"), false);
-    assertEquals(await store.getRecoveryHashes("u1"), ["b"]);
-    assertEquals(await store.consumeRecoveryHash("u2", "b"), false);
+    expect(await store.consumeRecoveryHash("u1", "a")).toStrictEqual(true);
+    expect(await store.consumeRecoveryHash("u1", "a")).toStrictEqual(false);
+    expect(await store.getRecoveryHashes("u1")).toStrictEqual(["b"]);
+    expect(await store.consumeRecoveryHash("u2", "b")).toStrictEqual(false);
   });
 
   it("returns copies so callers cannot mutate stored state", async () => {
@@ -803,11 +779,13 @@ describe("MemoryMfaStore", () => {
     await store.setPendingTotp("u1", "SECRET");
     const record = await store.getTotp("u1");
     record!.pendingSecretBase32 = "TAMPERED";
-    assertEquals((await store.getTotp("u1"))?.pendingSecretBase32, "SECRET");
+    expect((await store.getTotp("u1"))?.pendingSecretBase32).toStrictEqual(
+      "SECRET",
+    );
 
     await store.setRecoveryHashes("u1", ["a", "b"]);
     const hashes = await store.getRecoveryHashes("u1");
     hashes.push("c");
-    assertEquals(await store.getRecoveryHashes("u1"), ["a", "b"]);
+    expect(await store.getRecoveryHashes("u1")).toStrictEqual(["a", "b"]);
   });
 });

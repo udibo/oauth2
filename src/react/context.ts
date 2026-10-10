@@ -57,6 +57,5 @@ export interface OAuth2ContextValue extends OAuth2State {
  * through `useOAuth2()`. Default `null` so `useOAuth2()` can throw a
  * clear error when called outside any provider.
  */
-export const OAuth2Context: Context<OAuth2ContextValue | null> = createContext<
-  OAuth2ContextValue | null
->(null);
+export const OAuth2Context: Context<OAuth2ContextValue | null> =
+  createContext<OAuth2ContextValue | null>(null);

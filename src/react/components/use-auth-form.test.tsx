@@ -1,12 +1,7 @@
-import { cleanupAfterEach } from "../_test_setup.ts";
-
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 import { useAuthForm } from "./use-auth-form.ts";
-
-cleanupAfterEach();
 
 describe("useAuthForm", () => {
   it("submits the current values to onSubmit", async () => {
@@ -17,7 +12,7 @@ describe("useAuthForm", () => {
         onSubmit: (values) => {
           submitted.push({ ...values });
         },
-      })
+      }),
     );
 
     act(() => result.current.setValue("email", "a@b.com"));
@@ -25,9 +20,9 @@ describe("useAuthForm", () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(submitted, [{ email: "a@b.com" }]);
-    assertEquals(result.current.succeeded, true);
-    assertEquals(result.current.status, "success");
+    expect(submitted).toStrictEqual([{ email: "a@b.com" }]);
+    expect(result.current.succeeded).toStrictEqual(true);
+    expect(result.current.status).toStrictEqual("success");
   });
 
   it("runs onSubmit once for a same-tick double submit", async () => {
@@ -39,7 +34,7 @@ describe("useAuthForm", () => {
           calls++;
           await Promise.resolve();
         },
-      })
+      }),
     );
 
     await act(async () => {
@@ -49,7 +44,10 @@ describe("useAuthForm", () => {
       ]);
     });
 
-    assertEquals(calls, 1, "the re-entrancy lock blocks the second submit");
+    expect(
+      calls,
+      "the re-entrancy lock blocks the second submit",
+    ).toStrictEqual(1);
   });
 
   it("swallows an onSuccess that throws, keeping the success state", async () => {
@@ -60,14 +58,14 @@ describe("useAuthForm", () => {
         onSuccess: () => {
           throw new Error("navigate blew up");
         },
-      })
+      }),
     );
 
     await act(async () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(result.current.status, "success");
+    expect(result.current.status).toStrictEqual("success");
   });
 
   it("populates field and form errors from the result", async () => {
@@ -78,16 +76,16 @@ describe("useAuthForm", () => {
           error: "Nope",
           fieldErrors: { email: "Bad email" },
         }),
-      })
+      }),
     );
 
     await act(async () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(result.current.formError, "Nope");
-    assertEquals(result.current.errors.email, "Bad email");
-    assertEquals(result.current.status, "error");
+    expect(result.current.formError).toStrictEqual("Nope");
+    expect(result.current.errors.email).toStrictEqual("Bad email");
+    expect(result.current.status).toStrictEqual("error");
   });
 
   it("blocks submission when validate returns errors", async () => {
@@ -102,7 +100,7 @@ describe("useAuthForm", () => {
         onSubmit: () => {
           called = true;
         },
-      })
+      }),
     );
 
     act(() => result.current.setValue("password", "x"));
@@ -110,8 +108,8 @@ describe("useAuthForm", () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(called, false);
-    assertEquals(result.current.errors.confirmPassword, "Mismatch");
+    expect(called).toStrictEqual(false);
+    expect(result.current.errors.confirmPassword).toStrictEqual("Mismatch");
   });
 
   it("captures a thrown error as the form error", async () => {
@@ -121,15 +119,15 @@ describe("useAuthForm", () => {
         onSubmit: () => {
           throw new Error("boom");
         },
-      })
+      }),
     );
 
     await act(async () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(result.current.formError, "boom");
-    assertEquals(result.current.isSubmitting, false);
+    expect(result.current.formError).toStrictEqual("boom");
+    expect(result.current.isSubmitting).toStrictEqual(false);
   });
 
   it("traps a throwing validate as a form error without calling onSubmit", async () => {
@@ -143,16 +141,16 @@ describe("useAuthForm", () => {
         onSubmit: () => {
           called = true;
         },
-      })
+      }),
     );
 
     await act(async () => {
       await result.current.handleSubmit();
     });
 
-    assertEquals(called, false);
-    assertEquals(result.current.formError, "validator blew up");
-    assertEquals(result.current.status, "error");
+    expect(called).toStrictEqual(false);
+    expect(result.current.formError).toStrictEqual("validator blew up");
+    expect(result.current.status).toStrictEqual("error");
   });
 
   it("tracks submitting state and submitCount", async () => {
@@ -164,21 +162,21 @@ describe("useAuthForm", () => {
           new Promise<void>((r) => {
             resolve = r;
           }),
-      })
+      }),
     );
 
     let pending: Promise<void>;
     act(() => {
       pending = result.current.handleSubmit();
     });
-    assertEquals(result.current.isSubmitting, true);
-    assertEquals(result.current.submitCount, 1);
+    expect(result.current.isSubmitting).toStrictEqual(true);
+    expect(result.current.submitCount).toStrictEqual(1);
 
     await act(async () => {
       resolve?.();
       await pending;
     });
-    assertEquals(result.current.isSubmitting, false);
+    expect(result.current.isSubmitting).toStrictEqual(false);
   });
 
   it("ignores a second submit while one is in flight", async () => {
@@ -193,26 +191,26 @@ describe("useAuthForm", () => {
             resolve = r;
           });
         },
-      })
+      }),
     );
 
     let pending: Promise<void>;
     act(() => {
       pending = result.current.handleSubmit();
     });
-    assertEquals(result.current.isSubmitting, true);
+    expect(result.current.isSubmitting).toStrictEqual(true);
 
     await act(async () => {
       await result.current.handleSubmit();
     });
-    assertEquals(calls, 1);
-    assertEquals(result.current.submitCount, 1);
+    expect(calls).toStrictEqual(1);
+    expect(result.current.submitCount).toStrictEqual(1);
 
     await act(async () => {
       resolve?.();
       await pending;
     });
-    assertEquals(calls, 1);
+    expect(calls).toStrictEqual(1);
   });
 
   it("wires aria attributes through getFieldProps only when errored", async () => {
@@ -220,18 +218,17 @@ describe("useAuthForm", () => {
       useAuthForm({
         initialValues: { email: "" },
         onSubmit: () => ({ fieldErrors: { email: "Required" } }),
-      })
+      }),
     );
 
-    assertEquals(
-      result.current.getFieldProps("email")["aria-invalid"],
+    expect(result.current.getFieldProps("email")["aria-invalid"]).toStrictEqual(
       undefined,
     );
     await act(async () => {
       await result.current.handleSubmit();
     });
     const props = result.current.getFieldProps("email");
-    assertEquals(props["aria-invalid"], true);
-    assertEquals(props["aria-describedby"], `${props.id}-error`);
+    expect(props["aria-invalid"]).toStrictEqual(true);
+    expect(props["aria-describedby"]).toStrictEqual(`${props.id}-error`);
   });
 });

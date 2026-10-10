@@ -1,0 +1,26 @@
+{
+  "name": "example-app-with-own-auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Hono app that is its own OAuth2 identity provider, BFF and resource server in one process.",
+  "type": "module",
+  "scripts": {
+    "start": "node serve.ts",
+    "dev": "node --watch serve.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.3",
+    "@udibo/oauth2": "workspace:*",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=24.2"
+  }
+}

@@ -44,8 +44,8 @@ export interface AuthFormResult {
 
 /**
  * The app-provided function that performs a form's action — a client-side
- * `fetch` in a plain React Router app, or a call that submits a router action
- * in Juniper. Receives the collected values; resolve/return an
+ * `fetch`, or a call that submits a React Router action. Receives the
+ * collected values; resolve/return an
  * {@link AuthFormResult} (or throw) to report the outcome.
  */
 export type AuthSubmitHandler<V extends AuthFormValues> = (

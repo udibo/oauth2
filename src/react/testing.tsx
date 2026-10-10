@@ -178,9 +178,10 @@ class MockCore {
     return {
       accessToken: "mock-access-token",
       tokenType: "Bearer",
-      accessTokenExpiresAt: this.#sessionExpiresIn === null
-        ? undefined
-        : Date.now() + this.#sessionExpiresIn * 1000,
+      accessTokenExpiresAt:
+        this.#sessionExpiresIn === null
+          ? undefined
+          : Date.now() + this.#sessionExpiresIn * 1000,
     };
   }
 }
@@ -196,8 +197,10 @@ const MOCK_LOGIN_URL = "mock://login";
  * {@link createMockBffClient} / {@link createMockDirectClient} are what a
  * narrowing component wants.
  */
-export class MockOAuth2Client extends OAuth2ClientBase
-  implements MockOAuth2Controls {
+export class MockOAuth2Client
+  extends OAuth2ClientBase
+  implements MockOAuth2Controls
+{
   readonly #core: MockCore;
 
   /**
@@ -387,8 +390,10 @@ export class MockBffClient extends BffClient implements MockOAuth2Controls {
  * Stub the one your test drives, or point a real `DirectClient` at
  * `createMemoryAuthorizationServer().fetch` instead.
  */
-export class MockDirectClient extends DirectClient
-  implements MockOAuth2Controls {
+export class MockDirectClient
+  extends DirectClient
+  implements MockOAuth2Controls
+{
   readonly #core: MockCore;
 
   /**
@@ -413,9 +418,7 @@ export class MockDirectClient extends DirectClient
   }
 
   /** Resolves a fixed `mock://login` URL, skipping PKCE and storage. */
-  override login(
-    _options?: BaseLoginOptions,
-  ): Promise<AuthorizationRedirect> {
+  override login(_options?: BaseLoginOptions): Promise<AuthorizationRedirect> {
     return Promise.resolve({ url: MOCK_LOGIN_URL, state: "mock-state" });
   }
 
@@ -596,9 +599,7 @@ export interface MockOAuth2ProviderProps {
  * @param props A mock client, optional state overrides, and children.
  * @returns The subtree wrapped in a pre-resolved OAuth2 context.
  */
-export function MockOAuth2Provider(
-  props: MockOAuth2ProviderProps,
-): ReactNode {
+export function MockOAuth2Provider(props: MockOAuth2ProviderProps): ReactNode {
   const { client, state, children } = props;
   const value = useMemo(() => {
     const override = state ?? {};
@@ -610,7 +611,7 @@ export function MockOAuth2Provider(
         : client.initialState.isAuthenticated,
       isLoading: override.isLoading ?? false,
       user: overrides("user")
-        ? override.user ?? null
+        ? (override.user ?? null)
         : client.initialState.user,
       error: override.error ?? null,
       sessionExpiresIn: override.sessionExpiresIn ?? null,
@@ -618,8 +619,6 @@ export function MockOAuth2Provider(
     };
   }, [client, state]);
   return (
-    <OAuth2Context.Provider value={value}>
-      {children}
-    </OAuth2Context.Provider>
+    <OAuth2Context.Provider value={value}>{children}</OAuth2Context.Provider>
   );
 }

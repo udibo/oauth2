@@ -74,16 +74,13 @@ export type OAuth2Error = HttpError<OAuth2ProblemDetailsExtensions>;
  * companion of the {@linkcode OAuth2Error} type; prefer a specific subclass
  * (e.g. {@linkcode InvalidRequestError}) when the condition is known.
  */
-export const OAuth2Error: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const OAuth2Error: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "OAuth2 Error",
     extensions: {
       error: "server_error",
     },
-  },
-);
+  });
 
 /**
  * Type guard for OAuth2 errors: true for any `HttpError` whose
@@ -127,17 +124,14 @@ export function toOAuth2Error(error: unknown): OAuth2Error {
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const InvalidRequestError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const InvalidRequestError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Invalid Request",
     status: 400,
     extensions: {
       error: "invalid_request",
     },
-  },
-);
+  });
 
 /**
  * Client authentication failed.
@@ -147,17 +141,14 @@ export const InvalidRequestError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const InvalidClientError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const InvalidClientError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Invalid Client",
     status: 401,
     extensions: {
       error: "invalid_client",
     },
-  },
-);
+  });
 
 /**
  * The provided authorization grant or refresh token is invalid, expired, revoked,
@@ -165,34 +156,28 @@ export const InvalidClientError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const InvalidGrantError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const InvalidGrantError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Invalid Grant",
     status: 400,
     extensions: {
       error: "invalid_grant",
     },
-  },
-);
+  });
 
 /**
  * The authenticated client is not authorized to use this authorization grant type.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const UnauthorizedClientError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const UnauthorizedClientError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Unauthorized Client",
     status: 401,
     extensions: {
       error: "unauthorized_client",
     },
-  },
-);
+  });
 
 /**
  * The token type is not supported by the authorization server.
@@ -202,51 +187,42 @@ export const UnauthorizedClientError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc7009#section-2.2.1
  */
-export const UnsupportedTokenTypeError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const UnsupportedTokenTypeError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Unsupported Token Type",
     status: 400,
     extensions: {
       error: "unsupported_token_type",
     },
-  },
-);
+  });
 
 /**
  * The authorization grant type is not supported by the authorization server.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const UnsupportedGrantTypeError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const UnsupportedGrantTypeError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Unsupported Grant Type",
     status: 400,
     extensions: {
       error: "unsupported_grant_type",
     },
-  },
-);
+  });
 
 /**
  * The resource owner or authorization server denied the request.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1
  */
-export const AccessDeniedError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const AccessDeniedError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Access Denied",
     status: 401,
     extensions: {
       error: "access_denied",
     },
-  },
-);
+  });
 
 /**
  * The access token provided is expired, revoked, malformed, or invalid.
@@ -256,17 +232,14 @@ export const AccessDeniedError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3.1
  */
-export const InvalidTokenError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const InvalidTokenError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Invalid Token",
     status: 401,
     extensions: {
       error: "invalid_token",
     },
-  },
-);
+  });
 
 /**
  * The request requires higher privileges than provided by the access token.
@@ -281,15 +254,13 @@ export const InsufficientScopeError: OAuth2ErrorClass<
   OAuth2ProblemDetailsExtensions & { requiredScope?: string }
 > = createHttpErrorClass<
   OAuth2ProblemDetailsExtensions & { requiredScope?: string }
->(
-  {
-    name: "Insufficient Scope",
-    status: 403,
-    extensions: {
-      error: "insufficient_scope",
-    },
+>({
+  name: "Insufficient Scope",
+  status: 403,
+  extensions: {
+    error: "insufficient_scope",
   },
-);
+});
 
 /**
  * The request requires an authorization the subject does not hold — a
@@ -300,17 +271,13 @@ export const InsufficientScopeError: OAuth2ErrorClass<
  * `insufficient_permissions`.
  */
 export const InsufficientPermissionsError: OAuth2ErrorClass =
-  createHttpErrorClass<
-    OAuth2ProblemDetailsExtensions
-  >(
-    {
-      name: "Insufficient Permissions",
-      status: 403,
-      extensions: {
-        error: "insufficient_permissions",
-      },
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Insufficient Permissions",
+    status: 403,
+    extensions: {
+      error: "insufficient_permissions",
     },
-  );
+  });
 
 /**
  * The authorization server does not support obtaining an authorization code using this method.
@@ -318,51 +285,41 @@ export const InsufficientPermissionsError: OAuth2ErrorClass =
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1
  */
 export const UnsupportedResponseTypeError: OAuth2ErrorClass =
-  createHttpErrorClass<
-    OAuth2ProblemDetailsExtensions
-  >(
-    {
-      name: "Unsupported Response Type",
-      status: 400,
-      extensions: {
-        error: "unsupported_response_type",
-      },
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Unsupported Response Type",
+    status: 400,
+    extensions: {
+      error: "unsupported_response_type",
     },
-  );
+  });
 
 /**
  * The requested scope is invalid, unknown, or malformed.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  */
-export const InvalidScopeError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const InvalidScopeError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Invalid Scope",
     status: 400,
     extensions: {
       error: "invalid_scope",
     },
-  },
-);
+  });
 
 /**
  * The authorization server encountered an unexpected condition that prevented it from fulfilling the request.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1
  */
-export const ServerError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const ServerError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Server Error",
     status: 500,
     extensions: {
       error: "server_error",
     },
-  },
-);
+  });
 
 /**
  * The authorization server is currently unable to handle the request due to a temporary overloading or maintenance.
@@ -370,17 +327,13 @@ export const ServerError: OAuth2ErrorClass = createHttpErrorClass<
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1
  */
 export const TemporarilyUnavailableError: OAuth2ErrorClass =
-  createHttpErrorClass<
-    OAuth2ProblemDetailsExtensions
-  >(
-    {
-      name: "Temporarily Unavailable",
-      status: 503,
-      extensions: {
-        error: "temporarily_unavailable",
-      },
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Temporarily Unavailable",
+    status: 503,
+    extensions: {
+      error: "temporarily_unavailable",
     },
-  );
+  });
 
 /**
  * The authorization request is still pending user approval.
@@ -390,17 +343,14 @@ export const TemporarilyUnavailableError: OAuth2ErrorClass =
  *
  * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.5
  */
-export const AuthorizationPendingError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const AuthorizationPendingError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Authorization Pending",
     status: 400,
     extensions: {
       error: "authorization_pending",
     },
-  },
-);
+  });
 
 /**
  * The client is polling too frequently.
@@ -411,17 +361,14 @@ export const AuthorizationPendingError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.5
  */
-export const SlowDownError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const SlowDownError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Slow Down",
     status: 400,
     extensions: {
       error: "slow_down",
     },
-  },
-);
+  });
 
 /**
  * The device_code has expired.
@@ -431,14 +378,11 @@ export const SlowDownError: OAuth2ErrorClass = createHttpErrorClass<
  *
  * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.5
  */
-export const ExpiredTokenError: OAuth2ErrorClass = createHttpErrorClass<
-  OAuth2ProblemDetailsExtensions
->(
-  {
+export const ExpiredTokenError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
     name: "Expired Token",
     status: 400,
     extensions: {
       error: "expired_token",
     },
-  },
-);
+  });

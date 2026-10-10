@@ -5,9 +5,7 @@
  * @module
  */
 
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { AuthorizationCode } from "../../models/authorization-code.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
@@ -25,15 +23,15 @@ export interface AuthorizationCodeServiceContractOptions<
   /** Returns fresh services for each test. */
   makeServices():
     | Promise<{
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      authorizationCodeService: AuthorizationCodeServiceInterface<C, U, S>;
-    }>
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        authorizationCodeService: AuthorizationCodeServiceInterface<C, U, S>;
+      }>
     | {
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-      authorizationCodeService: AuthorizationCodeServiceInterface<C, U, S>;
-    };
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+        authorizationCodeService: AuthorizationCodeServiceInterface<C, U, S>;
+      };
   /** Persists a user with the given password into the user service under test. */
   addUser(
     service: UserServiceInterface<U>,
@@ -65,9 +63,7 @@ export function runAuthorizationCodeServiceContractTests<
   C extends ClientInterface,
   U extends MemoryUserShape,
   S extends AbstractScope = BasicScope,
->(
-  options: AuthorizationCodeServiceContractOptions<C, U, S>,
-): void {
+>(options: AuthorizationCodeServiceContractOptions<C, U, S>): void {
   const makeUser = options.makeUser ?? defaultMakeUser<U>;
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
 
@@ -94,12 +90,12 @@ export function runAuthorizationCodeServiceContractTests<
       it("generateCode returns unique strings", async () => {
         const a = await codeService.generateCode(client, user);
         const b = await codeService.generateCode(client, user);
-        assertEquals(a !== b, true);
+        expect(a !== b).toStrictEqual(true);
       });
 
       it("expiresAt returns a future date", async () => {
         const expires = await codeService.expiresAt(client, user);
-        assertEquals(expires.getTime() > Date.now(), true);
+        expect(expires.getTime() > Date.now()).toStrictEqual(true);
       });
 
       it("save + get round-trips an authorization code", async () => {
@@ -117,15 +113,15 @@ export function runAuthorizationCodeServiceContractTests<
         };
         await codeService.save(ac);
         const fetched = await codeService.get(code);
-        assertEquals(fetched?.code, code);
-        assertEquals(fetched?.client.id, client.id);
-        assertEquals(fetched?.redirectUri, "http://app/cb");
-        assertEquals(fetched?.challenge, "abc");
-        assertEquals(fetched?.nonce, "nonce-1");
+        expect(fetched?.code).toStrictEqual(code);
+        expect(fetched?.client.id).toStrictEqual(client.id);
+        expect(fetched?.redirectUri).toStrictEqual("http://app/cb");
+        expect(fetched?.challenge).toStrictEqual("abc");
+        expect(fetched?.nonce).toStrictEqual("nonce-1");
       });
 
       it("get returns undefined for an unknown code", async () => {
-        assertStrictEquals(await codeService.get("missing"), undefined);
+        expect(await codeService.get("missing")).toBe(undefined);
       });
 
       it("revoke deletes the code by string", async () => {
@@ -137,8 +133,8 @@ export function runAuthorizationCodeServiceContractTests<
           user,
         });
         const ok = await codeService.revoke(code);
-        assertStrictEquals(ok, true);
-        assertStrictEquals(await codeService.get(code), undefined);
+        expect(ok).toBe(true);
+        expect(await codeService.get(code)).toBe(undefined);
       });
 
       it("revoke deletes the code by object", async () => {
@@ -151,12 +147,12 @@ export function runAuthorizationCodeServiceContractTests<
         };
         await codeService.save(ac);
         const ok = await codeService.revoke(ac);
-        assertStrictEquals(ok, true);
-        assertStrictEquals(await codeService.get(code), undefined);
+        expect(ok).toBe(true);
+        expect(await codeService.get(code)).toBe(undefined);
       });
 
       it("revoke returns false for an unknown code", async () => {
-        assertStrictEquals(await codeService.revoke("missing"), false);
+        expect(await codeService.revoke("missing")).toBe(false);
       });
     },
   );

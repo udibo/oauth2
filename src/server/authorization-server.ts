@@ -400,14 +400,12 @@ export interface AuthorizationServerOptions<
  *   returned to the browser as-is. Use this to redirect to a login page,
  *   render an interstitial, etc.
  */
-export type AuthenticateUserFn<User> = (
-  request: Request,
-) => Promise<
+export type AuthenticateUserFn<User> = (request: Request) => Promise<
   | {
-    user: User;
-    authorizedScope?: AbstractScope;
-    authenticationContext?: AuthenticationContext;
-  }
+      user: User;
+      authorizedScope?: AbstractScope;
+      authenticationContext?: AuthenticationContext;
+    }
   | Response
   | null
 >;
@@ -541,9 +539,8 @@ const ENDPOINTS = {
     path: "/.well-known/openid-configuration",
     methods: ["GET"],
   },
-} satisfies
-  & Record<AdvertisedEndpointKey, AdvertisedEndpointDefinition>
-  & Record<DiscoveryEndpointKey, EndpointDefinition>;
+} satisfies Record<AdvertisedEndpointKey, AdvertisedEndpointDefinition> &
+  Record<DiscoveryEndpointKey, EndpointDefinition>;
 
 /**
  * Every endpoint the authorization server serves, by name — the eight it can
@@ -565,17 +562,18 @@ export type EndpointKey =
   | "oidcMetadata";
 
 type EndpointKeysInSync = EndpointKey extends keyof typeof ENDPOINTS
-  ? keyof typeof ENDPOINTS extends EndpointKey ? true
-  : never
+  ? keyof typeof ENDPOINTS extends EndpointKey
+    ? true
+    : never
   : never;
 const _endpointKeysInSync: EndpointKeysInSync = true;
 
 type EndpointEntry = {
-  [K in EndpointKey]: readonly [K, typeof ENDPOINTS[K]];
+  [K in EndpointKey]: readonly [K, (typeof ENDPOINTS)[K]];
 }[EndpointKey];
 
 type AdvertisedEndpointEntry = {
-  [K in AdvertisedEndpointKey]: readonly [K, typeof ENDPOINTS[K]];
+  [K in AdvertisedEndpointKey]: readonly [K, (typeof ENDPOINTS)[K]];
 }[AdvertisedEndpointKey];
 
 const ENDPOINT_ENTRIES = Object.entries(ENDPOINTS) as EndpointEntry[];
@@ -607,8 +605,8 @@ const AUTHORIZATION_CODE_GRANT_TYPE = "authorization_code";
  * }
  * ```
  */
-export const ENDPOINT_PATHS: Readonly<Record<EndpointKey, string>> = Object
-  .fromEntries(
+export const ENDPOINT_PATHS: Readonly<Record<EndpointKey, string>> =
+  Object.fromEntries(
     ENDPOINT_ENTRIES.map(([key, { path }]) => [key, path]),
   ) as Record<EndpointKey, string>;
 
@@ -814,8 +812,8 @@ export class AuthorizationServer<
     const { issuer } = context;
     const endpoints: ResolvedEndpoints = {};
     for (const [key, { option, path }] of ADVERTISED_ENTRIES) {
-      endpoints[key] = context[option] ??
-        (issuer ? `${issuer}${path}` : undefined);
+      endpoints[key] =
+        context[option] ?? (issuer ? `${issuer}${path}` : undefined);
     }
     return endpoints;
   }
@@ -877,7 +875,7 @@ export class AuthorizationServer<
       headers: {
         "Content-Type": "application/json;charset=UTF-8",
         "Cache-Control": "no-store",
-        "Pragma": "no-cache",
+        Pragma: "no-cache",
       },
     });
   }
@@ -966,12 +964,15 @@ export class AuthorizationServer<
     request: Request,
     options: { keepReadable?: boolean } = {},
   ): Promise<Uint8Array<ArrayBuffer>> {
-    const bytes = await readBoundedBody(request, this.#maxBodyBytes, options)
-      .catch((cause) => {
-        throw new InvalidRequestError("request body could not be read", {
-          cause,
-        });
+    const bytes = await readBoundedBody(
+      request,
+      this.#maxBodyBytes,
+      options,
+    ).catch((cause) => {
+      throw new InvalidRequestError("request body could not be read", {
+        cause,
       });
+    });
     if (!bytes) {
       throw new InvalidRequestError(
         413,
@@ -1010,11 +1011,13 @@ export class AuthorizationServer<
     const bytes = await this.#readBody(request, { keepReadable: true });
     const body = await new Response(bytes, {
       headers: { "content-type": contentType },
-    }).formData().catch(() => {
-      throw new InvalidRequestError(
-        "body must be application/x-www-form-urlencoded",
-      );
-    });
+    })
+      .formData()
+      .catch(() => {
+        throw new InvalidRequestError(
+          "body must be application/x-www-form-urlencoded",
+        );
+      });
 
     this.#assertSingletonParameters(body, ["client_id", "client_secret"]);
     options.validateBody?.(body);
@@ -1047,8 +1050,8 @@ export class AuthorizationServer<
    */
   async handleTokenRequest(request: Request): Promise<Response> {
     try {
-      const { context, body, client, grant } = await this
-        .#beginClientAuthenticatedRequest(request, {
+      const { context, body, client, grant } =
+        await this.#beginClientAuthenticatedRequest(request, {
           grantFromBody: (body) => this.#grantFromBody(body),
           validateBody: (body) => this.#assertTokenSingletonParameters(body),
         });
@@ -1099,11 +1102,11 @@ export class AuthorizationServer<
     authenticationContext?: AuthenticationContext,
   ): Promise<Record<string, unknown>> {
     return {
-      ...(await this.#userClaims?.(
+      ...((await this.#userClaims?.(
         user,
         scope,
         snapshotAuthenticationContext(authenticationContext),
-      ) ?? {}),
+      )) ?? {}),
       sub: this.#subjectOf(user),
     };
   }
@@ -1248,12 +1251,13 @@ export class AuthorizationServer<
     try {
       const params = await this.#endSessionParameters(request);
       const client = await this.#resolveEndSessionClient(request, params);
-      const result = await endSession({
-        request,
-        client,
-        subject: params.subject,
-        logoutHint: params.logoutHint,
-      }) ?? {};
+      const result =
+        (await endSession({
+          request,
+          client,
+          subject: params.subject,
+          logoutHint: params.logoutHint,
+        })) ?? {};
 
       const headers = new Headers(result.refused ? undefined : result.headers);
       const authorized = result.refused
@@ -1271,16 +1275,19 @@ export class AuthorizationServer<
   // RP-Initiated Logout §2: parameters come from the GET query or POST body.
   async #endSessionParameters(request: Request): Promise<EndSessionParameters> {
     const url = new URL(request.url);
-    const params = request.method === "POST"
-      ? new URLSearchParams(
-        new TextDecoder().decode(await this.#readBody(request)),
-      )
-      : url.searchParams;
+    const params =
+      request.method === "POST"
+        ? new URLSearchParams(
+            new TextDecoder().decode(await this.#readBody(request)),
+          )
+        : url.searchParams;
     const idTokenHint = params.get("id_token_hint");
     const hint = idTokenHint ? await this.#readIdTokenHint(idTokenHint) : null;
     const clientId = params.get("client_id");
     if (
-      clientId && hint && hint.audiences.length > 0 &&
+      clientId &&
+      hint &&
+      hint.audiences.length > 0 &&
       !hint.audiences.includes(clientId)
     ) {
       throw new InvalidRequestError(
@@ -1306,11 +1313,12 @@ export class AuthorizationServer<
     });
     if (!payload) return null;
     const aud = payload.aud;
-    const audiences = typeof aud === "string"
-      ? [aud]
-      : Array.isArray(aud)
-      ? aud.filter((value): value is string => typeof value === "string")
-      : [];
+    const audiences =
+      typeof aud === "string"
+        ? [aud]
+        : Array.isArray(aud)
+          ? aud.filter((value): value is string => typeof value === "string")
+          : [];
     return {
       subject: typeof payload.sub === "string" ? payload.sub : null,
       audiences,
@@ -1324,7 +1332,7 @@ export class AuthorizationServer<
     if (!params.clientId) return null;
     const { services } = await this.authorizationContext(request);
     try {
-      return await services.clientService.get(params.clientId) ?? null;
+      return (await services.clientService.get(params.clientId)) ?? null;
     } catch {
       return null;
     }
@@ -1461,16 +1469,19 @@ export class AuthorizationServer<
     });
     if (consented instanceof Response) return consented;
 
-    const authorizationCode = await grant.generateAuthorizationCode({
-      client,
-      user,
-      scope: consented.scope,
-      redirectUri: params.redirectUri ?? null,
-      challenge: params.challenge ?? null,
-      challengeMethod: params.challengeMethod ?? null,
-      nonce: params.nonce ?? null,
-      authenticationContext,
-    }, request);
+    const authorizationCode = await grant.generateAuthorizationCode(
+      {
+        client,
+        user,
+        scope: consented.scope,
+        redirectUri: params.redirectUri ?? null,
+        challenge: params.challenge ?? null,
+        challengeMethod: params.challengeMethod ?? null,
+        nonce: params.nonce ?? null,
+        authenticationContext,
+      },
+      request,
+    );
 
     redirectUrl.searchParams.set("code", authorizationCode.code);
     return Response.redirect(redirectUrl.toString(), 302);
@@ -1484,8 +1495,8 @@ export class AuthorizationServer<
     const { searchParams } = redirectUrl;
     searchParams.set("error", error.extensions.error ?? "server_error");
     // Use exposedMessage, never raw error.message, so 5xx server_error detail isn't leaked into the redirect.
-    const description = error.extensions.error_description ??
-      error.exposedMessage;
+    const description =
+      error.extensions.error_description ?? error.exposedMessage;
     if (description) {
       searchParams.set("error_description", description);
     }
@@ -1619,8 +1630,8 @@ export class AuthorizationServer<
     );
     let scope = acceptedScope ?? undefined;
 
-    const needsConsent = scope !== undefined &&
-      !(authorizedScope && authorizedScope.has(scope));
+    const needsConsent =
+      scope !== undefined && !(authorizedScope && authorizedScope.has(scope));
     if (needsConsent && handleConsent) {
       const consent = await handleConsent(client, scope, user);
       if (consent instanceof Response) return consent;
@@ -1683,13 +1694,10 @@ export class AuthorizationServer<
    */
   async handleRevocationRequest(request: Request): Promise<Response> {
     try {
-      const { context, body, client } = await this
-        .#beginClientAuthenticatedRequest(request, {
+      const { context, body, client } =
+        await this.#beginClientAuthenticatedRequest(request, {
           validateBody: (body) =>
-            this.#assertSingletonParameters(body, [
-              "token",
-              "token_type_hint",
-            ]),
+            this.#assertSingletonParameters(body, ["token", "token_type_hint"]),
         });
 
       const token = body.get("token");
@@ -1787,13 +1795,10 @@ export class AuthorizationServer<
    */
   async handleIntrospectionRequest(request: Request): Promise<Response> {
     try {
-      const { context, body, client } = await this
-        .#beginClientAuthenticatedRequest(request, {
+      const { context, body, client } =
+        await this.#beginClientAuthenticatedRequest(request, {
           validateBody: (body) =>
-            this.#assertSingletonParameters(body, [
-              "token",
-              "token_type_hint",
-            ]),
+            this.#assertSingletonParameters(body, ["token", "token_type_hint"]),
         });
 
       const tokenValue = body.get("token");
@@ -1808,21 +1813,18 @@ export class AuthorizationServer<
 
       let response: IntrospectionResponse;
 
-      const resolved = await this.#resolveToken(
-        tokenService,
-        tokenValue,
-        hint,
-      );
+      const resolved = await this.#resolveToken(tokenService, tokenValue, hint);
       const expiresAt = resolved && this.#introspectedExpiry(resolved);
 
       if (
-        !resolved || (expiresAt && expiresAt < new Date()) ||
+        !resolved ||
+        (expiresAt && expiresAt < new Date()) ||
         (this.#canIntrospectToken &&
-          await this.#canIntrospectToken(
-              client,
-              resolved.token,
-              resolved.tokenType,
-            ) !== true)
+          (await this.#canIntrospectToken(
+            client,
+            resolved.token,
+            resolved.tokenType,
+          )) !== true)
       ) {
         response = { active: false };
       } else {
@@ -1859,8 +1861,11 @@ export class AuthorizationServer<
 
         if (this.#introspectionClaims) {
           const extensions = await this.#introspectionClaims(token);
-          const { sub: _sub, username: _username, ...machineExtensions } =
-            extensions;
+          const {
+            sub: _sub,
+            username: _username,
+            ...machineExtensions
+          } = extensions;
           response = {
             ...(token.user ? extensions : machineExtensions),
             ...response,
@@ -1873,7 +1878,7 @@ export class AuthorizationServer<
         headers: {
           "Content-Type": "application/json;charset=UTF-8",
           "Cache-Control": "no-store",
-          "Pragma": "no-cache",
+          Pragma: "no-cache",
         },
       });
     } catch (error) {
@@ -2021,12 +2026,10 @@ export class AuthorizationServer<
    * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.1
    * @see https://datatracker.ietf.org/doc/html/rfc8628#section-3.2
    */
-  async handleDeviceAuthorizationRequest(
-    request: Request,
-  ): Promise<Response> {
+  async handleDeviceAuthorizationRequest(request: Request): Promise<Response> {
     try {
-      const { context, body, client } = await this
-        .#beginClientAuthenticatedRequest(request, {
+      const { context, body, client } =
+        await this.#beginClientAuthenticatedRequest(request, {
           requiredGrantType: DEVICE_AUTHORIZATION_GRANT_TYPE,
           validateBody: (body) =>
             this.#assertSingletonParameters(body, ["scope"]),
@@ -2035,9 +2038,8 @@ export class AuthorizationServer<
       const grant = this.#deviceAuthorizationGrant();
 
       const scopeText = body.get("scope");
-      const scope = typeof scopeText === "string"
-        ? grant.parseScope(scopeText)
-        : undefined;
+      const scope =
+        typeof scopeText === "string" ? grant.parseScope(scopeText) : undefined;
 
       // RFC 8628 §3.2 requires a verification_uri the user can visit.
       if (!context.verificationUri) {
@@ -2068,7 +2070,7 @@ export class AuthorizationServer<
         headers: {
           "Content-Type": "application/json;charset=UTF-8",
           "Cache-Control": "no-store",
-          "Pragma": "no-cache",
+          Pragma: "no-cache",
         },
       });
     } catch (error) {
@@ -2114,9 +2116,12 @@ export function localAuthServerFetch<
   S extends AbstractScope,
 >(authServer: AuthorizationServer<Client, User, S>): typeof fetch {
   return async (input, init) => {
-    const request = input instanceof Request
-      ? (init ? new Request(input, init) : input)
-      : new Request(String(input), init);
+    const request =
+      input instanceof Request
+        ? init
+          ? new Request(input, init)
+          : input
+        : new Request(String(input), init);
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();

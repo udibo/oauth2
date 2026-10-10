@@ -1,6 +1,5 @@
-import { assertEquals, assertRejects } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
+import { rejection } from "../_test_assert.ts";
 import {
   assertPasswordPolicy,
   checkPasswordPolicy,
@@ -9,8 +8,8 @@ import { IdentityError } from "./errors.ts";
 
 describe("checkPasswordPolicy", () => {
   it("enforces the default length floor", async () => {
-    assertEquals((await checkPasswordPolicy("short")).ok, false);
-    assertEquals((await checkPasswordPolicy("longenough")).ok, true);
+    expect((await checkPasswordPolicy("short")).ok).toStrictEqual(false);
+    expect((await checkPasswordPolicy("longenough")).ok).toStrictEqual(true);
   });
 
   it("enforces min/max and runs custom validators, collecting issues", async () => {
@@ -18,11 +17,11 @@ describe("checkPasswordPolicy", () => {
       minLength: 10,
       validators: [(p) => (/\d/.test(p) ? undefined : "Needs a digit.")],
     });
-    assertEquals(result.ok, false);
-    assertEquals(result.issues.length, 2);
+    expect(result.ok).toStrictEqual(false);
+    expect(result.issues.length).toStrictEqual(2);
 
     const max = await checkPasswordPolicy("x".repeat(5), { maxLength: 4 });
-    assertEquals(max.ok, false);
+    expect(max.ok).toStrictEqual(false);
   });
 
   it("awaits async validators", async () => {
@@ -31,8 +30,8 @@ describe("checkPasswordPolicy", () => {
         (p) => Promise.resolve(p === "longenough" ? "Known." : undefined),
       ],
     });
-    assertEquals(result.ok, false);
-    assertEquals(result.issues, ["Known."]);
+    expect(result.ok).toStrictEqual(false);
+    expect(result.issues).toStrictEqual(["Known."]);
   });
 
   it("fails closed on a non-string password instead of skipping the length checks", async () => {
@@ -45,64 +44,72 @@ describe("checkPasswordPolicy", () => {
     ];
     for (const password of lengthless) {
       const result = await checkPasswordPolicy(password as unknown as string);
-      assertEquals(result.ok, false, `${JSON.stringify(password)} must fail`);
+      expect(result.ok, `${JSON.stringify(password)} must fail`).toStrictEqual(
+        false,
+      );
     }
   });
 
   it("does not run validators on a non-string password", async () => {
     let calls = 0;
     const result = await checkPasswordPolicy(9 as unknown as string, {
-      validators: [() => {
-        calls++;
-        return undefined;
-      }],
+      validators: [
+        () => {
+          calls++;
+          return undefined;
+        },
+      ],
     });
-    assertEquals(result.ok, false);
-    assertEquals(calls, 0);
+    expect(result.ok).toStrictEqual(false);
+    expect(calls).toStrictEqual(0);
   });
 });
 
 describe("assertPasswordPolicy", () => {
   it("throws IdentityError('weak_password') on failure, passes otherwise", async () => {
-    const err = await assertRejects(
+    const err = await rejection(
       () => assertPasswordPolicy("x", { minLength: 8 }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "weak_password");
+    expect((err as IdentityError).code).toStrictEqual("weak_password");
     await assertPasswordPolicy("longenough1");
   });
 
   it("rejects a non-string password as weak_password", async () => {
-    const err = await assertRejects(
+    const err = await rejection(
       () => assertPasswordPolicy(12345678901234 as unknown as string),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "weak_password");
+    expect((err as IdentityError).code).toStrictEqual("weak_password");
   });
 
   it("traps a throwing validator as weak_password instead of a raw error", async () => {
-    const err = await assertRejects(
+    const err = await rejection(
       () =>
         assertPasswordPolicy("longenough1", {
-          validators: [() => {
-            throw new Error("breach service exploded");
-          }],
+          validators: [
+            () => {
+              throw new Error("breach service exploded");
+            },
+          ],
         }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "weak_password");
+    expect((err as IdentityError).code).toStrictEqual("weak_password");
   });
 
   it("preserves an IdentityError a validator throws itself", async () => {
-    const err = await assertRejects(
+    const err = await rejection(
       () =>
         assertPasswordPolicy("longenough1", {
-          validators: [() => {
-            throw new IdentityError("rate_limited", "slow down");
-          }],
+          validators: [
+            () => {
+              throw new IdentityError("rate_limited", "slow down");
+            },
+          ],
         }),
       IdentityError,
     );
-    assertEquals((err as IdentityError).code, "rate_limited");
+    expect((err as IdentityError).code).toStrictEqual("rate_limited");
   });
 });

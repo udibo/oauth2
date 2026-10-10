@@ -52,165 +52,165 @@ export type SignInCodeFailureReason =
 export type IdentityEvent =
   | { type: "sign_in.succeeded"; userId: string; identifier: string }
   | {
-    type: "sign_in.failed";
-    identifier: string;
-    reason: SignInFailureReason;
-    userId?: string;
-  }
+      type: "sign_in.failed";
+      identifier: string;
+      reason: SignInFailureReason;
+      userId?: string;
+    }
   | {
-    type: "sign_in.rate_limited";
-    identifier: string;
-    retryAfterMs: number;
-    enforced: boolean;
-  }
+      type: "sign_in.rate_limited";
+      identifier: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
   | {
-    type: "sign_in.locked";
-    userId: string;
-    identifier: string;
-    enforced: boolean;
-  }
+      type: "sign_in.locked";
+      userId: string;
+      identifier: string;
+      enforced: boolean;
+    }
   | {
-    type: "lockout";
-    userId: string;
-    identifier: string;
-    failures: number;
-    lockedUntil?: number;
-    enforced: boolean;
-  }
+      type: "lockout";
+      userId: string;
+      identifier: string;
+      failures: number;
+      lockedUntil?: number;
+      enforced: boolean;
+    }
   | { type: "account_unlock.requested"; userId: string; email: string }
   | {
-    type: "account_unlock.rate_limited";
-    userId: string;
-    email: string;
-    retryAfterMs: number;
-    enforced: boolean;
-  }
+      type: "account_unlock.rate_limited";
+      userId: string;
+      email: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
   | { type: "account_unlock.completed"; userId: string }
   | { type: "account_unlock.failed"; reason: "expired" | "invalid" }
   | { type: "sign_up"; userId: string }
   | { type: "password.upgraded"; userId: string; verifierId: string }
   | {
-    type: "password_policy.check_unavailable";
-    /**
-     * Which {@link PasswordPolicy} validator could not finish, as a stable
-     * snake_case name. {@link breachedPasswordValidator} reports
-     * `"breached_password"`.
-     */
-    validator: string;
-    /**
-     * `true` when the password was accepted anyway (the validator's `failOpen`
-     * default), `false` when it was rejected instead. A run of `true` is a
-     * control that stopped running — the question this event exists to answer.
-     */
-    failedOpen: boolean;
-    /**
-     * The underlying failure's message — a timeout, a DNS or egress-policy
-     * refusal, a non-2xx status from the upstream service.
-     */
-    error: string;
-  }
+      type: "password_policy.check_unavailable";
+      /**
+       * Which {@link PasswordPolicy} validator could not finish, as a stable
+       * snake_case name. {@link breachedPasswordValidator} reports
+       * `"breached_password"`.
+       */
+      validator: string;
+      /**
+       * `true` when the password was accepted anyway (the validator's `failOpen`
+       * default), `false` when it was rejected instead. A run of `true` is a
+       * control that stopped running — the question this event exists to answer.
+       */
+      failedOpen: boolean;
+      /**
+       * The underlying failure's message — a timeout, a DNS or egress-policy
+       * refusal, a non-2xx status from the upstream service.
+       */
+      error: string;
+    }
   | { type: "password_reset.requested"; email: string; userId?: string }
   | {
-    type: "password_reset.rate_limited";
-    email: string;
-    retryAfterMs: number;
-    enforced: boolean;
-  }
+      type: "password_reset.rate_limited";
+      email: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
   | { type: "password_reset.completed"; userId: string }
   | {
-    type: "password_reset.failed";
-    /**
-     * `"invalid_token"` — the reset link was unknown, expired, or already used.
-     * `"session_revocation_failed"` — the new password was set but the
-     * configured {@link RevocableSessionService} threw before the user's other
-     * sessions could be revoked, so the reset is reported failed (and rethrown)
-     * rather than trusted. The reset token is already spent, so clear the
-     * still-live sessions by calling `revokeAllByUser` again from this event,
-     * or have the user complete a fresh reset link.
-     */
-    reason: "invalid_token" | "session_revocation_failed";
-  }
+      type: "password_reset.failed";
+      /**
+       * `"invalid_token"` — the reset link was unknown, expired, or already used.
+       * `"session_revocation_failed"` — the new password was set but the
+       * configured {@link RevocableSessionService} threw before the user's other
+       * sessions could be revoked, so the reset is reported failed (and rethrown)
+       * rather than trusted. The reset token is already spent, so clear the
+       * still-live sessions by calling `revokeAllByUser` again from this event,
+       * or have the user complete a fresh reset link.
+       */
+      reason: "invalid_token" | "session_revocation_failed";
+    }
   | {
-    type: "credential_mint.failed";
-    /**
-     * Which enumeration-safe request flow could not mint its credential
-     * because the token or code store threw. The call still resolved `void`,
-     * exactly as it does for an unknown email, so this event is the only
-     * signal that the user was never sent anything.
-     */
-    flow: "password_reset" | "signin_link" | "signin_code";
-    /** The store's failure message. */
-    error: string;
-  }
+      type: "credential_mint.failed";
+      /**
+       * Which enumeration-safe request flow could not mint its credential
+       * because the token or code store threw. The call still resolved `void`,
+       * exactly as it does for an unknown email, so this event is the only
+       * signal that the user was never sent anything.
+       */
+      flow: "password_reset" | "signin_link" | "signin_code";
+      /** The store's failure message. */
+      error: string;
+    }
   | { type: "email_verification.requested"; userId: string; email: string }
   | {
-    type: "email_verification.rate_limited";
-    userId: string;
-    email: string;
-    retryAfterMs: number;
-    enforced: boolean;
-  }
+      type: "email_verification.rate_limited";
+      userId: string;
+      email: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
   | { type: "email_verification.completed"; userId: string; email?: string }
   | { type: "email_verification.failed"; reason: "expired" | "invalid" }
   | { type: "signin_link.requested"; email: string; userId?: string }
   | { type: "signin_link.consumed"; userId: string }
   | { type: "signin_link.failed"; reason: "expired" | "invalid" }
   | {
-    type: "signin_link.rate_limited";
-    email: string;
-    retryAfterMs?: number;
-    enforced: boolean;
-  }
+      type: "signin_link.rate_limited";
+      email: string;
+      retryAfterMs?: number;
+      enforced: boolean;
+    }
   | { type: "signin_code.requested"; email: string; userId?: string }
   | { type: "signin_code.verified"; userId: string }
   | {
-    type: "signin_code.failed";
-    email: string;
-    reason: SignInCodeFailureReason;
-  }
+      type: "signin_code.failed";
+      email: string;
+      reason: SignInCodeFailureReason;
+    }
   | {
-    type: "signin_code.rate_limited";
-    email: string;
-    retryAfterMs?: number;
-    enforced: boolean;
-  }
+      type: "signin_code.rate_limited";
+      email: string;
+      retryAfterMs?: number;
+      enforced: boolean;
+    }
   | {
-    type: "delivery.failed";
-    /** Which {@link DeliveryHooks} hook threw. */
-    hook: keyof DeliveryHooks;
-    /**
-     * `true` when the just-minted token or code was invalidated after the
-     * failed send — the intended outcome, nothing usable left behind. `false`
-     * when that cleanup *also* failed: a live credential the recipient never
-     * received is still outstanding until it expires. Alert on `false`.
-     */
-    invalidated: boolean;
-    /** The delivery hook's failure message. */
-    error: string;
-  }
+      type: "delivery.failed";
+      /** Which {@link DeliveryHooks} hook threw. */
+      hook: keyof DeliveryHooks;
+      /**
+       * `true` when the just-minted token or code was invalidated after the
+       * failed send — the intended outcome, nothing usable left behind. `false`
+       * when that cleanup *also* failed: a live credential the recipient never
+       * received is still outstanding until it expires. Alert on `false`.
+       */
+      invalidated: boolean;
+      /** The delivery hook's failure message. */
+      error: string;
+    }
   | { type: "mfa.enrollment.confirmed"; userId: string }
   | {
-    type: "mfa.verify.succeeded";
-    userId: string;
-    method: "totp" | "recovery";
-    remainingRecoveryCodes?: number;
-  }
+      type: "mfa.verify.succeeded";
+      userId: string;
+      method: "totp" | "recovery";
+      remainingRecoveryCodes?: number;
+    }
   | {
-    type: "mfa.verify.failed";
-    userId: string;
-    /**
-     * `"replayed"` marks a *valid* TOTP code rejected because its time step
-     * was already spent — the classic signal of code interception or a
-     * concurrent session, worth distinguishing from a typo in audit review.
-     */
-    reason: "invalid" | "replayed";
-  }
+      type: "mfa.verify.failed";
+      userId: string;
+      /**
+       * `"replayed"` marks a *valid* TOTP code rejected because its time step
+       * was already spent — the classic signal of code interception or a
+       * concurrent session, worth distinguishing from a typo in audit review.
+       */
+      reason: "invalid" | "replayed";
+    }
   | {
-    type: "mfa.verify.rate_limited";
-    userId: string;
-    retryAfterMs: number;
-    enforced: boolean;
-  }
+      type: "mfa.verify.rate_limited";
+      userId: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
   | { type: "mfa.recovery_codes.regenerated"; userId: string }
   | { type: "mfa.disabled"; userId: string };
 
@@ -223,9 +223,7 @@ export type IdentityEvent =
  * Trigger point `event` (see `docs/trigger-points.md`) — the one
  * **fire-and-forget** seam in the identity layer.
  */
-export type IdentityEventHook = (
-  event: IdentityEvent,
-) => void | Promise<void>;
+export type IdentityEventHook = (event: IdentityEvent) => void | Promise<void>;
 
 /** The `*.rate_limited` members of {@link IdentityEvent}. */
 export type RateLimitedEvent = Extract<
@@ -237,9 +235,8 @@ export type RateLimitedEvent = Extract<
  * A {@link RateLimitedEvent} minus the fields the throttle sequence fills in
  * (`retryAfterMs`, `enforced`) — what a flow passes to `enforceRateLimit`.
  */
-export type RateLimitedEventInit<E = RateLimitedEvent> = E extends
-  RateLimitedEvent ? Omit<E, "retryAfterMs" | "enforced">
-  : never;
+export type RateLimitedEventInit<E = RateLimitedEvent> =
+  E extends RateLimitedEvent ? Omit<E, "retryAfterMs" | "enforced"> : never;
 
 /**
  * Deliver an event to an optional {@link IdentityEventHook}, upholding the

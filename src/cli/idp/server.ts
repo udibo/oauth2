@@ -16,6 +16,11 @@
  * @module
  */
 
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+
+import { serve as serveNode } from "@hono/node-server";
+
 import type { ClientInterface } from "../../models/client.ts";
 import type { BasicScope } from "../../models/scope.ts";
 import {
@@ -170,11 +175,14 @@ async function createState(
 
   const secrets = new Map<string, string>();
   for (const user of config.users) {
-    await userService.add({
-      id: user.id,
-      username: user.username,
-      claims: user.claims,
-    }, user.password);
+    await userService.add(
+      {
+        id: user.id,
+        username: user.username,
+        claims: user.claims,
+      },
+      user.password,
+    );
   }
   for (const client of config.clients) {
     await clientService.add(
@@ -279,10 +287,7 @@ function pathAndQuery(request: Request): string {
   return `${pathname}${search}`;
 }
 
-function formValue(
-  form: FormData,
-  name: string,
-): string | undefined {
+function formValue(form: FormData, name: string): string | undefined {
   const value = form.get(name);
   return typeof value === "string" ? value : undefined;
 }
@@ -329,12 +334,14 @@ function handleConsentFor(
       }
     }
 
-    return htmlResponse(consentPage({
-      clientId: client.id,
-      scope: requestedScope?.toString() || undefined,
-      username: user.username,
-      returnTo: pathAndQuery(request),
-    }));
+    return htmlResponse(
+      consentPage({
+        clientId: client.id,
+        scope: requestedScope?.toString() || undefined,
+        username: user.username,
+        returnTo: pathAndQuery(request),
+      }),
+    );
   };
 }
 
@@ -355,9 +362,10 @@ async function handleLoginSubmission(
   } else {
     const username = formValue(form, "username");
     const password = formValue(form, "password");
-    user = username !== undefined && password !== undefined
-      ? await state.userService.getAuthenticated(username, password)
-      : undefined;
+    user =
+      username !== undefined && password !== undefined
+        ? await state.userService.getAuthenticated(username, password)
+        : undefined;
     if (!user) error = "Unknown username or password.";
   }
 
@@ -420,7 +428,7 @@ function handleLogout(
   );
   if (postLogout) {
     const registered = config.clients.some((client) =>
-      client.redirectUris.includes(postLogout)
+      client.redirectUris.includes(postLogout),
     );
     if (registered) {
       return redirect(postLogout, { "set-cookie": expired });
@@ -433,17 +441,14 @@ function handleLogout(
       400,
     );
   }
-  return new Response(
-    messagePage("Signed out", "The session was dropped."),
-    {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        "set-cookie": expired,
-      },
+  return new Response(messagePage("Signed out", "The session was dropped."), {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "set-cookie": expired,
     },
-  );
+  });
 }
 
 async function readJsonBody(
@@ -520,15 +525,17 @@ async function handleAdminTokens(
       `client "${client.id}" is not registered for the authorization_code grant`,
     );
   }
-  const redirectUri = typeof body.redirectUri === "string"
-    ? body.redirectUri
-    : client.redirectUris?.[0];
+  const redirectUri =
+    typeof body.redirectUri === "string"
+      ? body.redirectUri
+      : client.redirectUris?.[0];
   if (!redirectUri) {
     return jsonError(400, `client "${client.id}" has no redirect URI`);
   }
-  const scope = typeof body.scope === "string"
-    ? body.scope
-    : config.scopesSupported.join(" ");
+  const scope =
+    typeof body.scope === "string"
+      ? body.scope
+      : config.scopesSupported.join(" ");
 
   const verifier = generateCodeVerifier();
   const origin = new URL(request.url).origin;
@@ -557,7 +564,8 @@ async function handleAdminTokens(
     return jsonError(
       400,
       authorizeParams.get("error_description") ??
-        authorizeParams.get("error") ?? "the authorization request failed",
+        authorizeParams.get("error") ??
+        "the authorization request failed",
     );
   }
 
@@ -694,11 +702,13 @@ export async function startDevIdentityProvider(
     try {
       switch (pathname) {
         case "/":
-          return htmlResponse(statusPage({
-            issuer: issuer.value,
-            users: config.users,
-            clients: config.clients,
-          }));
+          return htmlResponse(
+            statusPage({
+              issuer: issuer.value,
+              users: config.users,
+              clients: config.clients,
+            }),
+          );
         case "/authorize":
           return await state.server.handleAuthorizeRequest(
             request,
@@ -725,12 +735,14 @@ export async function startDevIdentityProvider(
           if (method === "POST") {
             return await handleLoginSubmission(state, config, request);
           }
-          return htmlResponse(loginPage({
-            returnTo: safeReturnTo(
-              new URL(request.url).searchParams.get("return_to"),
-            ),
-            users: config.users,
-          }));
+          return htmlResponse(
+            loginPage({
+              returnTo: safeReturnTo(
+                new URL(request.url).searchParams.get("return_to"),
+              ),
+              users: config.users,
+            }),
+          );
         case "/consent":
           if (method !== "POST") return jsonError(405, "method must be POST");
           return await handleConsentSubmission(state, request);
@@ -759,25 +771,37 @@ export async function startDevIdentityProvider(
     }
   };
 
-  const server = Deno.serve({
+  const server = serveNode({
+    fetch: handler,
     port: config.port,
     hostname: config.hostname,
-    onListen: () => {},
-  }, handler);
-
-  const { hostname, port } = server.addr;
+    overrideGlobalObjects: false,
+  }) as Server;
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { address: hostname, port } = server.address() as AddressInfo;
   const host = hostname.includes(":") ? `[${hostname}]` : hostname;
   const url = `http://${host}:${port}`;
   issuer.value ||= `http://${
     WILDCARD_HOSTNAMES.has(hostname) ? "localhost" : host
   }:${port}`;
+  const finished = new Promise<void>((resolve) => {
+    server.once("close", resolve);
+  });
+  const shutdown = (): Promise<void> => {
+    server.close();
+    server.closeIdleConnections();
+    return finished;
+  };
   return {
     url,
     issuer: issuer.value,
     adminToken,
     hostname,
     port,
-    finished: server.finished,
-    shutdown: () => server.shutdown(),
+    finished,
+    shutdown,
   };
 }

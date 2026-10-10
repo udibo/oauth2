@@ -595,15 +595,14 @@ The package's CLI generates one. Run it once and put the printed JWK in your
 secret manager as `OIDC_SIGNING_KEY`:
 
 ```sh
-deno run jsr:@udibo/oauth2/cli oidc keygen
+npx udibo-oauth2 oidc keygen
 ```
 
 The JWK goes to stdout as a single line ready to paste into a secret store; the
 notes about handling it go to stderr, so piping stdout straight into your secret
 store — `… oidc keygen | gh secret set OIDC_SIGNING_KEY`, or your provider's
-equivalent — carries the key and nothing else. Nothing is written to disk, and
-the command needs **no Deno permissions** — run it without `-A`; a key generator
-asking for permissions is a reason to stop and look.
+equivalent — carries the key and nothing else. Nothing is written to disk and
+the command makes no network requests.
 
 The exported JWK contains the private key material — guard it like any
 credential. At boot, load it:
@@ -615,7 +614,7 @@ import {
 } from "@udibo/oauth2/server/authorization";
 
 const signingKey = await importSigningKeyJwk(
-  JSON.parse(Deno.env.get("OIDC_SIGNING_KEY")!),
+  JSON.parse(process.env.OIDC_SIGNING_KEY!),
 );
 const signingKeys = new StaticSigningKeyProvider(signingKey);
 ```

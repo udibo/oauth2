@@ -1,6 +1,6 @@
-import { assertRejects, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
+import { describe, expect, it } from "vitest";
+import { FakeTime } from "../../_test_fake-time.ts";
+import { rejection } from "../../_test_assert.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import { BasicScope } from "../../models/scope.ts";
 import {
@@ -51,8 +51,11 @@ async function createTestGrant() {
  * MemoryTokenService subclass that doesn't generate new refresh tokens.
  * Used to test the case where we preserve the existing refresh token.
  */
-class NoRotateTokenService
-  extends MemoryTokenService<TestClient, TestUser, BasicScope> {
+class NoRotateTokenService extends MemoryTokenService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   override generateRefreshToken(): Promise<string | undefined> {
     return Promise.resolve(undefined);
   }
@@ -62,8 +65,11 @@ class NoRotateTokenService
  * MemoryTokenService subclass that counts which revocation path the grant
  * takes, to pin rotation onto `revokeRotated` when a service implements it.
  */
-class RotationAwareTokenService
-  extends MemoryTokenService<TestClient, TestUser, BasicScope> {
+class RotationAwareTokenService extends MemoryTokenService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   rotatedCalls = 0;
   revokeCalls = 0;
   revokeRotated(
@@ -90,14 +96,14 @@ describe("RefreshTokenGrant", () => {
   describe("grantType", () => {
     it("should return refresh_token", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.grantType, "refresh_token");
+      expect(grant.grantType).toBe("refresh_token");
     });
   });
 
   describe("constructor", () => {
     it("should allow refresh tokens", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.allowRefreshToken, true);
+      expect(grant.allowRefreshToken).toBe(true);
     });
   });
 
@@ -107,7 +113,7 @@ describe("RefreshTokenGrant", () => {
 
       const request = tokenRequest({ grant_type: "refresh_token" });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "refresh_token parameter required",
@@ -122,7 +128,7 @@ describe("RefreshTokenGrant", () => {
         refresh_token: "non-existent",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "invalid refresh_token",
@@ -147,7 +153,7 @@ describe("RefreshTokenGrant", () => {
         refresh_token: "refresh-123",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "invalid refresh_token",
@@ -175,7 +181,7 @@ describe("RefreshTokenGrant", () => {
         refresh_token: "refresh-123",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidClientError,
         "refresh_token was issued to another client",
@@ -202,9 +208,9 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.accessToken !== "old-access", true);
-      assertStrictEquals(newToken.client.id, testClient.id);
-      assertStrictEquals(newToken.user?.id, testUser.id);
+      expect(newToken.accessToken !== "old-access").toBe(true);
+      expect(newToken.client.id).toBe(testClient.id);
+      expect(newToken.user?.id).toBe(testUser.id);
     });
 
     it("should preserve scope from original token", async () => {
@@ -229,7 +235,7 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.scope?.toString(), "read write");
+      expect(newToken.scope?.toString()).toBe("read write");
     });
 
     it("narrows scope to the requested subset (RFC 6749 Section 6)", async () => {
@@ -254,7 +260,7 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.scope?.toString(), "read write");
+      expect(newToken.scope?.toString()).toBe("read write");
     });
 
     it("rejects a requested scope outside the original grant", async () => {
@@ -277,7 +283,7 @@ describe("RefreshTokenGrant", () => {
         scope: "read write",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidScopeError,
         "requested scope exceeds the scope of the original grant",
@@ -305,7 +311,7 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.scope?.toString(), "read write");
+      expect(newToken.scope?.toString()).toBe("read write");
     });
 
     it("should revoke old token", async () => {
@@ -329,7 +335,7 @@ describe("RefreshTokenGrant", () => {
       await exchangeToken(grant, request, testClient);
 
       const oldRefresh = await tokenService.getRefreshToken("refresh-123");
-      assertStrictEquals(oldRefresh, undefined);
+      expect(oldRefresh).toBe(undefined);
     });
 
     it("rotates through revokeRotated when implemented, never revoke", async () => {
@@ -355,10 +361,9 @@ describe("RefreshTokenGrant", () => {
 
       await exchangeToken(grant, refreshRequest("refresh-rotated"), testClient);
 
-      assertStrictEquals(tokenService.rotatedCalls, 1);
-      assertStrictEquals(tokenService.revokeCalls, 0);
-      assertStrictEquals(
-        await tokenService.getRefreshToken("refresh-rotated"),
+      expect(tokenService.rotatedCalls).toBe(1);
+      expect(tokenService.revokeCalls).toBe(0);
+      expect(await tokenService.getRefreshToken("refresh-rotated")).toBe(
         undefined,
       );
     });
@@ -384,7 +389,7 @@ describe("RefreshTokenGrant", () => {
       const newToken = await exchangeToken(grant, request, testClient);
 
       const savedToken = await tokenService.getToken(newToken.accessToken);
-      assertStrictEquals(savedToken?.accessToken, newToken.accessToken);
+      expect(savedToken?.accessToken).toBe(newToken.accessToken);
     });
 
     it("should work with token that has no expiration", async () => {
@@ -406,8 +411,8 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof newToken.accessToken, "string");
-      assertStrictEquals(newToken.accessToken !== "old-access", true);
+      expect(typeof newToken.accessToken).toBe("string");
+      expect(newToken.accessToken !== "old-access").toBe(true);
     });
 
     it("should preserve existing refresh token when no new one generated", async () => {
@@ -442,10 +447,9 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.accessToken !== "old-access", true);
-      assertStrictEquals(newToken.refreshToken, "existing-refresh-token");
-      assertStrictEquals(
-        newToken.refreshTokenExpiresAt?.getTime(),
+      expect(newToken.accessToken !== "old-access").toBe(true);
+      expect(newToken.refreshToken).toBe("existing-refresh-token");
+      expect(newToken.refreshTokenExpiresAt?.getTime()).toBe(
         existingToken.refreshTokenExpiresAt?.getTime(),
       );
     });
@@ -481,8 +485,8 @@ describe("RefreshTokenGrant", () => {
 
       const newToken = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(newToken.refreshToken, "no-expire-refresh");
-      assertStrictEquals(newToken.refreshTokenExpiresAt, undefined);
+      expect(newToken.refreshToken).toBe("no-expire-refresh");
+      expect(newToken.refreshTokenExpiresAt).toBe(undefined);
     });
   });
 
@@ -514,10 +518,10 @@ describe("RefreshTokenGrant", () => {
         refreshRequest(original.refreshToken),
         (await clientService.get("client-1"))!,
       );
-      assertStrictEquals(rotated.familyId, original.familyId);
+      expect(rotated.familyId).toBe(original.familyId);
 
       const stored = await tokenService.getRefreshToken(rotated.refreshToken);
-      assertStrictEquals(stored?.familyId, original.familyId);
+      expect(stored?.familyId).toBe(original.familyId);
     });
 
     it("replaying a rotated-out token revokes the family and reports the event", async () => {
@@ -549,20 +553,19 @@ describe("RefreshTokenGrant", () => {
         client,
       );
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(grant, refreshRequest(original.refreshToken), client),
         InvalidGrantError,
       );
-      assertStrictEquals(reuseEvents.length, 1);
-      assertStrictEquals(reuseEvents[0].familyId, original.familyId);
-      assertStrictEquals(reuseEvents[0].familyRevoked, true);
+      expect(reuseEvents.length).toBe(1);
+      expect(reuseEvents[0].familyId).toBe(original.familyId);
+      expect(reuseEvents[0].familyRevoked).toBe(true);
 
-      assertStrictEquals(
-        await tokenService.getRefreshToken(rotated.refreshToken),
+      expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
         undefined,
       );
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(grant, refreshRequest(rotated.refreshToken), client),
         InvalidGrantError,
@@ -589,12 +592,12 @@ describe("RefreshTokenGrant", () => {
       const client = (await clientService.get("client-1"))!;
       await exchangeToken(grant, refreshRequest(original.refreshToken), client);
 
-      const error = await assertRejects(
+      const error = await rejection(
         () =>
           exchangeToken(grant, refreshRequest(original.refreshToken), client),
         InvalidGrantError,
       );
-      assertStrictEquals(error.status, 400);
+      expect(error.status).toBe(400);
     });
 
     it("degrades to a plain invalid_grant when the store lacks reuse support", async () => {
@@ -607,33 +610,27 @@ describe("RefreshTokenGrant", () => {
         accessTokenLifetime: tokenService.accessTokenLifetime,
         refreshTokenLifetime: tokenService.refreshTokenLifetime,
         acceptedScope: tokenService.acceptedScope.bind(tokenService),
-        generateAccessToken: tokenService.generateAccessToken.bind(
-          tokenService,
-        ),
-        generateRefreshToken: tokenService.generateRefreshToken.bind(
-          tokenService,
-        ),
-        accessTokenExpiresAt: tokenService.accessTokenExpiresAt.bind(
-          tokenService,
-        ),
-        refreshTokenExpiresAt: tokenService.refreshTokenExpiresAt.bind(
-          tokenService,
-        ),
+        generateAccessToken:
+          tokenService.generateAccessToken.bind(tokenService),
+        generateRefreshToken:
+          tokenService.generateRefreshToken.bind(tokenService),
+        accessTokenExpiresAt:
+          tokenService.accessTokenExpiresAt.bind(tokenService),
+        refreshTokenExpiresAt:
+          tokenService.refreshTokenExpiresAt.bind(tokenService),
         getToken: tokenService.getToken.bind(tokenService),
         getRefreshToken: tokenService.getRefreshToken.bind(tokenService),
         save: tokenService.save.bind(tokenService),
         revoke: tokenService.revoke.bind(tokenService),
         revokeCode: tokenService.revokeCode.bind(tokenService),
       } as typeof tokenService;
-      const bareGrant = new RefreshTokenGrant<
-        TestClient,
-        TestUser,
-        BasicScope
-      >({
-        resolve: () => ({ clientService, tokenService: bare }),
-      });
+      const bareGrant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>(
+        {
+          resolve: () => ({ clientService, tokenService: bare }),
+        },
+      );
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             bareGrant,
@@ -658,14 +655,9 @@ describe("RefreshTokenGrant", () => {
     ) {
       const userService = new MemoryUserService();
       const clientService = new MemoryClientService(userService);
-      const TokenService = options.rotates === false
-        ? NoRotateTokenService
-        : MemoryTokenService;
-      const tokenService = new TokenService<
-        TestClient,
-        TestUser,
-        BasicScope
-      >({
+      const TokenService =
+        options.rotates === false ? NoRotateTokenService : MemoryTokenService;
+      const tokenService = new TokenService<TestClient, TestUser, BasicScope>({
         clientService,
         userService,
         refreshTokenLifetime: 7 * 24 * 60 * 60,
@@ -710,14 +702,13 @@ describe("RefreshTokenGrant", () => {
       });
       const original = await seedFamily(tokenService, client, new Date());
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        rotated.refreshTokenExpiresAt?.getTime(),
+      expect(rotated.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 7 * DAY,
       );
     });
@@ -733,14 +724,13 @@ describe("RefreshTokenGrant", () => {
         new Date(START.getTime() - 29 * DAY),
       );
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        rotated.refreshTokenExpiresAt?.getTime(),
+      expect(rotated.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + DAY,
       );
     });
@@ -756,7 +746,7 @@ describe("RefreshTokenGrant", () => {
         new Date(START.getTime() - 30 * DAY),
       );
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(grant, refreshRequest(original.refreshToken), client),
         InvalidGrantError,
@@ -773,21 +763,20 @@ describe("RefreshTokenGrant", () => {
 
       for (let rotation = 0; rotation < 5; rotation++) {
         time.tick(5 * DAY);
-        current = await exchangeToken(
+        current = (await exchangeToken(
           grant,
           refreshRequest(current.refreshToken),
           client,
-        ) as RefreshToken<TestClient, TestUser, BasicScope>;
-        assertStrictEquals(current.familyCreatedAt?.getTime(), START.getTime());
+        )) as RefreshToken<TestClient, TestUser, BasicScope>;
+        expect(current.familyCreatedAt?.getTime()).toBe(START.getTime());
       }
 
-      assertStrictEquals(
-        current.refreshTokenExpiresAt?.getTime(),
+      expect(current.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 30 * DAY,
       );
 
       time.tick(6 * DAY);
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(grant, refreshRequest(current.refreshToken), client),
         InvalidGrantError,
@@ -804,14 +793,13 @@ describe("RefreshTokenGrant", () => {
         new Date(START.getTime() - 60 * DAY),
       );
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        rotated.refreshTokenExpiresAt?.getTime(),
+      expect(rotated.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 7 * DAY,
       );
     });
@@ -823,14 +811,13 @@ describe("RefreshTokenGrant", () => {
       });
       const original = await seedFamily(tokenService, client, undefined);
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        rotated.refreshTokenExpiresAt?.getTime(),
+      expect(rotated.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 7 * DAY,
       );
     });
@@ -849,11 +836,10 @@ describe("RefreshTokenGrant", () => {
         client,
       );
 
-      assertStrictEquals(
+      expect(
         rotated.accessTokenExpiresAt?.getTime(),
-        familyCreatedAt.getTime() + 30 * DAY,
         "an access token minted just under the ceiling must not outlive it",
-      );
+      ).toBe(familyCreatedAt.getTime() + 30 * DAY);
     });
 
     it("clamps a new family's access token when the cap is shorter than the access lifetime", async () => {
@@ -862,19 +848,17 @@ describe("RefreshTokenGrant", () => {
         refreshTokenMaxLifetime: 600,
       });
 
-      const issued = await grant.generateToken(
+      const issued = (await grant.generateToken(
         client,
         testUser,
         undefined,
         tokenService,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        issued.accessTokenExpiresAt?.getTime(),
+      expect(issued.accessTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 600_000,
       );
-      assertStrictEquals(
-        issued.refreshTokenExpiresAt?.getTime(),
+      expect(issued.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 600_000,
       );
     });
@@ -888,19 +872,17 @@ describe("RefreshTokenGrant", () => {
       const familyCreatedAt = new Date(START.getTime() - 30 * DAY + 600_000);
       const original = await seedFamily(tokenService, client, familyCreatedAt);
 
-      const next = await exchangeToken(
+      const next = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(next.refreshToken, original.refreshToken);
-      assertStrictEquals(
-        next.refreshTokenExpiresAt?.getTime(),
+      expect(next.refreshToken).toBe(original.refreshToken);
+      expect(next.refreshTokenExpiresAt?.getTime()).toBe(
         familyCreatedAt.getTime() + 30 * DAY,
       );
-      assertStrictEquals(
-        next.accessTokenExpiresAt?.getTime(),
+      expect(next.accessTokenExpiresAt?.getTime()).toBe(
         familyCreatedAt.getTime() + 30 * DAY,
       );
     });
@@ -912,18 +894,18 @@ describe("RefreshTokenGrant", () => {
       });
       const original = await seedFamily(tokenService, client, undefined);
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(rotated.familyCreatedAt?.getTime(), START.getTime());
+      expect(rotated.familyCreatedAt?.getTime()).toBe(START.getTime());
       const stored = await tokenService.getRefreshToken(rotated.refreshToken);
-      assertStrictEquals(stored?.familyCreatedAt?.getTime(), START.getTime());
+      expect(stored?.familyCreatedAt?.getTime()).toBe(START.getTime());
 
       time.tick(31 * DAY);
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(grant, refreshRequest(rotated.refreshToken), client),
         InvalidGrantError,
@@ -942,14 +924,13 @@ describe("RefreshTokenGrant", () => {
         new Date(START.getTime() - 5 * DAY),
       );
 
-      const rotated = await exchangeToken(
+      const rotated = (await exchangeToken(
         grant,
         refreshRequest(original.refreshToken),
         client,
-      ) as RefreshToken<TestClient, TestUser, BasicScope>;
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
 
-      assertStrictEquals(
-        rotated.refreshTokenExpiresAt?.getTime(),
+      expect(rotated.refreshTokenExpiresAt?.getTime()).toBe(
         START.getTime() + 5 * DAY,
       );
     });

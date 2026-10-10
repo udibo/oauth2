@@ -113,9 +113,7 @@ export interface HonoIdentityOptions<User extends IdentityUser> {
   paths?: HonoIdentityPaths;
 }
 
-function handle(
-  fn: (c: Context) => Response | Promise<Response>,
-): Handler {
+function handle(fn: (c: Context) => Response | Promise<Response>): Handler {
   return async (c) => {
     try {
       return await fn(c);
@@ -141,10 +139,10 @@ async function readBody(c: Context): Promise<Record<string, unknown>> {
       }
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {
-        out[key] = STRING_FIELDS.has(key) && value !== null &&
-            value !== undefined
-          ? String(value)
-          : value;
+        out[key] =
+          STRING_FIELDS.has(key) && value !== null && value !== undefined
+            ? String(value)
+            : value;
       }
       return out;
     } catch {
@@ -176,19 +174,24 @@ function isTrustedOrigin(c: Context, allowedOrigins: Set<string>): boolean {
   const origin = c.req.header("origin");
   const site = c.req.header("sec-fetch-site");
   if (site) {
-    return site === "same-origin" || site === "none" ||
-      (!!origin && allowedOrigins.has(origin));
+    return (
+      site === "same-origin" ||
+      site === "none" ||
+      (!!origin && allowedOrigins.has(origin))
+    );
   }
   if (!origin) return true;
-  return allowedOrigins.has(origin) ||
-    hostOf(origin) === new URL(c.req.url).host;
+  return (
+    allowedOrigins.has(origin) || hostOf(origin) === new URL(c.req.url).host
+  );
 }
 
 function sameOriginGuard(options: HonoIdentityCsrfOptions): MiddlewareHandler {
   const allowedOrigins = new Set(options.allowedOrigins ?? []);
   return async (c, next) => {
     if (
-      !SAFE_METHODS.has(c.req.method) && !isTrustedOrigin(c, allowedOrigins)
+      !SAFE_METHODS.has(c.req.method) &&
+      !isTrustedOrigin(c, allowedOrigins)
     ) {
       return c.json(
         { error: FORBIDDEN_ORIGIN },

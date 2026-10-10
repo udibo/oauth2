@@ -1,14 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertExists,
-  assertFalse,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { decodeBase64Url } from "@std/encoding/base64url";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
+import { thrown } from "../_test_assert.ts";
+import { decodeBase64Url } from "../utils/_encoding.ts";
 import { BasicScope } from "../models/scope.ts";
 import type { RefreshToken } from "../models/token.ts";
 import {
@@ -65,7 +57,7 @@ async function createOidcServer(
   await userService.add(testUser, "password");
   await clientService.add(testClient, "secret", testUser.id);
 
-  const signingKey = key ?? await generateSigningKey();
+  const signingKey = key ?? (await generateSigningKey());
   const grant = new AuthorizationCodeGrant<TestClient, TestUser, BasicScope>({
     resolve: () => ({
       clientService,
@@ -112,22 +104,28 @@ async function exchangeCodeWithNonce(
   scope: string,
   nonce?: string,
 ) {
-  const code = await grant.generateAuthorizationCode({
-    client: testClient,
-    user: testUser,
-    scope: new BasicScope(scope),
-    redirectUri: "https://example.com/callback",
-    nonce: nonce ?? null,
-  }, new Request("http://localhost/authorize"));
+  const code = await grant.generateAuthorizationCode(
+    {
+      client: testClient,
+      user: testUser,
+      scope: new BasicScope(scope),
+      redirectUri: "https://example.com/callback",
+      nonce: nonce ?? null,
+    },
+    new Request("http://localhost/authorize"),
+  );
 
   const response = await server.handleTokenRequest(
-    tokenRequest({
-      grant_type: "authorization_code",
-      code: code.code,
-      redirect_uri: "https://example.com/callback",
-    }, basicAuthHeader("client-1", "secret")),
+    tokenRequest(
+      {
+        grant_type: "authorization_code",
+        code: code.code,
+        redirect_uri: "https://example.com/callback",
+      },
+      basicAuthHeader("client-1", "secret"),
+    ),
   );
-  assertEquals(response.status, 200);
+  expect(response.status).toStrictEqual(200);
   return await response.json();
 }
 
@@ -141,14 +139,14 @@ describe("OIDC issuance", () => {
       "nonce-123",
     );
 
-    assertExists(body.id_token);
+    assert.exists(body.id_token);
     const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
-    assertExists(claims);
-    assertEquals(claims!.iss, "https://auth.example.com");
-    assertEquals(claims!.sub, "user-1");
-    assertEquals(claims!.aud, "client-1");
-    assertEquals(claims!.nonce, "nonce-123");
-    assertEquals(claims!.preferred_username, "testuser");
+    assert.exists(claims);
+    expect(claims!.iss).toStrictEqual("https://auth.example.com");
+    expect(claims!.sub).toStrictEqual("user-1");
+    expect(claims!.aud).toStrictEqual("client-1");
+    expect(claims!.nonce).toStrictEqual("nonce-123");
+    expect(claims!.preferred_username).toStrictEqual("testuser");
     assert(typeof claims!.exp === "number" && typeof claims!.iat === "number");
   });
 
@@ -160,12 +158,11 @@ describe("OIDC issuance", () => {
     const body = await exchangeCodeWithNonce(server, grant, "openid");
 
     const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
-    assertExists(claims);
-    assertEquals(
+    assert.exists(claims);
+    expect(
       claims!.nonce,
-      undefined,
       "the protocol nonce is authoritative: a request without one yields an id_token without one",
-    );
+    ).toStrictEqual(undefined);
   });
 
   it("stamps the request's nonce over one userClaims returns", async () => {
@@ -181,7 +178,7 @@ describe("OIDC issuance", () => {
     );
 
     const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
-    assertEquals(claims!.nonce, "nonce-123");
+    expect(claims!.nonce).toStrictEqual("nonce-123");
   });
 
   it("userinfo honors clockSkewSeconds on the bearer token's expiry", async () => {
@@ -213,36 +210,34 @@ describe("OIDC issuance", () => {
       }),
     );
 
-    assertEquals(
+    expect(
       userinfo.status,
-      200,
       "a token expired within the configured skew is still accepted",
-    );
-    assertEquals((await userinfo.json()).sub, "user-1");
+    ).toStrictEqual(200);
+    expect((await userinfo.json()).sub).toStrictEqual("user-1");
   });
 
   it("omits the id_token without the openid scope", async () => {
     const { server, grant } = await createOidcServer();
     const body = await exchangeCodeWithNonce(server, grant, "read");
-    assertEquals(body.id_token, undefined);
+    expect(body.id_token).toStrictEqual(undefined);
   });
 
   it("advertises the OIDC surface in metadata at both well-known names", async () => {
     const { server } = await createOidcServer();
     const response = await server.handleMetadataRequest(
-      new Request(
-        "https://auth.example.com/.well-known/openid-configuration",
-      ),
+      new Request("https://auth.example.com/.well-known/openid-configuration"),
     );
     const metadata = await response.json();
-    assertEquals(metadata.issuer, "https://auth.example.com");
-    assertEquals(metadata.jwks_uri, "https://auth.example.com/jwks");
-    assertEquals(
-      metadata.userinfo_endpoint,
+    expect(metadata.issuer).toStrictEqual("https://auth.example.com");
+    expect(metadata.jwks_uri).toStrictEqual("https://auth.example.com/jwks");
+    expect(metadata.userinfo_endpoint).toStrictEqual(
       "https://auth.example.com/userinfo",
     );
-    assertEquals(metadata.id_token_signing_alg_values_supported, ["ES256"]);
-    assertEquals(metadata.subject_types_supported, ["public"]);
+    expect(metadata.id_token_signing_alg_values_supported).toStrictEqual([
+      "ES256",
+    ]);
+    expect(metadata.subject_types_supported).toStrictEqual(["public"]);
   });
 
   it("serves only public key material from the JWKS endpoint", async () => {
@@ -250,11 +245,11 @@ describe("OIDC issuance", () => {
     const response = await server.handleJwksRequest(
       new Request("https://auth.example.com/jwks"),
     );
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
     const jwks = await response.json();
-    assertEquals(jwks.keys.length, 1);
-    assertEquals(jwks.keys[0].kid, signingKey.kid);
-    assertEquals(jwks.keys[0].d, undefined);
+    expect(jwks.keys.length).toStrictEqual(1);
+    expect(jwks.keys[0].kid).toStrictEqual(signingKey.kid);
+    expect(jwks.keys[0].d).toStrictEqual(undefined);
   });
 
   it("maps a getPublicJwks outage on /jwks to a clean error response", async () => {
@@ -277,8 +272,8 @@ describe("OIDC issuance", () => {
     const response = await server.handleJwksRequest(
       new Request("https://auth.example.com/jwks"),
     );
-    assertEquals(response.status, 500);
-    assertEquals((await response.json()).error, "server_error");
+    expect(response.status).toStrictEqual(500);
+    expect((await response.json()).error).toStrictEqual("server_error");
   });
 
   it("maps a resolve outage on the metadata endpoint to a clean error response", async () => {
@@ -294,8 +289,8 @@ describe("OIDC issuance", () => {
         "https://auth.example.com/.well-known/oauth-authorization-server",
       ),
     );
-    assertEquals(response.status, 500);
-    assertEquals((await response.json()).error, "server_error");
+    expect(response.status).toStrictEqual(500);
+    expect((await response.json()).error).toStrictEqual("server_error");
   });
 
   it("userinfo returns sub + claims for an openid-scoped token", async () => {
@@ -306,10 +301,10 @@ describe("OIDC issuance", () => {
         headers: { authorization: `Bearer ${openidBody.access_token}` },
       }),
     );
-    assertEquals(userinfo.status, 200);
+    expect(userinfo.status).toStrictEqual(200);
     const claims = await userinfo.json();
-    assertEquals(claims.sub, "user-1");
-    assertEquals(claims.preferred_username, "testuser");
+    expect(claims.sub).toStrictEqual("user-1");
+    expect(claims.preferred_username).toStrictEqual("testuser");
   });
 
   it('userinfo answers 403 insufficient_scope, challenging for scope="openid", when a valid token lacks it', async () => {
@@ -322,12 +317,12 @@ describe("OIDC issuance", () => {
       }),
     );
 
-    assertEquals(denied.status, 403);
-    assertEquals((await denied.json()).error, "insufficient_scope");
+    expect(denied.status).toStrictEqual(403);
+    expect((await denied.json()).error).toStrictEqual("insufficient_scope");
     const challenge = denied.headers.get("www-authenticate");
-    assertExists(challenge);
-    assertStringIncludes(challenge, 'error="insufficient_scope"');
-    assertStringIncludes(challenge, 'scope="openid"');
+    assert.exists(challenge);
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain('scope="openid"');
   });
 
   it("userinfo answers 401 invalid_token for a bearer token the server does not know", async () => {
@@ -339,11 +334,11 @@ describe("OIDC issuance", () => {
       }),
     );
 
-    assertEquals(denied.status, 401);
-    assertEquals((await denied.json()).error, "invalid_token");
+    expect(denied.status).toStrictEqual(401);
+    expect((await denied.json()).error).toStrictEqual("invalid_token");
     const challenge = denied.headers.get("www-authenticate");
-    assertExists(challenge);
-    assertStringIncludes(challenge, 'error="invalid_token"');
+    assert.exists(challenge);
+    expect(challenge).toContain('error="invalid_token"');
   });
 
   it("protocol claims win over userClaims collisions", async () => {
@@ -353,17 +348,17 @@ describe("OIDC issuance", () => {
     );
     const body = await exchangeCodeWithNonce(server, grant, "openid");
     const claims = await verifyJwt(body.id_token, signingKey.publicJwk);
-    assertExists(claims);
-    assertEquals(claims!.sub, "user-1");
+    assert.exists(claims);
+    expect(claims!.sub).toStrictEqual("user-1");
     assert(typeof claims!.exp === "number" && claims!.exp * 1000 > Date.now());
-    assertEquals(claims!.locale, "en");
+    expect(claims!.locale).toStrictEqual("en");
 
     const userinfo = await server.handleUserInfoRequest(
       new Request("https://auth.example.com/userinfo", {
         headers: { authorization: `Bearer ${body.access_token}` },
       }),
     );
-    assertEquals((await userinfo.json()).sub, "user-1");
+    expect((await userinfo.json()).sub).toStrictEqual("user-1");
   });
 
   it("does not mint an id_token for client_credentials even with openid", async () => {
@@ -394,15 +389,18 @@ describe("OIDC issuance", () => {
     });
 
     const response = await server.handleTokenRequest(
-      tokenRequest({
-        grant_type: "client_credentials",
-        scope: "openid",
-      }, basicAuthHeader("client-cc", "secret")),
+      tokenRequest(
+        {
+          grant_type: "client_credentials",
+          scope: "openid",
+        },
+        basicAuthHeader("client-cc", "secret"),
+      ),
     );
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
     const body = await response.json();
-    assertExists(body.access_token);
-    assertEquals(body.id_token, undefined);
+    assert.exists(body.access_token);
+    expect(body.id_token).toStrictEqual(undefined);
   });
 
   it("404s OIDC discovery when issuance is off", async () => {
@@ -410,13 +408,13 @@ describe("OIDC issuance", () => {
     const denied = await server.handleOidcMetadataRequest(
       new Request("https://auth.example.com/.well-known/openid-configuration"),
     );
-    assertEquals(denied.status, 404);
+    expect(denied.status).toStrictEqual(404);
     const metadata = await server.handleMetadataRequest(
       new Request(
         "https://auth.example.com/.well-known/oauth-authorization-server",
       ),
     );
-    assertEquals(metadata.status, 200);
+    expect(metadata.status).toStrictEqual(200);
   });
 
   it("issues verifiable JWT access tokens via the generator", async () => {
@@ -427,14 +425,14 @@ describe("OIDC issuance", () => {
     });
     const jwt = await generate(testClient, testUser, new BasicScope("read"));
     const claims = await verifyJwt(jwt, signingKey.publicJwk);
-    assertExists(claims);
-    assertEquals(claims!.sub, "user-1");
-    assertEquals(claims!.client_id, "client-1");
-    assertEquals(claims!.scope, "read");
+    assert.exists(claims);
+    expect(claims!.sub).toStrictEqual("user-1");
+    expect(claims!.client_id).toStrictEqual("client-1");
+    expect(claims!.scope).toStrictEqual("read");
     const header = JSON.parse(
       new TextDecoder().decode(decodeBase64Url(jwt.split(".")[0])),
     );
-    assertEquals(header.typ, "at+jwt");
+    expect(header.typ).toStrictEqual("at+jwt");
   });
 });
 
@@ -465,9 +463,9 @@ describe("RP-Initiated Logout", () => {
     const endSession: EndSessionFn<TestClient> | undefined =
       options.endSession === undefined
         ? (context) => {
-          calls.push(context);
-          return { headers: { "Set-Cookie": "session=; Max-Age=0" } };
-        }
+            calls.push(context);
+            return { headers: { "Set-Cookie": "session=; Max-Age=0" } };
+          }
         : options.endSession;
     const server = new AuthorizationServer<TestClient, TestUser, BasicScope>({
       resolve: () => ({
@@ -506,19 +504,17 @@ describe("RP-Initiated Logout", () => {
       }),
     );
 
-    assertEquals(response.status, 302);
-    assertEquals(
+    expect(response.status).toStrictEqual(302);
+    expect(
       response.headers.get("location"),
-      `${POST_LOGOUT}?state=xyz`,
       "state rides along to an authorized URI",
-    );
-    assertEquals(
+    ).toStrictEqual(`${POST_LOGOUT}?state=xyz`);
+    expect(
       response.headers.get("set-cookie"),
-      "session=; Max-Age=0",
       "the app's session-clearing header survives onto the redirect",
-    );
-    assertEquals(calls.length, 1);
-    assertEquals(calls[0].client?.id, "client-1");
+    ).toStrictEqual("session=; Max-Age=0");
+    expect(calls.length).toStrictEqual(1);
+    expect(calls[0].client?.id).toStrictEqual("client-1");
   });
 
   it("accepts the same request over POST", async () => {
@@ -529,9 +525,9 @@ describe("RP-Initiated Logout", () => {
         "POST",
       ),
     );
-    assertEquals(response.status, 302);
-    assertEquals(response.headers.get("location"), POST_LOGOUT);
-    assertEquals(calls.length, 1);
+    expect(response.status).toStrictEqual(302);
+    expect(response.headers.get("location")).toStrictEqual(POST_LOGOUT);
+    expect(calls.length).toStrictEqual(1);
   });
 
   it("still ends the session when the redirect is unauthorized, and refuses to send the browser there", async () => {
@@ -546,19 +542,17 @@ describe("RP-Initiated Logout", () => {
     for (const params of unauthorized) {
       const { server, calls } = await createLogoutServer();
       const response = await server.handleEndSessionRequest(logout(params));
-      assertEquals(
+      expect(
         response.status,
-        204,
-        `unauthorized redirect must not become a 302: ${
-          JSON.stringify(params)
-        }`,
-      );
-      assertFalse(response.headers.get("location"));
-      assertEquals(
+        `unauthorized redirect must not become a 302: ${JSON.stringify(
+          params,
+        )}`,
+      ).toStrictEqual(204);
+      expect(response.headers.get("location")).toBeFalsy();
+      expect(
         calls.length,
-        1,
         "a logout whose redirect is refused still logs the person out",
-      );
+      ).toStrictEqual(1);
     }
   });
 
@@ -572,8 +566,8 @@ describe("RP-Initiated Logout", () => {
         post_logout_redirect_uri: "https://evil.example/x",
       }),
     );
-    assertEquals(response.status, 302);
-    assertEquals(response.headers.get("location"), "/signed-out");
+    expect(response.status).toStrictEqual(302);
+    expect(response.headers.get("location")).toStrictEqual("/signed-out");
   });
 
   it("uses the app fallback without clearing a session when logout is refused", async () => {
@@ -592,9 +586,9 @@ describe("RP-Initiated Logout", () => {
       }),
     );
 
-    assertEquals(response.status, 302);
-    assertEquals(response.headers.get("location"), "/sign-in");
-    assertFalse(response.headers.has("set-cookie"));
+    expect(response.status).toStrictEqual(302);
+    expect(response.headers.get("location")).toStrictEqual("/sign-in");
+    expect(response.headers.has("set-cookie")).toBeFalsy();
   });
 
   it("answers 204 without session headers when a refused logout has no fallback", async () => {
@@ -608,9 +602,9 @@ describe("RP-Initiated Logout", () => {
       logout({ client_id: "client-1", post_logout_redirect_uri: POST_LOGOUT }),
     );
 
-    assertEquals(response.status, 204);
-    assertFalse(response.headers.has("location"));
-    assertFalse(response.headers.has("set-cookie"));
+    expect(response.status).toStrictEqual(204);
+    expect(response.headers.has("location")).toBeFalsy();
+    expect(response.headers.has("set-cookie")).toBeFalsy();
   });
 
   it("reads the subject and the client from an expired id_token_hint", async () => {
@@ -625,13 +619,12 @@ describe("RP-Initiated Logout", () => {
     const response = await server.handleEndSessionRequest(
       logout({ id_token_hint: expired, post_logout_redirect_uri: POST_LOGOUT }),
     );
-    assertEquals(
+    expect(
       response.status,
-      302,
       "an id_token that has expired is still a valid hint — logout happens after the token dies",
-    );
-    assertEquals(calls[0].subject, testUser.id);
-    assertEquals(calls[0].client?.id, "client-1");
+    ).toStrictEqual(302);
+    expect(calls[0].subject).toStrictEqual(testUser.id);
+    expect(calls[0].client?.id).toStrictEqual("client-1");
   });
 
   it("refuses a logout whose client_id disagrees with the id_token_hint's audience", async () => {
@@ -651,18 +644,16 @@ describe("RP-Initiated Logout", () => {
       }),
     );
 
-    assertEquals(
+    expect(
       response.status,
-      400,
       "RP-Initiated Logout requires client_id to match the id_token's audience",
-    );
-    assertEquals((await response.json()).error, "invalid_request");
-    assertFalse(response.headers.get("location"));
-    assertEquals(
+    ).toStrictEqual(400);
+    expect((await response.json()).error).toStrictEqual("invalid_request");
+    expect(response.headers.get("location")).toBeFalsy();
+    expect(
       calls.length,
-      0,
       "an inconsistent request ends no session for anyone",
-    );
+    ).toStrictEqual(0);
   });
 
   it("accepts a client_id that matches the id_token_hint's audience", async () => {
@@ -682,9 +673,9 @@ describe("RP-Initiated Logout", () => {
       }),
     );
 
-    assertEquals(response.status, 302);
-    assertEquals(calls[0].client?.id, "client-1");
-    assertEquals(calls[0].subject, testUser.id);
+    expect(response.status).toStrictEqual(302);
+    expect(calls[0].client?.id).toStrictEqual("client-1");
+    expect(calls[0].subject).toStrictEqual(testUser.id);
   });
 
   it("ignores an id_token_hint it cannot verify", async () => {
@@ -698,12 +689,13 @@ describe("RP-Initiated Logout", () => {
     const response = await server.handleEndSessionRequest(
       logout({ id_token_hint: forged, post_logout_redirect_uri: POST_LOGOUT }),
     );
-    assertEquals(
+    expect(
       response.status,
-      204,
       "a forged hint names no client, so no redirect is authorized",
+    ).toStrictEqual(204);
+    expect(calls[0].subject, "and it contributes no subject").toStrictEqual(
+      null,
     );
-    assertEquals(calls[0].subject, null, "and it contributes no subject");
   });
 
   it("is 404 and unadvertised until the app wires endSession", async () => {
@@ -730,21 +722,28 @@ describe("RP-Initiated Logout", () => {
     const response = await withoutSeam.handleEndSessionRequest(
       logout({ client_id: "client-1" }),
     );
-    assertEquals(response.status, 404);
+    expect(response.status).toStrictEqual(404);
 
-    const unwired = await (await withoutSeam.handleOidcMetadataRequest(
-      new Request("https://auth.example.com/.well-known/openid-configuration"),
-    )).json();
-    assertFalse(
+    const unwired = await (
+      await withoutSeam.handleOidcMetadataRequest(
+        new Request(
+          "https://auth.example.com/.well-known/openid-configuration",
+        ),
+      )
+    ).json();
+    expect(
       "end_session_endpoint" in unwired,
       "metadata must not advertise a logout the server cannot perform",
-    );
+    ).toBeFalsy();
 
-    const wired = await (await server.handleOidcMetadataRequest(
-      new Request("https://auth.example.com/.well-known/openid-configuration"),
-    )).json();
-    assertEquals(
-      wired.end_session_endpoint,
+    const wired = await (
+      await server.handleOidcMetadataRequest(
+        new Request(
+          "https://auth.example.com/.well-known/openid-configuration",
+        ),
+      )
+    ).json();
+    expect(wired.end_session_endpoint).toStrictEqual(
       "https://auth.example.com/end_session",
     );
   });
@@ -795,13 +794,13 @@ describe("JWT access token expiry", () => {
 
   async function expOf(jwt: string, key: SigningKey): Promise<number> {
     const claims = await verifyJwt(jwt, key.publicJwk);
-    assertExists(claims);
+    assert.exists(claims);
     assert(typeof claims!.exp === "number");
     return claims!.exp as number;
   }
 
   function seconds(date: Date | undefined): number {
-    assertExists(date);
+    assert.exists(date);
     return Math.ceil(date!.getTime() / 1000);
   }
 
@@ -823,9 +822,9 @@ describe("JWT access token expiry", () => {
     const exp = await expOf(token.accessToken, signingKey);
     assert(
       exp <= seconds(token.accessTokenExpiresAt),
-      `JWT exp ${exp} must not exceed the stored expiry ${
-        seconds(token.accessTokenExpiresAt)
-      }`,
+      `JWT exp ${exp} must not exceed the stored expiry ${seconds(
+        token.accessTokenExpiresAt,
+      )}`,
     );
   });
 
@@ -851,9 +850,9 @@ describe("JWT access token expiry", () => {
     const exp = await expOf(token.accessToken, signingKey);
     assert(
       exp <= seconds(token.accessTokenExpiresAt),
-      `JWT exp ${exp} must not exceed the family-capped expiry ${
-        seconds(token.accessTokenExpiresAt)
-      }`,
+      `JWT exp ${exp} must not exceed the family-capped expiry ${seconds(
+        token.accessTokenExpiresAt,
+      )}`,
     );
     assert(exp <= Math.ceil(Date.now() / 1000) + 30);
   });
@@ -895,9 +894,9 @@ describe("JWT access token expiry", () => {
     const exp = await expOf(rotated.accessToken, signingKey);
     assert(
       exp <= seconds(rotated.accessTokenExpiresAt),
-      `JWT exp ${exp} must not exceed the rotation's capped expiry ${
-        seconds(rotated.accessTokenExpiresAt)
-      }`,
+      `JWT exp ${exp} must not exceed the rotation's capped expiry ${seconds(
+        rotated.accessTokenExpiresAt,
+      )}`,
     );
     assert(exp <= seconds(familyCreatedAt) + 30);
   });
@@ -905,7 +904,7 @@ describe("JWT access token expiry", () => {
 
 describe("OIDC configuration assertions", () => {
   it("reports oidcEnabled false on a server without signing keys", () => {
-    assertFalse(createServer().oidcEnabled);
+    expect(createServer().oidcEnabled).toBeFalsy();
   });
 
   it("reports oidcEnabled true on a server with signing keys", async () => {
@@ -924,14 +923,14 @@ describe("OIDC configuration assertions", () => {
   });
 
   it("refuses to construct with requireOidc and no signing keys", () => {
-    const error = assertThrows(
+    const error = thrown(
       () => createServer({ requireOidc: true }),
       Error,
       "requireOidc",
     );
-    assertStringIncludes(error.message, "signingKeys");
-    assertStringIncludes(error.message, "id_token");
-    assertStringIncludes(error.message, "/jwks");
+    expect(error.message).toContain("signingKeys");
+    expect(error.message).toContain("id_token");
+    expect(error.message).toContain("/jwks");
   });
 
   it("constructs with requireOidc when signing keys are configured", async () => {

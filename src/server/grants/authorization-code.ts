@@ -54,13 +54,12 @@ export interface AuthorizationCodeGrantOptions<
   Client extends ClientInterface,
   User,
   S extends AbstractScope,
-> extends
-  GrantOptions<
-    Client,
-    User,
-    S,
-    AuthorizationCodeGrantServices<Client, User, S>
-  > {
+> extends GrantOptions<
+  Client,
+  User,
+  S,
+  AuthorizationCodeGrantServices<Client, User, S>
+> {
   /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
   /** Custom PKCE challenge methods. Defaults to S256 only. */
@@ -180,8 +179,8 @@ export class AuthorizationCodeGrant<
     });
     this.challengeMethods = options.challengeMethods ?? defaultChallengeMethods;
     this.requirePKCE = options.requirePKCE ?? true;
-    this.requireClientAuthentication = options.requireClientAuthentication ??
-      true;
+    this.requireClientAuthentication =
+      options.requireClientAuthentication ?? true;
   }
 
   /**
@@ -357,8 +356,8 @@ export class AuthorizationCodeGrant<
     client: Client,
     body: FormData,
   ): Promise<Token<Client, User, S>> {
-    const { authorizationCodeService, tokenService } = await this
-      .resolveServices(request);
+    const { authorizationCodeService, tokenService } =
+      await this.resolveServices(request);
 
     const code = body.get("code");
     if (typeof code !== "string") {
@@ -374,7 +373,7 @@ export class AuthorizationCodeGrant<
     if (!authorizationCode || authorizationCode.expiresAt < new Date()) {
       throw new InvalidGrantError("invalid code");
     }
-    if (!await authorizationCodeService.revoke(authorizationCode)) {
+    if (!(await authorizationCodeService.revoke(authorizationCode))) {
       throw new InvalidGrantError("code already used");
     }
 
@@ -385,7 +384,7 @@ export class AuthorizationCodeGrant<
           "code_verifier must be 43-128 characters using [A-Z] / [a-z] / [0-9] / - / . / _ / ~",
         );
       }
-      if (!await this.verifyCode(authorizationCode, codeVerifier)) {
+      if (!(await this.verifyCode(authorizationCode, codeVerifier))) {
         throw new InvalidGrantError("code_verifier verification failed");
       }
     } else if (authorizationCode.challenge) {

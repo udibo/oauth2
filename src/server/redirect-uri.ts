@@ -258,13 +258,15 @@ function matchesLoopback(registration: string, redirectUri: string): boolean {
 
   if (!LOOPBACK_HOSTNAMES.has(registeredUrl.hostname)) return false;
 
-  return registeredUrl.protocol === url.protocol &&
+  return (
+    registeredUrl.protocol === url.protocol &&
     registeredUrl.hostname === url.hostname &&
     registeredUrl.username === url.username &&
     registeredUrl.password === url.password &&
     registeredUrl.pathname === url.pathname &&
     registeredUrl.search === url.search &&
-    registeredUrl.hash === url.hash;
+    registeredUrl.hash === url.hash
+  );
 }
 
 function matchesPattern(
@@ -303,8 +305,11 @@ function matchesPattern(
 
   const [prefix, suffix] = patternLabels[0].split("*");
   const label = labels[0];
-  return label.length >= prefix.length + suffix.length &&
-    label.startsWith(prefix) && label.endsWith(suffix);
+  return (
+    label.length >= prefix.length + suffix.length &&
+    label.startsWith(prefix) &&
+    label.endsWith(suffix)
+  );
 }
 
 /**

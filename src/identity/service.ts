@@ -18,8 +18,7 @@
  * @module
  */
 
-import { delay } from "@std/async/delay";
-
+import { delay } from "../utils/_delay.ts";
 import {
   buildResetUrl,
   buildSignInUrl,
@@ -386,17 +385,15 @@ function foldEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-const RATE_KEYS: Record<
-  keyof IdentityRateLimiters,
-  (value: string) => string
-> = {
-  signIn: (identifier) => `signin:${identifier.trim()}`,
-  passwordReset: (email) => `pwreset:${foldEmail(email)}`,
-  emailVerification: (userId) => `verifyemail:${userId}`,
-  accountUnlock: (userId) => `unlock:${userId}`,
-  signInLink: (email) => `pwless:${foldEmail(email)}`,
-  signInCode: (email) => otpRateKey(TokenPurpose.SignIn, email),
-};
+const RATE_KEYS: Record<keyof IdentityRateLimiters, (value: string) => string> =
+  {
+    signIn: (identifier) => `signin:${identifier.trim()}`,
+    passwordReset: (email) => `pwreset:${foldEmail(email)}`,
+    emailVerification: (userId) => `verifyemail:${userId}`,
+    accountUnlock: (userId) => `unlock:${userId}`,
+    signInLink: (email) => `pwless:${foldEmail(email)}`,
+    signInCode: (email) => otpRateKey(TokenPurpose.SignIn, email),
+  };
 
 /**
  * Outcome of {@link IdentityService.consumeSignInLink}. `expired` and
@@ -492,19 +489,19 @@ export class IdentityService<User extends IdentityUser> {
     this.#rateLimiters = {
       signIn: options.rateLimiters?.signIn ?? options.rateLimiter,
       passwordReset: options.rateLimiters?.passwordReset ?? options.rateLimiter,
-      emailVerification: options.rateLimiters?.emailVerification ??
-        options.rateLimiter,
+      emailVerification:
+        options.rateLimiters?.emailVerification ?? options.rateLimiter,
       accountUnlock: options.rateLimiters?.accountUnlock ?? options.rateLimiter,
       signInLink: options.rateLimiters?.signInLink ?? options.rateLimiter,
       signInCode: options.rateLimiters?.signInCode ?? options.rateLimiter,
     };
     this.#otp = options.otp
       ? new EmailOtpService({
-        store: options.otp.store,
-        digits: options.otp.digits,
-        ttlMs: options.otp.ttlMs,
-        maxAttempts: options.otp.maxAttempts,
-      })
+          store: options.otp.store,
+          digits: options.otp.digits,
+          ttlMs: options.otp.ttlMs,
+          maxAttempts: options.otp.maxAttempts,
+        })
       : undefined;
     this.#lockout = options.lockout;
     this.#enforce = (options.protectionMode ?? "enforce") === "enforce";
@@ -512,11 +509,12 @@ export class IdentityService<User extends IdentityUser> {
     this.#legacyVerifiers = options.legacyVerifiers?.length
       ? options.legacyVerifiers
       : undefined;
-    const floor = options.failedSignInFloorMs ??
-      DEFAULT_FAILED_SIGN_IN_FLOOR_MS;
-    this.#failedSignInFloorMs = Number.isFinite(floor) && floor >= 0
-      ? floor
-      : DEFAULT_FAILED_SIGN_IN_FLOOR_MS;
+    const floor =
+      options.failedSignInFloorMs ?? DEFAULT_FAILED_SIGN_IN_FLOOR_MS;
+    this.#failedSignInFloorMs =
+      Number.isFinite(floor) && floor >= 0
+        ? floor
+        : DEFAULT_FAILED_SIGN_IN_FLOOR_MS;
   }
 
   /**
@@ -527,9 +525,10 @@ export class IdentityService<User extends IdentityUser> {
    * {@link IdentityServiceOptions.passwordPolicy} is omitted, and a non-string
    * password (the hash would `String`-coerce it).
    */
-  async signUp(
-    input: { password: string; profile: Record<string, unknown> },
-  ): Promise<User> {
+  async signUp(input: {
+    password: string;
+    profile: Record<string, unknown>;
+  }): Promise<User> {
     await assertPasswordPolicy(input.password, this.#passwordPolicy);
     const credential = await this.#passwords.hash(input.password);
     const user = await this.#users.create(input.profile, credential);
@@ -562,9 +561,10 @@ export class IdentityService<User extends IdentityUser> {
    * `protectionMode` is `"enforce"`. Rate-limit rejections throw before the
    * account lookup and are not held to the floor.
    */
-  async signIn(
-    input: { identifier: string; password: string },
-  ): Promise<User | null> {
+  async signIn(input: {
+    identifier: string;
+    password: string;
+  }): Promise<User | null> {
     const startedAt = performance.now();
     const identifier = input.identifier.trim();
     // Throttle before lookup so 429s don't reveal whether the account exists.
@@ -655,21 +655,19 @@ export class IdentityService<User extends IdentityUser> {
       });
       return;
     }
-    await this.#trapMintFailure(
-      "password_reset",
-      () =>
-        this.#issueAndDeliver(tokens, {
-          hook: "sendPasswordReset",
-          to: normalized,
-          subject: user.id,
-          data: { email: normalized },
-          ttlMs: this.#ttl.passwordReset,
-          requested: {
-            type: "password_reset.requested",
-            email: normalized,
-            userId: user.id,
-          },
-        }),
+    await this.#trapMintFailure("password_reset", () =>
+      this.#issueAndDeliver(tokens, {
+        hook: "sendPasswordReset",
+        to: normalized,
+        subject: user.id,
+        data: { email: normalized },
+        ttlMs: this.#ttl.passwordReset,
+        requested: {
+          type: "password_reset.requested",
+          email: normalized,
+          userId: user.id,
+        },
+      }),
     );
   }
 
@@ -705,9 +703,10 @@ export class IdentityService<User extends IdentityUser> {
    * {@link IdentityServiceOptions.passwordPolicy} is omitted. The token is left
    * unconsumed, so the user's link still works.
    */
-  async resetPassword(
-    input: { token: string; password: string },
-  ): Promise<{ userId: string } | null> {
+  async resetPassword(input: {
+    token: string;
+    password: string;
+  }): Promise<{ userId: string } | null> {
     const tokens = this.#requireTokens("resetPassword");
     // Check the policy before consuming the single-use token so a weak password
     // doesn't burn the user's reset link.
@@ -767,9 +766,10 @@ export class IdentityService<User extends IdentityUser> {
    * throttle per user and throw {@link IdentityError} `rate_limited` when
    * exceeded — surface it as a friendly cooldown.
    */
-  async requestEmailVerification(
-    input: { userId: string; email: string },
-  ): Promise<void> {
+  async requestEmailVerification(input: {
+    userId: string;
+    email: string;
+  }): Promise<void> {
     const tokens = this.#requireTokens("requestEmailVerification");
     await this.#throttle(
       "emailVerification",
@@ -842,9 +842,10 @@ export class IdentityService<User extends IdentityUser> {
    * (or a tighter `rateLimiters.accountUnlock`), requests throttle per user and
    * throw {@link IdentityError} `rate_limited` when exceeded.
    */
-  async requestAccountUnlock(
-    input: { userId: string; email: string },
-  ): Promise<void> {
+  async requestAccountUnlock(input: {
+    userId: string;
+    email: string;
+  }): Promise<void> {
     const tokens = this.#requireTokens("requestAccountUnlock");
     await this.#throttle(
       "accountUnlock",
@@ -947,20 +948,18 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit({ type: "signin_link.requested", email: normalized });
       return;
     }
-    await this.#trapMintFailure(
-      "signin_link",
-      () =>
-        this.#issueAndDeliver(tokens, {
-          hook: "sendSignInLink",
-          to: normalized,
-          subject: user.id,
-          ttlMs: options?.ttlMs ?? this.#ttl.signInLink,
-          requested: {
-            type: "signin_link.requested",
-            email: normalized,
-            userId: user.id,
-          },
-        }),
+    await this.#trapMintFailure("signin_link", () =>
+      this.#issueAndDeliver(tokens, {
+        hook: "sendSignInLink",
+        to: normalized,
+        subject: user.id,
+        ttlMs: options?.ttlMs ?? this.#ttl.signInLink,
+        requested: {
+          type: "signin_link.requested",
+          email: normalized,
+          userId: user.id,
+        },
+      }),
     );
   }
 
@@ -1047,9 +1046,10 @@ export class IdentityService<User extends IdentityUser> {
    * to sign in — session creation and your MFA gate stay your app's job, as
    * does treating a since-deleted/disabled user as a failed sign-in.
    */
-  async verifySignInCode(
-    input: { email: string; code: string },
-  ): Promise<VerifySignInCodeResult> {
+  async verifySignInCode(input: {
+    email: string;
+    code: string;
+  }): Promise<VerifySignInCodeResult> {
     const otp = this.#requireOtp("verifySignInCode");
     const email = input.email.trim();
     await this.#throttle(
@@ -1113,8 +1113,8 @@ export class IdentityService<User extends IdentityUser> {
   }
 
   async #rejectSignIn(startedAt: number): Promise<null> {
-    const remaining = this.#failedSignInFloorMs -
-      (performance.now() - startedAt);
+    const remaining =
+      this.#failedSignInFloorMs - (performance.now() - startedAt);
     if (remaining > 0) await delay(remaining);
     return null;
   }
@@ -1139,25 +1139,25 @@ export class IdentityService<User extends IdentityUser> {
     const credential = await this.#users.getCredential(userId);
     // Native credential is authoritative: only try an imported hash when there
     // is none, so a wrong password can't resurrect a stale one (no downgrade).
-    const legacyHash = credential ? null : await this.#getLegacyCredential(
-      userId,
-    );
+    const legacyHash = credential
+      ? null
+      : await this.#getLegacyCredential(userId);
     if (!credential && !legacyHash) {
       await this.#equalizeTiming(password);
       return "no_password";
     }
-    if (credential && await this.#passwords.verify(password, credential)) {
-      return await this.#rehashCredential(userId, password, credential)
+    if (credential && (await this.#passwords.verify(password, credential))) {
+      return (await this.#rehashCredential(userId, password, credential))
         ? "authenticated"
         : "wrong_password";
     }
     if (!legacyHash) return "wrong_password";
     const verifier = findLegacyVerifier(this.#legacyVerifiers!, legacyHash);
-    if (!verifier || !await this.#tryLegacy(verifier, password, legacyHash)) {
+    if (!verifier || !(await this.#tryLegacy(verifier, password, legacyHash))) {
       await this.#equalizeTiming(password);
       return "wrong_password";
     }
-    return await this.#upgradeCredential(userId, password, verifier.id)
+    return (await this.#upgradeCredential(userId, password, verifier.id))
       ? "authenticated"
       : "wrong_password";
   }
@@ -1170,7 +1170,8 @@ export class IdentityService<User extends IdentityUser> {
     if (
       !this.#users.replaceCredential ||
       !this.#passwords.needsRehash?.(credential)
-    ) return true;
+    )
+      return true;
     let replaced: boolean;
     try {
       replaced = await this.#users.replaceCredential(
@@ -1182,7 +1183,7 @@ export class IdentityService<User extends IdentityUser> {
       this.#logPersistFailure("password rehash", error);
       return true;
     }
-    return replaced || await this.#verifyCurrentCredential(userId, password);
+    return replaced || (await this.#verifyCurrentCredential(userId, password));
   }
 
   async #upgradeCredential(
@@ -1217,8 +1218,9 @@ export class IdentityService<User extends IdentityUser> {
     password: string,
   ): Promise<boolean> {
     const current = await this.#users.getCredential(userId);
-    return current !== undefined &&
-      await this.#passwords.verify(password, current);
+    return (
+      current !== undefined && (await this.#passwords.verify(password, current))
+    );
   }
 
   #logPersistFailure(operation: string, error: unknown): void {
@@ -1349,9 +1351,7 @@ export class IdentityService<User extends IdentityUser> {
 
   #requireOtp(method: string): EmailOtpService {
     if (!this.#otp) {
-      throw new Error(
-        `IdentityService.${method}() requires an \`otp\` option`,
-      );
+      throw new Error(`IdentityService.${method}() requires an \`otp\` option`);
     }
     return this.#otp;
   }

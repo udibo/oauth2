@@ -32,7 +32,7 @@ import { packageDeadlineSignal } from "../utils/_default-fetch.ts";
 import { sanitizeProviderText } from "../utils/text.ts";
 
 /** Response bytes accepted from an endpoint before the call is refused. */
-export const MAX_RESPONSE_BYTES = 64 * 1024;
+export const MAX_RESPONSE_BYTES: number = 64 * 1024;
 
 /** Wall-clock budget for one call, covering the connect and the body read. */
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -300,12 +300,14 @@ function reportedError(value: unknown): ReportedError | null {
   if (typeof error !== "string" || error.length === 0) return null;
   return {
     error: sanitizeProviderText(error),
-    description: typeof value.error_description === "string"
-      ? sanitizeProviderText(value.error_description)
-      : undefined,
-    uri: typeof value.error_uri === "string"
-      ? sanitizeProviderText(value.error_uri)
-      : undefined,
+    description:
+      typeof value.error_description === "string"
+        ? sanitizeProviderText(value.error_description)
+        : undefined,
+    uri:
+      typeof value.error_uri === "string"
+        ? sanitizeProviderText(value.error_uri)
+        : undefined,
   };
 }
 

@@ -110,8 +110,10 @@ export interface ListableSessionService {
 export function supportsSessionListing(
   service: RevocableSessionService,
 ): service is RevocableSessionService & ListableSessionService {
-  return typeof (service as Partial<ListableSessionService>).listByUser ===
-    "function";
+  return (
+    typeof (service as Partial<ListableSessionService>).listByUser ===
+    "function"
+  );
 }
 
 /**

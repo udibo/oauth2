@@ -1,7 +1,5 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { describe, expect, it } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
 import { MemoryAuthRequestStorage } from "./storage.ts";
 
 const TEN_MINUTES = 10 * 60 * 1000;
@@ -15,8 +13,8 @@ describe("MemoryAuthRequestStorage", () => {
     time.tick(TEN_MINUTES + 1);
     storage.set("fresh", { codeVerifier: "v2", createdAt: Date.now() });
 
-    assertStrictEquals(storage.get("abandoned"), null);
-    assertEquals(storage.get("fresh")?.codeVerifier, "v2");
+    expect(storage.get("abandoned")).toBe(null);
+    expect(storage.get("fresh")?.codeVerifier).toStrictEqual("v2");
   });
 
   it("keeps records still inside the TTL when a new one is written", () => {
@@ -27,7 +25,7 @@ describe("MemoryAuthRequestStorage", () => {
     time.tick(TEN_MINUTES);
     storage.set("fresh", { codeVerifier: "v2", createdAt: Date.now() });
 
-    assertEquals(storage.get("pending")?.codeVerifier, "v1");
+    expect(storage.get("pending")?.codeVerifier).toStrictEqual("v1");
   });
 
   it("honours a configured TTL", () => {
@@ -38,7 +36,7 @@ describe("MemoryAuthRequestStorage", () => {
     time.tick(1001);
     storage.set("fresh", { codeVerifier: "v2", createdAt: Date.now() });
 
-    assertStrictEquals(storage.get("abandoned"), null);
+    expect(storage.get("abandoned")).toBe(null);
   });
 
   it("never prunes with an infinite TTL", () => {
@@ -49,7 +47,7 @@ describe("MemoryAuthRequestStorage", () => {
     time.tick(365 * 24 * 60 * 60 * 1000);
     storage.set("fresh", { codeVerifier: "v2", createdAt: Date.now() });
 
-    assertEquals(storage.get("pending")?.codeVerifier, "v1");
+    expect(storage.get("pending")?.codeVerifier).toStrictEqual("v1");
   });
 
   it("visits only the expired prefix and the first fresh record when pruning", () => {
@@ -74,9 +72,9 @@ describe("MemoryAuthRequestStorage", () => {
     visits = 0;
     storage.set("next", { codeVerifier: "v", createdAt: Date.now() });
 
-    assertEquals(visits, 1);
-    assertStrictEquals(storage.get("expired-1"), null);
-    assertStrictEquals(storage.get("expired-2"), null);
+    expect(visits).toStrictEqual(1);
+    expect(storage.get("expired-1")).toBe(null);
+    expect(storage.get("expired-2")).toBe(null);
   });
 
   it("prunes a record rewritten under an existing state by its newest write", () => {
@@ -90,16 +88,16 @@ describe("MemoryAuthRequestStorage", () => {
     time.tick(TEN_MINUTES - 60_000 + 1);
     storage.set("fresh", { codeVerifier: "v4", createdAt: Date.now() });
 
-    assertStrictEquals(storage.get("abandoned"), null);
-    assertEquals(storage.get("rewritten")?.codeVerifier, "v3");
+    expect(storage.get("abandoned")).toBe(null);
+    expect(storage.get("rewritten")?.codeVerifier).toStrictEqual("v3");
   });
 
   it("take returns a record once and removes it", () => {
     const storage = new MemoryAuthRequestStorage();
     storage.set("state-1", { codeVerifier: "v1", createdAt: Date.now() });
 
-    assertEquals(storage.take("state-1")?.codeVerifier, "v1");
-    assertStrictEquals(storage.take("state-1"), null);
-    assertStrictEquals(storage.get("state-1"), null);
+    expect(storage.take("state-1")?.codeVerifier).toStrictEqual("v1");
+    expect(storage.take("state-1")).toBe(null);
+    expect(storage.get("state-1")).toBe(null);
   });
 });

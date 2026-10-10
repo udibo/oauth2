@@ -44,8 +44,12 @@ export interface PasswordGrantOptions<
   Client extends ClientInterface,
   User,
   S extends AbstractScope,
-> extends
-  GrantOptions<Client, User, S, PasswordGrantServices<Client, User, S>> {
+> extends GrantOptions<
+  Client,
+  User,
+  S,
+  PasswordGrantServices<Client, User, S>
+> {
   /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
 }

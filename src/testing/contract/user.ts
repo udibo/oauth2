@@ -29,9 +29,7 @@
  * @module
  */
 
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { beforeEach, describe, expect, it } from "vitest";
 import type { UserServiceInterface } from "../../server/services/user.ts";
 import type { MemoryUserShape } from "../services.ts";
 
@@ -87,31 +85,27 @@ export function runUserServiceContractTests<U extends MemoryUserShape>(
 
     describe("get", () => {
       it("returns undefined for an unknown id", async () => {
-        assertStrictEquals(await service.get("does-not-exist"), undefined);
+        expect(await service.get("does-not-exist")).toBe(undefined);
       });
 
       it("returns the user for a known id", async () => {
         const user = makeUser(1);
         await options.addUser(service, user, "pw");
         const fetched = await service.get(user.id);
-        assertEquals(fetched?.id, user.id);
-        assertEquals(fetched?.username, user.username);
+        expect(fetched?.id).toStrictEqual(user.id);
+        expect(fetched?.username).toStrictEqual(user.username);
       });
     });
 
     describe("getAuthenticated", () => {
       it("returns undefined for an unknown username", async () => {
-        assertStrictEquals(
-          await service.getAuthenticated("nobody", "pw"),
-          undefined,
-        );
+        expect(await service.getAuthenticated("nobody", "pw")).toBe(undefined);
       });
 
       it("returns undefined for a wrong password", async () => {
         const user = makeUser(2);
         await options.addUser(service, user, "correct");
-        assertStrictEquals(
-          await service.getAuthenticated(user.username, "wrong"),
+        expect(await service.getAuthenticated(user.username, "wrong")).toBe(
           undefined,
         );
       });
@@ -120,7 +114,7 @@ export function runUserServiceContractTests<U extends MemoryUserShape>(
         const user = makeUser(3);
         await options.addUser(service, user, "secret");
         const auth = await service.getAuthenticated(user.username, "secret");
-        assertEquals(auth?.id, user.id);
+        expect(auth?.id).toStrictEqual(user.id);
       });
     });
   });

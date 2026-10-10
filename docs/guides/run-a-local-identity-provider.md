@@ -6,8 +6,15 @@ machine, seeded from a JSON file. Point any application at it — in any languag
 rate limit.
 
 ```sh
-deno run --allow-net --allow-read --allow-env jsr:@udibo/oauth2/cli idp dev
+npm install --save-dev @udibo/oauth2
+npx udibo-oauth2 idp dev
 ```
+
+`udibo-oauth2` is the package's `bin`, so `npx` (or `pnpm exec`) finds it once
+`@udibo/oauth2` is installed. To run it once without installing the package, name
+the package explicitly: `npx --package @udibo/oauth2 udibo-oauth2 idp dev`. Do
+not run `npx udibo-oauth2` where the package is not installed, because `npx`
+then offers to download whichever npm package has that bare name.
 
 The protocol behavior is the same `AuthorizationServer` a production deployment
 runs: the same grants, the same PKCE enforcement, the same discovery document.
@@ -96,7 +103,7 @@ and a strict OIDC client will reject them. Pass `--issuer` with the URL your app
 actually uses:
 
 ```sh
-deno run --allow-net --allow-read --allow-env jsr:@udibo/oauth2/cli idp dev \
+npx udibo-oauth2 idp dev \
   --hostname 0.0.0.0 --unsafe-remote-access --issuer http://idp:9000
 ```
 
@@ -106,8 +113,7 @@ Everything is declared in one JSON file — using this tool means running a
 program, not writing one.
 
 ```sh
-deno run --allow-net --allow-read --allow-env jsr:@udibo/oauth2/cli idp dev \
-  --config idp.json
+npx udibo-oauth2 idp dev --config idp.json
 ```
 
 ```json
@@ -179,7 +185,7 @@ suite and wrong for anything that caches JWKS or holds a token across a restart.
 Generate a key once and hand it to the server:
 
 ```sh
-deno run jsr:@udibo/oauth2/cli oidc keygen
+npx udibo-oauth2 oidc keygen
 ```
 
 Pass it as `OIDC_SIGNING_KEY`, or paste the JWK into the config file's
@@ -187,8 +193,7 @@ Pass it as `OIDC_SIGNING_KEY`, or paste the JWK into the config file's
 override a committed config without editing it:
 
 ```sh
-OIDC_SIGNING_KEY='{"kty":"EC",...}' deno run --allow-net --allow-read \
-  --allow-env jsr:@udibo/oauth2/cli idp dev --config idp.json
+OIDC_SIGNING_KEY='{"kty":"EC",...}' npx udibo-oauth2 idp dev --config idp.json
 ```
 
 The server never writes key material to disk. When no key is supplied it says so
@@ -260,20 +265,21 @@ to know whether a reset actually happened.
 ## In CI
 
 No container is required: the CLI is one command, and GitHub Actions can run it
-in the background.
+in the background once `@udibo/oauth2` is a dev dependency.
 
 ```yaml
-- uses: denoland/setup-deno@v2
+- uses: actions/setup-node@v6
   with:
-    deno-version: v2.x
+    node-version: 24
+
+- run: npm ci
 
 - name: Start the identity provider
   env:
     OIDC_SIGNING_KEY: ${{ secrets.CI_OIDC_SIGNING_KEY }}
     IDP_ADMIN_TOKEN: ${{ github.run_id }}-idp-admin
   run: |
-    deno run --allow-net --allow-read --allow-env \
-      jsr:@udibo/oauth2/cli idp dev --config idp.ci.json \
+    npx udibo-oauth2 idp dev --config idp.ci.json \
       --issuer http://localhost:9000 &
     timeout 30 bash -c \
       'until curl -sf http://localhost:9000/.well-known/openid-configuration \
@@ -294,11 +300,12 @@ server.
 If your pipeline prefers service containers, wrap the CLI in an image:
 
 ```dockerfile
-FROM denoland/deno:alpine
+FROM node:24-alpine
+WORKDIR /app
+RUN npm install @udibo/oauth2
 COPY idp.ci.json /idp.json
 EXPOSE 9000
-CMD ["run", "--allow-net", "--allow-read", "--allow-env", \
-     "jsr:@udibo/oauth2/cli", "idp", "dev", \
+CMD ["npx", "udibo-oauth2", "idp", "dev", \
      "--config", "/idp.json", "--hostname", "0.0.0.0", \
      "--unsafe-remote-access", "--issuer", "http://idp:9000"]
 ```
@@ -318,7 +325,7 @@ Start the server once for the run, and reset between tests:
 export default defineConfig({
   webServer: {
     command:
-      "deno run --allow-net --allow-read --allow-env jsr:@udibo/oauth2/cli idp dev --config idp.json",
+      "npx udibo-oauth2 idp dev --config idp.json",
     env: { IDP_ADMIN_TOKEN: process.env.IDP_ADMIN_TOKEN! },
     url: "http://localhost:9000/.well-known/openid-configuration",
     reuseExistingServer: !process.env.CI,

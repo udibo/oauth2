@@ -1,15 +1,10 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
 import { ResetPasswordForm } from "./reset-password-form.tsx";
 import type { ResetPasswordValues } from "./reset-password-form.tsx";
-
-cleanupAfterEach();
 
 describe("RequestPasswordResetForm", () => {
   it("submits the email and swaps to a success message", async () => {
@@ -27,8 +22,8 @@ describe("RequestPasswordResetForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(submitted, ["user@example.com"]);
-    assertFalse(container.querySelector("form"));
+    expect(submitted).toStrictEqual(["user@example.com"]);
+    expect(container.querySelector("form")).toBeFalsy();
     assert(screen.getByRole("status").textContent?.includes("reset link"));
   });
 
@@ -42,17 +37,14 @@ describe("RequestPasswordResetForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(
+    expect(
       container.querySelector("[data-oauth2-success]")?.className,
-      "success-cls",
-    );
+    ).toStrictEqual("success-cls");
   });
 
   it("keeps the form and shows the error when submit fails", async () => {
     const { container } = render(
-      <RequestPasswordResetForm
-        onSubmit={() => ({ error: "Rate limited" })}
-      />,
+      <RequestPasswordResetForm onSubmit={() => ({ error: "Rate limited" })} />,
     );
     await act(async () => {
       fireEvent.submit(getForm(container));
@@ -82,8 +74,8 @@ describe("ResetPasswordForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(submitted[0].token, "tok-123");
-    assertEquals(submitted[0].password, "correct-horse");
+    expect(submitted[0].token).toStrictEqual("tok-123");
+    expect(submitted[0].password).toStrictEqual("correct-horse");
   });
 
   it("submits the current token after the token prop changes", async () => {
@@ -104,7 +96,7 @@ describe("ResetPasswordForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(submitted[0].token, "tok-late");
+    expect(submitted[0].token).toStrictEqual("tok-late");
   });
 
   it("blocks on password mismatch", async () => {
@@ -125,7 +117,7 @@ describe("ResetPasswordForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(called, false);
+    expect(called).toStrictEqual(false);
     assert(screen.getByText("Passwords do not match."));
   });
 });

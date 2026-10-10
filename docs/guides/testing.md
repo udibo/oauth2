@@ -8,7 +8,7 @@ correctly.
 ## Application routes
 
 For an app that exports its token reader or client instance, stub the relevant
-method with `@std/testing/mock` to exercise accepted tokens, rejected tokens,
+method with `vi.spyOn` from [Vitest](https://vitest.dev/) to exercise accepted tokens, rejected tokens,
 and issuer failures. Avoid a global fetch stub that also intercepts unrelated
 application traffic. For a protocol integration test, inject fetch through the
 client/reader constructor or run the
@@ -27,7 +27,7 @@ resource server. The following test assumes you have constructed an isolated app
 and its token service:
 
 ```ts
-import { assertEquals } from "@std/assert";
+import { expect, test } from "vitest";
 import { BasicScope } from "@udibo/oauth2/server";
 import { createAuthenticatedTestSession } from "@udibo/oauth2/hono/bff/testing";
 import type { HonoBff } from "@udibo/oauth2/hono/bff";
@@ -41,7 +41,7 @@ declare const tokenService: TokenServiceInterface<
   { id: string }
 >;
 
-Deno.test("an authenticated user can read the protected route", async () => {
+test("an authenticated user can read the protected route", async () => {
   const cookie = await createAuthenticatedTestSession(bff, {
     tokenService,
     client: { id: "app" },
@@ -52,7 +52,7 @@ Deno.test("an authenticated user can read the protected route", async () => {
   const response = await app.request("/api/me", {
     headers: { cookie, [bff.csrfHeaderName!]: "1" },
   });
-  assertEquals(response.status, 200);
+  expect(response.status).toBe(200);
   await response.body?.cancel();
 });
 ```
@@ -73,15 +73,19 @@ app's own routes can be tested without the identity service. Serve it on a
 loopback port, point the app's issuer at that origin, and decide who signs in:
 
 ```ts
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { serve } from "@hono/node-server";
 import { createFakeTenant } from "@udibo/oauth2/testing";
 
-const server = Deno.serve(
-  { hostname: "127.0.0.1", port: 0, onListen() {} },
-  (request) => tenant.fetch(request),
-);
-const tenant = await createFakeTenant({
-  issuer: `http://127.0.0.1:${server.addr.port}`,
+const server = serve({
+  fetch: (request) => tenant.fetch(request),
+  hostname: "127.0.0.1",
+  port: 0,
 });
+if (!server.listening) await once(server, "listening");
+const { port } = server.address() as AddressInfo;
+const tenant = await createFakeTenant({ issuer: `http://127.0.0.1:${port}` });
 
 await tenant.addClient({
   id: "my-app",
@@ -93,7 +97,7 @@ tenant.addOrganization({ id: "org-acme", slug: "acme" });
 tenant.addMember("org-acme", "ada", { permissions: ["projects:archive"] });
 tenant.signInAs("ada", { organizationId: "org-acme" });
 
-await server.shutdown();
+server.close();
 ```
 
 The next authorization request authenticates as whoever `signInAs` named, with
@@ -186,7 +190,10 @@ lockout, no rate limits and no session limits. Test those against a real tenant.
 
 ## Persistent storage contracts
 
-Use the exported suites against an isolated database or equivalent real store:
+Use the exported suites against an isolated database or equivalent real store.
+They register `describe` and `it` blocks through [Vitest](https://vitest.dev/),
+an optional peer dependency of the package, so call them from a Vitest test
+file:
 
 ```ts
 import { runOtpStoreContractTests } from "@udibo/oauth2/testing/contract";

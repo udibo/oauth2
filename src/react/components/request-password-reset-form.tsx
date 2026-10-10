@@ -39,8 +39,7 @@ export interface RequestPasswordResetLabels {
 }
 
 /** Props for {@link RequestPasswordResetForm}. */
-export interface RequestPasswordResetFormProps
-  extends BaseAuthFormProps<RequestPasswordResetValues> {
+export interface RequestPasswordResetFormProps extends BaseAuthFormProps<RequestPasswordResetValues> {
   /** Text overrides. */
   labels?: RequestPasswordResetLabels;
   /**
@@ -99,8 +98,8 @@ export function RequestPasswordResetForm(
       action={props.action}
       method={props.method}
       formRef={props.formRef}
-      succeeded={form.succeeded
-        ? (
+      succeeded={
+        form.succeeded ? (
           <div
             data-oauth2-success=""
             role="status"
@@ -108,8 +107,8 @@ export function RequestPasswordResetForm(
           >
             {labels?.success ?? DEFAULT_SUCCESS}
           </div>
-        )
-        : null}
+        ) : null
+      }
     >
       <TextField
         fieldProps={form.getFieldProps("email")}

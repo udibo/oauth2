@@ -1,6 +1,5 @@
-import { assertRejects, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
+import { describe, expect, it, vi } from "vitest";
+import { rejection } from "../../_test_assert.ts";
 import type { BasicScope } from "../../models/scope.ts";
 import { InvalidGrantError, InvalidRequestError } from "../../errors.ts";
 import { AuthorizationServer } from "../authorization-server.ts";
@@ -23,9 +22,7 @@ const testClient: TestClient = {
   grants: ["password"],
 };
 
-async function createTestGrant(
-  options: { allowRefreshToken?: boolean } = {},
-) {
+async function createTestGrant(options: { allowRefreshToken?: boolean } = {}) {
   const userService = new MemoryUserService();
   const clientService = new MemoryClientService(userService);
   const tokenService = new MemoryTokenService({ clientService, userService });
@@ -44,7 +41,7 @@ describe("PasswordGrant", () => {
   describe("grantType", () => {
     it("should return password", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(grant.grantType, "password");
+      expect(grant.grantType).toBe("password");
     });
   });
 
@@ -61,13 +58,13 @@ describe("PasswordGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.client.id, testClient.id);
-      assertStrictEquals(token.user?.id, testUser.id);
-      assertStrictEquals(token.user?.username, testUser.username);
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.client.id).toBe(testClient.id);
+      expect(token.user?.id).toBe(testUser.id);
+      expect(token.user?.username).toBe(testUser.username);
 
       const savedToken = await tokenService.getToken(token.accessToken);
-      assertStrictEquals(savedToken?.accessToken, token.accessToken);
+      expect(savedToken?.accessToken).toBe(token.accessToken);
     });
 
     it("should include scope when requested", async () => {
@@ -83,7 +80,7 @@ describe("PasswordGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(token.scope?.toString(), "read write");
+      expect(token.scope?.toString()).toBe("read write");
     });
 
     it("should work without scope parameter", async () => {
@@ -98,7 +95,7 @@ describe("PasswordGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(token.scope, undefined);
+      expect(token.scope).toBe(undefined);
     });
 
     it("should throw InvalidRequestError when username is missing", async () => {
@@ -110,7 +107,7 @@ describe("PasswordGrant", () => {
         password: "hunter2",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "username parameter required",
@@ -127,7 +124,7 @@ describe("PasswordGrant", () => {
         password: "hunter2",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "username parameter required",
@@ -143,7 +140,7 @@ describe("PasswordGrant", () => {
         username: "kyle",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "password parameter required",
@@ -160,7 +157,7 @@ describe("PasswordGrant", () => {
         password: "",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "password parameter required",
@@ -177,7 +174,7 @@ describe("PasswordGrant", () => {
         password: "hunter2",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "user authentication failed",
@@ -194,7 +191,7 @@ describe("PasswordGrant", () => {
         password: "wrongpassword",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "user authentication failed",
@@ -213,11 +210,10 @@ describe("PasswordGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals("refreshToken" in token, true);
-      assertStrictEquals(
+      expect("refreshToken" in token).toBe(true);
+      expect(
         typeof (token as unknown as { refreshToken: string }).refreshToken,
-        "string",
-      );
+      ).toBe("string");
     });
 
     it("should not include refresh token when allowRefreshToken is false", async () => {
@@ -234,17 +230,20 @@ describe("PasswordGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals("refreshToken" in token, false);
+      expect("refreshToken" in token).toBe(false);
     });
   });
 
   describe("errors thrown by getAuthenticated", () => {
     function passwordTokenRequest(): Request {
-      return tokenRequest({
-        grant_type: "password",
-        username: "kyle",
-        password: "hunter2",
-      }, basicAuthHeader("client-1", "secret"));
+      return tokenRequest(
+        {
+          grant_type: "password",
+          username: "kyle",
+          password: "hunter2",
+        },
+        basicAuthHeader("client-1", "secret"),
+      );
     }
 
     function createTokenServer(
@@ -268,42 +267,38 @@ describe("PasswordGrant", () => {
       const thrown = new InvalidGrantError(
         "multi-factor authentication required",
       );
-      using _getAuthenticated = stub(
-        services.userService,
-        "getAuthenticated",
-        () => Promise.reject(thrown),
-      );
+      using _getAuthenticated = vi
+        .spyOn(services.userService, "getAuthenticated")
+        .mockImplementation(() => Promise.reject(thrown));
 
-      const error = await assertRejects(
+      const error = await rejection(
         () => exchangeToken(services.grant, passwordTokenRequest(), testClient),
         InvalidGrantError,
         "multi-factor authentication required",
       );
 
-      assertStrictEquals(error, thrown);
+      expect(error).toBe(thrown);
     });
 
     it("should render an OAuth2 error as its own code, not server_error", async () => {
       const services = await createTestGrant();
       await services.clientService.add(testClient, "secret");
-      using _getAuthenticated = stub(
-        services.userService,
-        "getAuthenticated",
-        () =>
+      using _getAuthenticated = vi
+        .spyOn(services.userService, "getAuthenticated")
+        .mockImplementation(() =>
           Promise.reject(
             new InvalidGrantError("multi-factor authentication required"),
           ),
-      );
+        );
 
       const response = await createTokenServer(services).handleTokenRequest(
         passwordTokenRequest(),
       );
 
-      assertStrictEquals(response.status, 400);
+      expect(response.status).toBe(400);
       const body = await response.json();
-      assertStrictEquals(body.error, "invalid_grant");
-      assertStrictEquals(
-        body.error_description,
+      expect(body.error).toBe("invalid_grant");
+      expect(body.error_description).toBe(
         "multi-factor authentication required",
       );
     });
@@ -311,19 +306,19 @@ describe("PasswordGrant", () => {
     it("should render a non-OAuth2 error as server_error", async () => {
       const services = await createTestGrant();
       await services.clientService.add(testClient, "secret");
-      using _getAuthenticated = stub(
-        services.userService,
-        "getAuthenticated",
-        () => Promise.reject(new Error("mfa store unreachable")),
-      );
+      using _getAuthenticated = vi
+        .spyOn(services.userService, "getAuthenticated")
+        .mockImplementation(() =>
+          Promise.reject(new Error("mfa store unreachable")),
+        );
 
       const response = await createTokenServer(services).handleTokenRequest(
         passwordTokenRequest(),
       );
 
-      assertStrictEquals(response.status, 500);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      assertStrictEquals(body.error, "server_error");
+      expect(body.error).toBe("server_error");
     });
   });
 });

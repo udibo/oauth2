@@ -1,6 +1,4 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import { AccountLockout } from "./lockout.ts";
 
 describe("AccountLockout", () => {
@@ -11,20 +9,21 @@ describe("AccountLockout", () => {
     });
     const now = 1_000_000;
 
-    assertEquals(
-      (await lockout.recordFailure("u1", now)).locked,
+    expect((await lockout.recordFailure("u1", now)).locked).toStrictEqual(
       false,
     );
-    assertEquals((await lockout.recordFailure("u1", now)).locked, false);
+    expect((await lockout.recordFailure("u1", now)).locked).toStrictEqual(
+      false,
+    );
     const third = await lockout.recordFailure("u1", now);
-    assertEquals(third.locked, true);
-    assertEquals(third.justLocked, true);
-    assertEquals(third.failures, 3);
-    assertEquals(third.lockedUntil, now + 60_000);
+    expect(third.locked).toStrictEqual(true);
+    expect(third.justLocked).toStrictEqual(true);
+    expect(third.failures).toStrictEqual(3);
+    expect(third.lockedUntil).toStrictEqual(now + 60_000);
 
     const status = await lockout.status("u1", now + 1);
-    assertEquals(status.locked, true);
-    assertEquals(status.lockedUntil, now + 60_000);
+    expect(status.locked).toStrictEqual(true);
+    expect(status.lockedUntil).toStrictEqual(now + 60_000);
   });
 
   it("an expired lock reads unlocked and a new failure starts fresh", async () => {
@@ -35,12 +34,14 @@ describe("AccountLockout", () => {
     const now = 1_000_000;
     await lockout.recordFailure("u1", now);
     await lockout.recordFailure("u1", now);
-    assertEquals((await lockout.status("u1", now + 500)).locked, true);
-    assertEquals((await lockout.status("u1", now + 1_001)).locked, false);
+    expect((await lockout.status("u1", now + 500)).locked).toStrictEqual(true);
+    expect((await lockout.status("u1", now + 1_001)).locked).toStrictEqual(
+      false,
+    );
 
     const fresh = await lockout.recordFailure("u1", now + 2_000);
-    assertEquals(fresh.failures, 1);
-    assertEquals(fresh.locked, false);
+    expect(fresh.failures).toStrictEqual(1);
+    expect(fresh.locked).toStrictEqual(false);
   });
 
   it("failures during an active lock keep it locked without re-triggering", async () => {
@@ -53,9 +54,9 @@ describe("AccountLockout", () => {
     await lockout.recordFailure("u1", now);
 
     const during = await lockout.recordFailure("u1", now + 10);
-    assertEquals(during.locked, true);
-    assertEquals(during.justLocked, false);
-    assertEquals(during.lockedUntil, now + 60_000);
+    expect(during.locked).toStrictEqual(true);
+    expect(during.justLocked).toStrictEqual(false);
+    expect(during.lockedUntil).toStrictEqual(now + 60_000);
   });
 
   it("reset clears failures and any lock", async () => {
@@ -68,9 +69,9 @@ describe("AccountLockout", () => {
     await lockout.reset("u1");
 
     const status = await lockout.status("u1");
-    assertEquals(status.locked, false);
-    assertEquals(status.failures, 0);
-    assertEquals(status.lockedUntil, undefined);
+    expect(status.locked).toStrictEqual(false);
+    expect(status.failures).toStrictEqual(0);
+    expect(status.lockedUntil).toStrictEqual(undefined);
   });
 
   it("tracks accounts independently", async () => {
@@ -80,8 +81,8 @@ describe("AccountLockout", () => {
     });
     await lockout.recordFailure("u1");
     await lockout.recordFailure("u1");
-    assertEquals((await lockout.status("u1")).locked, true);
-    assertEquals((await lockout.status("u2")).locked, false);
+    expect((await lockout.status("u1")).locked).toStrictEqual(true);
+    expect((await lockout.status("u2")).locked).toStrictEqual(false);
   });
 
   it("concurrent failures neither lose counts nor double-report justLocked", async () => {
@@ -96,8 +97,8 @@ describe("AccountLockout", () => {
     );
 
     const failures = results.map((r) => r.failures).sort((a, b) => a - b);
-    assertEquals(failures, [1, 2, 3, 4, 5, 6, 7, 8]);
-    assertEquals(results.filter((r) => r.justLocked).length, 1);
-    assertEquals((await lockout.status("u1", now + 1)).locked, true);
+    expect(failures).toStrictEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(results.filter((r) => r.justLocked).length).toStrictEqual(1);
+    expect((await lockout.status("u1", now + 1)).locked).toStrictEqual(true);
   });
 });

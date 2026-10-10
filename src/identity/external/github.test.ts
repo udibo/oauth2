@@ -1,12 +1,5 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { ExternalAuthFlow } from "./flow.ts";
 import { githubProvider } from "./github.ts";
@@ -37,9 +30,10 @@ function createGithubStub(options: {
       | undefined,
   };
   const fetchStub: typeof fetch = async (input, init) => {
-    const request = input instanceof Request
-      ? new Request(input, init)
-      : new Request(String(input), init);
+    const request =
+      input instanceof Request
+        ? new Request(input, init)
+        : new Request(String(input), init);
     switch (request.url) {
       case "https://github.com/login/oauth/access_token":
         context.tokenRequest = {
@@ -52,8 +46,10 @@ function createGithubStub(options: {
           });
         }
         return Response.json(
-          options.tokenResponse ??
-            { access_token: "gh-token", token_type: "bearer" },
+          options.tokenResponse ?? {
+            access_token: "gh-token",
+            token_type: "bearer",
+          },
         );
       case "https://api.github.com/user":
         return Response.json(options.user ?? octocat);
@@ -75,14 +71,15 @@ async function signIn(stub: ReturnType<typeof createGithubStub>) {
   });
   const { url, transient } = await flow.start({ redirectUri });
   const authorizeUrl = new URL(url);
-  assertEquals(
-    authorizeUrl.origin + authorizeUrl.pathname,
+  expect(authorizeUrl.origin + authorizeUrl.pathname).toStrictEqual(
     "https://github.com/login/oauth/authorize",
   );
-  assertEquals(authorizeUrl.searchParams.get("scope"), "read:user user:email");
-  assertFalse(authorizeUrl.searchParams.has("code_challenge"));
-  assertEquals(transient.codeVerifier, undefined);
-  assertEquals(transient.nonce, undefined);
+  expect(authorizeUrl.searchParams.get("scope")).toStrictEqual(
+    "read:user user:email",
+  );
+  expect(authorizeUrl.searchParams.has("code_challenge")).toBeFalsy();
+  expect(transient.codeVerifier).toStrictEqual(undefined);
+  expect(transient.nonce).toStrictEqual(undefined);
   const profile = await flow.finish({
     params: new URLSearchParams({ code: "gh-code", state: transient.state }),
     transient,
@@ -104,21 +101,25 @@ describe("githubProvider", () => {
     });
     const profile = await signIn(stub);
 
-    assertEquals(profile.provider, "github");
-    assertEquals(profile.subject, "583231");
-    assertEquals(profile.email, "octocat@example.com");
-    assertEquals(profile.emailVerified, true);
-    assertEquals(profile.name, "The Octocat");
-    assertEquals(profile.picture, "https://avatars.example/octocat.png");
-    assertEquals(profile.raw.login, "octocat");
+    expect(profile.provider).toStrictEqual("github");
+    expect(profile.subject).toStrictEqual("583231");
+    expect(profile.email).toStrictEqual("octocat@example.com");
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(profile.name).toStrictEqual("The Octocat");
+    expect(profile.picture).toStrictEqual(
+      "https://avatars.example/octocat.png",
+    );
+    expect(profile.raw.login).toStrictEqual("octocat");
     assert(Array.isArray(profile.raw.emails));
 
     const tokenRequest = stub.context.tokenRequest!;
-    assertEquals(tokenRequest.headers.get("accept"), "application/json");
-    assertEquals(tokenRequest.body.get("client_id"), clientId);
-    assertEquals(tokenRequest.body.get("client_secret"), clientSecret);
-    assertEquals(tokenRequest.body.get("code"), "gh-code");
-    assertEquals(tokenRequest.body.get("redirect_uri"), redirectUri);
+    expect(tokenRequest.headers.get("accept")).toStrictEqual(
+      "application/json",
+    );
+    expect(tokenRequest.body.get("client_id")).toStrictEqual(clientId);
+    expect(tokenRequest.body.get("client_secret")).toStrictEqual(clientSecret);
+    expect(tokenRequest.body.get("code")).toStrictEqual("gh-code");
+    expect(tokenRequest.body.get("redirect_uri")).toStrictEqual(redirectUri);
   });
 
   it("reports emailVerified false when the primary email is unverified", async () => {
@@ -128,8 +129,8 @@ describe("githubProvider", () => {
       ],
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "octocat@example.com");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("octocat@example.com");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("falls back to the public profile email, unverified, when /user/emails is unavailable", async () => {
@@ -138,8 +139,8 @@ describe("githubProvider", () => {
       emailsStatus: 403,
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "octocat@public.example");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("octocat@public.example");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("ignores /user/emails entries that carry no string email", async () => {
@@ -152,8 +153,8 @@ describe("githubProvider", () => {
       ],
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "octocat@example.com");
-    assertEquals(profile.emailVerified, true);
+    expect(profile.email).toStrictEqual("octocat@example.com");
+    expect(profile.emailVerified).toStrictEqual(true);
   });
 
   it("falls back to the public email when every /user/emails entry is malformed", async () => {
@@ -162,8 +163,8 @@ describe("githubProvider", () => {
       emails: [null, { verified: true }],
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "octocat@public.example");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("octocat@public.example");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("falls back to the public email when /user/emails returns a non-array body", async () => {
@@ -172,8 +173,8 @@ describe("githubProvider", () => {
       emails: { message: "Not Found" },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "octocat@public.example");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("octocat@public.example");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("wraps a network failure as an ExternalAuthError instead of leaking it", async () => {
@@ -186,7 +187,7 @@ describe("githubProvider", () => {
     });
     const { transient } = await flow.start({ redirectUri });
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({
@@ -197,8 +198,8 @@ describe("githubProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[github]");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[github]");
   });
 
   it("keeps the upstream body when the token endpoint fails with an HTTP error", async () => {
@@ -207,10 +208,10 @@ describe("githubProvider", () => {
       tokenBody: "upstream unavailable",
     });
 
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "HTTP 502");
-    assertStringIncludes(error.message, "upstream unavailable");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("HTTP 502");
+    expect(error.message).toContain("upstream unavailable");
   });
 
   it("surfaces a token endpoint error body diagnosably", async () => {
@@ -221,14 +222,11 @@ describe("githubProvider", () => {
       },
     });
 
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[github]");
-    assertStringIncludes(error.message, "bad_verification_code");
-    assertStringIncludes(
-      error.message,
-      "The code passed is incorrect or expired.",
-    );
-    assertStringIncludes(error.message, "start");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[github]");
+    expect(error.message).toContain("bad_verification_code");
+    expect(error.message).toContain("The code passed is incorrect or expired.");
+    expect(error.message).toContain("start");
   });
 });

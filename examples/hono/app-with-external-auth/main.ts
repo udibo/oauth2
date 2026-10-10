@@ -28,7 +28,7 @@
  *     sends the session cookie, the BFF resolves it to a bearer token,
  *     the resource server introspects it against the external IDP.
  *   - `app.all("/remote-api/*", bff.proxy(...))` — the other topology:
- *     the API is a **separate service** (`api-service/` on port 8002),
+ *     the API is a **separate service** (`api-service/`, port 8002 by default),
  *     so instead of validating in-process the BFF forwards the call
  *     with the session's access token attached and streams the answer
  *     back. The browser still only talks to this origin, so there is no
@@ -42,7 +42,7 @@
  * `/remote-api/*` route.
  *
  * Run:
- *   deno task serve    # or: deno task dev (auto-reload)
+ *   pnpm start    # or: pnpm dev (restarts on file changes)
  *
  * Then visit http://localhost:8003/ and click "Sign in".
  *

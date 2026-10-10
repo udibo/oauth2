@@ -1,12 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { encodeBase64 } from "@std/encoding/base64";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
+import { encodeBase64 } from "../../utils/_encoding.ts";
 import { base64urlEncode } from "../../utils/crypto.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { ExternalAuthFlow } from "./flow.ts";
@@ -87,7 +81,7 @@ async function harness(
     clientSecret?: () => Promise<string>;
   } & Partial<{ privateKey: string }>,
 ) {
-  const privateKey = options.privateKey ?? await generateP8();
+  const privateKey = options.privateKey ?? (await generateP8());
   const holder = {
     idToken: "" as string,
     tokenStatus: 200 as number,
@@ -95,17 +89,16 @@ async function harness(
     tokenRequest: undefined as URLSearchParams | undefined,
   };
   const fetchStub: typeof fetch = async (input, init) => {
-    const request = input instanceof Request
-      ? new Request(input, init)
-      : new Request(String(input), init);
+    const request =
+      input instanceof Request
+        ? new Request(input, init)
+        : new Request(String(input), init);
     if (request.url === "https://appleid.apple.com/auth/token") {
       holder.tokenRequest = new URLSearchParams(await request.text());
       if (holder.tokenStatus !== 200) {
         return new Response("bad", { status: holder.tokenStatus });
       }
-      return Response.json(
-        holder.tokenBody ?? { id_token: holder.idToken },
-      );
+      return Response.json(holder.tokenBody ?? { id_token: holder.idToken });
     }
     if (request.url === "https://appleid.apple.com/auth/keys") {
       return Response.json({
@@ -133,16 +126,17 @@ describe("appleProvider", () => {
     const { flow } = await harness({ signer });
     const { url, transient } = await flow.start({ redirectUri });
     const authorize = new URL(url);
-    assertEquals(
-      authorize.origin + authorize.pathname,
+    expect(authorize.origin + authorize.pathname).toStrictEqual(
       "https://appleid.apple.com/auth/authorize",
     );
-    assertEquals(authorize.searchParams.get("response_type"), "code");
-    assertEquals(authorize.searchParams.get("response_mode"), "form_post");
-    assertEquals(authorize.searchParams.get("scope"), "name email");
-    assertEquals(authorize.searchParams.get("client_id"), clientId);
-    assertEquals(authorize.searchParams.get("nonce"), transient.nonce);
-    assertEquals(authorize.searchParams.get("state"), transient.state);
+    expect(authorize.searchParams.get("response_type")).toStrictEqual("code");
+    expect(authorize.searchParams.get("response_mode")).toStrictEqual(
+      "form_post",
+    );
+    expect(authorize.searchParams.get("scope")).toStrictEqual("name email");
+    expect(authorize.searchParams.get("client_id")).toStrictEqual(clientId);
+    expect(authorize.searchParams.get("nonce")).toStrictEqual(transient.nonce);
+    expect(authorize.searchParams.get("state")).toStrictEqual(transient.state);
   });
 
   it("exchanges the code and returns a JWKS-verified profile", async () => {
@@ -159,12 +153,14 @@ describe("appleProvider", () => {
       transient,
     });
 
-    assertEquals(profile.provider, "apple");
-    assertEquals(profile.subject, "001999.apple-subject.0001");
-    assertEquals(profile.email, "user@example.com");
-    assertEquals(profile.emailVerified, true);
-    assertEquals(holder.tokenRequest!.get("grant_type"), "authorization_code");
-    assertEquals(holder.tokenRequest!.get("client_id"), clientId);
+    expect(profile.provider).toStrictEqual("apple");
+    expect(profile.subject).toStrictEqual("001999.apple-subject.0001");
+    expect(profile.email).toStrictEqual("user@example.com");
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(holder.tokenRequest!.get("grant_type")).toStrictEqual(
+      "authorization_code",
+    );
+    expect(holder.tokenRequest!.get("client_id")).toStrictEqual(clientId);
     assert(
       (holder.tokenRequest!.get("client_secret") ?? "").split(".").length === 3,
       "client_secret is a signed JWT",
@@ -175,20 +171,22 @@ describe("appleProvider", () => {
     const signer = await createSigner("apple-key-1");
     const { flow, holder } = await harness({ signer });
     const { transient } = await flow.start({ redirectUri });
-    holder.idToken = await signer.sign(baseClaims({
-      nonce: transient.nonce,
-      email: "abc123@privaterelay.appleid.com",
-      email_verified: "true",
-      is_private_email: "true",
-    }));
+    holder.idToken = await signer.sign(
+      baseClaims({
+        nonce: transient.nonce,
+        email: "abc123@privaterelay.appleid.com",
+        email_verified: "true",
+        is_private_email: "true",
+      }),
+    );
 
     const profile = await flow.finish({
       params: new URLSearchParams({ code: "c", state: transient.state }),
       transient,
     });
-    assertEquals(profile.email, "abc123@privaterelay.appleid.com");
-    assertEquals(profile.emailVerified, true);
-    assertEquals(profile.raw.is_private_email, "true");
+    expect(profile.email).toStrictEqual("abc123@privaterelay.appleid.com");
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(profile.raw.is_private_email).toStrictEqual("true");
   });
 
   it("rejects an id_token whose signature does not verify against the JWKS", async () => {
@@ -200,7 +198,7 @@ describe("appleProvider", () => {
       baseClaims({ nonce: transient.nonce }),
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -208,8 +206,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "signature");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("signature");
   });
 
   it("maps an undecodable signature segment to the same provider error", async () => {
@@ -220,7 +218,7 @@ describe("appleProvider", () => {
     const [header, payload] = signed.split(".");
     holder.idToken = `${header}.${payload}.abc+def`;
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -228,8 +226,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "signature");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("signature");
   });
 
   it("rejects an id_token for a different audience", async () => {
@@ -240,7 +238,7 @@ describe("appleProvider", () => {
       baseClaims({ nonce: transient.nonce, aud: "com.someone.else" }),
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -248,8 +246,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "aud");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("aud");
   });
 
   it("rejects an id_token whose azp names a different client", async () => {
@@ -260,7 +258,7 @@ describe("appleProvider", () => {
       baseClaims({ nonce: transient.nonce, azp: "com.someone.else" }),
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -268,8 +266,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "azp");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("azp");
   });
 
   it("rejects an expired id_token", async () => {
@@ -281,7 +279,7 @@ describe("appleProvider", () => {
       baseClaims({ nonce: transient.nonce, exp: now - 3600 }),
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -289,8 +287,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "expired");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("expired");
   });
 
   it("rejects a replayed id_token with a mismatched nonce", async () => {
@@ -301,7 +299,7 @@ describe("appleProvider", () => {
       baseClaims({ nonce: "some-other-nonce" }),
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -309,7 +307,7 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "nonce_mismatch");
+    expect(error.code).toStrictEqual("nonce_mismatch");
   });
 
   it("rejects an id_token that claims an unexpected algorithm", async () => {
@@ -321,7 +319,7 @@ describe("appleProvider", () => {
       "HS256",
     );
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -329,8 +327,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "RS256");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("RS256");
   });
 
   it("rejects an id_token whose header omits kid rather than guessing a key", async () => {
@@ -338,11 +336,11 @@ describe("appleProvider", () => {
     const { flow, holder } = await harness({ signer });
     const { transient } = await flow.start({ redirectUri });
     const claims = baseClaims({ nonce: transient.nonce });
-    holder.idToken = `${segment({ alg: "RS256" })}.${segment(claims)}.${
-      base64urlEncode(encoder.encode("not-a-real-signature"))
-    }`;
+    holder.idToken = `${segment({ alg: "RS256" })}.${segment(claims)}.${base64urlEncode(
+      encoder.encode("not-a-real-signature"),
+    )}`;
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -350,8 +348,8 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "kid");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("kid");
   });
 
   it("surfaces an invalid_client token error diagnosably", async () => {
@@ -360,7 +358,7 @@ describe("appleProvider", () => {
     const { transient } = await flow.start({ redirectUri });
     holder.tokenStatus = 400;
 
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         flow.finish({
           params: new URLSearchParams({ code: "c", state: transient.state }),
@@ -368,9 +366,9 @@ describe("appleProvider", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "[apple]");
-    assertStringIncludes(error.message, "invalid_client");
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("[apple]");
+    expect(error.message).toContain("invalid_client");
   });
 
   it("accepts an injected client-secret factory for tests", async () => {
@@ -389,7 +387,9 @@ describe("appleProvider", () => {
       params: new URLSearchParams({ code: "c", state: transient.state }),
       transient,
     });
-    assertEquals(called, 1);
-    assertEquals(holder.tokenRequest!.get("client_secret"), "stub.secret.jwt");
+    expect(called).toStrictEqual(1);
+    expect(holder.tokenRequest!.get("client_secret")).toStrictEqual(
+      "stub.secret.jwt",
+    );
   });
 });

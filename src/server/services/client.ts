@@ -3,10 +3,7 @@ import type { ClientInterface } from "../../models/client.ts";
 /**
  * Service interface for client management.
  */
-export interface ClientServiceInterface<
-  Client extends ClientInterface,
-  User,
-> {
+export interface ClientServiceInterface<Client extends ClientInterface, User> {
   /** Retrieves a client by ID. */
   get(id: string): Promise<Client | undefined>;
 
@@ -38,10 +35,7 @@ export interface ClientServiceInterface<
    * @param secret The presented `client_secret`, omitted when the request
    * carried none.
    */
-  getAuthenticated(
-    id: string,
-    secret?: string,
-  ): Promise<Client | undefined>;
+  getAuthenticated(id: string, secret?: string): Promise<Client | undefined>;
 
   /**
    * Resolves the user a client-credentials token acts for. Resolving

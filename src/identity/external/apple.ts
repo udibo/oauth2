@@ -49,8 +49,10 @@ const SIGNATURE_NOT_VERIFIED =
   `token is forged, corrupted, or signed by an unpublished key.`;
 
 /** Options for {@link appleProvider}. */
-export interface AppleProviderOptions
-  extends Pick<AppleClientSecretOptions, "teamId" | "keyId" | "privateKey"> {
+export interface AppleProviderOptions extends Pick<
+  AppleClientSecretOptions,
+  "teamId" | "keyId" | "privateKey"
+> {
   /** The Services ID configured for web Sign in with Apple (the `client_id`). */
   clientId: string;
   /** Scopes requested by default. Defaults to `["name", "email"]`. */
@@ -98,9 +100,9 @@ interface JwkWithKid extends JsonWebKey {
  * const flow = new ExternalAuthFlow({
  *   provider: appleProvider({
  *     clientId: "com.example.web",
- *     teamId: Deno.env.get("APPLE_TEAM_ID")!,
- *     keyId: Deno.env.get("APPLE_KEY_ID")!,
- *     privateKey: Deno.env.get("APPLE_PRIVATE_KEY")!,
+ *     teamId: process.env.APPLE_TEAM_ID!,
+ *     keyId: process.env.APPLE_KEY_ID!,
+ *     privateKey: process.env.APPLE_PRIVATE_KEY!,
  *   }),
  * });
  * ```
@@ -109,7 +111,8 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
   const id = "apple";
   const fetchImpl: typeof fetch = (input, init) =>
     (options.fetch ?? defaultFetch)(input, init);
-  const clientSecretFactory = options.clientSecret ??
+  const clientSecretFactory =
+    options.clientSecret ??
     createAppleClientSecretFactory({
       providerId: id,
       teamId: options.teamId,
@@ -135,7 +138,8 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
       }),
       requiredField: "id_token",
       fetch: fetchImpl,
-      httpErrorHint: `An "invalid_client" here means the client-secret JWT ` +
+      httpErrorHint:
+        `An "invalid_client" here means the client-secret JWT ` +
         `is wrong — check the team id, key id, and Services ID (client id).`,
       tokenErrorHint: appleTokenErrorHint,
     });
@@ -174,9 +178,9 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
       throw new ExternalAuthError(
         id,
         "provider_error",
-        `Apple's JWKS endpoint returned invalid JSON (${
-          describeError(error)
-        }).`,
+        `Apple's JWKS endpoint returned invalid JSON (${describeError(
+          error,
+        )}).`,
         { cause: error },
       );
     }
@@ -285,10 +289,9 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
       throw new ExternalAuthError(
         id,
         "provider_error",
-        `Apple's JWKS has no key with kid "${
-          String(kid)
-        }" — the id_token was ` +
-          `signed by a key Apple no longer publishes.`,
+        `Apple's JWKS has no key with kid "${String(
+          kid,
+        )}" — the id_token was ` + `signed by a key Apple no longer publishes.`,
       );
     }
     return match;
@@ -323,9 +326,7 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
   };
 }
 
-function profileFromClaims(
-  claims: Record<string, unknown>,
-): ExternalProfile {
+function profileFromClaims(claims: Record<string, unknown>): ExternalProfile {
   const subject = claims.sub;
   if (typeof subject !== "string" || subject.length === 0) {
     throw new ExternalAuthError(
@@ -352,16 +353,22 @@ function appleTokenErrorHint(error: string | undefined): string {
     return `Ensure the sign-in requested the "openid" flow scopes.`;
   }
   if (error === "invalid_client") {
-    return `The client-secret JWT is wrong — check the team id, key id, and ` +
-      `Services ID (client id).`;
+    return (
+      `The client-secret JWT is wrong — check the team id, key id, and ` +
+      `Services ID (client id).`
+    );
   }
   if (error === "invalid_grant") {
-    return `Apple rejected the code — it expired, was already used, or the ` +
+    return (
+      `Apple rejected the code — it expired, was already used, or the ` +
       `redirect URI does not match the Services ID configuration. Ask the ` +
-      `user to start again.`;
+      `user to start again.`
+    );
   }
-  return `See Apple's "Generate and validate tokens" documentation for the ` +
-    `error's meaning.`;
+  return (
+    `See Apple's "Generate and validate tokens" documentation for the ` +
+    `error's meaning.`
+  );
 }
 
 function decodeJson(
@@ -370,9 +377,10 @@ function decodeJson(
   what: string,
 ): Record<string, unknown> {
   try {
-    return JSON.parse(
-      decoder.decode(base64urlDecode(segment)),
-    ) as Record<string, unknown>;
+    return JSON.parse(decoder.decode(base64urlDecode(segment))) as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     throw new ExternalAuthError(
       providerId,

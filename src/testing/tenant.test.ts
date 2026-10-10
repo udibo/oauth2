@@ -1,13 +1,7 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
+import { serve, type TestServer } from "../_test_server.ts";
+import { FakeTime } from "../_test_fake-time.ts";
+import { rejection, thrown } from "../_test_assert.ts";
 import { JwksTokenReader } from "../server/jwks-token-reader.ts";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
 import { generateCodeChallenge, generateCodeVerifier } from "../utils/pkce.ts";
@@ -34,16 +28,11 @@ interface Introspection {
 
 describe("createFakeTenant", () => {
   let tenant: FakeTenant;
-  let server: Deno.HttpServer<Deno.NetAddr>;
+  let server: TestServer;
 
   beforeAll(async () => {
-    server = Deno.serve(
-      { hostname: "127.0.0.1", port: 0, onListen() {} },
-      (request) => tenant.fetch(request),
-    );
-    tenant = await createFakeTenant({
-      issuer: `http://127.0.0.1:${server.addr.port}`,
-    });
+    server = await serve((request) => tenant.fetch(request));
+    tenant = await createFakeTenant({ issuer: server.origin });
     await tenant.addClient({
       id: APP.id,
       secret: APP.secret,
@@ -143,7 +132,7 @@ describe("createFakeTenant", () => {
       headers: { authorization: encodeBasicAuth(APP.id, APP.secret) },
       body: new URLSearchParams(body),
     });
-    assertEquals(response.status, 200, await response.clone().text());
+    expect(response.status, await response.clone().text()).toStrictEqual(200);
     return await response.json();
   }
 
@@ -159,12 +148,10 @@ describe("createFakeTenant", () => {
   async function machineToken(
     scope: string,
     client = REPORTER,
-  ): Promise<
-    {
-      status: number;
-      body: { access_token?: string; scope?: string; error?: string };
-    }
-  > {
+  ): Promise<{
+    status: number;
+    body: { access_token?: string; scope?: string; error?: string };
+  }> {
     const response = await fetch(url("/api/oauth2/token"), {
       method: "POST",
       headers: { authorization: encodeBasicAuth(client.id, client.secret) },
@@ -173,9 +160,7 @@ describe("createFakeTenant", () => {
     return { status: response.status, body: await response.json() };
   }
 
-  async function grantsOn(
-    id: string,
-  ): Promise<
+  async function grantsOn(id: string): Promise<
     {
       roleId: string | null;
       builtInRole: string | null;
@@ -188,12 +173,12 @@ describe("createFakeTenant", () => {
       url(`/api/resource-grants?type=document&id=${id}`),
       { headers: { authorization: `Bearer ${body.access_token}` } },
     );
-    assertEquals(response.status, 200, await response.clone().text());
+    expect(response.status, await response.clone().text()).toStrictEqual(200);
     return (await response.json()).grants;
   }
 
   it("refuses to register a machine client that states no scope allowlist", async () => {
-    await assertRejects(
+    await rejection(
       () =>
         tenant.addClient({
           id: "unbounded",
@@ -209,19 +194,18 @@ describe("createFakeTenant", () => {
     const both = await machineToken(
       `${ORGANIZATIONS_READ} ${ORGANIZATIONS_WRITE}`,
     );
-    assertEquals(both.status, 200, JSON.stringify(both.body));
-    assertEquals(
-      both.body.scope,
+    expect(both.status, JSON.stringify(both.body)).toStrictEqual(200);
+    expect(both.body.scope).toStrictEqual(
       `${ORGANIZATIONS_READ} ${ORGANIZATIONS_WRITE}`,
     );
     const outside = await machineToken("identity:users:read");
-    assertEquals(outside.status, 400);
-    assertEquals(outside.body.error, "invalid_scope");
+    expect(outside.status).toStrictEqual(400);
+    expect(outside.body.error).toStrictEqual("invalid_scope");
   });
 
   it("mints a JWT naming the client as its subject for a machine client that opted in", async () => {
     const issued = await machineToken(ORGANIZATIONS_READ, JWT_REPORTER);
-    assertEquals(issued.status, 200, JSON.stringify(issued.body));
+    expect(issued.status, JSON.stringify(issued.body)).toStrictEqual(200);
     const accessToken = issued.body.access_token!;
     const reader = new JwksTokenReader<{ id: string }, unknown>({
       issuer: tenant.issuer,
@@ -233,14 +217,14 @@ describe("createFakeTenant", () => {
       "the machine JWT did not verify against the tenant's JWKS",
     );
     const claims = JSON.parse(atob(accessToken.split(".")[1]));
-    assertEquals(claims.sub, JWT_REPORTER.id);
-    assertEquals(claims.client_id, JWT_REPORTER.id);
-    assertEquals(claims.scope, ORGANIZATIONS_READ);
-    assertFalse(
+    expect(claims.sub).toStrictEqual(JWT_REPORTER.id);
+    expect(claims.client_id).toStrictEqual(JWT_REPORTER.id);
+    expect(claims.scope).toStrictEqual(ORGANIZATIONS_READ);
+    expect(
       "permissions" in claims,
       "a machine token holds no permissions",
-    );
-    assertFalse("username" in claims, "a machine token names no person");
+    ).toBeFalsy();
+    expect("username" in claims, "a machine token names no person").toBeFalsy();
   });
 
   it("refuses a machine token an OIDC scope even when its allowlist names one", async () => {
@@ -251,8 +235,8 @@ describe("createFakeTenant", () => {
       scopes: [ORGANIZATIONS_READ, "openid"],
     });
     const refused = await machineToken("openid", oidcListed);
-    assertEquals(refused.status, 400, JSON.stringify(refused.body));
-    assertEquals(refused.body.error, "invalid_scope");
+    expect(refused.status, JSON.stringify(refused.body)).toStrictEqual(400);
+    expect(refused.body.error).toStrictEqual("invalid_scope");
   });
 
   it("refuses client_credentials to a public client as a failed authentication, before asking whether it may use the grant", async () => {
@@ -269,8 +253,8 @@ describe("createFakeTenant", () => {
       }),
     });
     const body = await response.json();
-    assertEquals(response.status, 401, JSON.stringify(body));
-    assertEquals(body.error, "invalid_client");
+    expect(response.status, JSON.stringify(body)).toStrictEqual(401);
+    expect(body.error).toStrictEqual("invalid_client");
   });
 
   it("answers a public client introspecting even its own token that it is inactive", async () => {
@@ -289,8 +273,8 @@ describe("createFakeTenant", () => {
         token: accessToken,
       }),
     });
-    assertEquals(response.status, 200);
-    assertEquals(await response.json(), { active: false });
+    expect(response.status).toStrictEqual(200);
+    expect(await response.json()).toStrictEqual({ active: false });
   });
 
   it("lists the grants on one resource in role-name order, compared by locale", async () => {
@@ -309,7 +293,10 @@ describe("createFakeTenant", () => {
       role: "alpha-reader",
     });
     const listed = await grantsOn("doc-ordered");
-    assertEquals(listed.map((grant) => grant.roleName), ["alpha", "Zeta"]);
+    expect(listed.map((grant) => grant.roleName)).toStrictEqual([
+      "alpha",
+      "Zeta",
+    ]);
   });
 
   it("lists a grant of a built-in tier as one, with no role id", async () => {
@@ -320,10 +307,10 @@ describe("createFakeTenant", () => {
       role: "member",
     });
     const [held] = await grantsOn("doc-5");
-    assertEquals(held.builtInRole, "member");
-    assertEquals(held.roleId, null);
-    assertEquals(held.roleSlug, "member");
-    assertEquals(held.roleName, "Member");
+    expect(held.builtInRole).toStrictEqual("member");
+    expect(held.roleId).toStrictEqual(null);
+    expect(held.roleSlug).toStrictEqual("member");
+    expect(held.roleName).toStrictEqual("Member");
   });
 
   it("lists a grant under the role it names, or under a slug built from its permissions, one id per role", async () => {
@@ -337,13 +324,13 @@ describe("createFakeTenant", () => {
       });
     }
     const [derived] = await grantsOn("doc-1");
-    assertEquals(derived.roleSlug, "documents-read");
-    assertEquals(derived.roleName, "documents-read");
+    expect(derived.roleSlug).toStrictEqual("documents-read");
+    expect(derived.roleName).toStrictEqual("documents-read");
     const [named] = await grantsOn("doc-3");
-    assertEquals(named.roleSlug, "reviewer");
-    assertEquals(named.roleName, "Reviewer");
+    expect(named.roleSlug).toStrictEqual("reviewer");
+    expect(named.roleName).toStrictEqual("Reviewer");
     const [sameRole] = await grantsOn("doc-4");
-    assertEquals(sameRole.roleId, named.roleId);
+    expect(sameRole.roleId).toStrictEqual(named.roleId);
     assert(derived.roleId !== named.roleId, "each role has an id of its own");
   });
 
@@ -359,37 +346,34 @@ describe("createFakeTenant", () => {
       role: "document-reviewer",
     });
     const [listed] = await grantsOn("doc-reviewed");
-    assertEquals(listed.roleId, roleId);
-    assertEquals(listed.roleName, "Document reviewer");
+    expect(listed.roleId).toStrictEqual(roleId);
+    expect(listed.roleName).toStrictEqual("Document reviewer");
   });
 
   it("advertises its endpoints on the issuer it was given", async () => {
-    const metadata = await (await fetch(
-      url("/.well-known/oauth-authorization-server"),
-    )).json();
-    assertEquals(metadata.issuer, tenant.issuer);
-    assertEquals(
-      metadata.introspection_endpoint,
+    const metadata = await (
+      await fetch(url("/.well-known/oauth-authorization-server"))
+    ).json();
+    expect(metadata.issuer).toStrictEqual(tenant.issuer);
+    expect(metadata.introspection_endpoint).toStrictEqual(
       url("/api/oauth2/introspect"),
     );
-    assertEquals(metadata.jwks_uri, url("/api/oauth2/jwks"));
+    expect(metadata.jwks_uri).toStrictEqual(url("/api/oauth2/jwks"));
   });
 
   it("adds the organization picked at sign-in, and only that one", async () => {
     const { access_token } = await signIn("ada", "org-acme");
     const claims = await introspect(access_token);
-    assertEquals(claims.org_id, "org-acme");
-    assertEquals(claims.org_slug, "acme");
-    assertEquals(claims.org_roles, ["editor"]);
-    assertEquals(claims.permissions?.sort(), [
+    expect(claims.org_id).toStrictEqual("org-acme");
+    expect(claims.org_slug).toStrictEqual("acme");
+    expect(claims.org_roles).toStrictEqual(["editor"]);
+    expect(claims.permissions?.sort()).toStrictEqual([
       "documents:read",
       "notes:write",
     ]);
   });
 
-  async function authorizeWith(
-    params: Record<string, string>,
-  ): Promise<URL> {
+  async function authorizeWith(params: Record<string, string>): Promise<URL> {
     const authorize = new URL(url("/api/oauth2/authorize"));
     authorize.search = new URLSearchParams({
       response_type: "code",
@@ -408,8 +392,8 @@ describe("createFakeTenant", () => {
   it("refuses an organization parameter naming one the person has not joined", async () => {
     tenant.signInAs("bob");
     const callback = await authorizeWith({ organization: "globex" });
-    assertEquals(callback.searchParams.get("error"), "invalid_request");
-    assertFalse(callback.searchParams.has("code"));
+    expect(callback.searchParams.get("error")).toStrictEqual("invalid_request");
+    expect(callback.searchParams.has("code")).toBeFalsy();
   });
 
   it("issues no code when nobody is signed in", async () => {
@@ -426,10 +410,10 @@ describe("createFakeTenant", () => {
     const response = await fetch(authorize, { redirect: "manual" });
     await response.body?.cancel();
     const location = response.headers.get("location");
-    assertFalse(
+    expect(
       location && new URL(location).searchParams.has("code"),
       `answered ${response.status} ${location}`,
-    );
+    ).toBeFalsy();
   });
 
   it("serves UserInfo for the signed-in person", async () => {
@@ -438,10 +422,10 @@ describe("createFakeTenant", () => {
       headers: { authorization: `Bearer ${access_token}` },
     });
     const claims = await response.json();
-    assertEquals(claims.sub, "ada");
-    assertEquals(claims.name, "Ada Lovelace");
-    assertEquals(claims.email, "ada@example.com");
-    assertEquals(claims.email_verified, true);
+    expect(claims.sub).toStrictEqual("ada");
+    expect(claims.name).toStrictEqual("Ada Lovelace");
+    expect(claims.email).toStrictEqual("ada@example.com");
+    expect(claims.email_verified).toStrictEqual(true);
   });
 
   it("mints JWT access tokens a resource server verifies against its JWKS", async () => {
@@ -458,25 +442,23 @@ describe("createFakeTenant", () => {
     const verified = await reader.getToken(accessToken);
     assert(verified, "the JWT did not verify against the tenant's JWKS");
     const claims = JSON.parse(atob(accessToken.split(".")[1]));
-    assertEquals(claims.aud, MCP);
-    assertEquals(claims.org_id, "org-acme");
-    assertEquals(claims.permissions.sort(), ["documents:read", "notes:write"]);
+    expect(claims.aud).toStrictEqual(MCP);
+    expect(claims.org_id).toStrictEqual("org-acme");
+    expect(claims.permissions.sort()).toStrictEqual([
+      "documents:read",
+      "notes:write",
+    ]);
   });
 });
 
 describe("createFakeTenant's organization and account APIs", () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
   let tenant: FakeTenant;
-  let server: Deno.HttpServer<Deno.NetAddr>;
+  let server: TestServer;
 
   beforeAll(async () => {
-    server = Deno.serve(
-      { hostname: "127.0.0.1", port: 0, onListen() {} },
-      (request) => tenant.fetch(request),
-    );
-    tenant = await createFakeTenant({
-      issuer: `http://127.0.0.1:${server.addr.port}`,
-    });
+    server = await serve((request) => tenant.fetch(request));
+    tenant = await createFakeTenant({ issuer: server.origin });
     await tenant.addClient({
       id: APP.id,
       secret: APP.secret,
@@ -561,7 +543,7 @@ describe("createFakeTenant's organization and account APIs", () => {
         code_verifier: verifier,
       }),
     });
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
     return await response.json();
   }
 
@@ -597,7 +579,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       "/api/organizations",
       { name, slug: `${name.toLowerCase()}-${crypto.randomUUID()}` },
     );
-    assertEquals(created.status, 201);
+    expect(created.status).toStrictEqual(201);
     return created.body.id;
   }
 
@@ -614,7 +596,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       "GET",
       "/api/account/sessions",
     );
-    assertEquals(reply.status, 200);
+    expect(reply.status).toStrictEqual(200);
     return reply.body.sessions;
   }
 
@@ -630,9 +612,9 @@ describe("createFakeTenant's organization and account APIs", () => {
         "GET",
         "/api/memberships",
       );
-      assertEquals(reply.body.memberships.map((entry) => entry.roles), [[
-        "member",
-      ]]);
+      expect(reply.body.memberships.map((entry) => entry.roles)).toStrictEqual([
+        ["member"],
+      ]);
     }
   });
 
@@ -643,20 +625,20 @@ describe("createFakeTenant's organization and account APIs", () => {
     const second = await authorize(APP, {});
     const third = await authorize();
     const listed = await sessionsOf(third);
-    assertEquals(listed.length, 3);
+    expect(listed.length).toStrictEqual(3);
     for (const token of [first, second, third]) {
-      assertEquals(
+      expect(
         (await call(token, "GET", "/api/account")).status,
-        200,
         "a sign-in in another browser revoked this one's credential",
-      );
+      ).toStrictEqual(200);
     }
     const currents = await Promise.all(
-      [first, second, third].map(async (token) =>
-        (await sessionsOf(token)).find((session) => session.current)?.id
+      [first, second, third].map(
+        async (token) =>
+          (await sessionsOf(token)).find((session) => session.current)?.id,
       ),
     );
-    assertEquals(new Set(currents).size, 3);
+    expect(new Set(currents).size).toStrictEqual(3);
   });
 
   it("continues the login session of a browser that sends its cookie back while it is the chosen person's", async () => {
@@ -668,30 +650,28 @@ describe("createFakeTenant's organization and account APIs", () => {
     assert(browser.cookie, "a sign-in set no login-session cookie");
     const adaAgain = await authorize(APP, browser);
     const adaSessions = await sessionsOf(adaAgain);
-    assertEquals(adaSessions.length, 1);
-    assertEquals(
+    expect(adaSessions.length).toStrictEqual(1);
+    expect(
       (await call(adaFirst, "GET", "/api/account")).status,
-      401,
       "the same browser signed in again and left its earlier credential live",
-    );
+    ).toStrictEqual(401);
 
     tenant.signInAs(bob);
     const asBob = await authorize(APP, browser);
-    assertEquals((await sessionsOf(asBob)).length, 1);
-    assertEquals(
+    expect((await sessionsOf(asBob)).length).toStrictEqual(1);
+    expect(
       (await sessionsOf(adaAgain)).map((session) => session.id),
-      adaSessions.map((session) => session.id),
       "another person's sign-in in this browser ended or joined ada's session",
-    );
+    ).toStrictEqual(adaSessions.map((session) => session.id));
 
     tenant.signInAs(ada);
     const adaReturns = await authorize(APP, browser);
     const returned = await sessionsOf(adaReturns);
-    assertEquals(returned.length, 2);
-    assertFalse(
+    expect(returned.length).toStrictEqual(2);
+    expect(
       returned.find((session) => session.current)?.id === adaSessions[0].id,
       "a cookie naming bob's session continued ada's",
-    );
+    ).toBeFalsy();
   });
 
   it("starts a new login session when the browser's session has ended", async () => {
@@ -706,11 +686,13 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/account/sessions/${endedSession.id}`,
     );
-    assertEquals(revoked.status, 204);
+    expect(revoked.status).toStrictEqual(204);
     const again = await authorize(APP, browser);
     const listed = await sessionsOf(again);
-    assertEquals(listed.length, 2);
-    assertFalse(listed.some((session) => session.id === endedSession.id));
+    expect(listed.length).toStrictEqual(2);
+    expect(
+      listed.some((session) => session.id === endedSession.id),
+    ).toBeFalsy();
   });
 
   it("names a cookie Secure only on an https issuer", async () => {
@@ -740,14 +722,12 @@ describe("createFakeTenant's organization and account APIs", () => {
       { redirect: "manual" },
     );
     await onHttp.body?.cancel();
-    assertEquals(
+    expect(
       onHttps.headers.get("set-cookie")?.split("; ").slice(1),
-      ["Path=/", "HttpOnly", "SameSite=Lax", "Secure"],
-    );
-    assertEquals(
+    ).toStrictEqual(["Path=/", "HttpOnly", "SameSite=Lax", "Secure"]);
+    expect(
       onHttp.headers.get("set-cookie")?.split("; ").slice(1),
-      ["Path=/", "HttpOnly", "SameSite=Lax"],
-    );
+    ).toStrictEqual(["Path=/", "HttpOnly", "SameSite=Lax"]);
   });
 
   it("reports each browser's device, and revokes a browser's earlier credential when it signs in again", async () => {
@@ -763,24 +743,22 @@ describe("createFakeTenant's organization and account APIs", () => {
     const onLaptop = await authorize();
 
     const listed = await sessionsOf(onLaptop);
-    assertEquals(listed.map((session) => session.userAgent), [
+    expect(listed.map((session) => session.userAgent)).toStrictEqual([
       "Laptop Browser",
       "Phone Browser",
     ]);
-    assertEquals(listed.map((session) => session.ipAddress), [
+    expect(listed.map((session) => session.ipAddress)).toStrictEqual([
       null,
       "192.0.2.10",
     ]);
-    assertEquals(
+    expect(
       (await sessionsOf(againOnPhone)).find((session) => session.current)?.id,
-      listed[1].id,
-    );
+    ).toStrictEqual(listed[1].id);
     const replaced = await call(onPhone, "GET", "/api/account/sessions");
-    assertEquals(
+    expect(
       replaced.status,
-      401,
       "a second sign-in in the same browser left the first credential live",
-    );
+    ).toStrictEqual(401);
   });
 
   async function revoke(token: string, client = APP): Promise<void> {
@@ -790,7 +768,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       body: new URLSearchParams({ token }),
     });
     await response.body?.cancel();
-    assertEquals(response.status, 200);
+    expect(response.status).toStrictEqual(200);
   }
 
   it("keeps a third-party app's credentials apart from the login session they came from", async () => {
@@ -800,29 +778,25 @@ describe("createFakeTenant's organization and account APIs", () => {
     const firstParty = await authorize(APP, phoneBrowser);
     const thirdParty = await authorize(PARTNER, phoneBrowser);
     const [phone] = await sessionsOf(firstParty);
-    assertEquals(
+    expect(
       (await sessionsOf(thirdParty)).find((session) => session.current)?.id,
-      phone.id,
       "a third-party credential names the session it came from as current",
-    );
+    ).toStrictEqual(phone.id);
     const firstPartyAgain = await authorize(APP, phoneBrowser);
-    assertEquals(
+    expect(
       (await call(firstParty, "GET", "/api/account")).status,
-      401,
       "a first-party sign-in in the same browser left its predecessor live",
-    );
-    assertEquals(
+    ).toStrictEqual(401);
+    expect(
       (await call(thirdParty, "GET", "/api/account")).status,
-      200,
       "a first-party sign-in revoked a third-party credential",
-    );
+    ).toStrictEqual(200);
 
     await revoke(thirdParty, PARTNER);
-    assertEquals(
+    expect(
       (await sessionsOf(firstPartyAgain)).map((session) => session.id),
-      [phone.id],
       "revoking a third-party credential ended the login session",
-    );
+    ).toStrictEqual([phone.id]);
 
     const partnerAgain = await authorize(PARTNER, phoneBrowser);
     tenant.signInAs(person, { userAgent: "Laptop Browser" });
@@ -832,16 +806,14 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/account/sessions/${phone.id}`,
     );
-    assertEquals(ended.status, 204);
-    assertEquals(
+    expect(ended.status).toStrictEqual(204);
+    expect(
       (await call(firstPartyAgain, "GET", "/api/account")).status,
-      401,
-    );
-    assertEquals(
+    ).toStrictEqual(401);
+    expect(
       (await call(partnerAgain, "GET", "/api/account")).status,
-      200,
       "ending the login session revoked a third-party credential",
-    );
+    ).toStrictEqual(200);
   });
 
   it("leaves a login session alone when another app presents one of its tokens", async () => {
@@ -858,8 +830,8 @@ describe("createFakeTenant's organization and account APIs", () => {
       }),
     });
     await refreshed.body?.cancel();
-    assertFalse(refreshed.ok, "another app refreshed this app's token");
-    assertEquals((await sessionsOf(issued.access_token)).length, 1);
+    expect(refreshed.ok, "another app refreshed this app's token").toBeFalsy();
+    expect((await sessionsOf(issued.access_token)).length).toStrictEqual(1);
   });
 
   it("ends the login session when a replayed refresh token revokes its family", async () => {
@@ -876,9 +848,9 @@ describe("createFakeTenant's organization and account APIs", () => {
         refresh_token: issued.refresh_token!,
       }),
     });
-    assertEquals(rotated.status, 200);
+    expect(rotated.status).toStrictEqual(200);
     const successor = await rotated.json();
-    assertEquals((await sessionsOf(onLaptop)).length, 2);
+    expect((await sessionsOf(onLaptop)).length).toStrictEqual(2);
 
     const replayed = await fetch(url("/api/oauth2/token"), {
       method: "POST",
@@ -889,16 +861,14 @@ describe("createFakeTenant's organization and account APIs", () => {
       }),
     });
     await replayed.body?.cancel();
-    assertEquals(replayed.status, 400);
-    assertEquals(
+    expect(replayed.status).toStrictEqual(400);
+    expect(
       (await call(successor.access_token, "GET", "/api/account")).status,
-      401,
-    );
-    assertEquals(
+    ).toStrictEqual(401);
+    expect(
       (await sessionsOf(onLaptop)).map((session) => session.userAgent),
-      ["Laptop Browser"],
       "a revoked family left its login session listed",
-    );
+    ).toStrictEqual(["Laptop Browser"]);
   });
 
   it("signs the person in again when their login was ended from another device", async () => {
@@ -913,12 +883,14 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/account/sessions/${phoneSession.id}`,
     );
-    assertEquals(ended.status, 204);
+    expect(ended.status).toStrictEqual(204);
 
     tenant.signInAs(person, { userAgent: "Phone Browser" });
     const listed = await sessionsOf(await authorize());
-    assertEquals(listed.length, 2);
-    assertFalse(listed.some((session) => session.id === phoneSession.id));
+    expect(listed.length).toStrictEqual(2);
+    expect(
+      listed.some((session) => session.id === phoneSession.id),
+    ).toBeFalsy();
   });
 
   it("gives a minted access token no login session, so it cannot sign out the others", async () => {
@@ -927,20 +899,20 @@ describe("createFakeTenant's organization and account APIs", () => {
     await authorize();
     const minted = await mint(person);
     const listed = await sessionsOf(minted);
-    assertEquals(listed.map((session) => session.current), [false]);
+    expect(listed.map((session) => session.current)).toStrictEqual([false]);
     const refused = await call<{ reason?: string }>(
       minted,
       "POST",
       "/api/account/sessions/revoke-others",
     );
-    assertEquals(refused.status, 409);
-    assertEquals(refused.body.reason, "current_session_required");
+    expect(refused.status).toStrictEqual(409);
+    expect(refused.body.reason).toStrictEqual("current_session_required");
   });
 
   it("answers the metadata bucket a person was seeded with", async () => {
     const person = await addPerson({ userMetadata: { plan: "trial" } });
     const reply = await call(await mint(person), "GET", "/api/account");
-    assertEquals(reply.body, { userMetadata: { plan: "trial" } });
+    expect(reply.body).toStrictEqual({ userMetadata: { plan: "trial" } });
   });
 
   it("refuses a metadata bucket larger than sixteen kilobytes", async () => {
@@ -948,7 +920,7 @@ describe("createFakeTenant's organization and account APIs", () => {
     const reply = await call(await mint(person), "PATCH", "/api/account", {
       userMetadata: { notes: "x".repeat(16 * 1024) },
     });
-    assertEquals(reply.status, 400);
+    expect(reply.status).toStrictEqual(400);
   });
 
   it("offers an organization role the tenant defined, under the name it was given", async () => {
@@ -963,8 +935,8 @@ describe("createFakeTenant's organization and account APIs", () => {
       `/api/organizations/${organizationId}/member-roles`,
     );
     assert(
-      roles.body.some((role) =>
-        role.slug === "reviewer" && role.name === "Reviewer"
+      roles.body.some(
+        (role) => role.slug === "reviewer" && role.name === "Reviewer",
       ),
     );
     const offered = await call(
@@ -973,13 +945,13 @@ describe("createFakeTenant's organization and account APIs", () => {
       `/api/organizations/${organizationId}/invitations`,
       { email: `${invitee}@example.com`, role: "reviewer" },
     );
-    assertEquals(offered.status, 201);
+    expect(offered.status).toStrictEqual(201);
     const waiting = await call<{ offers: { roleName: string }[] }>(
       await mint(invitee),
       "GET",
       "/api/organizations/offers",
     );
-    assertEquals(waiting.body.offers.map((offer) => offer.roleName), [
+    expect(waiting.body.offers.map((offer) => offer.roleName)).toStrictEqual([
       "Reviewer",
     ]);
   });
@@ -1019,19 +991,17 @@ describe("createFakeTenant's organization and account APIs", () => {
         }`,
       );
     const first = await pageAt();
-    assertEquals(first.body.data.length, 20);
-    assertEquals(first.body.hasMore, true);
-    assertEquals(first.body.cursors.prev, null);
+    expect(first.body.data.length).toStrictEqual(20);
+    expect(first.body.hasMore).toStrictEqual(true);
+    expect(first.body.cursors.prev).toStrictEqual(null);
     const second = await pageAt(first.body.cursors.next);
-    assertEquals(second.body.data.length, 5);
-    assertEquals(second.body.hasMore, false);
-    assertEquals(
-      [...first.body.data, ...second.body.data].map((row) => row.userId)
-        .sort(),
-      [...people].sort(),
-    );
+    expect(second.body.data.length).toStrictEqual(5);
+    expect(second.body.hasMore).toStrictEqual(false);
+    expect(
+      [...first.body.data, ...second.body.data].map((row) => row.userId).sort(),
+    ).toStrictEqual([...people].sort());
     const back = await pageAt(second.body.cursors.prev);
-    assertEquals(back.body.data, first.body.data);
+    expect(back.body.data).toStrictEqual(first.body.data);
   });
 
   it("withdraws its offers when an organization is deleted", async () => {
@@ -1050,31 +1020,29 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/organizations/${organizationId}`,
     );
-    assertEquals(deleted.status, 204);
+    expect(deleted.status).toStrictEqual(204);
     const inviteeToken = await mint(invitee);
     const waiting = await call<{ offers: unknown[] }>(
       inviteeToken,
       "GET",
       "/api/organizations/offers",
     );
-    assertEquals(waiting.body.offers, []);
+    expect(waiting.body.offers).toStrictEqual([]);
     const accepted = await call<{ status: string }>(
       inviteeToken,
       "POST",
       `/api/organizations/offers/${offered.body.membership.id}/accept`,
     );
-    assertEquals(accepted.body.status, "invalid");
+    expect(accepted.body.status).toStrictEqual("invalid");
   });
 
   it("stores a return_to on a registered origin or on the tenant's own host", async () => {
     const ownerToken = await mint(await addPerson());
     const organizationId = await createOrganization(ownerToken, "Returning");
-    for (
-      const returnTo of [
-        `${new URL(REDIRECT).origin}/welcome`,
-        "/organization-invite",
-      ]
-    ) {
+    for (const returnTo of [
+      `${new URL(REDIRECT).origin}/welcome`,
+      "/organization-invite",
+    ]) {
       const offered = await call<{ invitation: { returnTo: string } }>(
         ownerToken,
         "POST",
@@ -1085,8 +1053,8 @@ describe("createFakeTenant's organization and account APIs", () => {
           return_to: returnTo,
         },
       );
-      assertEquals(offered.status, 201);
-      assertEquals(offered.body.invitation.returnTo, returnTo);
+      expect(offered.status).toStrictEqual(201);
+      expect(offered.body.invitation.returnTo).toStrictEqual(returnTo);
     }
   });
 
@@ -1098,7 +1066,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       "GET",
       `/api/organizations/${organizationId}/invitations?status=accepted`,
     );
-    assertEquals(reply.status, 400);
+    expect(reply.status).toStrictEqual(400);
   });
 
   it("answers an invitation older than seven days as expired", async () => {
@@ -1119,13 +1087,16 @@ describe("createFakeTenant's organization and account APIs", () => {
       "GET",
       "/api/organizations/offers",
     );
-    assertEquals(waiting.body.offers, [], "an expired invitation was offered");
+    expect(
+      waiting.body.offers,
+      "an expired invitation was offered",
+    ).toStrictEqual([]);
     const accepted = await call<{ status: string }>(
       holderToken,
       "POST",
       `/api/organizations/offers/${offered.body.invitation.id}/accept`,
     );
-    assertEquals(accepted.body.status, "expired");
+    expect(accepted.body.status).toStrictEqual("expired");
   });
 
   it("refuses to link an account to a person it does not know", () => {
@@ -1148,7 +1119,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       "/api/check",
       { permissions: [permission] },
     );
-    assertEquals(reply.status, 200);
+    expect(reply.status).toStrictEqual(200);
     return reply.body.results[permission];
   }
 
@@ -1164,7 +1135,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       `/api/organizations/${organizationId}/members/${userId}/roles`,
       { roleId },
     );
-    assertEquals(granted.status, 201, JSON.stringify(granted.body));
+    expect(granted.status, JSON.stringify(granted.body)).toStrictEqual(201);
   }
 
   it("keeps a defined role's id across redefinition, which changes what holders are granted", async () => {
@@ -1180,12 +1151,11 @@ describe("createFakeTenant's organization and account APIs", () => {
     tenant.addMember(organizationId, member);
     await grantAppRole(await mint(owner), organizationId, member, roleId);
     const memberToken = await mint(member, organizationId);
-    assertFalse(await permitted(memberToken, permission));
+    expect(await permitted(memberToken, permission)).toBeFalsy();
 
-    assertEquals(
+    expect(
       tenant.defineOrganizationRole({ slug, permissions: [permission] }),
-      roleId,
-    );
+    ).toStrictEqual(roleId);
     assert(
       await permitted(memberToken, permission),
       "a holder kept the role's earlier permissions",
@@ -1195,19 +1165,17 @@ describe("createFakeTenant's organization and account APIs", () => {
       "GET",
       `/api/organizations/${organizationId}/member-roles`,
     );
-    assertEquals(
-      roles.body.filter((role) => role.slug === slug),
-      [{ id: roleId, slug, name: slug }],
-    );
+    expect(roles.body.filter((role) => role.slug === slug)).toStrictEqual([
+      { id: roleId, slug, name: slug },
+    ]);
   });
 
   it("defines a role under the id it is given, and refuses an id another role holds or a new id for a defined slug", () => {
     const id = crypto.randomUUID();
-    assertEquals(
+    expect(
       tenant.defineOrganizationRole({ slug: `given-${id}`, id }),
-      id,
-    );
-    assertThrows(
+    ).toStrictEqual(id);
+    thrown(
       () =>
         tenant.defineOrganizationRole({
           slug: `given-${id}`,
@@ -1216,7 +1184,7 @@ describe("createFakeTenant's organization and account APIs", () => {
       Error,
       id,
     );
-    assertThrows(
+    thrown(
       () => tenant.defineOrganizationRole({ slug: `taken-${id}`, id }),
       Error,
       id,
@@ -1238,8 +1206,8 @@ describe("createFakeTenant's organization and account APIs", () => {
     tenant.addMember(there, member);
     await grantAppRole(ownerToken, here, member, roleId);
     assert(await permitted(await mint(member, here), permission));
-    assertFalse(await permitted(await mint(member, there), permission));
-    assertFalse(await permitted(await mint(member), permission));
+    expect(await permitted(await mint(member, there), permission)).toBeFalsy();
+    expect(await permitted(await mint(member), permission)).toBeFalsy();
   });
 
   it("ends the application roles a membership held when removeMember ends it", async () => {
@@ -1256,16 +1224,16 @@ describe("createFakeTenant's organization and account APIs", () => {
     await grantAppRole(ownerToken, organizationId, member, roleId);
     tenant.removeMember(organizationId, member);
     tenant.addMember(organizationId, member);
-    assertFalse(
+    expect(
       await permitted(await mint(member, organizationId), permission),
       "a role outlived the membership removeMember ended",
-    );
+    ).toBeFalsy();
     const held = await call<unknown[]>(
       ownerToken,
       "GET",
       `/api/organizations/${organizationId}/members/${member}/roles`,
     );
-    assertEquals(held.body, []);
+    expect(held.body).toStrictEqual([]);
   });
 
   it("ends the permissions a membership was seeded with when a manager revokes the last of it", async () => {
@@ -1281,25 +1249,25 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/organizations/${organizationId}/members/${member}/member`,
     );
-    assertEquals(revoked.status, 204);
+    expect(revoked.status).toStrictEqual(204);
     const offered = await call<{ membership: { id: string } }>(
       ownerToken,
       "POST",
       `/api/organizations/${organizationId}/invitations`,
       { email: `${member}@example.com`, role: "member" },
     );
-    assertEquals(offered.status, 201);
+    expect(offered.status).toStrictEqual(201);
     const memberToken = await mint(member);
     const accepted = await call<{ status: string }>(
       memberToken,
       "POST",
       `/api/organizations/offers/${offered.body.membership.id}/accept`,
     );
-    assertEquals(accepted.body.status, "accepted");
-    assertFalse(
+    expect(accepted.body.status).toStrictEqual("accepted");
+    expect(
       await permitted(await mint(member, organizationId), permission),
       "rejoining restored what the ended membership was seeded with",
-    );
+    ).toBeFalsy();
   });
 
   it("forgets an organization's application roles when it is deleted", async () => {
@@ -1317,12 +1285,12 @@ describe("createFakeTenant's organization and account APIs", () => {
       "DELETE",
       `/api/organizations/${organizationId}`,
     );
-    assertEquals(deleted.status, 204);
+    expect(deleted.status).toStrictEqual(204);
     tenant.addOrganization({ id: organizationId, slug: `sealed-${owner}` });
     tenant.addMember(organizationId, owner);
-    assertFalse(
+    expect(
       await permitted(await mint(owner, organizationId), permission),
       "a deleted organization's role came back with an organization of its id",
-    );
+    ).toBeFalsy();
   });
 });

@@ -23,9 +23,7 @@
  * @module
  */
 
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { OtpRecord, OtpStore } from "../../identity/otp.ts";
 import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
@@ -86,7 +84,7 @@ export function runOtpStoreContractTests(
 
     describe("create / findActive", () => {
       it("returns null when the pair has no code", async () => {
-        assertStrictEquals(await store.findActive(EMAIL, PURPOSE), null);
+        expect(await store.findActive(EMAIL, PURPOSE)).toBe(null);
       });
 
       it("round-trips every field of a created record", async () => {
@@ -94,13 +92,13 @@ export function runOtpStoreContractTests(
         await store.create(created);
         const found = await store.findActive(EMAIL, PURPOSE);
         assert(found !== null, "a created record must be findable");
-        assertStrictEquals(found.id, created.id);
-        assertStrictEquals(found.email, created.email);
-        assertStrictEquals(found.purpose, created.purpose);
-        assertStrictEquals(found.codeHash, created.codeHash);
-        assertStrictEquals(found.expiresAt, created.expiresAt);
-        assertStrictEquals(found.attempts, 0);
-        assertStrictEquals(found.maxAttempts, 3);
+        expect(found.id).toBe(created.id);
+        expect(found.email).toBe(created.email);
+        expect(found.purpose).toBe(created.purpose);
+        expect(found.codeHash).toBe(created.codeHash);
+        expect(found.expiresAt).toBe(created.expiresAt);
+        expect(found.attempts).toBe(0);
+        expect(found.maxAttempts).toBe(3);
       });
 
       it("returns the most recently created active record", async () => {
@@ -109,17 +107,16 @@ export function runOtpStoreContractTests(
         const newer = record({ createdAt: now, codeHash: "new" });
         await store.create(older);
         await store.create(newer);
-        assertStrictEquals(
+        expect(
           (await store.findActive(EMAIL, PURPOSE))?.id,
-          newer.id,
           "a re-send supersedes the code before it",
-        );
+        ).toBe(newer.id);
       });
 
       it("returns an expired record rather than hiding it", async () => {
         await store.create(record({ expiresAt: Date.now() - 1000 }));
         assert(
-          await store.findActive(EMAIL, PURPOSE) !== null,
+          (await store.findActive(EMAIL, PURPOSE)) !== null,
           "expiry is the service's call — it reports `expired` distinctly " +
             "from `invalid`, which it cannot do if the store swallows the row",
         );
@@ -127,8 +124,8 @@ export function runOtpStoreContractTests(
 
       it("scopes lookups by email and by purpose", async () => {
         await store.create(record());
-        assertStrictEquals(await store.findActive(OTHER_EMAIL, PURPOSE), null);
-        assertStrictEquals(await store.findActive(EMAIL, OTHER_PURPOSE), null);
+        expect(await store.findActive(OTHER_EMAIL, PURPOSE)).toBe(null);
+        expect(await store.findActive(EMAIL, OTHER_PURPOSE)).toBe(null);
       });
     });
 
@@ -137,19 +134,18 @@ export function runOtpStoreContractTests(
         const created = record();
         await store.create(created);
         const results = await race(() => store.consume(created.id));
-        assertStrictEquals(
+        expect(
           results.filter((claimed) => claimed).length,
-          1,
           "a code is single-use — consumers racing one code must not each " +
             "be told they claimed it",
-        );
-        assertStrictEquals(await store.consume("missing-code"), false);
+        ).toBe(1);
+        expect(await store.consume("missing-code")).toBe(false);
       });
       it("takes the record out of the active set", async () => {
         const created = record();
         await store.create(created);
         await store.consume(created.id);
-        assertStrictEquals(await store.findActive(EMAIL, PURPOSE), null);
+        expect(await store.findActive(EMAIL, PURPOSE)).toBe(null);
       });
 
       it("leaves an older active code findable", async () => {
@@ -159,20 +155,14 @@ export function runOtpStoreContractTests(
         await store.create(older);
         await store.create(newer);
         await store.consume(newer.id);
-        assertStrictEquals(
-          (await store.findActive(EMAIL, PURPOSE))?.id,
-          older.id,
-        );
+        expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(older.id);
       });
 
       it("is a no-op for an unknown id", async () => {
         const created = record();
         await store.create(created);
         await store.consume("no-such-id");
-        assertStrictEquals(
-          (await store.findActive(EMAIL, PURPOSE))?.id,
-          created.id,
-        );
+        expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(created.id);
       });
     });
 
@@ -184,22 +174,18 @@ export function runOtpStoreContractTests(
         await store.create(previous);
         await store.create(undelivered);
         await store.invalidateById(undelivered.id);
-        assertStrictEquals(
+        expect(
           (await store.findActive(EMAIL, PURPOSE))?.id,
-          previous.id,
           "discarding an undeliverable code must not take a concurrent " +
             "request's code with it",
-        );
+        ).toBe(previous.id);
       });
 
       it("is a no-op for an unknown id", async () => {
         const created = record();
         await store.create(created);
         await store.invalidateById("no-such-id");
-        assertStrictEquals(
-          (await store.findActive(EMAIL, PURPOSE))?.id,
-          created.id,
-        );
+        expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(created.id);
       });
     });
 
@@ -208,7 +194,7 @@ export function runOtpStoreContractTests(
         await store.create(record({ createdAt: Date.now() - 1000 }));
         await store.create(record());
         await store.invalidate(EMAIL, PURPOSE);
-        assertStrictEquals(await store.findActive(EMAIL, PURPOSE), null);
+        expect(await store.findActive(EMAIL, PURPOSE)).toBe(null);
       });
 
       it("leaves other emails and other purposes alone", async () => {
@@ -216,13 +202,13 @@ export function runOtpStoreContractTests(
         await store.create(record({ email: OTHER_EMAIL }));
         await store.create(record({ purpose: OTHER_PURPOSE }));
         await store.invalidate(EMAIL, PURPOSE);
-        assert(await store.findActive(OTHER_EMAIL, PURPOSE) !== null);
-        assert(await store.findActive(EMAIL, OTHER_PURPOSE) !== null);
+        assert((await store.findActive(OTHER_EMAIL, PURPOSE)) !== null);
+        assert((await store.findActive(EMAIL, OTHER_PURPOSE)) !== null);
       });
 
       it("is a no-op when the pair has no active code", async () => {
         await store.invalidate(EMAIL, PURPOSE);
-        assertStrictEquals(await store.findActive(EMAIL, PURPOSE), null);
+        expect(await store.findActive(EMAIL, PURPOSE)).toBe(null);
       });
     });
 
@@ -230,13 +216,13 @@ export function runOtpStoreContractTests(
       it("returns the count after the increment", async () => {
         const created = record();
         await store.create(created);
-        assertStrictEquals(await store.recordAttempt(created.id), 1);
-        assertStrictEquals(await store.recordAttempt(created.id), 2);
-        assertStrictEquals(await store.recordAttempt(created.id), 3);
+        expect(await store.recordAttempt(created.id)).toBe(1);
+        expect(await store.recordAttempt(created.id)).toBe(2);
+        expect(await store.recordAttempt(created.id)).toBe(3);
       });
 
       it("returns 0 for an unknown id", async () => {
-        assertStrictEquals(await store.recordAttempt("no-such-id"), 0);
+        expect(await store.recordAttempt("no-such-id")).toBe(0);
       });
 
       it("counts each record separately", async () => {
@@ -246,7 +232,7 @@ export function runOtpStoreContractTests(
         await store.create(theirs);
         await store.recordAttempt(mine.id);
         await store.recordAttempt(mine.id);
-        assertStrictEquals(await store.recordAttempt(theirs.id), 1);
+        expect(await store.recordAttempt(theirs.id)).toBe(1);
       });
 
       it("gives every concurrent guess its own count", async () => {
@@ -255,13 +241,12 @@ export function runOtpStoreContractTests(
         const counts = await Promise.all(
           Array.from({ length: 5 }, () => store.recordAttempt(created.id)),
         );
-        assertEquals(
+        expect(
           [...counts].sort((a, b) => a - b),
-          [1, 2, 3, 4, 5],
           "the guess budget is spent by the returned count — concurrent " +
             "guesses sharing one count spend the budget once and let the " +
             "rest through",
-        );
+        ).toStrictEqual([1, 2, 3, 4, 5]);
       });
     });
   });

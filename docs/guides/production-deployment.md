@@ -66,7 +66,7 @@ at startup breaks existing sessions or token verification on every restart.
 ## Signing keys and rotation
 
 This section applies only when your app issues OIDC or JWT tokens. Generate a
-signing key with `deno run jsr:@udibo/oauth2/cli oidc keygen`, then store its
+signing key with `npx udibo-oauth2 oidc keygen`, then store its
 output as a secret. The package's issuer signs with ES256; verify that your
 consumers accept that algorithm.
 

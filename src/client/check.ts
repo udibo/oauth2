@@ -160,8 +160,8 @@ export async function checkPermissions(
     await response.body?.cancel();
     throw new ServerError(`check request refused: ${response.status}`);
   }
-  return await receiveJson(
+  return (await receiveJson(
     response,
     CHECK_ENDPOINT,
-  ) as unknown as CheckPermissionsResult;
+  )) as unknown as CheckPermissionsResult;
 }

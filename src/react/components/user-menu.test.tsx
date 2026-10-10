@@ -1,15 +1,10 @@
-import { cleanupAfterEach } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { createMockOAuth2Client, MockOAuth2Provider } from "../testing.tsx";
 import type { UserInfoClaims } from "../../client/mod.ts";
 import { UserMenu } from "./user-menu.tsx";
 import type { UserMenuProps } from "./user-menu.tsx";
-
-cleanupAfterEach();
 
 function renderMenu(
   props: UserMenuProps,
@@ -52,12 +47,12 @@ describe("UserMenu", () => {
       { sub: "u3", name: "Grace" },
     );
     const trigger = screen.getByRole("button", { name: "Grace" });
-    assertEquals(trigger.getAttribute("aria-expanded"), "false");
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("false");
     fireEvent.click(trigger);
-    assertEquals(trigger.getAttribute("aria-expanded"), "true");
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("true");
     assert(screen.getByText("Profile"));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    assertEquals(logouts, [1]);
+    expect(logouts).toStrictEqual([1]);
   });
 
   it("uses a disclosure pattern, not ARIA menu roles", () => {
@@ -66,8 +61,8 @@ describe("UserMenu", () => {
       { sub: "u3b", name: "Grace" },
     );
     fireEvent.click(screen.getByRole("button", { name: "Grace" }));
-    assertFalse(screen.queryByRole("menu"));
-    assertFalse(screen.queryByRole("menuitem"));
+    expect(screen.queryByRole("menu")).toBeFalsy();
+    expect(screen.queryByRole("menuitem")).toBeFalsy();
   });
 
   it("closes on Escape", () => {
@@ -77,10 +72,10 @@ describe("UserMenu", () => {
     );
     const trigger = screen.getByRole("button", { name: "Grace" });
     fireEvent.click(trigger);
-    assertEquals(trigger.getAttribute("aria-expanded"), "true");
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("true");
     fireEvent.keyDown(document, { key: "Escape" });
-    assertEquals(trigger.getAttribute("aria-expanded"), "false");
-    assertFalse(screen.queryByText("Profile"));
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("false");
+    expect(screen.queryByText("Profile")).toBeFalsy();
   });
 
   it("closes on outside pointerdown", () => {
@@ -90,16 +85,16 @@ describe("UserMenu", () => {
     );
     const trigger = screen.getByRole("button", { name: "Grace" });
     fireEvent.click(trigger);
-    assertEquals(trigger.getAttribute("aria-expanded"), "true");
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("true");
     fireEvent.pointerDown(document.body);
-    assertEquals(trigger.getAttribute("aria-expanded"), "false");
-    assertFalse(screen.queryByText("Profile"));
+    expect(trigger.getAttribute("aria-expanded")).toStrictEqual("false");
+    expect(screen.queryByText("Profile")).toBeFalsy();
   });
 
   it("renders the signedOut slot when unauthenticated", () => {
     renderMenu({ signedOut: <span>Sign in</span> }, null);
     assert(screen.getByText("Sign in"));
-    assertFalse(screen.queryByRole("button"));
+    expect(screen.queryByRole("button")).toBeFalsy();
   });
 
   it("ejects to a render prop with the user and logout callback", () => {
@@ -109,6 +104,6 @@ describe("UserMenu", () => {
       },
       { sub: "u4" },
     );
-    assertEquals(screen.getByTestId("who").textContent, "u4");
+    expect(screen.getByTestId("who").textContent).toStrictEqual("u4");
   });
 });

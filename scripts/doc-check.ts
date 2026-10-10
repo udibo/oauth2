@@ -1,13 +1,13 @@
 /**
  * Documentation gate: type-checks the code in the docs.
  *
- * Two sources feed one `deno check` run, so a snippet that no longer compiles
+ * Two sources feed one `tsc` run, so a snippet that no longer compiles
  * against the package fails CI the same way a broken source file does:
  *
  * - Every fenced `ts` / `tsx` block in `README.md` and `docs/**\/*.md`. These
  *   are whole programs and are held to the compiler's full strictness.
  * - Every `@example` block on the JSDoc of a file that is part of the API
- *   reference — the entrypoints in `src/deno.json` and the files whose symbols
+ *   reference — the entrypoints in `jsr.json` and the files whose symbols
  *   they export. This is what JSR renders, and it is the first code most
  *   adopters copy.
  *
@@ -42,23 +42,33 @@
  * @module
  */
 
+import { spawnSync } from "node:child_process";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  apiReferenceFiles,
+  entrypoints,
+  type PublicSymbol,
+  publicSymbols,
+} from "./_exports.ts";
+import { isMain } from "./_main.ts";
+
+export type { PublicSymbol };
+
 /**
  * The number of `ignore`-marked snippets the package may carry today, across
  * both markdown fences and JSDoc `@example` blocks. Ratchet it down as opt-outs
  * are removed.
  */
-export const DEFAULT_IGNORE_BUDGET = 13;
-
-const budgetArg = Deno.args
-  .find((arg) => arg.startsWith("--ignore-budget="))
-  ?.slice("--ignore-budget=".length);
-const budget = budgetArg === undefined
-  ? DEFAULT_IGNORE_BUDGET
-  : Number(budgetArg);
-
-const packageDir = new URL("../", import.meta.url);
-const srcDir = new URL("src/", packageDir);
-const outDir = new URL("doc-check/", new URL("scripts/", packageDir));
+export const DEFAULT_IGNORE_BUDGET = 10;
 
 /** Where a snippet came from, which decides how strictly it is judged. */
 export type SnippetOrigin = "markdown" | "jsdoc";
@@ -85,18 +95,6 @@ export interface Extraction {
   ignored: number;
 }
 
-/** A public symbol and the entrypoint specifier a consumer imports it from. */
-export interface PublicSymbol {
-  /** Exported name. */
-  name: string;
-  /** `deno doc` declaration kind, which decides whether the import is a type. */
-  kind: string;
-  /** Package-relative path of the file that declares it. */
-  file: string;
-  /** Specifier to import it from, e.g. `@udibo/oauth2/server`. */
-  specifier: string;
-}
-
 const FENCE = /^\s*```(.*)$/;
 
 function langOf(info: string[]): "ts" | "tsx" | null {
@@ -116,16 +114,16 @@ export function extractMarkdownSnippets(
   let ignored = 0;
   let index = 0;
   while (index < lines.length) {
-    const opening = FENCE.exec(lines[index]);
+    const opening = FENCE.exec(lines[index]!);
     if (!opening) {
       index++;
       continue;
     }
-    const info = opening[1].trim().split(/\s+/);
+    const info = opening[1]!.trim().split(/\s+/);
     const lang = langOf(info);
     const start = index + 1;
     let end = start;
-    while (end < lines.length && !FENCE.test(lines[end])) end++;
+    while (end < lines.length && !FENCE.test(lines[end]!)) end++;
     if (lang) {
       if (info.includes("ignore")) {
         ignored++;
@@ -150,10 +148,7 @@ export function extractMarkdownSnippets(
  * string contains `ignore` is counted, not returned; blocks under any other tag
  * are not examples and are skipped.
  */
-export function extractJsDocExamples(
-  source: string,
-  code: string,
-): Extraction {
+export function extractJsDocExamples(source: string, code: string): Extraction {
   const lines = code.split("\n");
   const snippets: Snippet[] = [];
   let ignored = 0;
@@ -165,7 +160,7 @@ export function extractJsDocExamples(
   let buffer: string[] = [];
   let fence = 0;
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index].trim();
+    const line = lines[index]!.trim();
     if (!inDoc) {
       if (line.startsWith("/**")) inDoc = true;
       else continue;
@@ -179,7 +174,7 @@ export function extractJsDocExamples(
       else if (/^@\w+/.test(body)) inExample = false;
       const opening = inExample ? FENCE.exec(body) : null;
       if (opening) {
-        info = opening[1].trim().split(/\s+/);
+        info = opening[1]!.trim().split(/\s+/);
         lang = langOf(info);
         open = true;
         buffer = [];
@@ -229,31 +224,26 @@ export function importPreludeFor(
   ];
   const groups = new Map<string, string[]>();
   const taken = new Set<string>();
-  for (const { name, kind, specifier } of preferred) {
+  for (const { name, specifier } of preferred) {
     if (taken.has(name)) continue;
     if (!new RegExp(`\\b${name}\\b`).test(snippet.code)) continue;
-    const declaration =
-      `\\b(?:const|let|var|function|class|interface|type|enum)\\s+${name}\\b`;
+    const declaration = `\\b(?:const|let|var|function|class|interface|type|enum)\\s+${name}\\b`;
     if (new RegExp(declaration).test(snippet.code)) continue;
     if (new RegExp(`import[^;]*\\b${name}\\b[^;]*from`).test(snippet.code)) {
       continue;
     }
     taken.add(name);
     const names = groups.get(specifier) ?? [];
-    const isType = kind === "interface" || kind === "typeAlias";
-    names.push(isType ? `type ${name}` : name);
+    names.push(name);
     groups.set(specifier, names);
   }
   return [...groups]
-    .map(([specifier, names]) =>
-      `import { ${names.sort().join(", ")} } from "${specifier}";`
+    .map(
+      ([specifier, names]) =>
+        `import { ${names.sort().join(", ")} } from "${specifier}";`,
     )
     .join("\n");
 }
-
-const FRAGMENT_DIAGNOSTIC = /^TS(?:1108|2304|2552|7006|7031|18004) \[ERROR\]/;
-
-const UNDECLARED_BINDING = /^TS(?:2304|2552|18004) \[ERROR\]/;
 
 /**
  * The API-reference files whose `@example` blocks still lean on a binding the
@@ -291,25 +281,29 @@ export const UNDECLARED_BINDING_BASELINE: ReadonlySet<string> = new Set([
   "server/signing-keys.ts",
 ]);
 
+const FRAGMENT_DIAGNOSTIC = /^TS(?:1108|2304|2552|7006|7031|18004):/;
+
+const UNDECLARED_BINDING = /^TS(?:2304|2552|18004):/;
+
+const CONSUMER_DEPENDENCY =
+  /^TS2307: Cannot find module '(?![./]|@udibo\/oauth2)[^']+'/;
+
 /**
- * Whether a `deno check` diagnostic is about an `@example` naming a binding it
- * never declared. Such a binding has an error type, so every call made on it
- * goes unchecked — the gate fails it outside
+ * Whether a `tsc` diagnostic (`TS2304: Cannot find name 'app'.`) is about an
+ * `@example` naming a binding it never declared. Such a binding has an error
+ * type, so every call made on it goes unchecked — the gate fails it outside
  * {@link UNDECLARED_BINDING_BASELINE}, even though it is fragment-shaped.
  */
 export function isUndeclaredBinding(diagnostic: string): boolean {
   return UNDECLARED_BINDING.test(diagnostic);
 }
 
-const CONSUMER_DEPENDENCY =
-  /^TS2307 \[ERROR\]: Import "(?!@udibo\/oauth2)[^"]+" not a dependency and not in import map/;
-
 /**
- * Whether a `deno check` diagnostic is only about an `@example` being a
- * fragment rather than a program — a binding the surrounding prose supplies, or
- * a bare `return` because the example quotes the inside of a handler.
- * Everything else is a real defect in the documented code. A prose-supplied
- * binding is fragment-shaped but only tolerated for the files in
+ * Whether a `tsc` diagnostic is only about an `@example` being a fragment
+ * rather than a program — a binding the surrounding prose supplies, or a bare
+ * `return` because the example quotes the inside of a handler. Everything else
+ * is a real defect in the documented code. A prose-supplied binding is
+ * fragment-shaped but only tolerated for the files in
  * {@link UNDECLARED_BINDING_BASELINE}; see {@link isUndeclaredBinding}.
  */
 export function isFragmentDiagnostic(diagnostic: string): boolean {
@@ -317,12 +311,66 @@ export function isFragmentDiagnostic(diagnostic: string): boolean {
 }
 
 /**
- * Whether a `deno check` diagnostic is only about a third-party module the
- * reader's own app installs, which the snippet sandbox deliberately does not
- * carry. A missing `@udibo/oauth2` subpath is never this.
+ * Whether a `tsc` diagnostic is only about a third-party module the reader's
+ * own app installs, which the snippet sandbox deliberately does not carry. A
+ * missing `@udibo/oauth2` subpath or a relative module is never this.
  */
 export function isConsumerDependency(diagnostic: string): boolean {
   return CONSUMER_DEPENDENCY.test(diagnostic);
+}
+
+/**
+ * The compiler configuration the snippets are checked under: the package's
+ * own strict settings, with each `@udibo/oauth2` subpath mapped to the source
+ * file `jsr.json` publishes for it, so a snippet resolves exactly what a
+ * consumer would import.
+ */
+export function snippetTsconfig(
+  exports: Record<string, string>,
+): Record<string, unknown> {
+  const paths: Record<string, string[]> = {};
+  for (const [subpath, path] of Object.entries(exports)) {
+    paths[`@udibo/oauth2${subpath.slice(1)}`] = [`../../${path.slice(2)}`];
+  }
+  return {
+    extends: "../../tsconfig.json",
+    compilerOptions: {
+      noEmit: true,
+      declaration: false,
+      isolatedDeclarations: false,
+      verbatimModuleSyntax: false,
+      paths,
+    },
+    include: ["*.ts", "*.tsx"],
+  };
+}
+
+/** One error line of `tsc --pretty false` output, with its continuation lines. */
+export interface Diagnostic {
+  /** Generated snippet file name the error is in, when it names one. */
+  file: string | null;
+  /** `TSnnnn: message`, followed by any continuation lines. */
+  text: string;
+}
+
+/** Splits `tsc --pretty false` output into one diagnostic per error. */
+export function parseDiagnostics(output: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match =
+      /^(.*?)\((\d+),(\d+)\): error (TS\d+): (.*)$/.exec(line) ??
+      /^error (TS\d+): (.*)$/.exec(line);
+    if (match && match.length === 6) {
+      const file =
+        /doc-check[\\/]([\w.-]+\.tsx?)$/.exec(match[1]!)?.[1] ?? null;
+      found.push({ file, text: `${match[4]}: ${match[5]}` });
+    } else if (match) {
+      found.push({ file: null, text: `${match[1]}: ${match[2]}` });
+    } else if (found.length > 0 && /^\s/.test(line)) {
+      found[found.length - 1]!.text += `\n${line}`;
+    }
+  }
+  return found;
 }
 
 function fileNameFor(snippet: Snippet): string {
@@ -336,113 +384,56 @@ function fileNameFor(snippet: Snippet): string {
   return `${prefix}${slug}-line${snippet.fence}.${snippet.lang}`;
 }
 
-async function markdownFiles(): Promise<string[]> {
+function markdownFiles(root: string): string[] {
   const found = ["README.md"];
-  async function walk(dir: URL, prefix: string): Promise<void> {
-    for await (const entry of Deno.readDir(dir)) {
-      if (entry.isDirectory) {
-        await walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`);
+  function walk(dir: string, prefix: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        walk(join(dir, entry.name), `${prefix}${entry.name}/`);
       } else if (entry.name.endsWith(".md")) {
         found.push(`${prefix}${entry.name}`);
       }
     }
   }
-  await walk(new URL("docs/", packageDir), "docs/");
+  walk(join(root, "docs"), "docs/");
   return found.sort();
 }
 
-async function publicSymbols(): Promise<PublicSymbol[]> {
-  const config = JSON.parse(
-    await Deno.readTextFile(new URL("deno.json", srcDir)),
-  );
-  const symbols: PublicSymbol[] = [];
-  for (const [subpath, path] of Object.entries(config.exports)) {
-    const specifier = `@udibo/oauth2${subpath.slice(1)}`;
-    const { success, stdout } = await new Deno.Command(Deno.execPath(), {
-      args: ["doc", "--json", path as string],
-      cwd: srcDir,
-      env: { NO_COLOR: "1" },
-      stdout: "piped",
-      stderr: "null",
-    }).output();
-    if (!success) {
-      throw new Error(`doc-check: \`deno doc --json ${path}\` failed.`);
-    }
-    const doc = JSON.parse(new TextDecoder().decode(stdout));
-    for (const node of Object.values(doc.nodes) as { symbols?: unknown[] }[]) {
-      for (const symbol of node.symbols ?? []) {
-        const { name, declarations } = symbol as {
-          name: string;
-          declarations?: { kind: string; location: { filename: string } }[];
-        };
-        const declaration = declarations?.[0];
-        if (!declaration) continue;
-        symbols.push({
-          name,
-          kind: declaration.kind,
-          file: declaration.location.filename.replace(srcDir.href, ""),
-          specifier,
-        });
-      }
-    }
-  }
-  return symbols;
+function clean(outDir: string): void {
+  rmSync(outDir, { recursive: true, force: true });
 }
 
-async function apiReferenceFiles(symbols: PublicSymbol[]): Promise<string[]> {
-  const config = JSON.parse(
-    await Deno.readTextFile(new URL("deno.json", srcDir)),
-  );
-  const entrypoints = Object.values(config.exports as Record<string, string>)
-    .map((path) => path.replace(/^\.\//, ""));
-  return [...new Set([...entrypoints, ...symbols.map((s) => s.file)])]
-    .filter((file) => !/\.test\.tsx?$/.test(file))
-    .sort();
-}
+function main(args: string[]): number {
+  const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
+  const outDir = join(root, "scripts", "doc-check");
+  const budgetArg = args
+    .find((arg) => arg.startsWith("--ignore-budget="))
+    ?.slice("--ignore-budget=".length);
+  const budget =
+    budgetArg === undefined ? DEFAULT_IGNORE_BUDGET : Number(budgetArg);
 
-async function clean(): Promise<void> {
-  try {
-    for await (const entry of Deno.readDir(outDir)) {
-      if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
-        await Deno.remove(new URL(entry.name, outDir));
-      }
-    }
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-}
+  clean(outDir);
 
-function diagnostics(stderr: string): string[] {
-  return stderr
-    .split(/^(?=TS\d+ \[ERROR\]:)/m)
-    .filter((block) => /^TS\d+ \[ERROR\]:/.test(block))
-    .map((block) => block.trimEnd());
-}
-
-function locationOf(diagnostic: string): string | null {
-  const matches = [...diagnostic.matchAll(/doc-check\/([\w.-]+\.tsx?)/g)];
-  return matches.length > 0 ? matches[matches.length - 1][1] : null;
-}
-
-async function main(): Promise<void> {
-  await clean();
-
-  const sources = await markdownFiles();
+  const sources = markdownFiles(root);
   const snippets: Snippet[] = [];
   let ignored = 0;
   for (const source of sources) {
-    const markdown = await Deno.readTextFile(new URL(source, packageDir));
-    const extraction = extractMarkdownSnippets(source, markdown);
+    const extraction = extractMarkdownSnippets(
+      source,
+      readFileSync(join(root, source), "utf8"),
+    );
     snippets.push(...extraction.snippets);
     ignored += extraction.ignored;
   }
   const markdownCount = snippets.length;
 
-  const symbols = await publicSymbols();
-  const files = await apiReferenceFiles(symbols);
+  const symbols = publicSymbols(root);
+  const files = apiReferenceFiles(root, symbols);
   for (const file of files) {
-    const code = await Deno.readTextFile(new URL(file, srcDir));
-    const extraction = extractJsDocExamples(file, code);
+    const extraction = extractJsDocExamples(
+      file,
+      readFileSync(join(root, "src", file), "utf8"),
+    );
     snippets.push(...extraction.snippets);
     ignored += extraction.ignored;
   }
@@ -455,64 +446,77 @@ async function main(): Promise<void> {
         `go down: compile the snippet, move it into an example, or raise the ` +
         `budget deliberately.`,
     );
-    Deno.exit(1);
+    return 1;
   }
 
   if (snippets.length === 0) {
     console.log("doc-check: no checkable snippets found.");
-    return;
+    return 0;
   }
 
-  const written: string[] = [];
-  const fragments = new Map<string, Snippet>();
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(
+    join(outDir, "tsconfig.json"),
+    JSON.stringify(snippetTsconfig(entrypoints(root)), null, 2),
+  );
+  const written = new Map<string, Snippet>();
   for (const snippet of snippets) {
     const name = fileNameFor(snippet);
-    const prelude = snippet.origin === "jsdoc"
-      ? importPreludeFor(snippet, symbols)
-      : "";
-    await Deno.writeTextFile(
-      new URL(name, outDir),
+    const prelude =
+      snippet.origin === "jsdoc" ? importPreludeFor(snippet, symbols) : "";
+    writeFileSync(
+      join(outDir, name),
       `// ${snippet.source}:${snippet.fence}\n${
         prelude ? `${prelude}\n` : ""
-      }${snippet.code}\n`,
+      }${snippet.code}\nexport {};\n`,
     );
-    written.push(`scripts/doc-check/${name}`);
-    if (snippet.origin === "jsdoc") fragments.set(name, snippet);
+    written.set(name, snippet);
   }
 
-  const { success, stderr } = await new Deno.Command(Deno.execPath(), {
-    args: ["check", ...written],
-    cwd: packageDir,
-    env: { NO_COLOR: "1" },
-    stdout: "null",
-    stderr: "piped",
-  }).output();
+  const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
+  const result = spawnSync(
+    process.execPath,
+    [
+      tsc,
+      "-p",
+      relative(root, join(outDir, "tsconfig.json")),
+      "--pretty",
+      "false",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  const raw = `${result.stdout}${result.stderr}`;
+  const all = parseDiagnostics(raw);
 
-  const raw = new TextDecoder().decode(stderr);
   const baselineUsed = new Set<string>();
   let undeclared = 0;
-  const failures = diagnostics(raw).filter((diagnostic) => {
-    const location = locationOf(diagnostic);
-    const snippet = location ? fragments.get(location) : undefined;
-    if (!snippet) return true;
-    if (isUndeclaredBinding(diagnostic)) {
+  const failures = all.filter((diagnostic) => {
+    const snippet = diagnostic.file ? written.get(diagnostic.file) : undefined;
+    if (!snippet || snippet.origin !== "jsdoc") return true;
+    if (isUndeclaredBinding(diagnostic.text)) {
       if (!UNDECLARED_BINDING_BASELINE.has(snippet.source)) {
         undeclared++;
         return true;
       }
       baselineUsed.add(snippet.source);
     }
-    return !isFragmentDiagnostic(diagnostic) &&
-      !isConsumerDependency(diagnostic);
+    return (
+      !isFragmentDiagnostic(diagnostic.text) &&
+      !isConsumerDependency(diagnostic.text)
+    );
   });
   const stale = [...UNDECLARED_BINDING_BASELINE]
     .filter((source) => !baselineUsed.has(source))
     .sort();
-
-  await clean();
+  const failureLines = failures.map((diagnostic) => {
+    const snippet = diagnostic.file ? written.get(diagnostic.file) : undefined;
+    const origin = snippet ? `${snippet.source}:${snippet.fence}: ` : "";
+    return `${origin}${diagnostic.text}`;
+  });
+  clean(outDir);
 
   if (failures.length > 0) {
-    console.error(failures.join("\n\n"));
+    console.error(failureLines.join("\n\n"));
     if (undeclared > 0) {
       console.error(
         `doc-check: ${undeclared} of these are bindings an \`@example\` ` +
@@ -527,7 +531,7 @@ async function main(): Promise<void> {
         `Fix the snippet, move it into an example, or mark the block ` +
         `\`ts ignore\` when it is a fragment quoted for reading.`,
     );
-    Deno.exit(1);
+    return 1;
   }
   if (stale.length > 0) {
     console.error(
@@ -535,12 +539,12 @@ async function main(): Promise<void> {
         `UNDECLARED_BINDING_BASELINE entry — the list only shrinks, so ` +
         `delete them from it:\n  ${stale.join("\n  ")}`,
     );
-    Deno.exit(1);
+    return 1;
   }
-  if (!success && diagnostics(raw).length === 0) {
+  if (result.status !== 0 && all.length === 0) {
     console.error(raw);
-    console.error("doc-check: `deno check` failed without diagnostics.");
-    Deno.exit(1);
+    console.error("doc-check: `tsc` failed without diagnostics.");
+    return 1;
   }
 
   console.log(
@@ -551,6 +555,9 @@ async function main(): Promise<void> {
       `${UNDECLARED_BINDING_BASELINE.size} file(s) still lean on undeclared ` +
       `bindings).`,
   );
+  return 0;
 }
 
-if (import.meta.main) await main();
+if (isMain(import.meta.url)) {
+  process.exit(main(process.argv.slice(2)));
+}

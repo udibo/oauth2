@@ -1,13 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { encodeBase32 } from "@std/encoding/base32";
-
+import { assert, describe, expect, it } from "vitest";
+import { rejection, thrown } from "../../_test_assert.ts";
+import { encodeBase32 } from "../../utils/_encoding.ts";
 import {
   buildOtpauthUri,
   decodeTotpSecret,
@@ -25,9 +18,10 @@ const RFC_SEEDS: Record<TotpAlgorithm, Uint8Array> = {
   ),
 };
 
-const RFC_VECTORS: Array<
-  { seconds: number; codes: Record<TotpAlgorithm, string> }
-> = [
+const RFC_VECTORS: Array<{
+  seconds: number;
+  codes: Record<TotpAlgorithm, string>;
+}> = [
   {
     seconds: 59,
     codes: {
@@ -84,15 +78,14 @@ describe("generateTotpCode", () => {
   for (const algorithm of ALGORITHMS) {
     it(`matches the RFC 6238 Appendix B vectors for ${algorithm}`, async () => {
       for (const vector of RFC_VECTORS) {
-        assertEquals(
+        expect(
           await generateTotpCode({
             secret: RFC_SEEDS[algorithm],
             timestamp: vector.seconds * 1000,
             digits: 8,
             algorithm,
           }),
-          vector.codes[algorithm],
-        );
+        ).toStrictEqual(vector.codes[algorithm]);
       }
     });
   }
@@ -102,14 +95,13 @@ describe("generateTotpCode", () => {
     const padded = encodeBase32(seed);
     const unpadded = padded.replaceAll("=", "");
     for (const secret of [padded, unpadded, unpadded.toLowerCase()]) {
-      assertEquals(
+      expect(
         await generateTotpCode({
           secret,
           timestamp: 59_000,
           digits: 8,
         }),
-        "94287082",
-      );
+      ).toStrictEqual("94287082");
     }
   });
 
@@ -118,17 +110,17 @@ describe("generateTotpCode", () => {
       secret: RFC_SEEDS["SHA-1"],
       timestamp: 59_000,
     });
-    assertEquals(code, "287082");
-    assertEquals(code.length, 6);
+    expect(code).toStrictEqual("287082");
+    expect(code.length).toStrictEqual(6);
   });
 });
 
 describe("generateTotpSecret", () => {
   it("returns 20 random bytes with an unpadded base32 round-trip", () => {
     const { secret, base32 } = generateTotpSecret();
-    assertEquals(secret.length, 20);
+    expect(secret.length).toStrictEqual(20);
     assert(/^[A-Z2-7]{32}$/.test(base32));
-    assertEquals(decodeTotpSecret(base32), secret);
+    expect(decodeTotpSecret(base32)).toStrictEqual(secret);
   });
 
   it("returns a different secret each call", () => {
@@ -139,16 +131,17 @@ describe("generateTotpSecret", () => {
 describe("decodeTotpSecret", () => {
   it("tolerates lowercase, whitespace, and missing padding", () => {
     const { secret, base32 } = generateTotpSecret();
-    assertEquals(decodeTotpSecret(base32.toLowerCase()), secret);
-    assertEquals(
+    expect(decodeTotpSecret(base32.toLowerCase())).toStrictEqual(secret);
+    expect(
       decodeTotpSecret(`${base32.slice(0, 4)} ${base32.slice(4)}`),
+    ).toStrictEqual(secret);
+    expect(decodeTotpSecret(`${base32}========`.slice(0, 40))).toStrictEqual(
       secret,
     );
-    assertEquals(decodeTotpSecret(`${base32}========`.slice(0, 40)), secret);
   });
 
   it("rejects values that are not base32", () => {
-    assertThrows(() => decodeTotpSecret("not base32!"), TypeError);
+    thrown(() => decodeTotpSecret("not base32!"), TypeError);
   });
 });
 
@@ -163,7 +156,7 @@ describe("verifyTotpCode", () => {
       digits: 8,
       windows: 0,
     });
-    assertEquals(result, { valid: true, matchedStep: 1 });
+    expect(result).toStrictEqual({ valid: true, matchedStep: 1 });
   });
 
   it("accepts one step of skew either side by default and rejects beyond it", async () => {
@@ -176,18 +169,17 @@ describe("verifyTotpCode", () => {
         timestamp: timestamp + skewSteps * 30_000,
       });
       assert(result.valid, `skew ${skewSteps}`);
-      assertEquals(result.matchedStep, Math.floor(timestamp / 30_000));
+      expect(result.matchedStep).toStrictEqual(Math.floor(timestamp / 30_000));
     }
     for (const skewSteps of [-2, 2]) {
-      assertEquals(
+      expect(
         await verifyTotpCode({
           secret,
           code,
           timestamp: timestamp + skewSteps * 30_000,
         }),
-        { valid: false },
         `skew ${skewSteps}`,
-      );
+      ).toStrictEqual({ valid: false });
     }
   });
 
@@ -200,7 +192,7 @@ describe("verifyTotpCode", () => {
       timestamp: timestamp + 60_000,
       windows: 2,
     });
-    assertEquals(result.valid, true);
+    expect(result.valid).toStrictEqual(true);
   });
 
   it("rejects a zero-window verify of a neighboring step's code", async () => {
@@ -209,19 +201,17 @@ describe("verifyTotpCode", () => {
       secret,
       timestamp: timestamp - 30_000,
     });
-    assertEquals(
+    expect(
       await verifyTotpCode({ secret, code, timestamp, windows: 0 }),
-      { valid: false },
-    );
+    ).toStrictEqual({ valid: false });
   });
 
   it("rejects malformed codes without leaking a matched step", async () => {
     for (const code of ["", "12345", "1234567", "94287o82", "castle"]) {
-      assertEquals(
+      expect(
         await verifyTotpCode({ secret, code, timestamp: 59_000, digits: 8 }),
-        { valid: false },
         code,
-      );
+      ).toStrictEqual({ valid: false });
     }
   });
 
@@ -233,7 +223,7 @@ describe("verifyTotpCode", () => {
       digits: 8,
       windows: 0,
     });
-    assertEquals(result, { valid: true, matchedStep: 1 });
+    expect(result).toStrictEqual({ valid: true, matchedStep: 1 });
   });
 
   it("prefers the newest step when adjacent steps produce the same code", async () => {
@@ -256,32 +246,29 @@ describe("verifyTotpCode", () => {
       timestamp: step * 30_000,
       digits: 1,
     });
-    assertEquals(result, { valid: true, matchedStep: step });
+    expect(result).toStrictEqual({ valid: true, matchedStep: step });
   });
 
   it("rejects unusable digits, period, or windows configuration", async () => {
-    await assertRejects(
+    await rejection(
       () => verifyTotpCode({ secret, code: "123456", digits: 6.5 }),
       TypeError,
     );
-    await assertRejects(
+    await rejection(
       () => verifyTotpCode({ secret, code: "123456", periodSeconds: 0 }),
       TypeError,
     );
-    await assertRejects(
+    await rejection(
       () => verifyTotpCode({ secret, code: "123456", windows: -1 }),
       TypeError,
     );
-    await assertRejects(
-      () => generateTotpCode({ secret, digits: 0 }),
-      TypeError,
-    );
+    await rejection(() => generateTotpCode({ secret, digits: 0 }), TypeError);
   });
 
   it("skips negative time steps at the epoch boundary", async () => {
     const code = await generateTotpCode({ secret, timestamp: 0 });
     const result = await verifyTotpCode({ secret, code, timestamp: 0 });
-    assertEquals(result, { valid: true, matchedStep: 0 });
+    expect(result).toStrictEqual({ valid: true, matchedStep: 0 });
   });
 
   it("supports the replay contract: the same step never exceeds a stored lastStep", async () => {
@@ -314,8 +301,7 @@ describe("buildOtpauthUri", () => {
       issuer: "Udibo App",
       accountName: "user+tag@example.com",
     });
-    assertEquals(
-      uri,
+    expect(uri).toStrictEqual(
       "otpauth://totp/Udibo%20App:user%2Btag%40example.com" +
         "?secret=JBSWY3DPEHPK3PXP&issuer=Udibo%20App&algorithm=SHA1&digits=6&period=30",
     );
@@ -330,9 +316,9 @@ describe("buildOtpauthUri", () => {
       periodSeconds: 60,
       algorithm: "SHA-256",
     });
-    assertStringIncludes(uri, "algorithm=SHA256");
-    assertStringIncludes(uri, "digits=8");
-    assertStringIncludes(uri, "period=60");
+    expect(uri).toContain("algorithm=SHA256");
+    expect(uri).toContain("digits=8");
+    expect(uri).toContain("period=60");
   });
 
   it("normalizes the secret to uppercase without padding", () => {
@@ -341,11 +327,11 @@ describe("buildOtpauthUri", () => {
       issuer: "Udibo",
       accountName: "a@b.co",
     });
-    assertStringIncludes(uri, "secret=JBSWY3DPEHPK3PXP&");
+    expect(uri).toContain("secret=JBSWY3DPEHPK3PXP&");
   });
 
   it("rejects a non-base32 secret so it cannot inject URI parameters", () => {
-    assertThrows(
+    thrown(
       () =>
         buildOtpauthUri({
           secret: "ABC&algorithm=SHA256",
@@ -358,7 +344,7 @@ describe("buildOtpauthUri", () => {
 
   it("rejects non-positive-integer digits and period", () => {
     for (const digits of [0, -1, 6.5]) {
-      assertThrows(
+      thrown(
         () =>
           buildOtpauthUri({
             secret: "JBSWY3DPEHPK3PXP",
@@ -369,7 +355,7 @@ describe("buildOtpauthUri", () => {
         TypeError,
       );
     }
-    assertThrows(
+    thrown(
       () =>
         buildOtpauthUri({
           secret: "JBSWY3DPEHPK3PXP",

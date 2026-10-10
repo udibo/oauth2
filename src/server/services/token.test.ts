@@ -1,6 +1,5 @@
-import { assertStrictEquals, assertThrows } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
+import { thrown } from "../../_test_assert.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import type { BasicScope } from "../../models/scope.ts";
 import type { TestClient, TestUser } from "../../testing/_test_fixtures.ts";
@@ -9,8 +8,11 @@ import {
   type AbstractTokenServiceOptions,
 } from "./token.ts";
 
-class StubTokenService
-  extends AbstractTokenService<TestClient, TestUser, BasicScope> {
+class StubTokenService extends AbstractTokenService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   getToken(): Promise<Token<TestClient, TestUser, BasicScope> | undefined> {
     return Promise.resolve(undefined);
   }
@@ -55,7 +57,7 @@ function createService(
 describe("AbstractTokenService", () => {
   describe("refreshTokenMaxLifetime", () => {
     it("rejects a sliding lifetime longer than the absolute cap", () => {
-      assertThrows(
+      thrown(
         () =>
           createService({
             refreshTokenLifetime: 1209600,
@@ -67,7 +69,7 @@ describe("AbstractTokenService", () => {
     });
 
     it("rejects the default sliding lifetime against a shorter cap", () => {
-      assertThrows(
+      thrown(
         () => createService({ refreshTokenMaxLifetime: 86400 }),
         TypeError,
       );
@@ -78,11 +80,11 @@ describe("AbstractTokenService", () => {
         refreshTokenLifetime: 86400,
         refreshTokenMaxLifetime: 86400,
       });
-      assertStrictEquals(service.refreshTokenMaxLifetime, 86400);
+      expect(service.refreshTokenMaxLifetime).toBe(86400);
     });
 
     it("is unset by default", () => {
-      assertStrictEquals(createService().refreshTokenMaxLifetime, undefined);
+      expect(createService().refreshTokenMaxLifetime).toBe(undefined);
     });
   });
 
@@ -100,8 +102,7 @@ describe("AbstractTokenService", () => {
         familyCreatedAt,
       );
 
-      assertStrictEquals(
-        expiresAt?.getTime(),
+      expect(expiresAt?.getTime()).toBe(
         familyCreatedAt.getTime() + 2592000 * 1000,
       );
     });
@@ -109,14 +110,13 @@ describe("AbstractTokenService", () => {
     it("leaves the family uncapped when no maximum is configured", async () => {
       const service = createService();
 
-      assertStrictEquals(
+      expect(
         await service.refreshTokenFamilyExpiresAt(
           testClient,
           testUser,
           new Date(),
         ),
-        undefined,
-      );
+      ).toBe(undefined);
     });
   });
 });

@@ -56,8 +56,7 @@ export interface MfaEnrollmentLabels {
 }
 
 /** Props for {@link MfaEnrollmentForm}. */
-export interface MfaEnrollmentFormProps
-  extends BaseAuthFormProps<MfaEnrollmentValues> {
+export interface MfaEnrollmentFormProps extends BaseAuthFormProps<MfaEnrollmentValues> {
   /** The secret, URI, and recovery codes to display. */
   data: MfaEnrollmentData;
   /**
@@ -125,41 +124,37 @@ export function MfaEnrollmentForm(props: MfaEnrollmentFormProps): ReactNode {
             <p role="heading" aria-level={2} data-oauth2-secret-heading="">
               {labels?.secretHeading ?? "Scan this QR code"}
             </p>
-            {qr
-              ? <div data-oauth2-qr="" className={classNames.qr}>{qr}</div>
-              : null}
+            {qr ? (
+              <div data-oauth2-qr="" className={classNames.qr}>
+                {qr}
+              </div>
+            ) : null}
             <p data-oauth2-secret-hint="">
               {labels?.secretHint ?? "Or enter this code:"}{" "}
               <code data-oauth2-secret-value="">{data.secret}</code>
             </p>
           </div>
-          {data.recoveryCodes && data.recoveryCodes.length > 0
-            ? (
-              <div data-oauth2-recovery="">
-                <p
-                  role="heading"
-                  aria-level={2}
-                  data-oauth2-recovery-heading=""
-                >
-                  {labels?.recoveryHeading ?? "Save your recovery codes"}
-                </p>
-                <ul
-                  data-oauth2-recovery-codes=""
-                  className={classNames.recoveryCodes}
-                >
-                  {data.recoveryCodes.map((recoveryCode) => (
-                    <li
-                      key={recoveryCode}
-                      data-oauth2-recovery-code=""
-                      className={classNames.recoveryCode}
-                    >
-                      <code>{recoveryCode}</code>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-            : null}
+          {data.recoveryCodes && data.recoveryCodes.length > 0 ? (
+            <div data-oauth2-recovery="">
+              <p role="heading" aria-level={2} data-oauth2-recovery-heading="">
+                {labels?.recoveryHeading ?? "Save your recovery codes"}
+              </p>
+              <ul
+                data-oauth2-recovery-codes=""
+                className={classNames.recoveryCodes}
+              >
+                {data.recoveryCodes.map((recoveryCode) => (
+                  <li
+                    key={recoveryCode}
+                    data-oauth2-recovery-code=""
+                    className={classNames.recoveryCode}
+                  >
+                    <code>{recoveryCode}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </>
       }
     >

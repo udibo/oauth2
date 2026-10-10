@@ -152,30 +152,28 @@ export class RateLimiter implements RateLimiterLike {
 
 type RateLimitReport =
   | {
-    /** The flow's `*.rate_limited` event, minus the fields filled in here. */
-    event: RateLimitedEventInit;
-    /** The service's event emitter (already hook-safe, never throws). */
-    emit: (event: IdentityEvent) => Promise<void>;
-  }
+      /** The flow's `*.rate_limited` event, minus the fields filled in here. */
+      event: RateLimitedEventInit;
+      /** The service's event emitter (already hook-safe, never throws). */
+      emit: (event: IdentityEvent) => Promise<void>;
+    }
   | {
-    /** Omitted in a flow whose service exposes no event seam. */
-    event?: never;
-    emit?: never;
-  };
+      /** Omitted in a flow whose service exposes no event seam. */
+      event?: never;
+      emit?: never;
+    };
 
 /** Options for {@link enforceRateLimit}. */
-export type EnforceRateLimitOptions =
-  & {
-    /** The limiter to check; `undefined` disables throttling entirely. */
-    rateLimiter: RateLimiterLike | undefined;
-    /** The limiter key (e.g. `signin:${identifier}`, `mfa:verify:${userId}`). */
-    key: string;
-    /** The `IdentityError` message when the limit is hit under enforcement. */
-    message: string;
-    /** `false` (log-only mode) emits the event but lets the attempt through. */
-    enforce: boolean;
-  }
-  & RateLimitReport;
+export type EnforceRateLimitOptions = {
+  /** The limiter to check; `undefined` disables throttling entirely. */
+  rateLimiter: RateLimiterLike | undefined;
+  /** The limiter key (e.g. `signin:${identifier}`, `mfa:verify:${userId}`). */
+  key: string;
+  /** The `IdentityError` message when the limit is hit under enforcement. */
+  message: string;
+  /** `false` (log-only mode) emits the event but lets the attempt through. */
+  enforce: boolean;
+} & RateLimitReport;
 
 /**
  * The shared throttle sequence every identity-layer flow uses: check the
@@ -296,8 +294,8 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 
   #dropColdest(count: number): void {
-    const ordered = [...this.#buckets].sort((a, b) =>
-      a[1].count - b[1].count || a[1].resetAt - b[1].resetAt
+    const ordered = [...this.#buckets].sort(
+      (a, b) => a[1].count - b[1].count || a[1].resetAt - b[1].resetAt,
     );
     for (const [key] of ordered.slice(0, count)) this.#buckets.delete(key);
   }

@@ -467,8 +467,8 @@ export class JwksTokenReader<
     this.#cacheMaxAgeMs = options.cacheMaxAgeMs ?? 600_000;
     this.#minFetchIntervalMs = options.minFetchIntervalMs ?? 30_000;
     this.#fetchTimeoutMs = options.fetchTimeoutMs ?? 5_000;
-    this.#Scope = options.Scope ??
-      (BasicScope as unknown as ScopeConstructor<S>);
+    this.#Scope =
+      options.Scope ?? (BasicScope as unknown as ScopeConstructor<S>);
     this.#getClient = options.getClient;
     this.#getUser = options.getUser;
     this.#customFetch = options.fetch;
@@ -532,7 +532,7 @@ export class JwksTokenReader<
       accessTokenExpiresAt: new Date(claims.exp * 1000),
       client,
       user,
-      scope: scopeText ? new this.#Scope(scopeText) as S : undefined,
+      scope: scopeText ? (new this.#Scope(scopeText) as S) : undefined,
       claims: claims as Record<string, unknown>,
     };
   }
@@ -555,8 +555,8 @@ export class JwksTokenReader<
     const audience = Array.isArray(claims.aud)
       ? claims.aud
       : typeof claims.aud === "string"
-      ? [claims.aud]
-      : [];
+        ? [claims.aud]
+        : [];
     if (!audience.some((value) => this.#audience.includes(value))) return false;
 
     const now = Math.floor(Date.now() / 1000);
@@ -673,7 +673,7 @@ export class JwksTokenReader<
   }
 
   async #load(): Promise<void> {
-    const jwksUri = this.#jwksUri ?? await this.#discoverJwksUri();
+    const jwksUri = this.#jwksUri ?? (await this.#discoverJwksUri());
     const body = await this.#fetchJson(jwksUri, "jwks");
     if (!isRecord(body) || !Array.isArray(body.keys)) {
       throw new ServerError("jwks response has no `keys` array");
@@ -729,7 +729,7 @@ export class JwksTokenReader<
       let response: Response;
       try {
         response = await fetchImpl(url, {
-          headers: { "Accept": "application/json" },
+          headers: { Accept: "application/json" },
           signal: packageDeadlineSignal(controller.signal),
         });
       } catch (cause) {
@@ -741,11 +741,11 @@ export class JwksTokenReader<
         await response.body?.cancel();
         throw response.status >= 500
           ? new TemporarilyUnavailableError(
-            `${label} request failed (HTTP ${response.status})`,
-          )
+              `${label} request failed (HTTP ${response.status})`,
+            )
           : new ServerError(
-            `${label} request failed (HTTP ${response.status})`,
-          );
+              `${label} request failed (HTTP ${response.status})`,
+            );
       }
       try {
         return await response.json();

@@ -133,15 +133,18 @@ export class BffClient extends OAuth2ClientBase {
       session: endpoints.session ?? "/auth/session",
     };
     this.#authorizePath = options.authorizePath;
-    this.#csrfHeader = options.csrfHeader === false ? {} : {
-      [options.csrfHeader?.name ?? "x-csrf"]: options.csrfHeader?.value ?? "1",
-    };
+    this.#csrfHeader =
+      options.csrfHeader === false
+        ? {}
+        : {
+            [options.csrfHeader?.name ?? "x-csrf"]:
+              options.csrfHeader?.value ?? "1",
+          };
   }
 
   #url(path: string): string {
-    const origin = typeof location !== "undefined"
-      ? location.origin
-      : "http://localhost";
+    const origin =
+      typeof location !== "undefined" ? location.origin : "http://localhost";
     return new URL(`${this.#endpoints.baseUrl}${path}`, origin).toString();
   }
 

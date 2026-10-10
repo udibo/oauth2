@@ -1,10 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../_test_assert.ts";
+import { serve } from "../_test_server.ts";
 import type { BasicScope } from "../models/scope.ts";
 import {
   basicAuthHeader,
@@ -156,36 +152,35 @@ async function withHttpServer(
   fn: (origin: string) => Promise<void>,
 ): Promise<void> {
   const routes = new Map(
-    [...clientAuthenticatedEndpoints, endSessionEndpoint].map((
-      endpoint,
-    ) => [endpoint.path, endpoint.handle]),
+    [...clientAuthenticatedEndpoints, endSessionEndpoint].map((endpoint) => [
+      endpoint.path,
+      endpoint.handle,
+    ]),
   );
-  const http = Deno.serve(
-    { hostname: "127.0.0.1", port: 0, onListen: () => {} },
-    (request) => {
-      const handle = routes.get(new URL(request.url).pathname);
-      return handle
-        ? handle(server, request)
-        : new Response(null, { status: 404 });
-    },
-  );
+  const http = await serve((request) => {
+    const handle = routes.get(new URL(request.url).pathname);
+    return handle
+      ? handle(server, request)
+      : new Response(null, { status: 404 });
+  });
   try {
-    await fn(`http://127.0.0.1:${http.addr.port}`);
+    await fn(http.origin);
   } finally {
     await http.shutdown();
   }
 }
 
 async function assertTooLarge(response: Response): Promise<void> {
-  assertStrictEquals(response.status, 413);
+  expect(response.status).toBe(413);
   const body = await response.json();
-  assertStrictEquals(body.error, "invalid_request");
+  expect(body.error).toBe("invalid_request");
 }
 
 describe("AuthorizationServer request body limit", () => {
-  for (
-    const endpoint of [...clientAuthenticatedEndpoints, endSessionEndpoint]
-  ) {
+  for (const endpoint of [
+    ...clientAuthenticatedEndpoints,
+    endSessionEndpoint,
+  ]) {
     describe(endpoint.name, () => {
       it("accepts a body of exactly the default 64 KiB limit", async () => {
         const { server, calls } = await createServer();
@@ -201,7 +196,7 @@ describe("AuthorizationServer request body limit", () => {
             response.status < 400,
             `expected success, got ${response.status}`,
           );
-          assertStrictEquals(calls.resolve, 1);
+          expect(calls.resolve).toBe(1);
         });
       });
 
@@ -215,8 +210,8 @@ describe("AuthorizationServer request body limit", () => {
             body: paddedForm(endpoint.fields, DEFAULT_LIMIT + 1),
           });
           await assertTooLarge(response);
-          assertStrictEquals(calls.resolve, 0);
-          assertStrictEquals(calls.endSession, 0);
+          expect(calls.resolve).toBe(0);
+          expect(calls.endSession).toBe(0);
         });
       });
 
@@ -231,10 +226,11 @@ describe("AuthorizationServer request body limit", () => {
             redirect: "manual",
             headers: formHeaders(),
             body: stream,
-          });
+            duplex: "half",
+          } as RequestInit);
           await assertTooLarge(response);
-          assertStrictEquals(calls.resolve, 0);
-          assertStrictEquals(calls.endSession, 0);
+          expect(calls.resolve).toBe(0);
+          expect(calls.endSession).toBe(0);
         });
       });
 
@@ -249,7 +245,8 @@ describe("AuthorizationServer request body limit", () => {
             method: "POST",
             headers: { ...formHeaders(), "content-length": "64" },
             body: stream,
-          }),
+            duplex: "half",
+          } as RequestInit),
         );
         await assertTooLarge(response);
         assert(
@@ -257,8 +254,8 @@ describe("AuthorizationServer request body limit", () => {
           `read ${state.pulled} bytes past a ${DEFAULT_LIMIT}-byte limit`,
         );
         assert(state.cancelled, "the request body stream was not cancelled");
-        assertStrictEquals(calls.resolve, 0);
-        assertStrictEquals(calls.endSession, 0);
+        expect(calls.resolve).toBe(0);
+        expect(calls.endSession).toBe(0);
       });
 
       it("refuses a body whose Content-Length declares more than the limit without reading it", async () => {
@@ -272,11 +269,12 @@ describe("AuthorizationServer request body limit", () => {
             method: "POST",
             headers: { ...formHeaders(), "content-length": `${1024 * 1024}` },
             body: stream,
-          }),
+            duplex: "half",
+          } as RequestInit),
         );
         await assertTooLarge(response);
-        assertStrictEquals(state.pulled, 0);
-        assertStrictEquals(calls.resolve, 0);
+        expect(state.pulled).toBe(0);
+        expect(calls.resolve).toBe(0);
       });
 
       it("answers a body stream that errors mid-read with 400 invalid_request", async () => {
@@ -293,12 +291,13 @@ describe("AuthorizationServer request body limit", () => {
             method: "POST",
             headers: formHeaders(),
             body: stream,
-          }),
+            duplex: "half",
+          } as RequestInit),
         );
-        assertStrictEquals(response.status, 400);
+        expect(response.status).toBe(400);
         const body = await response.json();
-        assertStrictEquals(body.error, "invalid_request");
-        assertStrictEquals(calls.endSession, 0);
+        expect(body.error).toBe("invalid_request");
+        expect(calls.endSession).toBe(0);
       });
 
       it("applies a configured maxBodyBytes", async () => {
@@ -338,12 +337,12 @@ describe("AuthorizationServer request body limit", () => {
       }),
     );
     await assertTooLarge(response);
-    assertStrictEquals(response.headers.get("cache-control"), "no-store");
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   it("rejects a maxBodyBytes that is not a positive integer", async () => {
     for (const maxBodyBytes of [0, -1, 1.5, Number.NaN, Infinity]) {
-      await assertRejects(
+      await rejection(
         () => createServer(maxBodyBytes),
         RangeError,
         "maxBodyBytes",
@@ -356,7 +355,7 @@ describe("AuthorizationServer request body limit", () => {
     const response = await server.handleEndSessionRequest(
       new Request("http://localhost/end_session?client_id=client-1"),
     );
-    assertEquals(response.status, 302);
-    assertStrictEquals(calls.endSession, 1);
+    expect(response.status).toStrictEqual(302);
+    expect(calls.endSession).toBe(1);
   });
 });

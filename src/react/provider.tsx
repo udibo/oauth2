@@ -187,15 +187,16 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     };
   }, [client, state.isAuthenticated, state.sessionExpiresIn, renewCount]);
 
-  const value = useMemo<OAuth2ContextValue>(() => ({
-    client,
-    ...state,
-  }), [client, state]);
+  const value = useMemo<OAuth2ContextValue>(
+    () => ({
+      client,
+      ...state,
+    }),
+    [client, state],
+  );
 
   return (
-    <OAuth2Context.Provider value={value}>
-      {children}
-    </OAuth2Context.Provider>
+    <OAuth2Context.Provider value={value}>{children}</OAuth2Context.Provider>
   );
 }
 

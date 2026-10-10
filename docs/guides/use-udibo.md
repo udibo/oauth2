@@ -54,7 +54,7 @@ declare const sessions: SessionStore;
 declare const resourceServer: HonoResourceServer<ClientInterface, unknown>;
 
 function required(name: string): string {
-  const value = Deno.env.get(name);
+  const value = process.env[name];
   if (!value) throw new Error(`Missing ${name}`);
   return value;
 }
@@ -125,8 +125,8 @@ request work.
 
 React apps can use `OAuth2Provider`, `useOAuth2`, and `RequireAuth` from
 `@udibo/oauth2/react`; the
-[external-auth Juniper example](../../examples/juniper/app-with-external-auth/README.md)
-shows that wiring. A client-side guard controls rendering; your API still
+[React Router template](../../templates/react-router/README.md) shows that
+wiring. A client-side guard controls rendering; your API still
 requires server-side authorization.
 
 The BFF's local logout ends the application session and attempts upstream token

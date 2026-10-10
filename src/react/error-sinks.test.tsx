@@ -1,8 +1,4 @@
-// deno-lint-ignore-file no-window require-await -- jsdom provides `window`; `act(async …)` needs the async signature
-import { cleanupAfterEach } from "./_test_setup.ts";
-
-import { assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { act, type ReactNode } from "react";
 
@@ -23,8 +19,6 @@ import { base64urlEncode } from "../utils/crypto.ts";
 import { OAuth2Callback } from "./callback.tsx";
 import { OAuth2Provider } from "./provider.tsx";
 import { useOAuth2 } from "./use-oauth2.ts";
-
-cleanupAfterEach();
 
 const AUTHORIZE_URL = "https://auth.example/authorize";
 const TOKEN_URL = "https://auth.example/token";
@@ -86,13 +80,13 @@ describe("OAuth2Provider error state", () => {
       );
     });
 
-    assertStrictEquals(screen.getByTestId("code").textContent, "server_error");
+    expect(screen.getByTestId("code").textContent).toBe("server_error");
   });
 
   it("surfaces an undecodable id_token as an OAuth2Error", async () => {
-    const idToken = `header.${
-      base64urlEncode(new TextEncoder().encode("not json"))
-    }.sig`;
+    const idToken = `header.${base64urlEncode(
+      new TextEncoder().encode("not json"),
+    )}.sig`;
     const client = directClientWithIdToken(idToken);
 
     await act(async () => {
@@ -107,7 +101,7 @@ describe("OAuth2Provider error state", () => {
       await client.getSession();
     });
 
-    assertStrictEquals(screen.getByTestId("code").textContent, "server_error");
+    expect(screen.getByTestId("code").textContent).toBe("server_error");
   });
 });
 
@@ -133,10 +127,7 @@ describe("OAuth2Callback error state", () => {
         );
       });
 
-      assertStrictEquals(
-        screen.getByTestId("code").textContent,
-        "server_error",
-      );
+      expect(screen.getByTestId("code").textContent).toBe("server_error");
     } finally {
       window.history.replaceState(null, "", originalHref);
     }
@@ -158,6 +149,6 @@ describe("OAuth2Callback error state", () => {
       );
     });
 
-    assertStrictEquals(screen.getByTestId("code").textContent, "server_error");
+    expect(screen.getByTestId("code").textContent).toBe("server_error");
   });
 });

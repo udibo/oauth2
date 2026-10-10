@@ -349,7 +349,7 @@ export class EmailOtpService {
     }
     if (timingSafeEqualString(record.codeHash, submittedHash)) {
       return {
-        status: await this.#store.consume(record.id) ? "success" : "invalid",
+        status: (await this.#store.consume(record.id)) ? "success" : "invalid",
       };
     }
     if (attempts === record.maxAttempts) {
@@ -381,7 +381,9 @@ export class MemoryOtpStore implements OtpStore {
     for (const id of this.#active) {
       const record = this.#records.get(id);
       if (
-        record && record.email === email && record.purpose === purpose &&
+        record &&
+        record.email === email &&
+        record.purpose === purpose &&
         (!latest || record.createdAt >= latest.createdAt)
       ) {
         latest = record;

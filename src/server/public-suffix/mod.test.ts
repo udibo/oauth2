@@ -1,6 +1,4 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import { isPublicSuffix, publicSuffixListInfo } from "./mod.ts";
 import { PUBLIC_SUFFIX_RULES } from "./rules.ts";
 
@@ -9,41 +7,39 @@ const RULE_SHAPE =
 
 function assertPublicSuffixes(domains: string[], expected: boolean): void {
   for (const domain of domains) {
-    assertStrictEquals(isPublicSuffix(domain), expected, domain);
+    expect(isPublicSuffix(domain), domain).toBe(expected);
   }
 }
 
 describe("publicSuffixListInfo", () => {
   it("records where the snapshot came from and when", () => {
-    assertStrictEquals(
-      publicSuffixListInfo.source,
+    expect(publicSuffixListInfo.source).toBe(
       "https://publicsuffix.org/list/public_suffix_list.dat",
     );
-    assertEquals(
+    expect(
       /^\d{4}-\d{2}-\d{2}$/.test(publicSuffixListInfo.retrieved),
+    ).toStrictEqual(true);
+    expect(/^[0-9a-f]{64}$/.test(publicSuffixListInfo.sha256)).toStrictEqual(
       true,
     );
-    assertEquals(/^[0-9a-f]{64}$/.test(publicSuffixListInfo.sha256), true);
-    assertEquals(publicSuffixListInfo.ruleCount > 5000, true);
+    expect(publicSuffixListInfo.ruleCount > 5000).toStrictEqual(true);
   });
 
   it("counts the rules it actually carries, so a partial regeneration fails", () => {
-    assertStrictEquals(
-      PUBLIC_SUFFIX_RULES.split("\n").length,
+    expect(PUBLIC_SUFFIX_RULES.split("\n").length).toBe(
       publicSuffixListInfo.ruleCount,
     );
   });
 
   it("carries every rule exactly once", () => {
     const rules = PUBLIC_SUFFIX_RULES.split("\n");
-    assertStrictEquals(new Set(rules).size, rules.length);
+    expect(new Set(rules).size).toBe(rules.length);
   });
 
   it("carries only lowercase punycode rules, so a fetched error page fails", () => {
-    assertEquals(
+    expect(
       PUBLIC_SUFFIX_RULES.split("\n").filter((rule) => !RULE_SHAPE.test(rule)),
-      [],
-    );
+    ).toStrictEqual([]);
   });
 });
 
@@ -57,16 +53,19 @@ describe("isPublicSuffix", () => {
   });
 
   it("classifies private-section platform suffixes", () => {
-    assertPublicSuffixes([
-      "deno.net",
-      "vercel.app",
-      "pages.dev",
-      "github.io",
-      "s3.amazonaws.com",
-      "s3.us-east-1.amazonaws.com",
-      "blob.core.windows.net",
-      "eu-west-1.elasticbeanstalk.com",
-    ], true);
+    assertPublicSuffixes(
+      [
+        "deno.net",
+        "vercel.app",
+        "pages.dev",
+        "github.io",
+        "s3.amazonaws.com",
+        "s3.us-east-1.amazonaws.com",
+        "blob.core.windows.net",
+        "eu-west-1.elasticbeanstalk.com",
+      ],
+      true,
+    );
   });
 
   it("treats one tenant's slice of a platform as registrable", () => {
@@ -86,8 +85,8 @@ describe("isPublicSuffix", () => {
   });
 
   it("treats an unlisted top-level domain as a public suffix", () => {
-    assertStrictEquals(isPublicSuffix("notarealtldanywhere"), true);
-    assertStrictEquals(isPublicSuffix("example.notarealtldanywhere"), false);
+    expect(isPublicSuffix("notarealtldanywhere")).toBe(true);
+    expect(isPublicSuffix("example.notarealtldanywhere")).toBe(false);
   });
 
   it("normalizes case, a trailing dot, and Unicode to punycode", () => {

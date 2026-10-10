@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "pnpm-lock.yaml",
+    "node_modules",
+    "templates/*/build",
+    "templates/*/.react-router",
+    "docs",
+    "llms.txt",
+    "llms-full.txt",
+    "*.md",
+    ".releaserc.json",
+    ".github",
+    "scripts/doc-check"
+  ]
+}

@@ -1,30 +1,28 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import { classifyIdentifier, createIdentifierResolver } from "./identifier.ts";
 
 describe("classifyIdentifier", () => {
   it("classifies emails", () => {
-    assertEquals(classifyIdentifier("alice@example.com"), "email");
-    assertEquals(classifyIdentifier("  a@b.co  "), "email");
+    expect(classifyIdentifier("alice@example.com")).toStrictEqual("email");
+    expect(classifyIdentifier("  a@b.co  ")).toStrictEqual("email");
   });
 
   it("classifies phone numbers", () => {
-    assertEquals(classifyIdentifier("+1 (555) 123-4567"), "phone");
-    assertEquals(classifyIdentifier("5551234567"), "phone");
+    expect(classifyIdentifier("+1 (555) 123-4567")).toStrictEqual("phone");
+    expect(classifyIdentifier("5551234567")).toStrictEqual("phone");
   });
 
   it("classifies everything else as a username", () => {
-    assertEquals(classifyIdentifier("alice"), "username");
-    assertEquals(classifyIdentifier("  bob_99 "), "username");
-    assertEquals(classifyIdentifier("12345"), "username");
+    expect(classifyIdentifier("alice")).toStrictEqual("username");
+    expect(classifyIdentifier("  bob_99 ")).toStrictEqual("username");
+    expect(classifyIdentifier("12345")).toStrictEqual("username");
   });
 });
 
 describe("createIdentifierResolver", () => {
   const users = {
     email: { "alice@example.com": { id: "u-email" } },
-    username: { "alice": { id: "u-name" } },
+    username: { alice: { id: "u-name" } },
     phone: { "5551234567": { id: "u-phone" } },
   } as const;
 
@@ -35,23 +33,25 @@ describe("createIdentifierResolver", () => {
   });
 
   it("dispatches to the matching lookup", async () => {
-    assertEquals((await resolve("alice@example.com"))?.id, "u-email");
-    assertEquals((await resolve("alice"))?.id, "u-name");
-    assertEquals((await resolve("5551234567"))?.id, "u-phone");
+    expect((await resolve("alice@example.com"))?.id).toStrictEqual("u-email");
+    expect((await resolve("alice"))?.id).toStrictEqual("u-name");
+    expect((await resolve("5551234567"))?.id).toStrictEqual("u-phone");
   });
 
   it("trims before dispatching", async () => {
-    assertEquals((await resolve("  alice@example.com "))?.id, "u-email");
+    expect((await resolve("  alice@example.com "))?.id).toStrictEqual(
+      "u-email",
+    );
   });
 
   it("returns undefined when the kind has no configured lookup", async () => {
     const emailOnly = createIdentifierResolver<{ id: string }>({
       email: () => Promise.resolve({ id: "x" }),
     });
-    assertEquals(await emailOnly("alice"), undefined);
+    expect(await emailOnly("alice")).toStrictEqual(undefined);
   });
 
   it("returns undefined when the user is not found", async () => {
-    assertEquals(await resolve("nobody@example.com"), undefined);
+    expect(await resolve("nobody@example.com")).toStrictEqual(undefined);
   });
 });

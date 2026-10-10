@@ -146,6 +146,6 @@ attributes when replacing markup. The
 [component API](https://jsr.io/@udibo/oauth2/doc/react/components) lists the
 slots and props.
 
-See the [Juniper](../../templates/juniper/README.md) and
-[React Router](../../templates/react-router/README.md) templates for complete
-apps, and [testing](testing.md) for mock providers and BFF session fixtures.
+See the [React Router template](../../templates/react-router/README.md) for a
+complete app, and [testing](testing.md) for mock providers and BFF session
+fixtures.

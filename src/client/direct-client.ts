@@ -11,8 +11,6 @@
  * @module
  */
 
-import { delay } from "@std/async/delay";
-
 import {
   AccessDeniedError,
   InvalidGrantError,
@@ -32,6 +30,7 @@ import {
 } from "../utils/pkce.ts";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
 import { base64urlDecode } from "../utils/crypto.ts";
+import { delay } from "../utils/_delay.ts";
 import { sanitizeProviderText } from "../utils/text.ts";
 
 import {
@@ -303,7 +302,7 @@ const REFRESH_SKEW_MS = 30_000;
  *
  * const client = new DirectClient({
  *   clientId: "worker",
- *   clientSecret: Deno.env.get("CLIENT_SECRET")!,
+ *   clientSecret: process.env.CLIENT_SECRET!,
  *   endpoints: { token: "https://auth.example.com/token" },
  * });
  *
@@ -358,10 +357,11 @@ export class DirectClient extends OAuth2ClientBase {
     this.#discoveryCache = options.discoveryCache;
     this.#endpoints = { ...options.endpoints };
     this.#tokenStorage = options.tokenStorage ?? new MemoryTokenStorage();
-    this.#refreshTokenStorage = options.refreshTokenStorage ??
-      new MemoryRefreshTokenStorage();
+    this.#refreshTokenStorage =
+      options.refreshTokenStorage ?? new MemoryRefreshTokenStorage();
     this.#authRequestTtlMs = options.authRequestTtlMs ?? 10 * 60 * 1000;
-    this.#authRequestStorage = options.authRequestStorage ??
+    this.#authRequestStorage =
+      options.authRequestStorage ??
       defaultAuthRequestStorage(this.#authRequestTtlMs);
   }
 
@@ -434,17 +434,13 @@ export class DirectClient extends OAuth2ClientBase {
     const cache = this.#discoveryCache;
     const promise = (async () => {
       if (cache) {
-        const entry = await cache.resolve(
-          issuer,
-          () => this.#fetchMetadata(issuer),
+        const entry = await cache.resolve(issuer, () =>
+          this.#fetchMetadata(issuer),
         );
         return this.#adoptMetadata(entry.metadata, entry.expiresAt);
       }
       const meta = await this.#fetchMetadata(issuer);
-      return this.#adoptMetadata(
-        meta,
-        Date.now() + DEFAULT_DISCOVERY_TTL_MS,
-      );
+      return this.#adoptMetadata(meta, Date.now() + DEFAULT_DISCOVERY_TTL_MS);
     })();
     this.#discoveryPromise = promise;
     const clear = () => {
@@ -598,9 +594,7 @@ export class DirectClient extends OAuth2ClientBase {
    * const { url, state } = await client.login({ returnTo: "/dashboard" });
    * ```
    */
-  async login(
-    options: LoginOptions = {},
-  ): Promise<AuthorizationRedirect> {
+  async login(options: LoginOptions = {}): Promise<AuthorizationRedirect> {
     const baseAuthEndpoint = await this.#requireEndpoint("authorization");
     const authEndpoint = options.origin
       ? withOrigin(baseAuthEndpoint, options.origin)
@@ -612,8 +606,8 @@ export class DirectClient extends OAuth2ClientBase {
     const codeChallenge = await challengeMethods.S256(codeVerifier);
     const scope = options.scope ?? this.#scope;
 
-    const authRequestStorage = options.authRequestStorage ??
-      this.#authRequestStorage;
+    const authRequestStorage =
+      options.authRequestStorage ?? this.#authRequestStorage;
     await authRequestStorage.set(state, {
       codeVerifier,
       returnTo: options.returnTo,
@@ -756,8 +750,8 @@ export class DirectClient extends OAuth2ClientBase {
     state: string,
     options: ExchangeOptions = {},
   ): Promise<ExchangeResult> {
-    const authRequestStorage = options.authRequestStorage ??
-      this.#authRequestStorage;
+    const authRequestStorage =
+      options.authRequestStorage ?? this.#authRequestStorage;
     const record = await claimAuthRequest(authRequestStorage, state);
     if (!record) throw new InvalidGrantError("unknown state parameter");
     if (
@@ -900,7 +894,8 @@ export class DirectClient extends OAuth2ClientBase {
       this.#refreshPromise &&
       (this.#refreshSnapshot?.version === undefined ||
         this.#refreshSnapshot.version === this.#sessionVersion)
-    ) return this.#refreshPromise;
+    )
+      return this.#refreshPromise;
     const snapshot: { version?: number } = {};
     const promise = this.#doRefresh(reportTransient, snapshot);
     this.#refreshPromise = promise;
@@ -917,7 +912,7 @@ export class DirectClient extends OAuth2ClientBase {
     snapshot: { version?: number },
   ): Promise<string> {
     const { version, refreshToken } = await this.#mutateSession(async () => {
-      const version = snapshot.version = this.#sessionVersion;
+      const version = (snapshot.version = this.#sessionVersion);
       return {
         version,
         refreshToken: await this.#readRefreshToken(reportTransient),
@@ -1301,7 +1296,10 @@ export class DirectClient extends OAuth2ClientBase {
     const refreshToken = await this.#readRefreshToken(false).catch(() => null);
     const idToken = await Promise.resolve()
       .then(() => this.#tokenStorage.get())
-      .then((tokens) => tokens?.idToken, () => undefined);
+      .then(
+        (tokens) => tokens?.idToken,
+        () => undefined,
+      );
     if (version !== this.#sessionVersion) return {};
     await this.#clearSession();
     this.emit({ type: "logged_out", reason: "user" });
@@ -1539,7 +1537,10 @@ export class DirectClient extends OAuth2ClientBase {
 
   #mutateSession<T>(mutate: () => Promise<T>): Promise<T> {
     const operation = this.#sessionWrites.then(mutate);
-    this.#sessionWrites = operation.then(() => undefined, () => undefined);
+    this.#sessionWrites = operation.then(
+      () => undefined,
+      () => undefined,
+    );
     return operation;
   }
 
@@ -1603,8 +1604,8 @@ function toSearchParams(
 }
 
 function defaultAuthRequestStorage(ttlMs: number): AuthRequestStorage {
-  const inBrowserDocument = typeof document !== "undefined" &&
-    typeof sessionStorage !== "undefined";
+  const inBrowserDocument =
+    typeof document !== "undefined" && typeof sessionStorage !== "undefined";
   return inBrowserDocument
     ? new SessionStorageAuthRequestStorage({ ttlMs })
     : new MemoryAuthRequestStorage({ ttlMs });

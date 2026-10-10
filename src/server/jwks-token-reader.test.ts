@@ -1,24 +1,13 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, describe, expect, it } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
+import { rejection, thrown } from "../_test_assert.ts";
 import {
   InvalidTokenError,
   ServerError,
   TemporarilyUnavailableError,
 } from "../errors.ts";
 import { base64urlEncode } from "../utils/crypto.ts";
-import {
-  generateTestCertificate,
-  runTrustingCertificate,
-  serveTls,
-} from "../utils/_test_tls.ts";
+import { hangUntilAborted, stubDenoRuntime } from "../_test_deno-runtime.ts";
 import {
   JwksTokenReader,
   type JwksTokenReaderOptions,
@@ -80,11 +69,10 @@ const signParams: Record<
 };
 
 async function createKey(kid: string, alg = "ES256"): Promise<TestKey> {
-  const pair = await crypto.subtle.generateKey(
-    generateParams[alg],
-    true,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey(generateParams[alg], true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
   const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
   return { kid, alg, privateKey: pair.privateKey, jwk: { ...jwk, kid, alg } };
 }
@@ -115,9 +103,12 @@ async function signToken(
   claims: Record<string, unknown>,
   header: Record<string, unknown> = {},
 ): Promise<string> {
-  const signingInput = `${
-    encodeSegment({ alg: key.alg, typ: "at+jwt", kid: key.kid, ...header })
-  }.${encodeSegment(claims)}`;
+  const signingInput = `${encodeSegment({
+    alg: key.alg,
+    typ: "at+jwt",
+    kid: key.kid,
+    ...header,
+  })}.${encodeSegment(claims)}`;
   const signature = await crypto.subtle.sign(
     signParams[key.alg],
     key.privateKey,
@@ -126,25 +117,28 @@ async function signToken(
   return `${signingInput}.${base64urlEncode(new Uint8Array(signature))}`;
 }
 
-function mockFetch(
-  handler: (url: string) => Response | Promise<Response>,
-): { fetch: typeof fetch; calls: string[] } {
+function mockFetch(handler: (url: string) => Response | Promise<Response>): {
+  fetch: typeof fetch;
+  calls: string[];
+} {
   const calls: string[] = [];
   const fetchImpl: typeof fetch = (input) => {
-    const url = typeof input === "string"
-      ? input
-      : input instanceof URL
-      ? input.toString()
-      : input.url;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
     calls.push(url);
     return Promise.resolve(handler(url));
   };
   return { fetch: fetchImpl, calls };
 }
 
-function jwksFetch(
-  state: { keys: PublishedJwk[]; fail?: () => Response },
-): { fetch: typeof fetch; calls: string[] } {
+function jwksFetch(state: { keys: PublishedJwk[]; fail?: () => Response }): {
+  fetch: typeof fetch;
+  calls: string[];
+} {
   return mockFetch((url) => {
     if (url !== JWKS_URI) return new Response("not found", { status: 404 });
     if (state.fail) return state.fail();
@@ -155,9 +149,8 @@ function jwksFetch(
 function neverRespondingFetch(): typeof fetch {
   return (_input, init) =>
     new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener(
-        "abort",
-        () => reject(new DOMException("request aborted", "AbortError")),
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("request aborted", "AbortError")),
       );
     });
 }
@@ -171,7 +164,7 @@ function createReader(
     audience: AUDIENCE,
     jwksUri: JWKS_URI,
     getClient: (claims) => ({ id: String(claims.client_id) }),
-    getUser: (claims) => claims.sub ? { id: claims.sub } : undefined,
+    getUser: (claims) => (claims.sub ? { id: claims.sub } : undefined),
     fetch: fetchImpl,
     ...options,
   });
@@ -187,10 +180,10 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(accessToken);
 
-      assertStrictEquals(token?.accessToken, accessToken);
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(token?.user?.id, "user-1");
-      assertStrictEquals(token?.scope?.toString(), "read write");
+      expect(token?.accessToken).toBe(accessToken);
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user?.id).toBe("user-1");
+      expect(token?.scope?.toString()).toBe("read write");
       assert(token?.accessTokenExpiresAt instanceof Date);
     });
 
@@ -205,9 +198,9 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(accessToken);
 
-      assertEquals(token?.claims?.permissions, ["posts:write"]);
-      assertEquals(token?.claims?.org_id, "org-1");
-      assertEquals(token?.claims?.iss, ISSUER);
+      expect(token?.claims?.permissions).toStrictEqual(["posts:write"]);
+      expect(token?.claims?.org_id).toStrictEqual("org-1");
+      expect(token?.claims?.iss).toStrictEqual(ISSUER);
     });
 
     it("accepts an RS256 token signed by a published RSA key", async () => {
@@ -217,7 +210,7 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
+      expect(token?.client.id).toBe("my-client");
     });
 
     it("accepts a PS256 token signed by a published RSA key", async () => {
@@ -227,7 +220,7 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
+      expect(token?.client.id).toBe("my-client");
     });
 
     it("accepts an RSA key published without an alg", async () => {
@@ -238,7 +231,7 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
+      expect(token?.client.id).toBe("my-client");
     });
 
     it("accepts a token whose aud array includes the configured audience", async () => {
@@ -250,10 +243,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ aud: ["https://other.example.com", AUDIENCE] }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("accepts a token matching any of several configured audiences", async () => {
@@ -263,10 +253,9 @@ describe("JwksTokenReader", () => {
         audience: ["https://other.example.com", AUDIENCE],
       });
 
-      assertStrictEquals(
+      expect(
         (await reader.getToken(await signToken(key, claimsFor())))?.client.id,
-        "my-client",
-      );
+      ).toBe("my-client");
     });
 
     it("accepts a token without a kid by trying every compatible key", async () => {
@@ -278,10 +267,7 @@ describe("JwksTokenReader", () => {
         kid: undefined,
       });
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("accepts the application/at+jwt long form of the typ header", async () => {
@@ -292,10 +278,7 @@ describe("JwksTokenReader", () => {
         typ: "application/at+jwt",
       });
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("accepts a plain JWT typ when configured to", async () => {
@@ -304,10 +287,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch, { types: ["at+jwt", "jwt"] });
       const accessToken = await signToken(key, claimsFor(), { typ: "JWT" });
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("skips the typ check when types is empty", async () => {
@@ -316,10 +296,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch, { types: [] });
       const accessToken = await signToken(key, claimsFor(), { typ: undefined });
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("reads scope from the scp array claim", async () => {
@@ -331,8 +308,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ scope: undefined, scp: ["read", "write"] }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.scope?.toString(),
+      expect((await reader.getToken(accessToken))?.scope?.toString()).toBe(
         "read write",
       );
     });
@@ -347,8 +323,8 @@ describe("JwksTokenReader", () => {
       );
       const token = await reader.getToken(accessToken);
 
-      assertStrictEquals(token?.scope, undefined);
-      assertStrictEquals(token?.user, undefined);
+      expect(token?.scope).toBe(undefined);
+      expect(token?.user).toBe(undefined);
     });
 
     it("awaits async mappers", async () => {
@@ -362,7 +338,7 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.user?.id, "db:user-1");
+      expect(token?.user?.id).toBe("db:user-1");
     });
   });
 
@@ -380,9 +356,9 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls[0], OAUTH_METADATA_URL);
-      assertStrictEquals(calls[1], JWKS_URI);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls[0]).toBe(OAUTH_METADATA_URL);
+      expect(calls[1]).toBe(JWKS_URI);
     });
 
     it("falls back to openid-configuration", async () => {
@@ -398,9 +374,9 @@ describe("JwksTokenReader", () => {
 
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls[0], OAUTH_METADATA_URL);
-      assertStrictEquals(calls[1], OIDC_METADATA_URL);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls[0]).toBe(OAUTH_METADATA_URL);
+      expect(calls[1]).toBe(OIDC_METADATA_URL);
     });
 
     it("throws server_error when the metadata has no jwks_uri", async () => {
@@ -409,7 +385,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch, { jwksUri: undefined });
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
+      await rejection(() => reader.getToken(accessToken), ServerError);
     });
 
     it("reuses a discovered jwks_uri across refreshes", async () => {
@@ -432,10 +408,7 @@ describe("JwksTokenReader", () => {
       state.keys = [keyB.jwk];
       await reader.getToken(await signToken(keyB, claimsFor()));
 
-      assertStrictEquals(
-        calls.filter((url) => url === OAUTH_METADATA_URL).length,
-        1,
-      );
+      expect(calls.filter((url) => url === OAUTH_METADATA_URL).length).toBe(1);
     });
   });
 
@@ -448,7 +421,7 @@ describe("JwksTokenReader", () => {
       await reader.getToken(await signToken(key, claimsFor()));
       await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
     });
 
     it("refetches on every read when cacheMaxAgeMs keeps the cache stale", async () => {
@@ -462,7 +435,7 @@ describe("JwksTokenReader", () => {
       await reader.getToken(await signToken(key, claimsFor()));
       await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(calls.length, 2);
+      expect(calls.length).toBe(2);
     });
 
     it("refetches once when a token names an unknown kid", async () => {
@@ -476,8 +449,8 @@ describe("JwksTokenReader", () => {
       state.keys = [keyA.jwk, keyB.jwk];
       const token = await reader.getToken(await signToken(keyB, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls.length, 2);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls.length).toBe(2);
     });
 
     it("dedupes concurrent refetches for the same unknown kid", async () => {
@@ -494,9 +467,9 @@ describe("JwksTokenReader", () => {
         Array.from({ length: 8 }, () => reader.getToken(accessToken)),
       );
 
-      assertStrictEquals(calls.length, 2);
+      expect(calls.length).toBe(2);
       for (const result of results) {
-        assertStrictEquals(result?.client.id, "my-client");
+        expect(result?.client.id).toBe("my-client");
       }
     });
 
@@ -510,7 +483,7 @@ describe("JwksTokenReader", () => {
         Array.from({ length: 8 }, () => reader.getToken(accessToken)),
       );
 
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
     });
 
     it("does not refetch for unknown kids within the minimum fetch interval", async () => {
@@ -524,13 +497,12 @@ describe("JwksTokenReader", () => {
       state.keys = [keyA.jwk, keyB.jwk];
       for (let attempt = 0; attempt < 20; attempt++) {
         const unknown = await createKey(`attacker-${attempt}`);
-        assertStrictEquals(
+        expect(
           await reader.getToken(await signToken(unknown, claimsFor())),
-          undefined,
-        );
+        ).toBe(undefined);
       }
 
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
     });
 
     it("keeps serving cached keys when a refresh fails", async () => {
@@ -548,8 +520,8 @@ describe("JwksTokenReader", () => {
       state.fail = () => new Response("boom", { status: 503 });
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls.length, 2);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls.length).toBe(2);
     });
   });
 
@@ -558,20 +530,18 @@ describe("JwksTokenReader", () => {
       const { fetch, calls } = jwksFetch({ keys: [] });
       const reader = createReader(fetch);
 
-      for (
-        const malformed of [
-          "",
-          "not-a-jwt",
-          "a.b",
-          "a.b.c.d",
-          "!!!.???.###",
-          `${btoa("[]")}.${btoa("{}")}.sig`,
-        ]
-      ) {
-        assertStrictEquals(await reader.getToken(malformed), undefined);
+      for (const malformed of [
+        "",
+        "not-a-jwt",
+        "a.b",
+        "a.b.c.d",
+        "!!!.???.###",
+        `${btoa("[]")}.${btoa("{}")}.sig`,
+      ]) {
+        expect(await reader.getToken(malformed)).toBe(undefined);
       }
 
-      assertStrictEquals(calls.length, 0);
+      expect(calls.length).toBe(0);
     });
 
     it("rejects a token signed by an unpublished key without refetching", async () => {
@@ -580,11 +550,10 @@ describe("JwksTokenReader", () => {
       const { fetch, calls } = jwksFetch({ keys: [published.jwk] });
       const reader = createReader(fetch, { minFetchIntervalMs: 0 });
 
-      assertStrictEquals(
+      expect(
         await reader.getToken(await signToken(attacker, claimsFor())),
-        undefined,
-      );
-      assertStrictEquals(calls.length, 1);
+      ).toBe(undefined);
+      expect(calls.length).toBe(1);
     });
 
     it("rejects a token whose kid is still unknown after a refetch", async () => {
@@ -593,11 +562,10 @@ describe("JwksTokenReader", () => {
       const { fetch, calls } = jwksFetch({ keys: [published.jwk] });
       const reader = createReader(fetch, { minFetchIntervalMs: 0 });
 
-      assertStrictEquals(
-        await reader.getToken(await signToken(rotated, claimsFor())),
+      expect(await reader.getToken(await signToken(rotated, claimsFor()))).toBe(
         undefined,
       );
-      assertStrictEquals(calls.length, 2);
+      expect(calls.length).toBe(2);
     });
 
     it("rejects a token from another issuer", async () => {
@@ -609,7 +577,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ iss: "https://evil.example.com" }),
       );
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token minted for another audience", async () => {
@@ -621,7 +589,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ aud: "https://other.example.com" }),
       );
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token with no audience", async () => {
@@ -630,7 +598,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor({ aud: undefined }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects an expired token", async () => {
@@ -640,7 +608,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ exp: now - 3600 }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token with no exp claim", async () => {
@@ -649,7 +617,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor({ exp: undefined }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token whose exp is not a number", async () => {
@@ -658,7 +626,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor({ exp: "later" }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token whose nbf is in the future", async () => {
@@ -668,7 +636,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ nbf: now + 3600 }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token with the wrong typ header", async () => {
@@ -677,18 +645,20 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor(), { typ: "JWT" });
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects an unsigned token claiming alg none", async () => {
       const key = await createKey("key-a");
       const { fetch } = jwksFetch({ keys: [key.jwk] });
       const reader = createReader(fetch);
-      const accessToken = `${
-        encodeSegment({ alg: "none", typ: "at+jwt", kid: key.kid })
-      }.${encodeSegment(claimsFor())}.`;
+      const accessToken = `${encodeSegment({
+        alg: "none",
+        typ: "at+jwt",
+        kid: key.kid,
+      })}.${encodeSegment(claimsFor())}.`;
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects an HS256 token even when the JWKS publishes a symmetric key", async () => {
@@ -700,28 +670,32 @@ describe("JwksTokenReader", () => {
         false,
         ["sign"],
       );
-      const signingInput = `${
-        encodeSegment({ alg: "HS256", typ: "at+jwt", kid: "key-hmac" })
-      }.${encodeSegment(claimsFor())}`;
+      const signingInput = `${encodeSegment({
+        alg: "HS256",
+        typ: "at+jwt",
+        kid: "key-hmac",
+      })}.${encodeSegment(claimsFor())}`;
       const signature = await crypto.subtle.sign(
         "HMAC",
         hmacKey,
         encoder.encode(signingInput),
       );
-      const accessToken = `${signingInput}.${
-        base64urlEncode(new Uint8Array(signature))
-      }`;
+      const accessToken = `${signingInput}.${base64urlEncode(
+        new Uint8Array(signature),
+      )}`;
       const { fetch } = jwksFetch({
-        keys: [{
-          kty: "oct",
-          k: base64urlEncode(secret),
-          alg: "HS256",
-          kid: "key-hmac",
-        }],
+        keys: [
+          {
+            kty: "oct",
+            k: base64urlEncode(secret),
+            alg: "HS256",
+            kid: "key-hmac",
+          },
+        ],
       });
       const reader = createReader(fetch);
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a header alg the published key does not carry", async () => {
@@ -730,7 +704,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor(), { alg: "RS256" });
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects an algorithm outside the configured allowlist", async () => {
@@ -738,8 +712,7 @@ describe("JwksTokenReader", () => {
       const { fetch } = jwksFetch({ keys: [key.jwk] });
       const reader = createReader(fetch, { algorithms: ["ES256"] });
 
-      assertStrictEquals(
-        await reader.getToken(await signToken(key, claimsFor())),
+      expect(await reader.getToken(await signToken(key, claimsFor()))).toBe(
         undefined,
       );
     });
@@ -749,26 +722,23 @@ describe("JwksTokenReader", () => {
       const { fetch } = jwksFetch({ keys: [{ ...key.jwk, use: "enc" }] });
       const reader = createReader(fetch);
 
-      assertStrictEquals(
-        await reader.getToken(await signToken(key, claimsFor())),
+      expect(await reader.getToken(await signToken(key, claimsFor()))).toBe(
         undefined,
       );
     });
   });
 
   describe("clock skew", () => {
-    for (
-      const clockSkewSeconds of [
-        NaN,
-        Infinity,
-        -Infinity,
-        -1,
-        Number.MAX_VALUE,
-      ]
-    ) {
+    for (const clockSkewSeconds of [
+      NaN,
+      Infinity,
+      -Infinity,
+      -1,
+      Number.MAX_VALUE,
+    ]) {
       it(`rejects invalid clock skew ${clockSkewSeconds} at construction`, () => {
         const { fetch } = jwksFetch({ keys: [] });
-        assertThrows(
+        thrown(
           () => createReader(fetch, { clockSkewSeconds }),
           RangeError,
           "clockSkewSeconds",
@@ -791,14 +761,13 @@ describe("JwksTokenReader", () => {
       const now = Date.now() / 1000;
       for (const overrides of [{ exp: now - 29 }, { nbf: now + 30 }]) {
         const accessToken = await signToken(key, claimsFor(overrides));
-        assertStrictEquals(
-          (await reader.getToken(accessToken))?.client.id,
+        expect((await reader.getToken(accessToken))?.client.id).toBe(
           "my-client",
         );
       }
       for (const overrides of [{ exp: now - 30 }, { nbf: now + 31 }]) {
         const accessToken = await signToken(key, claimsFor(overrides));
-        assertStrictEquals(await reader.getToken(accessToken), undefined);
+        expect(await reader.getToken(accessToken)).toBe(undefined);
       }
     });
 
@@ -811,22 +780,17 @@ describe("JwksTokenReader", () => {
       const zeroReader = createReader(fetch, { clockSkewSeconds: 0 });
       for (const overrides of [{ exp: now - 0.25 }, { nbf: now + 0.5 }]) {
         const accessToken = await signToken(key, claimsFor(overrides));
-        assertStrictEquals(
-          (await fractionalReader.getToken(accessToken))?.client.id,
+        expect((await fractionalReader.getToken(accessToken))?.client.id).toBe(
           "my-client",
         );
-        assertStrictEquals(await zeroReader.getToken(accessToken), undefined);
+        expect(await zeroReader.getToken(accessToken)).toBe(undefined);
       }
       for (const overrides of [{ exp: now - 0.5 }, { nbf: now + 0.75 }]) {
         const accessToken = await signToken(key, claimsFor(overrides));
-        assertStrictEquals(
-          await fractionalReader.getToken(accessToken),
-          undefined,
-        );
+        expect(await fractionalReader.getToken(accessToken)).toBe(undefined);
       }
       const currentToken = await signToken(key, claimsFor({ nbf: now }));
-      assertStrictEquals(
-        (await zeroReader.getToken(currentToken))?.client.id,
+      expect((await zeroReader.getToken(currentToken))?.client.id).toBe(
         "my-client",
       );
     });
@@ -841,21 +805,19 @@ describe("JwksTokenReader", () => {
       });
       const exp = Date.now() / 1000 - 0.25;
       const accessToken = await signToken(key, claimsFor({ exp }));
-      assertStrictEquals(
+      expect(
         (await reader.getToken(accessToken))?.accessTokenExpiresAt?.getTime(),
-        exp * 1000,
-      );
-      await assertRejects(
+      ).toBe(exp * 1000);
+      await rejection(
         () => server.getToken(accessToken, { tokenService: reader }),
         InvalidTokenError,
         "access token has expired",
       );
       server.clockSkewSeconds = 0.5;
-      assertStrictEquals(
+      expect(
         (await server.getToken(accessToken, { tokenService: reader }))
           .accessToken,
-        accessToken,
-      );
+      ).toBe(accessToken);
     });
 
     it("accepts a token that expired within the skew", async () => {
@@ -865,10 +827,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ exp: now - 30 }));
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("rejects a token that expired beyond the skew", async () => {
@@ -878,7 +837,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ exp: now - 30 }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("accepts an nbf that is in the future within the skew", async () => {
@@ -888,10 +847,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ nbf: now + 30 }));
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("rejects an nbf beyond the skew", async () => {
@@ -901,7 +857,7 @@ describe("JwksTokenReader", () => {
       const now = Math.floor(Date.now() / 1000);
       const accessToken = await signToken(key, claimsFor({ nbf: now + 30 }));
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
   });
 
@@ -914,7 +870,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
@@ -929,7 +885,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
@@ -944,7 +900,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
+      await rejection(() => reader.getToken(accessToken), ServerError);
     });
 
     it("throws server_error when the body is not a JWKS", async () => {
@@ -956,7 +912,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
+      await rejection(() => reader.getToken(accessToken), ServerError);
     });
 
     it("does not retry a failed fetch within the minimum fetch interval", async () => {
@@ -968,16 +924,16 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
 
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
     });
   });
 
@@ -990,18 +946,22 @@ describe("JwksTokenReader", () => {
         audience: "my-client",
       });
       const now = Math.floor(Date.now() / 1000);
-      const idToken = await signToken(key, {
-        iss: ISSUER,
-        sub: "user-1",
-        aud: "my-client",
-        iat: now,
-        exp: now + 3600,
-        nonce: "n-abc",
-        at_hash: "kR8mQ2p",
-        auth_time: now,
-      }, { typ: "JWT" });
+      const idToken = await signToken(
+        key,
+        {
+          iss: ISSUER,
+          sub: "user-1",
+          aud: "my-client",
+          iat: now,
+          exp: now + 3600,
+          nonce: "n-abc",
+          at_hash: "kR8mQ2p",
+          auth_time: now,
+        },
+        { typ: "JWT" },
+      );
 
-      assertStrictEquals(await reader.getToken(idToken), undefined);
+      expect(await reader.getToken(idToken)).toBe(undefined);
     });
 
     it("rejects a token with no client_id claim", async () => {
@@ -1013,7 +973,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ client_id: undefined }),
       );
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
 
     it("rejects a token carrying id_token-only claims", async () => {
@@ -1026,11 +986,10 @@ describe("JwksTokenReader", () => {
           key,
           claimsFor({ [claim]: "value" }),
         );
-        assertStrictEquals(
+        expect(
           await reader.getToken(accessToken),
-          undefined,
           `expected a token carrying ${claim} to be rejected`,
-        );
+        ).toBe(undefined);
       }
     });
 
@@ -1048,10 +1007,7 @@ describe("JwksTokenReader", () => {
         }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
     });
 
     it("reads the client id from a vendor claim when configured", async () => {
@@ -1066,8 +1022,7 @@ describe("JwksTokenReader", () => {
         claimsFor({ client_id: undefined, cid: "okta-client" }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
+      expect((await reader.getToken(accessToken))?.client.id).toBe(
         "okta-client",
       );
     });
@@ -1081,7 +1036,7 @@ describe("JwksTokenReader", () => {
         "http://example.invalid/UNDEFINED": true,
       });
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
   });
 
@@ -1097,15 +1052,15 @@ describe("JwksTokenReader", () => {
       await reader.getToken(
         await signToken(keyA, claimsFor(), { kid: undefined }),
       );
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
 
       state.keys = [jwkB];
       const token = await reader.getToken(
         await signToken(keyB, claimsFor(), { kid: undefined }),
       );
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls.length, 2);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls.length).toBe(2);
     });
 
     it("throttles kid-less refetches to the minimum interval", async () => {
@@ -1120,15 +1075,14 @@ describe("JwksTokenReader", () => {
 
       for (let attempt = 0; attempt < 10; attempt++) {
         const attacker = await createKey(`attacker-${attempt}`);
-        assertStrictEquals(
+        expect(
           await reader.getToken(
             await signToken(attacker, claimsFor(), { kid: undefined }),
           ),
-          undefined,
-        );
+        ).toBe(undefined);
       }
 
-      assertStrictEquals(calls.length, 1);
+      expect(calls.length).toBe(1);
     });
   });
 
@@ -1140,7 +1094,7 @@ describe("JwksTokenReader", () => {
       });
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
@@ -1166,44 +1120,61 @@ describe("JwksTokenReader", () => {
       state.hang = true;
       const token = await reader.getToken(await signToken(key, claimsFor()));
 
-      assertStrictEquals(token?.client.id, "my-client");
-      assertStrictEquals(calls.length, 2);
+      expect(token?.client.id).toBe("my-client");
+      expect(calls.length).toBe(2);
       release!();
     });
 
-    it("retries a timed-out fetch on a new HTTP/2 connection", async () => {
-      const certificate = await generateTestCertificate();
+    it("retries a timed-out fetch on a new connection", async () => {
+      const issuer = "https://jwks-reconnect.example.com";
       const key = await createKey("key-a");
-      const served: string[] = [];
-      await using server = serveTls(
-        certificate,
-        async (request, connection) => {
-          const { pathname } = new URL(request.url);
-          served.push(pathname);
-          if (pathname === "/.well-known/oauth-authorization-server") {
-            server.stall();
-            return Response.json({
-              issuer: server.url,
-              jwks_uri: `${server.url}/jwks`,
-            });
-          }
-          if (connection.stalled) {
-            await connection.released;
-            return new Response(null, { status: 503 });
-          }
-          return Response.json({ keys: [key.jwk] });
-        },
-      );
-      const token = await signToken(key, claimsFor({ iss: server.url }));
+      const token = await signToken(key, claimsFor({ iss: issuer }));
+      const reader = new JwksTokenReader<TestClient, TestUser>({
+        issuer,
+        audience: "https://api.example.com",
+        minFetchIntervalMs: 0,
+        getClient: (claims) => ({ id: String(claims.client_id) }),
+      });
+      const validate = () =>
+        reader.getToken(token).then(
+          (found) => (found ? "valid" : "invalid"),
+          (error: unknown) =>
+            error instanceof TemporarilyUnavailableError
+              ? "unavailable"
+              : String(error),
+        );
+      using runtime = stubDenoRuntime((input, init) => {
+        const { pathname } = new URL(
+          input instanceof Request ? input.url : input,
+        );
+        if (pathname === "/.well-known/oauth-authorization-server") {
+          return Promise.resolve(
+            Response.json({ issuer, jwks_uri: `${issuer}/jwks` }),
+          );
+        }
+        return init && "client" in init
+          ? Promise.resolve(Response.json({ keys: [key.jwk] }))
+          : hangUntilAborted(init?.signal);
+      });
+      using time = new FakeTime();
 
-      const outcomes = await runTrustingCertificate(
-        new URL("./_test_jwks_stalled_connection.ts", import.meta.url),
-        certificate,
-        [server.url, token, "3"],
-      );
+      const first = validate();
+      await time.tickAsync(5_000);
+      const outcomes = [await first, await validate(), await validate()];
 
-      assertEquals(served[0], "/.well-known/oauth-authorization-server");
-      assertEquals(outcomes, ["unavailable", "valid", "valid"]);
+      expect(outcomes).toStrictEqual(["unavailable", "valid", "valid"]);
+      expect(
+        runtime.requests.map(({ input }) => String(input)).slice(0, 3),
+      ).toStrictEqual([
+        `${issuer}/.well-known/oauth-authorization-server`,
+        `${issuer}/jwks`,
+        `${issuer}/jwks`,
+      ]);
+      expect(runtime.clients).toHaveLength(1);
+      expect(runtime.requests[2]?.init).toHaveProperty(
+        "client",
+        runtime.clients[0],
+      );
     });
 
     it("hands an injected fetch the request without a transport of its own", async () => {
@@ -1220,14 +1191,14 @@ describe("JwksTokenReader", () => {
       const accessToken = await signToken(key, claimsFor());
 
       for (let attempt = 0; attempt < 2; attempt++) {
-        await assertRejects(
+        await rejection(
           () => reader.getToken(accessToken),
           TemporarilyUnavailableError,
         );
       }
 
-      assertStrictEquals(inits.length, 2);
-      assertEquals(inits.map((init) => Object.keys(init).sort()), [
+      expect(inits.length).toBe(2);
+      expect(inits.map((init) => Object.keys(init).sort())).toStrictEqual([
         ["headers", "signal"],
         ["headers", "signal"],
       ]);
@@ -1244,7 +1215,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
+      await rejection(() => reader.getToken(accessToken), ServerError);
     });
 
     it("throws server_error when keys is not an array", async () => {
@@ -1256,7 +1227,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
+      await rejection(() => reader.getToken(accessToken), ServerError);
     });
 
     it("drops keys whose members have the wrong types", async () => {
@@ -1272,7 +1243,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch);
       const accessToken = await signToken(key, claimsFor());
 
-      assertStrictEquals(await reader.getToken(accessToken), undefined);
+      expect(await reader.getToken(accessToken)).toBe(undefined);
     });
   });
 
@@ -1303,11 +1274,8 @@ describe("JwksTokenReader", () => {
         claimsFor({ iss: TENANT_ISSUER }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
-      assertStrictEquals(calls[0], TENANT_OAUTH_URL);
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
+      expect(calls[0]).toBe(TENANT_OAUTH_URL);
     });
 
     it("falls back to the appended OIDC form last", async () => {
@@ -1328,11 +1296,8 @@ describe("JwksTokenReader", () => {
         claimsFor({ iss: TENANT_ISSUER }),
       );
 
-      assertStrictEquals(
-        (await reader.getToken(accessToken))?.client.id,
-        "my-client",
-      );
-      assertEquals(calls.slice(0, 3), [
+      expect((await reader.getToken(accessToken))?.client.id).toBe("my-client");
+      expect(calls.slice(0, 3)).toStrictEqual([
         TENANT_OAUTH_URL,
         TENANT_OIDC_INSERTED,
         TENANT_OIDC_APPENDED,
@@ -1348,8 +1313,8 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch, { jwksUri: undefined });
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(() => reader.getToken(accessToken), ServerError);
-      assertEquals(calls, [OAUTH_METADATA_URL, OIDC_METADATA_URL]);
+      await rejection(() => reader.getToken(accessToken), ServerError);
+      expect(calls).toStrictEqual([OAUTH_METADATA_URL, OIDC_METADATA_URL]);
     });
 
     it("reports a transient discovery failure over a later permanent one", async () => {
@@ -1363,7 +1328,7 @@ describe("JwksTokenReader", () => {
       const reader = createReader(fetch, { jwksUri: undefined });
       const accessToken = await signToken(key, claimsFor());
 
-      await assertRejects(
+      await rejection(
         () => reader.getToken(accessToken),
         TemporarilyUnavailableError,
       );
@@ -1372,7 +1337,7 @@ describe("JwksTokenReader", () => {
 
   describe("configuration", () => {
     it("rejects an issuer that is not an absolute URL", () => {
-      assertThrows(
+      thrown(
         () =>
           createReader(jwksFetch({ keys: [] }).fetch, { issuer: "auth.local" }),
         TypeError,
@@ -1380,7 +1345,7 @@ describe("JwksTokenReader", () => {
     });
 
     it("rejects an algorithm it cannot verify", () => {
-      assertThrows(
+      thrown(
         () =>
           createReader(jwksFetch({ keys: [] }).fetch, {
             algorithms: ["HS256"],
@@ -1390,7 +1355,7 @@ describe("JwksTokenReader", () => {
     });
 
     it("rejects an empty audience list", () => {
-      assertThrows(
+      thrown(
         () => createReader(jwksFetch({ keys: [] }).fetch, { audience: [] }),
         TypeError,
       );

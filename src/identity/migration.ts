@@ -16,7 +16,7 @@
  * only built-in verifier is {@link pbkdf2Verifier} (PBKDF2 is a Web Crypto
  * primitive). **bcrypt, argon2, and scrypt cannot be implemented dep-free** —
  * bcrypt and argon2 have no Web Crypto primitive, and scrypt is not exposed by
- * Web Crypto or `@std/crypto`. Those are **BYO**: you implement the
+ * Web Crypto. Those are **BYO**: you implement the
  * {@link LegacyPasswordVerifier} seam with your app's own bcrypt/argon2/scrypt
  * dependency and pass it in. {@link parsePhc} is provided to parse the PHC /
  * modular-crypt strings those algorithms store, so a BYO verifier is a few
@@ -25,8 +25,9 @@
  * @module
  */
 
-import { decodeBase64 } from "@std/encoding";
-import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
+import { timingSafeEqual } from "node:crypto";
+
+import { decodeBase64 } from "../utils/_encoding.ts";
 
 /**
  * A verifier for one foreign password-hash format, used during
@@ -38,7 +39,7 @@ import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
  * Implement this to bring your own bcrypt/argon2/scrypt verifier (using your
  * app's dependency) — the package only ships {@link pbkdf2Verifier} built-in.
  *
- * @example Bring-your-own bcrypt (app adds an `npm:bcryptjs` dependency)
+ * @example Bring-your-own bcrypt (app adds a `bcryptjs` dependency)
  * ```ts
  * import { compare } from "bcryptjs";
  * import type { LegacyPasswordVerifier } from "@udibo/oauth2/identity/migration";
@@ -244,8 +245,8 @@ function parsePbkdf2(phc: string): Pbkdf2Parsed | null {
   const parsed = phc.startsWith("pbkdf2_")
     ? parseDjango(phc)
     : phc.startsWith("$pbkdf2-")
-    ? parsePhcPbkdf2(phc)
-    : null;
+      ? parsePhcPbkdf2(phc)
+      : null;
   if (!parsed) return null;
   if (parsed.iterations > MAX_PBKDF2_ITERATIONS) return null;
   if (parsed.expected.length < MIN_HASH_BYTES) return null;

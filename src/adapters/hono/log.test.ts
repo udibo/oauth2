@@ -1,35 +1,30 @@
-import { describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { stub } from "@std/testing/mock";
+import { assert, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { redactedRequestTarget, requestLogger } from "./log.ts";
 
 describe("redactedRequestTarget", () => {
   it("returns the pathname untouched when there is no query", () => {
-    assertEquals(
+    expect(
       redactedRequestTarget("https://app.example.com/reset-password"),
-      "/reset-password",
-    );
+    ).toStrictEqual("/reset-password");
   });
 
   it("keeps the parameter name and replaces its value", () => {
     const secret = crypto.randomUUID();
-    assertEquals(
+    expect(
       redactedRequestTarget(
         `https://app.example.com/verify-email?token=${secret}`,
       ),
-      "/verify-email?token=[redacted]",
-    );
+    ).toStrictEqual("/verify-email?token=[redacted]");
   });
 
   it("redacts every parameter, not only the one named token", () => {
-    assertEquals(
+    expect(
       redactedRequestTarget(
         `https://app.example.com/signin-link?token=${crypto.randomUUID()}&redirect=/profile`,
       ),
-      "/signin-link?token=[redacted]&redirect=[redacted]",
-    );
+    ).toStrictEqual("/signin-link?token=[redacted]&redirect=[redacted]");
   });
 
   it("redacts a value nested inside another parameter's value", () => {
@@ -38,45 +33,44 @@ describe("redactedRequestTarget", () => {
     const target = redactedRequestTarget(
       `https://app.example.com/sign-in?redirect=${nested}`,
     );
-    assertFalse(
+    expect(
       target.includes(secret),
       "a token carried through a redirect parameter is still a token",
-    );
-    assertEquals(target, "/sign-in?redirect=[redacted]");
+    ).toBeFalsy();
+    expect(target).toStrictEqual("/sign-in?redirect=[redacted]");
   });
 
   it("keeps one entry per repeat so the shape of the request survives", () => {
-    assertEquals(
+    expect(
       redactedRequestTarget(
         "https://app.example.com/identity/t/audit?eventType=auth&eventType=admin",
       ),
+    ).toStrictEqual(
       "/identity/t/audit?eventType=[redacted]&eventType=[redacted]",
     );
   });
 
   it("redacts a valueless parameter rather than echoing it", () => {
-    assertEquals(
+    expect(
       redactedRequestTarget("https://app.example.com/users?includeDeleted"),
-      "/users?includeDeleted=[redacted]",
-    );
+    ).toStrictEqual("/users?includeDeleted=[redacted]");
   });
 
   it("encodes a parameter name so it cannot forge a second log line", () => {
     const target = redactedRequestTarget(
       "https://app.example.com/?%0A%3C--%20GET%20%2Fadmin=1",
     );
-    assertFalse(
+    expect(
       target.includes("\n"),
       "a decoded newline in a parameter name would split the log line",
-    );
-    assertEquals(target, "/?%0A%3C--%20GET%20%2Fadmin=[redacted]");
+    ).toBeFalsy();
+    expect(target).toStrictEqual("/?%0A%3C--%20GET%20%2Fadmin=[redacted]");
   });
 
   it("drops the origin, so a host is never confused for a path", () => {
-    assertEquals(
+    expect(
       redactedRequestTarget("https://tenant.example.com/profile?tab=security"),
-      "/profile?tab=[redacted]",
-    );
+    ).toStrictEqual("/profile?tab=[redacted]");
   });
 });
 
@@ -97,14 +91,14 @@ describe("requestLogger", () => {
     const res = await app.request(
       `https://app.example.com/reset-password?token=${secret}`,
     );
-    assertEquals(res.status, 200);
+    expect(res.status).toStrictEqual(200);
     await res.text();
 
-    assertFalse(
+    expect(
       lines.some((line) => line.includes(secret)),
       `the reset token reached the log: ${lines.join(" | ")}`,
-    );
-    assertEquals(lines[0], "<-- GET /reset-password?token=[redacted]");
+    ).toBeFalsy();
+    expect(lines[0]).toStrictEqual("<-- GET /reset-password?token=[redacted]");
     assert(
       lines[1]?.startsWith("--> GET /reset-password?token=[redacted] 200 "),
       `the response line must carry the same redacted target: ${lines[1]}`,
@@ -118,14 +112,14 @@ describe("requestLogger", () => {
     const res = await app.request(
       `https://app.example.com/verify-email?token=${secret}`,
     );
-    assertEquals(res.status, 302);
+    expect(res.status).toStrictEqual(302);
     await res.body?.cancel();
 
-    assertFalse(
+    expect(
       lines.some((line) => line.includes(secret)),
       `the verification token reached the log: ${lines.join(" | ")}`,
-    );
-    assertEquals(lines[0], "<-- GET /verify-email?token=[redacted]");
+    ).toBeFalsy();
+    expect(lines[0]).toStrictEqual("<-- GET /verify-email?token=[redacted]");
     assert(
       lines[1]?.startsWith("--> GET /verify-email?token=[redacted] 302 "),
       `the response line must carry the same redacted target: ${lines[1]}`,
@@ -143,7 +137,7 @@ describe("requestLogger", () => {
     });
     await res.text();
 
-    assertEquals(lines[0], "<-- POST /reset-password");
+    expect(lines[0]).toStrictEqual("<-- POST /reset-password");
   });
 
   it("defaults to console.log, resolved per line so a stub still sees it", async () => {
@@ -153,15 +147,17 @@ describe("requestLogger", () => {
     app.use(requestLogger());
     app.get("/reset-password", (c) => c.text("ok"));
 
-    using _log = stub(console, "log", (...args: unknown[]) => {
-      lines.push(args.join(" "));
-    });
+    using _log = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(" "));
+      });
 
     const res = await app.request(
       `https://app.example.com/reset-password?token=${secret}`,
     );
     await res.text();
 
-    assertEquals(lines[0], "<-- GET /reset-password?token=[redacted]");
+    expect(lines[0]).toStrictEqual("<-- GET /reset-password?token=[redacted]");
   });
 });

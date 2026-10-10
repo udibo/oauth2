@@ -104,7 +104,10 @@ async function fetchOnOwnConnection(
 function watchBody(response: Response, onError: () => void): Response {
   const { body: source, status } = response;
   if (
-    !source || status < 200 || status > 599 || NULL_BODY_STATUSES.has(status)
+    !source ||
+    status < 200 ||
+    status > 599 ||
+    NULL_BODY_STATUSES.has(status)
   ) {
     return response;
   }

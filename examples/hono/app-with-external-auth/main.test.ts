@@ -16,9 +16,7 @@
  * own wiring (routes, scope gates, error responses).
  */
 
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
+import { describe, expect, it, vi } from "vitest";
 
 import { BasicScope } from "@udibo/oauth2/server";
 import { createTestSession } from "@udibo/oauth2/hono/bff/testing";
@@ -38,11 +36,14 @@ const CSRF = { [bff.csrfHeaderName!]: "1" };
  * in this map resolves to `undefined`, mirroring the real
  * introspection response for an inactive token.
  */
-const activeTokens: Record<string, {
-  client: string;
-  user: string;
-  scope?: string;
-}> = {
+const activeTokens: Record<
+  string,
+  {
+    client: string;
+    user: string;
+    scope?: string;
+  }
+> = {
   "user-token": {
     client: "spa",
     user: "user-1",
@@ -56,56 +57,58 @@ const activeTokens: Record<string, {
 };
 
 function stubTokenReader() {
-  return stub(tokenReader, "getToken", (token: string) => {
-    const claims = activeTokens[token];
-    if (!claims) return Promise.resolve(undefined);
-    return Promise.resolve({
-      accessToken: token,
-      client: { id: claims.client },
-      user: { id: claims.user, username: claims.user },
-      scope: claims.scope ? new BasicScope(claims.scope) : undefined,
+  return vi
+    .spyOn(tokenReader, "getToken")
+    .mockImplementation((token: string) => {
+      const claims = activeTokens[token];
+      if (!claims) return Promise.resolve(undefined);
+      return Promise.resolve({
+        accessToken: token,
+        client: { id: claims.client },
+        user: { id: claims.user, username: claims.user },
+        scope: claims.scope ? new BasicScope(claims.scope) : undefined,
+      });
     });
-  });
 }
 
 describe("app-with-external-auth example", () => {
   it("GET / returns the SPA index page", async () => {
     const res = await app.request("/");
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const body = await res.text();
-    assertEquals(body.includes("App with external auth"), true);
-    assertEquals(body.includes(`action="/auth/login"`), true);
-    assertEquals(body.includes(">Sign in<"), true);
+    expect(body).toContain("App with external auth");
+    expect(body).toContain(`action="/auth/login"`);
+    expect(body).toContain(">Sign in<");
   });
 
   it("GET / mentions the IDP-pairing dev tip", async () => {
     const res = await app.request("/");
     const body = await res.text();
-    assertEquals(body.includes("app-with-own-auth"), true);
-    assertEquals(body.includes("port 8001"), true);
+    expect(body).toContain("app-with-own-auth");
+    expect(body).toContain("port 8001");
   });
 
   it("GET /auth/session returns isAuthenticated=false without a cookie", async () => {
     const res = await app.request("/auth/session");
-    assertStrictEquals(res.status, 200);
-    assertEquals(await res.json(), { isAuthenticated: false, user: null });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toStrictEqual({
+      isAuthenticated: false,
+      user: null,
+    });
   });
 
   it("POST /auth/login redirects to the external IDP's /oauth2/authorize", async () => {
     const res = await app.request("/auth/login?return_to=/welcome", {
       method: "POST",
     });
-    assertStrictEquals(res.status, 302);
+    expect(res.status).toBe(302);
     const location = res.headers.get("Location")!;
-    assertEquals(
-      location.startsWith("http://localhost:8001/oauth2/authorize"),
-      true,
-    );
+    expect(location).toMatch(/^http:\/\/localhost:8001\/oauth2\/authorize/);
   });
 
   it("GET /api/me returns 401 without a session cookie", async () => {
     const res = await app.request("/api/me");
-    assertStrictEquals(res.status, 401);
+    expect(res.status).toBe(401);
   });
 
   it("GET /api/me returns 200 with a valid session (introspection stubbed)", async () => {
@@ -117,10 +120,10 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/api/me", {
       headers: { cookie, ...CSRF },
     });
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    assertEquals(body.sub, "user-1");
-    assertEquals(body.client, "spa");
+    expect(body.sub).toBe("user-1");
+    expect(body.client).toBe("spa");
   });
 
   it("GET /api/admin returns 403 for a token without admin scope", async () => {
@@ -132,11 +135,8 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/api/admin", {
       headers: { cookie, ...CSRF },
     });
-    assertStrictEquals(res.status, 403);
-    assertEquals(
-      res.headers.get("WWW-Authenticate")?.includes("insufficient_scope"),
-      true,
-    );
+    expect(res.status).toBe(403);
+    expect(res.headers.get("WWW-Authenticate")).toContain("insufficient_scope");
   });
 
   it("GET /api/admin returns 200 for an admin token", async () => {
@@ -148,10 +148,10 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/api/admin", {
       headers: { cookie, ...CSRF },
     });
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    assertEquals(body.sub, "user-admin");
-    assertEquals(body.scope?.includes("admin"), true);
+    expect(body.sub).toBe("user-admin");
+    expect(body.scope).toContain("admin");
   });
 
   it("GET /api/write returns 200 for a token with write scope", async () => {
@@ -163,17 +163,14 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/api/write", {
       headers: { cookie, ...CSRF },
     });
-    assertStrictEquals(res.status, 200);
+    expect(res.status).toBe(200);
   });
 
   it("GET /remote-api/* returns 401 without a session, never calling the API service", async () => {
     const res = await app.request("/remote-api/private");
-    assertStrictEquals(res.status, 401);
-    assertEquals(
-      res.headers.get("WWW-Authenticate")?.includes("invalid_token"),
-      true,
-    );
-    assertEquals((await res.json()).error, "invalid_token");
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toContain("invalid_token");
+    expect((await res.json()).error).toBe("invalid_token");
   });
 
   it("GET /remote-api/* rejects a credentialed request without the CSRF header", async () => {
@@ -184,8 +181,8 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/remote-api/private", {
       headers: { cookie },
     });
-    assertStrictEquals(res.status, 403);
-    assertEquals((await res.json()).error, "csrf_validation_failed");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("csrf_validation_failed");
   });
 
   it("/api/me returns 401 when the IDP says the token is inactive", async () => {
@@ -197,6 +194,6 @@ describe("app-with-external-auth example", () => {
     const res = await app.request("/api/me", {
       headers: { cookie, ...CSRF },
     });
-    assertStrictEquals(res.status, 401);
+    expect(res.status).toBe(401);
   });
 });

@@ -1,15 +1,7 @@
-import {
-  assert,
-  assertEquals,
-  assertGreater,
-  assertLessOrEqual,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { encodeBase64 } from "@std/encoding/base64";
-import { describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, describe, expect, it } from "vitest";
+import { FakeTime } from "../../_test_fake-time.ts";
+import { rejection } from "../../_test_assert.ts";
+import { encodeBase64 } from "../../utils/_encoding.ts";
 import { toArrayBuffer } from "../../utils/_buffer.ts";
 import { base64urlDecode } from "../../utils/crypto.ts";
 import { ExternalAuthError } from "./errors.ts";
@@ -52,19 +44,18 @@ describe("generateAppleClientSecret", () => {
 
     const [headerPart, payloadPart, signaturePart] = jwt.split(".");
     const header = decodeSegment(headerPart);
-    assertEquals(header.alg, "ES256");
-    assertEquals(header.kid, config.keyId);
+    expect(header.alg).toStrictEqual("ES256");
+    expect(header.kid).toStrictEqual(config.keyId);
 
     const payload = decodeSegment(payloadPart);
-    assertEquals(payload.iss, config.teamId);
-    assertEquals(payload.sub, config.clientId);
-    assertEquals(payload.aud, APPLE_AUDIENCE);
-    assertGreater(payload.exp as number, payload.iat as number);
-    assertGreater(payload.iat as number, before - 5);
-    assertLessOrEqual(
+    expect(payload.iss).toStrictEqual(config.teamId);
+    expect(payload.sub).toStrictEqual(config.clientId);
+    expect(payload.aud).toStrictEqual(APPLE_AUDIENCE);
+    expect(payload.exp as number).toBeGreaterThan(payload.iat as number);
+    expect(payload.iat as number).toBeGreaterThan(before - 5);
+    expect(
       (payload.exp as number) - (payload.iat as number),
-      APPLE_CLIENT_SECRET_MAX_TTL_SECONDS,
-    );
+    ).toBeLessThanOrEqual(APPLE_CLIENT_SECRET_MAX_TTL_SECONDS);
 
     const valid = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },
@@ -77,7 +68,7 @@ describe("generateAppleClientSecret", () => {
 
   it("rejects a TTL over Apple's six-month cap with a configuration error", async () => {
     const { pem } = await generateP8();
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         generateAppleClientSecret({
           ...config,
@@ -86,14 +77,14 @@ describe("generateAppleClientSecret", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertEquals(error.provider, "apple");
-    assertStringIncludes(error.message, "6 months");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.provider).toStrictEqual("apple");
+    expect(error.message).toContain("6 months");
   });
 
   it("rejects a NaN TTL with a configuration error instead of signing an unusable exp", async () => {
     const { pem } = await generateP8();
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         generateAppleClientSecret({
           ...config,
@@ -102,71 +93,88 @@ describe("generateAppleClientSecret", () => {
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "TTL");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("TTL");
   });
 
   it("names an empty team id in a configuration error", async () => {
     const { pem } = await generateP8();
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         generateAppleClientSecret({ ...config, teamId: "  ", privateKey: pem }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "team id");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("team id");
   });
 
   it("names an empty Services ID in a configuration error", async () => {
     const { pem } = await generateP8();
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         generateAppleClientSecret({ ...config, clientId: "", privateKey: pem }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "Services ID");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("Services ID");
   });
 
   it("rejects a malformed private key with a configuration error", async () => {
-    const error = await assertRejects(
+    const error = await rejection(
       () =>
         generateAppleClientSecret({
           ...config,
-          privateKey: "-----BEGIN PRIVATE KEY-----\n@@@not base64@@@\n" +
+          privateKey:
+            "-----BEGIN PRIVATE KEY-----\n@@@not base64@@@\n" +
             "-----END PRIVATE KEY-----",
         }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, ".p8");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain(".p8");
   });
 
   it("rejects a wrong-curve (P-384) key with a configuration error", async () => {
     const { pem } = await generateP8("P-384");
-    const error = await assertRejects(
+    const error = await rejection(
       () => generateAppleClientSecret({ ...config, privateKey: pem }),
       ExternalAuthError,
     );
-    assertEquals(error.code, "configuration");
-    assertStringIncludes(error.message, "P-256");
+    expect(error.code).toStrictEqual("configuration");
+    expect(error.message).toContain("P-256");
   });
 });
 
 describe("createAppleClientSecretFactory", () => {
   it("caches the secret and re-signs only after it nears expiry", async () => {
-    using time = new FakeTime();
+    using time = new FakeTime(1_700_000_000_000);
     const { pem } = await generateP8();
     const factory = createAppleClientSecretFactory({
       ...config,
       privateKey: pem,
       expiresInSeconds: 3600,
-      renewBeforeSeconds: 3600,
+      renewBeforeSeconds: 600,
     });
     const first = await factory();
-    const second = await factory();
-    assertEquals(first, second, "within TTL the cached secret is reused");
+    expect(await factory(), "within TTL the cached secret is reused").toBe(
+      first,
+    );
 
+    await time.tickAsync(2_999_000);
+    expect(
+      await factory(),
+      "just before the renew window it is still reused",
+    ).toBe(first);
+
+    await time.tickAsync(1_000);
+    expect(await factory(), "inside the renew window it is re-signed").not.toBe(
+      first,
+    );
+  });
+
+  it("re-signs on every call when the renew window covers the whole TTL", async () => {
+    using time = new FakeTime(1_700_000_000_000);
+    const { pem } = await generateP8();
     const eager = createAppleClientSecretFactory({
       ...config,
       privateKey: pem,
@@ -184,7 +192,7 @@ describe("createAppleClientSecretFactory", () => {
       ...config,
       privateKey: "not a key",
     });
-    const error = await assertRejects(() => factory(), ExternalAuthError);
-    assertEquals(error.code, "configuration");
+    const error = await rejection(() => factory(), ExternalAuthError);
+    expect(error.code).toStrictEqual("configuration");
   });
 });

@@ -81,9 +81,8 @@ app.get("/callback", async (c) => {
 });
 
 app.post("/token", (c) => proxy(c, `${AUTH_SERVER_URL}/oauth2/token`));
-app.post(
-  "/device-authorization",
-  (c) => proxy(c, `${AUTH_SERVER_URL}/oauth2/device_authorization`),
+app.post("/device-authorization", (c) =>
+  proxy(c, `${AUTH_SERVER_URL}/oauth2/device_authorization`),
 );
 
 /**
@@ -134,9 +133,10 @@ ${STYLE}
    <a href="/">homepage</a>.</p>`;
 }
 
-function errorPage(
-  opts: { error: string; errorDescription: string | null },
-): string {
+function errorPage(opts: {
+  error: string;
+  errorDescription: string | null;
+}): string {
   const desc = opts.errorDescription
     ? `<p>${escapeHtml(opts.errorDescription)}</p>`
     : "";
@@ -151,9 +151,11 @@ ${STYLE}
 <p><a href="/">← Back to homepage</a></p>`;
 }
 
-function callbackPage(
-  opts: { status: number; body: string; state?: string },
-): string {
+function callbackPage(opts: {
+  status: number;
+  body: string;
+  state?: string;
+}): string {
   const ok = opts.status >= 200 && opts.status < 300;
   let token: string | undefined;
   let pretty = opts.body;
@@ -171,12 +173,12 @@ function callbackPage(
     ? `<div class="ok-box">
         <p><strong>Status:</strong> <span class="ok">${opts.status}</span></p>
         ${
-      opts.state
-        ? `<p><strong>State:</strong> <code>${
-          escapeHtml(opts.state)
-        }</code></p>`
-        : ""
-    }
+          opts.state
+            ? `<p><strong>State:</strong> <code>${escapeHtml(
+                opts.state,
+              )}</code></p>`
+            : ""
+        }
       </div>`
     : `<div class="no-box">
         <p><strong>Status:</strong> <span class="no">${opts.status}</span></p>

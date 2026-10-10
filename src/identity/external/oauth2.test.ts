@@ -1,6 +1,4 @@
-import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { describe, expect, it } from "vitest";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import { oauth2Provider } from "./oauth2.ts";
 
@@ -43,17 +41,18 @@ describe("oauth2Provider authorize URL", () => {
       }),
     );
 
-    assertEquals(url.searchParams.get("state"), "flow-state");
-    assertEquals(
-      url.searchParams.get("code_challenge"),
+    expect(url.searchParams.get("state")).toStrictEqual("flow-state");
+    expect(url.searchParams.get("code_challenge")).toStrictEqual(
       await generateCodeChallenge(codeVerifier),
     );
-    assertEquals(url.searchParams.get("code_challenge_method"), "S256");
-    assertEquals(url.searchParams.get("redirect_uri"), redirectUri);
-    assertEquals(url.searchParams.get("client_id"), "acme-client-id");
-    assertEquals(url.searchParams.get("response_type"), "code");
-    assertEquals(url.searchParams.get("scope"), "profile");
-    assertEquals(url.searchParams.get("audience"), "https://api.acme.example");
-    assertEquals(url.searchParams.getAll("state").length, 1);
+    expect(url.searchParams.get("code_challenge_method")).toStrictEqual("S256");
+    expect(url.searchParams.get("redirect_uri")).toStrictEqual(redirectUri);
+    expect(url.searchParams.get("client_id")).toStrictEqual("acme-client-id");
+    expect(url.searchParams.get("response_type")).toStrictEqual("code");
+    expect(url.searchParams.get("scope")).toStrictEqual("profile");
+    expect(url.searchParams.get("audience")).toStrictEqual(
+      "https://api.acme.example",
+    );
+    expect(url.searchParams.getAll("state").length).toStrictEqual(1);
   });
 });

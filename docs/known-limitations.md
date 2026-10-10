@@ -8,9 +8,9 @@ application-owned responsibilities.
 
 OAuth callbacks carry authorization codes and state in query parameters. Mount
 `requestLogger()` from `@udibo/oauth2/hono/log` before authentication routes. It
-replaces every query value with `[redacted]` in request and response lines; the
-Juniper starter and examples use it by default. For other loggers or telemetry,
-use `redactedRequestTarget(url)` before recording the URL.
+replaces every query value with `[redacted]` in request and response lines. For
+other loggers or telemetry, use `redactedRequestTarget(url)` before recording
+the URL.
 
 The pathname and parameter names remain visible, so do not put secrets there.
 The middleware does not control reverse-proxy access logs, tracing exporters, or
@@ -343,19 +343,17 @@ fetch redirects. A trusted provider configuration is part of that boundary.
 
 ## Runtime
 
-- **`./cli` is the only Deno-locked entrypoint.** It uses `Deno.serve`,
-  `Deno.env`, `Deno.readTextFile` and `Deno.args`, so it runs on Deno and
-  nowhere else. Every other subpath is Web-standard — no `node:` import, and no
-  runtime-specific global on the library path beyond one feature check: the
-  default `fetch` uses `Deno.createHttpClient` when it exists, as the next item
-  describes (the `Deno.env.get` you see in connector JSDoc is example prose, not
-  code the package runs). The CLI is a development tool (`oidc keygen`,
-  `idp dev`); nothing on the library path imports it, so its floor never
-  constrains the rest of the package. The generic `/testing` and
-  `/testing/contract` helpers register suites through `@std/testing/bdd` and are
-  verified on Deno only. The full matrix is in
-  [the README](../README.md#runtime-support); the support boundary is in
-  [the stability policy](stability.md#runtime-support).
+- **The `udibo-oauth2` command is Node-only.** It uses `node:http`, `node:fs`
+  and `process`, so it runs on Node 22 or later and nowhere else. It is a
+  development tool (`oidc keygen`, `idp dev`); nothing on the library path
+  imports it, so its floor never constrains the rest of the package. Outside
+  the command, the library path is Web-standard apart from `node:crypto`
+  (`timingSafeEqual`) in `/identity` and `/identity/migration`, and one feature
+  check: the default `fetch` uses `Deno.createHttpClient` when it exists, as the
+  next item describes. The testing helpers (`/testing`, `/testing/contract`,
+  `/hono/bff/testing`, `/react/testing`) register suites through Vitest. The
+  full matrix is in [the README](../README.md#runtime-support); the support
+  boundary is in [the stability policy](stability.md#runtime-support).
 - **On Deno, a request that misses the package's own deadline moves later
   requests off the pooled connection.** Deno's global `fetch` sends every
   request to an origin over one pooled HTTP/2 connection, and aborting a request

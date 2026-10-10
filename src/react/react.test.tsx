@@ -1,13 +1,9 @@
-// deno-lint-ignore-file no-window require-await -- jsdom provides `window`; `act(async …)` needs the async signature
-import { cleanupAfterEach } from "./_test_setup.ts";
-
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { stub } from "@std/testing/mock";
-import { FakeTime } from "@std/testing/time";
+import { assert, describe, expect, it, vi } from "vitest";
+import { FakeTime } from "../_test_fake-time.ts";
 import { render, screen } from "@testing-library/react";
 import { act, type ReactNode, StrictMode } from "react";
 
+import { DirectClient } from "../client/direct-client.ts";
 import { OAuth2Callback } from "./callback.tsx";
 import { OAuth2Provider } from "./provider.tsx";
 import { RequireAuth } from "./require-auth.tsx";
@@ -19,8 +15,6 @@ import {
   createMockOAuth2Client,
   MockOAuth2Provider,
 } from "./testing.tsx";
-
-cleanupAfterEach();
 
 function Probe(): ReactNode {
   const { isAuthenticated, isLoading, user } = useOAuth2();
@@ -64,9 +58,9 @@ describe("useAuthorization", () => {
         <AuthorizationProbe />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("can").textContent, "true");
-    assertStrictEquals(screen.getByTestId("org").textContent, "true");
-    assertStrictEquals(screen.getByTestId("role").textContent, "true");
+    expect(screen.getByTestId("can").textContent).toBe("true");
+    expect(screen.getByTestId("org").textContent).toBe("true");
+    expect(screen.getByTestId("role").textContent).toBe("true");
   });
 
   it("answers everything false for an anonymous session", () => {
@@ -76,9 +70,9 @@ describe("useAuthorization", () => {
         <AuthorizationProbe />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("can").textContent, "false");
-    assertStrictEquals(screen.getByTestId("org").textContent, "false");
-    assertStrictEquals(screen.getByTestId("role").textContent, "false");
+    expect(screen.getByTestId("can").textContent).toBe("false");
+    expect(screen.getByTestId("org").textContent).toBe("false");
+    expect(screen.getByTestId("role").textContent).toBe("false");
   });
 });
 
@@ -93,8 +87,8 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Probe />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(screen.getByTestId("user").textContent, "u1");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("u1");
   });
 
   it("lets an explicit state override the client, user: null included", () => {
@@ -110,12 +104,11 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Probe />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
-    assertStrictEquals(
+    expect(screen.getByTestId("auth").textContent).toBe("false");
+    expect(
       screen.getByTestId("user").textContent,
-      "none",
       "an explicit null must override the client's user, not fall back to it",
-    );
+    ).toBe("none");
   });
 
   it("reports signed out for a client built unauthenticated", () => {
@@ -125,14 +118,17 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Probe />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
-    assertStrictEquals(screen.getByTestId("user").textContent, "none");
+    expect(screen.getByTestId("auth").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("none");
   });
 
   it("initialState is a construction snapshot, not live client state", () => {
     const client = createMockOAuth2Client();
     client.signIn({ sub: "later" });
-    assertEquals(client.initialState, { isAuthenticated: false, user: null });
+    expect(client.initialState).toStrictEqual({
+      isAuthenticated: false,
+      user: null,
+    });
   });
 
   it("keeps the construction snapshot when the client signs out later", () => {
@@ -143,8 +139,8 @@ describe("MockOAuth2Provider + useOAuth2", () => {
       </MockOAuth2Provider>,
     );
     act(() => client.signOut());
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(screen.getByTestId("user").textContent, "u1");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("u1");
   });
 
   it("re-renders when client.signIn / signOut emit events", async () => {
@@ -154,7 +150,9 @@ describe("MockOAuth2Provider + useOAuth2", () => {
       return (
         <div>
           <span data-testid="auth">{String(isAuthenticated)}</span>
-          <button type="button" onClick={() => login()}>login</button>
+          <button type="button" onClick={() => login()}>
+            login
+          </button>
         </div>
       );
     }
@@ -163,13 +161,13 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Wrapper />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
+    expect(screen.getByTestId("auth").textContent).toBe("false");
     await act(async () => {
       client.signIn({ sub: "u2" });
     });
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
     act(() => client.signOut());
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
+    expect(screen.getByTestId("auth").textContent).toBe("false");
   });
 
   it("populates user after an authenticated event", async () => {
@@ -179,12 +177,12 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("user").textContent, "none");
+    expect(screen.getByTestId("user").textContent).toBe("none");
     await act(async () => {
       client.signIn({ sub: "u-pub" });
     });
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(screen.getByTestId("user").textContent, "u-pub");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("u-pub");
   });
 
   it("OAuth2Provider probes getSession and exposes logoutUrl", async () => {
@@ -208,11 +206,8 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         </OAuth2Provider>,
       );
     });
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(
-      screen.getByTestId("logout").textContent,
-      "/auth/logout",
-    );
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("logout").textContent).toBe("/auth/logout");
   });
 
   it("throws a clear error when used outside any provider", () => {
@@ -226,9 +221,8 @@ describe("MockOAuth2Provider + useOAuth2", () => {
     } catch (err) {
       caught = err;
     }
-    assertEquals(caught instanceof Error, true);
-    assertEquals(
-      (caught as Error).message.includes("OAuth2Provider"),
+    expect(caught instanceof Error).toStrictEqual(true);
+    expect((caught as Error).message.includes("OAuth2Provider")).toStrictEqual(
       true,
     );
   });
@@ -249,10 +243,9 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Caller />
       </MockOAuth2Provider>,
     );
-    assertEquals(
+    expect(
       screen.getByTestId("err").textContent?.includes("DirectClient"),
-      true,
-    );
+    ).toStrictEqual(true);
   });
 
   it("useBffClient returns the provider's BffClient", () => {
@@ -267,7 +260,7 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Caller />
       </OAuth2Provider>,
     );
-    assertEquals(resolved === client, true);
+    expect(resolved === client).toStrictEqual(true);
   });
 
   it("useBffClient rejects a client that is not a BffClient", () => {
@@ -286,10 +279,9 @@ describe("MockOAuth2Provider + useOAuth2", () => {
         <Caller />
       </MockOAuth2Provider>,
     );
-    assertEquals(
+    expect(
       screen.getByTestId("err").textContent?.includes("BffClient"),
-      true,
-    );
+    ).toStrictEqual(true);
   });
 });
 
@@ -314,7 +306,7 @@ describe("narrowing hooks", () => {
     let token: string | undefined;
     function Caller(): ReactNode {
       const direct = useDirectClient();
-      direct.getAccessToken().then((value) => {
+      void direct.getAccessToken().then((value) => {
         token = value;
       });
       return null;
@@ -326,7 +318,7 @@ describe("narrowing hooks", () => {
         </MockOAuth2Provider>,
       );
     });
-    assertStrictEquals(token, "mock-access-token");
+    expect(token).toBe("mock-access-token");
   });
 
   it("exposes loginContinuation through the narrowed BffClient", () => {
@@ -341,8 +333,7 @@ describe("narrowing hooks", () => {
         <Caller />
       </MockOAuth2Provider>,
     );
-    assertStrictEquals(
-      screen.getByTestId("href").textContent,
+    expect(screen.getByTestId("href").textContent).toBe(
       "/auth/login?return_to=%2Fx",
     );
   });
@@ -360,11 +351,55 @@ describe("OAuth2Callback", () => {
         </MockOAuth2Provider>,
       );
     });
-    assertEquals(
+    expect(
       screen.getByTestId("err").textContent?.includes("DirectClient"),
-      true,
       "the wrong-client error must reach `fallback`, not escape as a throw",
-    );
+    ).toStrictEqual(true);
+  });
+});
+
+describe("OAuth2Callback defaults", () => {
+  it("shows the error message in a <pre> when no fallback is given", async () => {
+    await act(async () => {
+      render(
+        <MockOAuth2Provider client={createMockBffClient()}>
+          <OAuth2Callback />
+        </MockOAuth2Provider>,
+      );
+    });
+
+    const message = document.querySelector("pre");
+    assert(message, "the default fallback must render a <pre>");
+    expect(message.textContent).toContain("DirectClient");
+  });
+
+  it("replaces the history entry with returnTo once the exchange succeeds", async () => {
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: {
+        authorization: "http://idp.test/authorize",
+        token: "http://idp.test/token",
+      },
+    });
+    using _exchange = vi
+      .spyOn(client, "handleAuthorizationCallback")
+      .mockResolvedValue({ returnTo: "/dashboard" } as Awaited<
+        ReturnType<DirectClient["handleAuthorizationCallback"]>
+      >);
+    const originalHref = window.location.href;
+    try {
+      await act(async () => {
+        render(
+          <OAuth2Provider client={client} initialState={{ isLoading: false }}>
+            <OAuth2Callback />
+          </OAuth2Provider>,
+        );
+      });
+
+      expect(window.location.pathname).toBe("/dashboard");
+    } finally {
+      window.history.replaceState(null, "", originalHref);
+    }
   });
 });
 
@@ -382,12 +417,12 @@ describe("OAuth2Provider renew timer", () => {
         </OAuth2Provider>,
       );
     });
-    assertStrictEquals(client.renewCount, 0);
+    expect(client.renewCount).toBe(0);
 
     await act(async () => {
       await time.tickAsync(91_000);
     });
-    assertStrictEquals(client.renewCount, 1, "the timer must fire once armed");
+    expect(client.renewCount, "the timer must fire once armed").toBe(1);
   });
 
   it("re-arms after a renew so the session keeps refreshing", async () => {
@@ -408,10 +443,8 @@ describe("OAuth2Provider renew timer", () => {
       await act(async () => {
         await time.tickAsync(91_000);
       });
-      assertStrictEquals(
-        client.renewCount,
+      expect(client.renewCount, "each renew must schedule the next one").toBe(
         expected,
-        "each renew must schedule the next one",
       );
     }
   });
@@ -426,7 +459,7 @@ describe("OAuth2Provider renew timer", () => {
         </OAuth2Provider>,
       );
     });
-    assertStrictEquals(client.renewCount, 0);
+    expect(client.renewCount).toBe(0);
 
     await act(async () => {
       client.signIn({ sub: "u-login" });
@@ -434,11 +467,10 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(91_000);
     });
-    assertStrictEquals(
+    expect(
       client.renewCount,
-      1,
       "the authenticated event carries accessTokenExpiresAt; the timer must use it",
-    );
+    ).toBe(1);
   });
 
   it("re-arms off a token_refreshed event", async () => {
@@ -451,7 +483,7 @@ describe("OAuth2Provider renew timer", () => {
         </OAuth2Provider>,
       );
     });
-    assertStrictEquals(client.renewCount, 0, "no expiry means no timer");
+    expect(client.renewCount, "no expiry means no timer").toBe(0);
 
     await act(async () => {
       client.refreshTokens(120);
@@ -459,7 +491,7 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(91_000);
     });
-    assertStrictEquals(client.renewCount, 1);
+    expect(client.renewCount).toBe(1);
   });
 
   it("schedules nothing while signed out", async () => {
@@ -475,7 +507,7 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(600_000);
     });
-    assertStrictEquals(client.renewCount, 0);
+    expect(client.renewCount).toBe(0);
   });
 
   it("stops renewing after logout", async () => {
@@ -494,7 +526,7 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(91_000);
     });
-    assertStrictEquals(client.renewCount, 1);
+    expect(client.renewCount).toBe(1);
 
     await act(async () => {
       client.signOut();
@@ -502,11 +534,7 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(600_000);
     });
-    assertStrictEquals(
-      client.renewCount,
-      1,
-      "a signed-out session must not renew",
-    );
+    expect(client.renewCount, "a signed-out session must not renew").toBe(1);
   });
 
   it("arms an immediate renew for an expired but revivable session", async () => {
@@ -522,16 +550,15 @@ describe("OAuth2Provider renew timer", () => {
         </OAuth2Provider>,
       );
     });
-    assertStrictEquals(client.renewCount, 0);
+    expect(client.renewCount).toBe(0);
 
     await act(async () => {
       await time.tickAsync(6_000);
     });
-    assertStrictEquals(
+    expect(
       client.renewCount,
-      1,
       "sessionExpiresIn 0 means renew now, not never",
-    );
+    ).toBe(1);
   });
 
   it("clears its timer on unmount", async () => {
@@ -552,18 +579,16 @@ describe("OAuth2Provider renew timer", () => {
     await act(async () => {
       await time.tickAsync(600_000);
     });
-    assertStrictEquals(client.renewCount, 0);
+    expect(client.renewCount).toBe(0);
   });
 });
 
 describe("RequireAuth", () => {
   it("renders fallback while unauthenticated and children once signed in", async () => {
     const client = createMockOAuth2Client();
-    using _login = stub(
-      client,
-      "login",
-      () => Promise.resolve({ url: "" }),
-    );
+    using _login = vi
+      .spyOn(client, "login")
+      .mockImplementation(() => Promise.resolve({ url: "" }));
     render(
       <OAuth2Provider client={client} initialState={{ user: null }}>
         <RequireAuth fallback={<span data-testid="fallback">loading</span>}>
@@ -571,20 +596,18 @@ describe("RequireAuth", () => {
         </RequireAuth>
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("fallback").textContent, "loading");
+    expect(screen.getByTestId("fallback").textContent).toBe("loading");
     await act(async () => {
       client.signIn({ sub: "u3" });
     });
-    assertStrictEquals(screen.getByTestId("protected").textContent, "secret");
+    expect(screen.getByTestId("protected").textContent).toBe("secret");
   });
 
   it("calls login with the current path as returnTo when unauthenticated", async () => {
     const client = createMockOAuth2Client();
-    using loginStub = stub(
-      client,
-      "login",
-      () => Promise.resolve({ url: "" }),
-    );
+    using loginStub = vi
+      .spyOn(client, "login")
+      .mockImplementation(() => Promise.resolve({ url: "" }));
     render(
       <OAuth2Provider client={client} initialState={{ user: null }}>
         <RequireAuth>
@@ -593,12 +616,11 @@ describe("RequireAuth", () => {
       </OAuth2Provider>,
     );
     await act(async () => {});
-    assertEquals(loginStub.calls.length >= 1, true);
-    assertStrictEquals(
-      (loginStub.calls[0].args[0] as { returnTo?: string } | undefined)
+    expect(loginStub.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(
+      (loginStub.mock.calls[0]?.[0] as { returnTo?: string } | undefined)
         ?.returnTo,
-      "/",
-    );
+    ).toBe("/");
   });
 });
 
@@ -607,22 +629,15 @@ describe("useOAuth2 navigation", () => {
     const client = createMockOAuth2Client();
     const assigned: string[] = [];
     const realLocation = window.location;
-    let replaced = false;
-    try {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: {
-          origin: realLocation.origin,
-          pathname: "/",
-          search: "",
-          assign: (url: string) => assigned.push(url),
-        },
-      });
-      replaced = true;
-    } catch {
-      // Some runtimes pin `window.location`; skip the assertion there.
-    }
-    if (!replaced) return;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        origin: realLocation.origin,
+        pathname: "/",
+        search: "",
+        assign: (url: string) => assigned.push(url),
+      },
+    });
     try {
       let doLogin: () => void = () => {};
       const Caller = (): ReactNode => {
@@ -638,7 +653,47 @@ describe("useOAuth2 navigation", () => {
       await act(async () => {
         doLogin();
       });
-      assertEquals(assigned, ["mock://login"]);
+      expect(assigned).toStrictEqual(["mock://login"]);
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      });
+    }
+  });
+
+  it("logout() navigates the browser to the returned url", async () => {
+    const client = createMockOAuth2Client();
+    using _logout = vi
+      .spyOn(client, "logout")
+      .mockResolvedValue({ url: "https://idp.test/end-session" });
+    const assigned: string[] = [];
+    const realLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        origin: realLocation.origin,
+        pathname: "/",
+        search: "",
+        assign: (url: string) => assigned.push(url),
+      },
+    });
+    try {
+      let doLogout: () => void = () => {};
+      const Caller = (): ReactNode => {
+        const { logout } = useOAuth2();
+        doLogout = () => void logout();
+        return null;
+      };
+      render(
+        <OAuth2Provider client={client} initialState={{ user: null }}>
+          <Caller />
+        </OAuth2Provider>,
+      );
+      await act(async () => {
+        doLogout();
+      });
+      expect(assigned).toStrictEqual(["https://idp.test/end-session"]);
     } finally {
       Object.defineProperty(window, "location", {
         configurable: true,
@@ -665,9 +720,9 @@ describe("OAuth2Provider initialState", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(screen.getByTestId("user").textContent, "ssr-user");
-    assertStrictEquals(probeCalls, 0);
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("ssr-user");
+    expect(probeCalls).toBe(0);
   });
 
   it("survives StrictMode double-mount without re-running the probe", () => {
@@ -688,7 +743,7 @@ describe("OAuth2Provider initialState", () => {
         </OAuth2Provider>
       </StrictMode>,
     );
-    assertStrictEquals(probeCalls, 0);
+    expect(probeCalls).toBe(0);
   });
 
   it("re-syncs when a later SSR navigation supplies updated initialState (BFF login)", () => {
@@ -703,7 +758,7 @@ describe("OAuth2Provider initialState", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
+    expect(screen.getByTestId("auth").textContent).toBe("false");
 
     rerender(
       <OAuth2Provider
@@ -713,8 +768,8 @@ describe("OAuth2Provider initialState", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
-    assertStrictEquals(screen.getByTestId("user").textContent, "ssr-u");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("ssr-u");
   });
 
   it("re-syncs to signed-out when initialState flips to unauthenticated", () => {
@@ -727,7 +782,7 @@ describe("OAuth2Provider initialState", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "true");
+    expect(screen.getByTestId("auth").textContent).toBe("true");
 
     rerender(
       <OAuth2Provider
@@ -737,7 +792,7 @@ describe("OAuth2Provider initialState", () => {
         <Probe />
       </OAuth2Provider>,
     );
-    assertStrictEquals(screen.getByTestId("auth").textContent, "false");
-    assertStrictEquals(screen.getByTestId("user").textContent, "none");
+    expect(screen.getByTestId("auth").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("none");
   });
 });

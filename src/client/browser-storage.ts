@@ -161,9 +161,10 @@ export class IndexedDBRefreshTokenStorage implements RefreshTokenStorage {
 
   #open(version?: number): Promise<IDBDatabase> {
     return new Promise<IDBDatabase>((resolve, reject) => {
-      const req = version === undefined
-        ? indexedDB.open(this.#databaseName)
-        : indexedDB.open(this.#databaseName, version);
+      const req =
+        version === undefined
+          ? indexedDB.open(this.#databaseName)
+          : indexedDB.open(this.#databaseName, version);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(this.#storeName)) {

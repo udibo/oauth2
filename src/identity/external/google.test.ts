@@ -1,12 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
-import { encodeBase64Url } from "@std/encoding/base64url";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
+import { encodeBase64Url } from "../../utils/_encoding.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { ExternalAuthFlow } from "./flow.ts";
 import { googleProvider, type GoogleProviderOptions } from "./google.ts";
@@ -34,9 +28,10 @@ function createGoogleStub(options: {
       | undefined,
   };
   const fetchStub: typeof fetch = async (input, init) => {
-    const request = input instanceof Request
-      ? new Request(input, init)
-      : new Request(String(input), init);
+    const request =
+      input instanceof Request
+        ? new Request(input, init)
+        : new Request(String(input), init);
     switch (request.url) {
       case "https://accounts.google.com/.well-known/oauth-authorization-server":
         return new Response("Not Found", { status: 404 });
@@ -48,9 +43,9 @@ function createGoogleStub(options: {
           token_endpoint: "https://oauth2.googleapis.com/token",
           ...(options.userinfo
             ? {
-              userinfo_endpoint:
-                "https://openidconnect.googleapis.com/v1/userinfo",
-            }
+                userinfo_endpoint:
+                  "https://openidconnect.googleapis.com/v1/userinfo",
+              }
             : {}),
         });
       case "https://oauth2.googleapis.com/token":
@@ -82,9 +77,7 @@ function createGoogleStub(options: {
 async function signIn(
   stub: ReturnType<typeof createGoogleStub>,
   config?: Pick<GoogleProviderOptions, "azp">,
-): Promise<
-  Awaited<ReturnType<ExternalAuthFlow["finish"]>>
-> {
+): Promise<Awaited<ReturnType<ExternalAuthFlow["finish"]>>> {
   const flow = new ExternalAuthFlow({
     provider: googleProvider({
       clientId,
@@ -94,7 +87,7 @@ async function signIn(
     }),
   });
   const { url, transient } = await flow.start({ redirectUri });
-  assertStringIncludes(url, "https://accounts.google.com/o/oauth2/v2/auth");
+  expect(url).toContain("https://accounts.google.com/o/oauth2/v2/auth");
   stub.context.nonce = transient.nonce;
   return await flow.finish({
     params: new URLSearchParams({
@@ -121,20 +114,20 @@ describe("googleProvider", () => {
     });
     const profile = await signIn(stub);
 
-    assertEquals(profile.provider, "google");
-    assertEquals(profile.subject, "g-123");
-    assertEquals(profile.email, "ada@example.com");
-    assertEquals(profile.emailVerified, true);
-    assertEquals(profile.name, "Ada Lovelace");
-    assertEquals(profile.givenName, "Ada");
-    assertEquals(profile.familyName, "Lovelace");
-    assertEquals(profile.picture, "https://img.example/ada.png");
-    assertEquals(profile.raw.hd, "example.com");
+    expect(profile.provider).toStrictEqual("google");
+    expect(profile.subject).toStrictEqual("g-123");
+    expect(profile.email).toStrictEqual("ada@example.com");
+    expect(profile.emailVerified).toStrictEqual(true);
+    expect(profile.name).toStrictEqual("Ada Lovelace");
+    expect(profile.givenName).toStrictEqual("Ada");
+    expect(profile.familyName).toStrictEqual("Lovelace");
+    expect(profile.picture).toStrictEqual("https://img.example/ada.png");
+    expect(profile.raw.hd).toStrictEqual("example.com");
 
     const tokenRequest = stub.context.tokenRequest!;
     assert(tokenRequest.headers.get("authorization")?.startsWith("Basic "));
-    assertEquals(tokenRequest.body.get("code"), "google-code");
-    assertEquals(tokenRequest.body.get("redirect_uri"), redirectUri);
+    expect(tokenRequest.body.get("code")).toStrictEqual("google-code");
+    expect(tokenRequest.body.get("redirect_uri")).toStrictEqual(redirectUri);
     assert(tokenRequest.body.get("code_verifier"));
   });
 
@@ -147,8 +140,8 @@ describe("googleProvider", () => {
       },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "grace@example.com");
-    assertEquals(profile.emailVerified, false);
+    expect(profile.email).toStrictEqual("grace@example.com");
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("defaults emailVerified to false when the claim is absent", async () => {
@@ -156,7 +149,7 @@ describe("googleProvider", () => {
       claims: { sub: "g-789", email: "joan@example.com" },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.emailVerified, false);
+    expect(profile.emailVerified).toStrictEqual(false);
   });
 
   it("rejects an expired id_token", async () => {
@@ -167,9 +160,9 @@ describe("googleProvider", () => {
         exp: Math.floor(Date.now() / 1000) - 3600,
       },
     });
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "expired");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("expired");
   });
 
   it("rejects an id_token with multiple audiences and a foreign azp", async () => {
@@ -181,9 +174,9 @@ describe("googleProvider", () => {
         azp: "another-client",
       },
     });
-    const error = await assertRejects(() => signIn(stub), ExternalAuthError);
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, "azp");
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain("azp");
   });
 
   it("accepts a cross-client azp when the config opts out of the check", async () => {
@@ -195,7 +188,7 @@ describe("googleProvider", () => {
       },
     });
     const profile = await signIn(stub, { azp: "ignore" });
-    assertEquals(profile.subject, "g-cross-client");
+    expect(profile.subject).toStrictEqual("g-cross-client");
   });
 
   it("accepts a single-element aud array with no azp claim", async () => {
@@ -208,8 +201,8 @@ describe("googleProvider", () => {
       },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.subject, "g-single-aud");
-    assertEquals(profile.email, "single@example.com");
+    expect(profile.subject).toStrictEqual("g-single-aud");
+    expect(profile.email).toStrictEqual("single@example.com");
   });
 
   it("merges userinfo claims over id_token claims when the sub matches", async () => {
@@ -227,9 +220,9 @@ describe("googleProvider", () => {
       },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.picture, "https://img.example/fresh.png");
-    assertEquals(profile.raw.locale, "en-GB");
-    assertEquals(profile.email, "ada@example.com");
+    expect(profile.picture).toStrictEqual("https://img.example/fresh.png");
+    expect(profile.raw.locale).toStrictEqual("en-GB");
+    expect(profile.email).toStrictEqual("ada@example.com");
   });
 
   it("ignores a userinfo response whose sub does not match the id_token", async () => {
@@ -238,7 +231,7 @@ describe("googleProvider", () => {
       userinfo: { sub: "g-999", email: "attacker@example.com" },
     });
     const profile = await signIn(stub);
-    assertEquals(profile.email, "ada@example.com");
-    assertEquals(profile.subject, "g-123");
+    expect(profile.email).toStrictEqual("ada@example.com");
+    expect(profile.subject).toStrictEqual("g-123");
   });
 });

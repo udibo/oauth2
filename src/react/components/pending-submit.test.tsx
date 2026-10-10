@@ -1,8 +1,5 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import {
   act,
   createEvent,
@@ -19,8 +16,6 @@ import { ResetPasswordForm } from "./reset-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
 import type { AuthFormResult } from "./types.ts";
-
-cleanupAfterEach();
 
 type HeldSubmit = () => Promise<AuthFormResult>;
 
@@ -109,7 +104,9 @@ async function startPendingSubmit(
   await act(async () => {
     fireEvent.click(button);
   });
-  assertEquals(submit.calls(), 1, "clicking the idle button submits once");
+  expect(submit.calls(), "clicking the idle button submits once").toStrictEqual(
+    1,
+  );
   assert(
     screen.getByRole("button", { name: form.pendingLabel }) === button,
     "the pending state must re-render the same button",
@@ -123,16 +120,16 @@ describe("a pending submit button stays focusable and inert", () => {
       it("announces pending with aria-disabled instead of native disabled", async () => {
         const { button, release } = await startPendingSubmit(form);
 
-        assertEquals(button.getAttribute("aria-disabled"), "true");
-        assertFalse(
+        expect(button.getAttribute("aria-disabled")).toStrictEqual("true");
+        expect(
           button.hasAttribute("disabled"),
           "disabling the focused button drops keyboard focus to <body> in Chromium",
-        );
+        ).toBeFalsy();
 
         await act(async () => release());
         const idle = screen.getByRole("button", { name: form.label });
-        assertFalse(idle.hasAttribute("aria-disabled"));
-        assertFalse(idle.hasAttribute("disabled"));
+        expect(idle.hasAttribute("aria-disabled")).toBeFalsy();
+        expect(idle.hasAttribute("disabled")).toBeFalsy();
       });
     });
   }
@@ -154,8 +151,11 @@ describe("repeat activation while a submit is pending", () => {
     });
 
     assert(click.defaultPrevented, "the pending button must cancel activation");
-    assertEquals(submitEvents, 0, "a pending button must not submit its form");
-    assertEquals(calls(), 1);
+    expect(
+      submitEvents,
+      "a pending button must not submit its form",
+    ).toStrictEqual(0);
+    expect(calls()).toStrictEqual(1);
     await act(async () => release());
   });
 
@@ -168,7 +168,7 @@ describe("repeat activation while a submit is pending", () => {
     await act(async () => {
       fireEvent.submit(form);
     });
-    assertEquals(submit.calls(), 1);
+    expect(submit.calls()).toStrictEqual(1);
 
     const second = createEvent.submit(form);
     await act(async () => {
@@ -176,13 +176,13 @@ describe("repeat activation while a submit is pending", () => {
     });
 
     assert(second.defaultPrevented, "the repeat submit must be cancelled");
-    assertEquals(submit.calls(), 1, "onSubmit must not run again");
+    expect(submit.calls(), "onSubmit must not run again").toStrictEqual(1);
 
     await act(async () => submit.release());
     await act(async () => {
       fireEvent.submit(form);
     });
-    assertEquals(submit.calls(), 2, "a settled form submits again");
+    expect(submit.calls(), "a settled form submits again").toStrictEqual(2);
     await act(async () => submit.release());
   });
 });

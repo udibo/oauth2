@@ -130,8 +130,8 @@ export function assertIdTokenClaims(input: IdTokenClaimsInput): void {
     );
   }
   const aud = claims.aud;
-  const audienceOk = aud === clientId ||
-    (Array.isArray(aud) && aud.includes(clientId));
+  const audienceOk =
+    aud === clientId || (Array.isArray(aud) && aud.includes(clientId));
   if (!audienceOk) {
     throw new ExternalAuthError(
       provider,
@@ -161,16 +161,18 @@ export function assertIdTokenClaims(input: IdTokenClaimsInput): void {
     throw new ExternalAuthError(
       provider,
       "provider_error",
-      `id_token is expired or has no "exp" claim (exp=${
-        JSON.stringify(exp)
-      }) — reject per OpenID Connect Core §3.1.3.7. Ask the user to start ` +
+      `id_token is expired or has no "exp" claim (exp=${JSON.stringify(
+        exp,
+      )}) — reject per OpenID Connect Core §3.1.3.7. Ask the user to start ` +
         `again.`,
     );
   }
   if (
     expectedNonce !== undefined &&
-    !(typeof claims.nonce === "string" &&
-      timingSafeEqualString(claims.nonce, expectedNonce))
+    !(
+      typeof claims.nonce === "string" &&
+      timingSafeEqualString(claims.nonce, expectedNonce)
+    )
   ) {
     throw new ExternalAuthError(
       provider,

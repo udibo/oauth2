@@ -53,13 +53,12 @@ export interface DeviceAuthorizationGrantOptions<
   Client extends ClientInterface,
   User,
   S extends AbstractScope,
-> extends
-  GrantOptions<
-    Client,
-    User,
-    S,
-    DeviceAuthorizationGrantServices<Client, User, S>
-  > {
+> extends GrantOptions<
+  Client,
+  User,
+  S,
+  DeviceAuthorizationGrantServices<Client, User, S>
+> {
   /** Whether to issue a refresh token with the access token. Defaults to `true`. */
   allowRefreshToken?: boolean;
 }
@@ -177,17 +176,16 @@ export class DeviceAuthorizationGrant<
     client: Client,
     body: FormData,
   ): Promise<Token<Client, User, S>> {
-    const { deviceAuthorizationService, tokenService } = await this
-      .resolveServices(request);
+    const { deviceAuthorizationService, tokenService } =
+      await this.resolveServices(request);
 
     const deviceCode = body.get("device_code");
     if (typeof deviceCode !== "string") {
       throw new InvalidRequestError("device_code parameter required");
     }
 
-    const authorization = await deviceAuthorizationService.getByDeviceCode(
-      deviceCode,
-    );
+    const authorization =
+      await deviceAuthorizationService.getByDeviceCode(deviceCode);
     if (!authorization) {
       throw new InvalidGrantError("invalid device_code");
     }
@@ -233,7 +231,7 @@ export class DeviceAuthorizationGrant<
 
     const { user, scope } = authorization;
 
-    if (!await deviceAuthorizationService.revoke(authorization)) {
+    if (!(await deviceAuthorizationService.revoke(authorization))) {
       throw new InvalidGrantError("device_code already used");
     }
 
@@ -255,9 +253,8 @@ export class DeviceAuthorizationGrant<
     } catch (error) {
       let stillStored;
       try {
-        stillStored = await deviceAuthorizationService.getByDeviceCode(
-          deviceCode,
-        );
+        stillStored =
+          await deviceAuthorizationService.getByDeviceCode(deviceCode);
       } catch {
         throw error;
       }

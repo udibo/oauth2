@@ -157,8 +157,8 @@ export class IntrospectionTokenReader<
     this.introspectionEndpoint = options.introspectionEndpoint;
     this.clientId = options.clientId;
     this.clientSecret = options.clientSecret;
-    this.Scope = options.Scope ??
-      (BasicScope as unknown as ScopeConstructor<S>);
+    this.Scope =
+      options.Scope ?? (BasicScope as unknown as ScopeConstructor<S>);
     this.getClient = options.getClient;
     this.getUser = options.getUser;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 5_000;
@@ -211,7 +211,7 @@ export class IntrospectionTokenReader<
       client,
       user,
       scope: data.scope
-        ? new this.Scope(data.scope) as S | undefined
+        ? (new this.Scope(data.scope) as S | undefined)
         : undefined,
       claims: data as Record<string, unknown>,
     };
@@ -234,7 +234,7 @@ export class IntrospectionTokenReader<
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": encodeBasicAuth(this.clientId, this.clientSecret),
+            Authorization: encodeBasicAuth(this.clientId, this.clientSecret),
           },
           body: new URLSearchParams({ token: accessToken }),
           signal: packageDeadlineSignal(controller.signal),
@@ -250,24 +250,24 @@ export class IntrospectionTokenReader<
         await response.body?.cancel();
         throw response.status >= 500
           ? new TemporarilyUnavailableError(
-            `token introspection failed (HTTP ${response.status})`,
-          )
+              `token introspection failed (HTTP ${response.status})`,
+            )
           : new ServerError(
-            `token introspection failed (HTTP ${response.status})`,
-          );
+              `token introspection failed (HTTP ${response.status})`,
+            );
       }
 
       try {
-        return await response.json() as IntrospectionResponse;
+        return (await response.json()) as IntrospectionResponse;
       } catch (cause) {
         throw controller.signal.aborted
           ? new TemporarilyUnavailableError(
-            "token introspection request failed",
-            { cause },
-          )
+              "token introspection request failed",
+              { cause },
+            )
           : new ServerError("token introspection response was not JSON", {
-            cause,
-          });
+              cause,
+            });
       }
     } finally {
       clearTimeout(deadline);

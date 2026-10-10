@@ -1,11 +1,8 @@
-import {
-  assertEquals,
-  assertMatch,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { rejection, thrown } from "../../_test_assert.ts";
 import {
   defaultDevIdpConfig,
   loadDevIdpConfig,
@@ -16,12 +13,13 @@ async function withConfigFile(
   contents: string,
   fn: (path: string) => Promise<void>,
 ): Promise<void> {
-  const path = await Deno.makeTempFile({ suffix: ".json" });
+  const directory = await mkdtemp(join(tmpdir(), "oauth2-idp-config-"));
   try {
-    await Deno.writeTextFile(path, contents);
+    const path = join(directory, "idp.json");
+    await writeFile(path, contents);
     await fn(path);
   } finally {
-    await Deno.remove(path);
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -29,12 +27,12 @@ describe("parseDevIdpConfig", () => {
   it("fills every default so the server has nothing left to resolve", () => {
     const config = parseDevIdpConfig({});
 
-    assertEquals(config.port, 9000);
-    assertEquals(config.hostname, "127.0.0.1");
-    assertEquals(config.consent, "auto");
-    assertEquals(config.grants.authorization_code, true);
-    assertEquals(config.grants.password, false);
-    assertEquals(config.users, defaultDevIdpConfig().users);
+    expect(config.port).toStrictEqual(9000);
+    expect(config.hostname).toStrictEqual("127.0.0.1");
+    expect(config.consent).toStrictEqual("auto");
+    expect(config.grants.authorization_code).toStrictEqual(true);
+    expect(config.grants.password).toStrictEqual(false);
+    expect(config.users).toStrictEqual(defaultDevIdpConfig().users);
   });
 
   it("defaults a user's id to its username and its claims to none", () => {
@@ -43,8 +41,8 @@ describe("parseDevIdpConfig", () => {
       clients: [],
     });
 
-    assertEquals(config.users[0].id, "dev@example.com");
-    assertEquals(config.users[0].claims, {});
+    expect(config.users[0].id).toStrictEqual("dev@example.com");
+    expect(config.users[0].claims).toStrictEqual({});
   });
 
   it("keeps declared users, clients, and scopes", () => {
@@ -53,30 +51,34 @@ describe("parseDevIdpConfig", () => {
       port: 4444,
       consent: "prompt",
       scopesSupported: ["openid", "orders:read"],
-      users: [{
-        id: "u1",
-        username: "dev",
-        password: "pw",
-        claims: { name: "Dev" },
-      }],
-      clients: [{
-        id: "web",
-        secret: "s3cret",
-        redirectUris: ["http://localhost:4000/cb"],
-        grants: ["authorization_code"],
-      }],
+      users: [
+        {
+          id: "u1",
+          username: "dev",
+          password: "pw",
+          claims: { name: "Dev" },
+        },
+      ],
+      clients: [
+        {
+          id: "web",
+          secret: "s3cret",
+          redirectUris: ["http://localhost:4000/cb"],
+          grants: ["authorization_code"],
+        },
+      ],
     });
 
-    assertEquals(config.issuer, "https://idp.test");
-    assertEquals(config.port, 4444);
-    assertEquals(config.consent, "prompt");
-    assertEquals(config.scopesSupported, ["openid", "orders:read"]);
-    assertEquals(config.users[0].claims, { name: "Dev" });
-    assertEquals(config.clients[0].secret, "s3cret");
+    expect(config.issuer).toStrictEqual("https://idp.test");
+    expect(config.port).toStrictEqual(4444);
+    expect(config.consent).toStrictEqual("prompt");
+    expect(config.scopesSupported).toStrictEqual(["openid", "orders:read"]);
+    expect(config.users[0].claims).toStrictEqual({ name: "Dev" });
+    expect(config.clients[0].secret).toStrictEqual("s3cret");
   });
 
   it("rejects an unknown field instead of ignoring the typo", () => {
-    assertThrows(
+    thrown(
       () => parseDevIdpConfig({ user: [] }),
       Error,
       "config.user is not a known option",
@@ -84,25 +86,48 @@ describe("parseDevIdpConfig", () => {
   });
 
   it("names the path of a missing or mistyped field", () => {
-    assertThrows(
+    thrown(
       () => parseDevIdpConfig({ users: [{ username: "dev" }], clients: [] }),
       Error,
       "users[0].password must be a non-empty string",
     );
-    assertThrows(
+    thrown(
       () => parseDevIdpConfig({ port: "9000" }),
       Error,
       "config.port must be an integer >= 0",
     );
-    assertThrows(
+    thrown(
       () => parseDevIdpConfig({ consent: "maybe" }),
       Error,
       'config.consent must be "auto" or "prompt"',
     );
   });
 
+  it("names the path of a grant flag or collection of the wrong type", () => {
+    thrown(
+      () => parseDevIdpConfig({ grants: { password: "yes" } }),
+      Error,
+      "config.grants.password must be true or false",
+    );
+    thrown(
+      () => parseDevIdpConfig({ grants: [] }),
+      Error,
+      "config.grants must be an object",
+    );
+    thrown(
+      () => parseDevIdpConfig({ users: {} }),
+      Error,
+      "config.users must be an array",
+    );
+    thrown(
+      () => parseDevIdpConfig({ accessTokenLifetime: 0 }),
+      Error,
+      "config.accessTokenLifetime must be an integer >= 1",
+    );
+  });
+
   it("requires a redirect URI for an authorization_code client", () => {
-    assertThrows(
+    thrown(
       () =>
         parseDevIdpConfig({
           users: [],
@@ -114,7 +139,7 @@ describe("parseDevIdpConfig", () => {
   });
 
   it("rejects duplicate user and client ids", () => {
-    assertThrows(
+    thrown(
       () =>
         parseDevIdpConfig({
           users: [
@@ -126,7 +151,7 @@ describe("parseDevIdpConfig", () => {
       Error,
       'more than one user with id "dev"',
     );
-    assertThrows(
+    thrown(
       () =>
         parseDevIdpConfig({
           users: [],
@@ -141,7 +166,7 @@ describe("parseDevIdpConfig", () => {
   });
 
   it("requires a private JWK when a signing key is pinned", () => {
-    assertThrows(
+    thrown(
       () => parseDevIdpConfig({ signingKey: { kty: "EC" } }),
       Error,
       "config.signingKey.d must be a non-empty string",
@@ -155,16 +180,18 @@ describe("loadDevIdpConfig", () => {
       JSON.stringify({
         port: 4100,
         users: [{ username: "dev", password: "pw" }],
-        clients: [{
-          id: "web",
-          redirectUris: ["http://localhost:4000/cb"],
-        }],
+        clients: [
+          {
+            id: "web",
+            redirectUris: ["http://localhost:4000/cb"],
+          },
+        ],
       }),
       async (path) => {
         const config = await loadDevIdpConfig(path);
-        assertEquals(config.port, 4100);
-        assertEquals(config.users[0].username, "dev");
-        assertEquals(config.clients[0].grants, [
+        expect(config.port).toStrictEqual(4100);
+        expect(config.users[0].username).toStrictEqual("dev");
+        expect(config.clients[0].grants).toStrictEqual([
           "authorization_code",
           "refresh_token",
         ]);
@@ -174,28 +201,25 @@ describe("loadDevIdpConfig", () => {
 
   it("names the file when the JSON is malformed", async () => {
     await withConfigFile("{ not json", async (path) => {
-      const error = await assertRejects(
-        () => loadDevIdpConfig(path),
-        Error,
-      );
-      assertMatch(error.message, /is not valid JSON/);
-      assertEquals(error.message.includes(path), true);
+      const error = await rejection(() => loadDevIdpConfig(path), Error);
+      expect(error.message).toMatch(/is not valid JSON/);
+      expect(error.message.includes(path)).toStrictEqual(true);
     });
   });
 
   it("names the file when a field is invalid", async () => {
     await withConfigFile(JSON.stringify({ port: -1 }), async (path) => {
-      const error = await assertRejects(() => loadDevIdpConfig(path), Error);
-      assertMatch(error.message, /config.port must be an integer/);
-      assertEquals(error.message.includes(path), true);
+      const error = await rejection(() => loadDevIdpConfig(path), Error);
+      expect(error.message).toMatch(/config.port must be an integer/);
+      expect(error.message.includes(path)).toStrictEqual(true);
     });
   });
 
-  it("reports a missing file without a stack of Deno internals", async () => {
-    const error = await assertRejects(
+  it("reports a missing file by name", async () => {
+    const error = await rejection(
       () => loadDevIdpConfig("/nonexistent/idp.json"),
       Error,
     );
-    assertMatch(error.message, /cannot read config \/nonexistent\/idp.json/);
+    expect(error.message).toMatch(/cannot read config \/nonexistent\/idp.json/);
   });
 });

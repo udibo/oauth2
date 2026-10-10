@@ -23,9 +23,7 @@
  * @module
  */
 
-import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { RateLimitStore } from "../../identity/rate-limit.ts";
 
 /** Options for {@link runRateLimitStoreContractTests}. */
@@ -76,51 +74,55 @@ export function runRateLimitStoreContractTests(
     describe("increment", () => {
       it("opens a window at count 1 that ends one window from now", async () => {
         const result = await store.increment(KEY, WINDOW_MS, now);
-        assertEquals(result.count, 1);
-        assertAlmostEquals(result.resetAt, now + WINDOW_MS, tolerance);
+        expect(result.count).toStrictEqual(1);
+        expect(
+          Math.abs(result.resetAt - (now + WINDOW_MS)),
+        ).toBeLessThanOrEqual(tolerance);
       });
 
       it("counts up within the window without moving its end", async () => {
         const first = await store.increment(KEY, WINDOW_MS, now);
         const second = await store.increment(KEY, WINDOW_MS, now + 10);
         const third = await store.increment(KEY, WINDOW_MS, now + 20);
-        assertEquals([second.count, third.count], [2, 3]);
-        assertEquals(
+        expect([second.count, third.count]).toStrictEqual([2, 3]);
+        expect(
           [second.resetAt, third.resetAt],
-          [first.resetAt, first.resetAt],
           "a fixed window ends when it ends — hits inside it must not push " +
             "the reset out",
-        );
+        ).toStrictEqual([first.resetAt, first.resetAt]);
       });
 
       it("opens a fresh window once the previous one has lapsed", async () => {
         const first = await store.increment(KEY, WINDOW_MS, now);
         const after = first.resetAt + 1;
         const result = await store.increment(KEY, WINDOW_MS, after);
-        assertEquals(result.count, 1);
-        assertAlmostEquals(result.resetAt, after + WINDOW_MS, tolerance);
+        expect(result.count).toStrictEqual(1);
+        expect(
+          Math.abs(result.resetAt - (after + WINDOW_MS)),
+        ).toBeLessThanOrEqual(tolerance);
       });
 
       it("counts each key on its own", async () => {
         await store.increment(KEY, WINDOW_MS, now);
         await store.increment(KEY, WINDOW_MS, now);
         const other = await store.increment(OTHER_KEY, WINDOW_MS, now);
-        assertEquals(other.count, 1);
+        expect(other.count).toStrictEqual(1);
       });
 
       it("gives every concurrent hit its own count", async () => {
         const results = await Promise.all(
           Array.from({ length: 5 }, () => store.increment(KEY, WINDOW_MS, now)),
         );
-        assertEquals(
+        expect(
           results.map((result) => result.count).sort((a, b) => a - b),
-          [1, 2, 3, 4, 5],
           "the limiter decides on the returned count — concurrent hits " +
             "sharing a count are exactly the burst that slips past the " +
             "threshold",
-        );
+        ).toStrictEqual([1, 2, 3, 4, 5]);
         const next = await store.increment(KEY, WINDOW_MS, now);
-        assertEquals(next.count, 6, "no hit may be lost to a stale read");
+        expect(next.count, "no hit may be lost to a stale read").toStrictEqual(
+          6,
+        );
       });
     });
 
@@ -130,8 +132,10 @@ export function runRateLimitStoreContractTests(
         await store.increment(KEY, WINDOW_MS, now);
         await store.reset(KEY);
         const result = await store.increment(KEY, WINDOW_MS, now);
-        assertEquals(result.count, 1);
-        assertAlmostEquals(result.resetAt, now + WINDOW_MS, tolerance);
+        expect(result.count).toStrictEqual(1);
+        expect(
+          Math.abs(result.resetAt - (now + WINDOW_MS)),
+        ).toBeLessThanOrEqual(tolerance);
       });
 
       it("clears only the key it is given", async () => {
@@ -139,7 +143,7 @@ export function runRateLimitStoreContractTests(
         await store.increment(OTHER_KEY, WINDOW_MS, now);
         await store.reset(KEY);
         const other = await store.increment(OTHER_KEY, WINDOW_MS, now);
-        assertEquals(other.count, 2);
+        expect(other.count).toStrictEqual(2);
       });
 
       it("is a no-op for a key with no counter", async () => {

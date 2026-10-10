@@ -77,8 +77,9 @@ export interface MemoryUserShape {
  * Generic over the user type — supply your real app's `User` interface
  * (extending {@link MemoryUserShape}) so fixtures match production data.
  */
-export class MemoryUserService<U extends MemoryUserShape>
-  implements UserServiceInterface<U> {
+export class MemoryUserService<
+  U extends MemoryUserShape,
+> implements UserServiceInterface<U> {
   #usersById = new Map<string, U>();
   #usersByUsername = new Map<string, U>();
   #credentialsByUserId = new Map<string, PasswordCredential>();
@@ -86,7 +87,8 @@ export class MemoryUserService<U extends MemoryUserShape>
 
   /** Applies the password-hasher default; construct with no arguments for it. */
   constructor(options: MemoryUserServiceOptions = {}) {
-    this.#passwords = options.passwords ??
+    this.#passwords =
+      options.passwords ??
       new PasswordIdentityService({ iterations: FIXTURE_PBKDF2_ITERATIONS });
   }
 
@@ -124,7 +126,7 @@ export class MemoryUserService<U extends MemoryUserShape>
     if (!user) return undefined;
     const credential = this.#credentialsByUserId.get(user.id);
     if (!credential) return undefined;
-    return await this.#passwords.verify(password, credential)
+    return (await this.#passwords.verify(password, credential))
       ? user
       : undefined;
   }
@@ -166,8 +168,10 @@ export class MemoryUserService<U extends MemoryUserShape>
  * remember. `getAuthenticated` requires the secret for confidential
  * clients, and requires public clients to present none.
  */
-export class MemoryClientService<C extends ClientInterface, U>
-  implements ClientServiceInterface<C, U> {
+export class MemoryClientService<
+  C extends ClientInterface,
+  U,
+> implements ClientServiceInterface<C, U> {
   #clientsById = new Map<string, C>();
   #secretHashByClientId = new Map<string, string>();
   #ownerUserIdByClientId = new Map<string, string>();
@@ -189,11 +193,7 @@ export class MemoryClientService<C extends ClientInterface, U>
    * used by the client-credentials grant.
    * @throws Error when a client with the same id is already registered.
    */
-  async add(
-    client: C,
-    secret?: string,
-    ownerUserId?: string,
-  ): Promise<void> {
+  async add(client: C, secret?: string, ownerUserId?: string): Promise<void> {
     if (this.#clientsById.has(client.id)) {
       throw new Error(`Client with id "${client.id}" already exists`);
     }
@@ -218,16 +218,13 @@ export class MemoryClientService<C extends ClientInterface, U>
    * secret they were never issued fails authentication rather than being
    * ignored. An empty `secret` counts as none.
    */
-  async getAuthenticated(
-    id: string,
-    secret?: string,
-  ): Promise<C | undefined> {
+  async getAuthenticated(id: string, secret?: string): Promise<C | undefined> {
     const client = this.#clientsById.get(id);
     if (!client) return undefined;
     const storedHash = this.#secretHashByClientId.get(id);
     if (!storedHash) return secret ? undefined : client;
     if (!secret) return undefined;
-    if (await sha256Hash(secret) !== storedHash) return undefined;
+    if ((await sha256Hash(secret)) !== storedHash) return undefined;
     return client;
   }
 
@@ -319,8 +316,8 @@ export class MemoryTokenService<
     this.#clientService = options.clientService;
     this.#userService = options.userService;
     this.accessTokenLifetime = options.accessTokenLifetime ?? 60 * 60;
-    this.refreshTokenLifetime = options.refreshTokenLifetime ??
-      14 * 24 * 60 * 60;
+    this.refreshTokenLifetime =
+      options.refreshTokenLifetime ?? 14 * 24 * 60 * 60;
     this.refreshTokenMaxLifetime = options.refreshTokenMaxLifetime;
   }
 
@@ -365,7 +362,7 @@ export class MemoryTokenService<
   ): Promise<Date | undefined> {
     const lifetime =
       (client as { accessTokenLifetime?: number }).accessTokenLifetime ??
-        this.accessTokenLifetime;
+      this.accessTokenLifetime;
     return Promise.resolve(new Date(Date.now() + lifetime * 1000));
   }
 
@@ -380,7 +377,7 @@ export class MemoryTokenService<
   ): Promise<Date | undefined> {
     const lifetime =
       (client as { refreshTokenLifetime?: number }).refreshTokenLifetime ??
-        this.refreshTokenLifetime;
+      this.refreshTokenLifetime;
     return Promise.resolve(new Date(Date.now() + lifetime * 1000));
   }
 
@@ -395,9 +392,9 @@ export class MemoryTokenService<
     familyCreatedAt: Date,
     _scope?: S | null,
   ): Promise<Date | undefined> {
-    const maxLifetime = (client as { refreshTokenMaxLifetime?: number })
-      .refreshTokenMaxLifetime ??
-      this.refreshTokenMaxLifetime;
+    const maxLifetime =
+      (client as { refreshTokenMaxLifetime?: number })
+        .refreshTokenMaxLifetime ?? this.refreshTokenMaxLifetime;
     return Promise.resolve(
       maxLifetime == null
         ? undefined
@@ -469,9 +466,7 @@ export class MemoryTokenService<
    * token, plus authorization-code hash when a `code` is present so
    * {@linkcode revokeCode} can find it). Returns the input unchanged.
    */
-  save(
-    token: RefreshToken<C, U, S>,
-  ): Promise<RefreshToken<C, U, S>>;
+  save(token: RefreshToken<C, U, S>): Promise<RefreshToken<C, U, S>>;
   /**
    * Persists a token, indexing it by hashed access token (and authorization-code
    * hash when a `code` is present). Returns the input unchanged.
@@ -541,9 +536,10 @@ export class MemoryTokenService<
       }
     }
     const hashed = await sha256Hash(token);
-    const stored = hint === "refresh_token"
-      ? this.#tokensByRefreshHash.get(hashed)
-      : this.#tokensByAccessHash.get(hashed);
+    const stored =
+      hint === "refresh_token"
+        ? this.#tokensByRefreshHash.get(hashed)
+        : this.#tokensByAccessHash.get(hashed);
     if (!stored) return false;
     this.#tokensByAccessHash.delete(stored.accessTokenHash);
     if (stored.refreshTokenHash) {
@@ -669,20 +665,12 @@ export class MemoryAuthorizationCodeService<
   }
 
   /** Mints a random opaque authorization code. */
-  generateCode(
-    _client: C,
-    _user: U,
-    _scope?: S | null,
-  ): Promise<string> {
+  generateCode(_client: C, _user: U, _scope?: S | null): Promise<string> {
     return Promise.resolve(crypto.randomUUID());
   }
 
   /** Returns now plus {@linkcode lifetime}. */
-  expiresAt(
-    _client: C,
-    _user: U,
-    _scope?: S | null,
-  ): Promise<Date> {
+  expiresAt(_client: C, _user: U, _scope?: S | null): Promise<Date> {
     return Promise.resolve(new Date(Date.now() + this.lifetime * 1000));
   }
 
@@ -744,9 +732,10 @@ export class MemoryAuthorizationCodeService<
   async revoke(
     authorizationCode: AuthorizationCode<C, U, S> | string,
   ): Promise<boolean> {
-    const code = typeof authorizationCode === "string"
-      ? authorizationCode
-      : authorizationCode.code;
+    const code =
+      typeof authorizationCode === "string"
+        ? authorizationCode
+        : authorizationCode.code;
     return this.#codes.delete(await sha256Hash(code));
   }
 }
@@ -808,10 +797,7 @@ export class MemoryDeviceAuthorizationService<
   }
 
   /** Mints a random opaque device code (polled by the device). */
-  generateDeviceCode(
-    _client: C,
-    _scope?: S | null,
-  ): Promise<string> {
+  generateDeviceCode(_client: C, _scope?: S | null): Promise<string> {
     return Promise.resolve(crypto.randomUUID());
   }
 
@@ -819,10 +805,7 @@ export class MemoryDeviceAuthorizationService<
    * Mints a short, human-enterable user code in `XXXX-XXXX` form drawn from an
    * unambiguous alphabet (no vowels or look-alike digits).
    */
-  generateUserCode(
-    _client: C,
-    _scope?: S | null,
-  ): Promise<string> {
+  generateUserCode(_client: C, _scope?: S | null): Promise<string> {
     const chars = "BCDFGHJKLMNPQRSTVWXYZ23456789";
     let code = "";
     const array = new Uint8Array(8);

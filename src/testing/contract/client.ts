@@ -49,9 +49,7 @@
  * @module
  */
 
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import { beforeEach, describe, it } from "@std/testing/bdd";
-
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import type { ClientServiceInterface } from "../../server/services/client.ts";
 import type { UserServiceInterface } from "../../server/services/user.ts";
@@ -68,13 +66,13 @@ export interface ClientServiceContractOptions<
    */
   makeServices():
     | Promise<{
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-    }>
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+      }>
     | {
-      userService: UserServiceInterface<U>;
-      clientService: ClientServiceInterface<C, U>;
-    };
+        userService: UserServiceInterface<U>;
+        clientService: ClientServiceInterface<C, U>;
+      };
   /** Adds a user via the consumer's preferred mechanism. */
   addUser(
     service: UserServiceInterface<U>,
@@ -110,9 +108,7 @@ const defaultMakeClient = <C extends ClientInterface>(seq: number): C =>
 export function runClientServiceContractTests<
   C extends ClientInterface,
   U extends MemoryUserShape,
->(
-  options: ClientServiceContractOptions<C, U>,
-): void {
+>(options: ClientServiceContractOptions<C, U>): void {
   const makeUser = options.makeUser ?? defaultMakeUser<U>;
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
 
@@ -128,14 +124,14 @@ export function runClientServiceContractTests<
 
     describe("get", () => {
       it("returns undefined for an unknown id", async () => {
-        assertStrictEquals(await clientService.get("missing"), undefined);
+        expect(await clientService.get("missing")).toBe(undefined);
       });
 
       it("returns the registered client", async () => {
         const client = makeClient(1);
         await options.addClient(clientService, client);
         const fetched = await clientService.get(client.id);
-        assertEquals(fetched?.id, client.id);
+        expect(fetched?.id).toStrictEqual(client.id);
       });
     });
 
@@ -144,39 +140,34 @@ export function runClientServiceContractTests<
         const client = makeClient(2);
         await options.addClient(clientService, client);
         const auth = await clientService.getAuthenticated(client.id);
-        assertEquals(auth?.id, client.id);
+        expect(auth?.id).toStrictEqual(client.id);
       });
 
       it("returns undefined for a public client that presents a secret", async () => {
         const client = makeClient(9);
         await options.addClient(clientService, client);
-        assertStrictEquals(
+        expect(
           await clientService.getAuthenticated(client.id, "unissued"),
-          undefined,
-        );
+        ).toBe(undefined);
       });
 
       it("returns the public client when the presented secret is empty", async () => {
         const client = makeClient(10);
         await options.addClient(clientService, client);
         const auth = await clientService.getAuthenticated(client.id, "");
-        assertEquals(auth?.id, client.id);
+        expect(auth?.id).toStrictEqual(client.id);
       });
 
       it("returns undefined for a confidential client when no secret is supplied", async () => {
         const client = makeClient(3);
         await options.addClient(clientService, client, "secret");
-        assertStrictEquals(
-          await clientService.getAuthenticated(client.id),
-          undefined,
-        );
+        expect(await clientService.getAuthenticated(client.id)).toBe(undefined);
       });
 
       it("returns undefined for a confidential client with a wrong secret", async () => {
         const client = makeClient(4);
         await options.addClient(clientService, client, "correct");
-        assertStrictEquals(
-          await clientService.getAuthenticated(client.id, "wrong"),
+        expect(await clientService.getAuthenticated(client.id, "wrong")).toBe(
           undefined,
         );
       });
@@ -188,7 +179,7 @@ export function runClientServiceContractTests<
           client.id,
           "matching",
         );
-        assertEquals(auth?.id, client.id);
+        expect(auth?.id).toStrictEqual(client.id);
       });
     });
 
@@ -196,7 +187,7 @@ export function runClientServiceContractTests<
       it("resolves nothing for a client registered without a user, rather than failing", async () => {
         const client = makeClient(6);
         await options.addClient(clientService, client);
-        assertStrictEquals(await clientService.getUser(client), undefined);
+        expect(await clientService.getUser(client)).toBe(undefined);
       });
 
       it("returns the associated user when one was registered", async () => {
@@ -205,7 +196,7 @@ export function runClientServiceContractTests<
         await options.addUser(userService, user, "pw");
         await options.addClient(clientService, client, undefined, user.id);
         const owner = await clientService.getUser(client);
-        assertEquals(owner?.id, user.id);
+        expect(owner?.id).toStrictEqual(user.id);
       });
 
       it("accepts a client id (not just a client object)", async () => {
@@ -214,7 +205,7 @@ export function runClientServiceContractTests<
         await options.addUser(userService, user, "pw");
         await options.addClient(clientService, client, undefined, user.id);
         const owner = await clientService.getUser(client.id);
-        assertEquals(owner?.id, user.id);
+        expect(owner?.id).toStrictEqual(user.id);
       });
     });
   });

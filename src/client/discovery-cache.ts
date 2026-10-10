@@ -12,7 +12,7 @@ import type { AuthorizationServerMetadata } from "../models/responses.ts";
  * {@link MemoryDiscoveryCache}, and how long a `DirectClient` without a
  * `discoveryCache` keeps its own copy.
  */
-export const DEFAULT_DISCOVERY_TTL_MS = 60 * 60 * 1000;
+export const DEFAULT_DISCOVERY_TTL_MS: number = 60 * 60 * 1000;
 
 /** Default entry ceiling for {@link MemoryDiscoveryCache}. */
 export const DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES = 100;
@@ -143,8 +143,8 @@ export class MemoryDiscoveryCache implements DiscoveryCache {
   /** Creates a cache with the given TTL and entry ceiling. */
   constructor(options: MemoryDiscoveryCacheOptions = {}) {
     this.#ttlMs = options.ttlMs ?? DEFAULT_DISCOVERY_TTL_MS;
-    this.#maxEntries = options.maxEntries ??
-      DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES;
+    this.#maxEntries =
+      options.maxEntries ?? DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES;
   }
 
   /**

@@ -1,23 +1,20 @@
-// deno-lint-ignore-file require-await -- act(async …) needs the async signature
-import { cleanupAfterEach, getForm } from "../_test_setup.ts";
-
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { getForm } from "../_test_form.ts";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { SignInForm } from "./sign-in-form.tsx";
 import type { SignInValues } from "./sign-in-form.tsx";
-
-cleanupAfterEach();
 
 describe("SignInForm", () => {
   it("renders accessible labelled fields", () => {
     render(<SignInForm onSubmit={() => {}} />);
     const identifier = screen.getByLabelText("Email or username");
     const password = screen.getByLabelText("Password");
-    assertEquals(identifier.getAttribute("autocomplete"), "username");
-    assertEquals(password.getAttribute("type"), "password");
-    assertEquals(password.getAttribute("autocomplete"), "current-password");
+    expect(identifier.getAttribute("autocomplete")).toStrictEqual("username");
+    expect(password.getAttribute("type")).toStrictEqual("password");
+    expect(password.getAttribute("autocomplete")).toStrictEqual(
+      "current-password",
+    );
   });
 
   it("submits the collected values", async () => {
@@ -38,9 +35,9 @@ describe("SignInForm", () => {
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(submitted.length, 1);
-    assertEquals(submitted[0].identifier, "user@example.com");
-    assertEquals(submitted[0].password, "hunter2");
+    expect(submitted.length).toStrictEqual(1);
+    expect(submitted[0].identifier).toStrictEqual("user@example.com");
+    expect(submitted[0].password).toStrictEqual("hunter2");
   });
 
   it("shows a form-level error and per-field errors from the result", async () => {
@@ -56,17 +53,16 @@ describe("SignInForm", () => {
       fireEvent.submit(getForm(container));
     });
     assert(
-      container.querySelector("[data-oauth2-error-summary]")?.textContent
-        ?.includes("Invalid"),
+      container
+        .querySelector("[data-oauth2-error-summary]")
+        ?.textContent?.includes("Invalid"),
     );
-    assertEquals(
+    expect(
       screen.getByText("Too short").getAttribute("data-oauth2-error"),
-      "",
-    );
-    assertEquals(
+    ).toStrictEqual("");
+    expect(
       screen.getByLabelText("Password").getAttribute("aria-invalid"),
-      "true",
-    );
+    ).toStrictEqual("true");
   });
 
   it("marks the submit button aria-disabled, never disabled, while submitting", async () => {
@@ -76,20 +72,21 @@ describe("SignInForm", () => {
         onSubmit={() =>
           new Promise<void>((r) => {
             resolve = r;
-          })}
+          })
+        }
       />,
     );
     const button = screen.getByRole("button", { name: "Sign in" });
     await act(async () => {
       fireEvent.submit(getForm(container));
     });
-    assertEquals(button.getAttribute("aria-disabled"), "true");
-    assertFalse(button.hasAttribute("disabled"));
+    expect(button.getAttribute("aria-disabled")).toStrictEqual("true");
+    expect(button.hasAttribute("disabled")).toBeFalsy();
     await act(async () => {
       resolve?.();
     });
-    assertFalse(button.hasAttribute("aria-disabled"));
-    assertFalse(button.hasAttribute("disabled"));
+    expect(button.hasAttribute("aria-disabled")).toBeFalsy();
+    expect(button.hasAttribute("disabled")).toBeFalsy();
   });
 
   it("renders social buttons from the socialProviders prop", () => {
@@ -104,13 +101,15 @@ describe("SignInForm", () => {
       />,
     );
     const github = screen.getByText("Continue with GitHub").closest("a");
-    assertEquals(github?.getAttribute("href"), "/auth/login?connection=github");
-    assertEquals(
-      screen.getByText("Continue with Google").closest("a")?.getAttribute(
-        "data-oauth2-social-button",
-      ),
-      "google",
+    expect(github?.getAttribute("href")).toStrictEqual(
+      "/auth/login?connection=github",
     );
+    expect(
+      screen
+        .getByText("Continue with Google")
+        .closest("a")
+        ?.getAttribute("data-oauth2-social-button"),
+    ).toStrictEqual("google");
   });
 
   it("calls onSocialSelect when a social button without href is clicked", () => {
@@ -125,20 +124,20 @@ describe("SignInForm", () => {
     fireEvent.click(
       screen.getByText("Continue with GitHub").closest("button")!,
     );
-    assertEquals(selected, ["github"]);
+    expect(selected).toStrictEqual(["github"]);
   });
 
   it("renders no social section when providers are absent or empty", () => {
     const { container, rerender } = render(<SignInForm onSubmit={() => {}} />);
-    assertFalse(
+    expect(
       container.querySelector("[data-oauth2-social]"),
       "absent socialProviders must render no social section",
-    );
+    ).toBeFalsy();
     rerender(<SignInForm onSubmit={() => {}} socialProviders={[]} />);
-    assertFalse(
+    expect(
       container.querySelector("[data-oauth2-social]"),
       "an empty socialProviders list must render no social section",
-    );
+    ).toBeFalsy();
   });
 
   it("renders the remember checkbox and forgot-password link when configured", () => {
@@ -149,14 +148,12 @@ describe("SignInForm", () => {
         forgotPasswordHref="/forgot-password"
       />,
     );
-    assertEquals(
+    expect(
       screen.getByLabelText("Remember me").getAttribute("type"),
-      "checkbox",
-    );
-    assertEquals(
+    ).toStrictEqual("checkbox");
+    expect(
       screen.getByText("Forgot password?").getAttribute("href"),
-      "/forgot-password",
-    );
+    ).toStrictEqual("/forgot-password");
   });
 
   it("ejects to a render prop exposing the form state", () => {
@@ -165,7 +162,7 @@ describe("SignInForm", () => {
         {(form) => <p data-testid="status">{form.status}</p>}
       </SignInForm>,
     );
-    assertEquals(screen.getByTestId("status").textContent, "idle");
+    expect(screen.getByTestId("status").textContent).toStrictEqual("idle");
   });
 
   it("applies per-slot classNames", () => {
@@ -184,17 +181,15 @@ describe("SignInForm", () => {
     assert(formElement, "the form slot needs its own data attribute");
     assert(formElement.classList.contains("form-cls"));
     assert(
-      container.querySelector("[data-oauth2-form]")?.classList.contains(
-        "root-cls",
-      ),
+      container
+        .querySelector("[data-oauth2-form]")
+        ?.classList.contains("root-cls"),
     );
+    assert(screen.getByLabelText("Password").classList.contains("input-cls"));
     assert(
-      screen.getByLabelText("Password").classList.contains("input-cls"),
-    );
-    assert(
-      screen.getByRole("button", { name: "Sign in" }).classList.contains(
-        "submit-cls",
-      ),
+      screen
+        .getByRole("button", { name: "Sign in" })
+        .classList.contains("submit-cls"),
     );
   });
 });

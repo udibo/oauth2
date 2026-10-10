@@ -1,13 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { FakeTime } from "@std/testing/time";
-
+import { assert, describe, expect, it } from "vitest";
+import { FakeTime } from "../../_test_fake-time.ts";
+import { thrown } from "../../_test_assert.ts";
 import { InvalidGrantError, OAuth2Error } from "../../errors.ts";
 import {
   assertIdTokenClaims,
@@ -44,17 +37,19 @@ function check(overrides: Partial<IdTokenClaimsInput> = {}): void {
 }
 
 function rejects(overrides: Partial<IdTokenClaimsInput>): ExternalAuthError {
-  return assertThrows(() => check(overrides), ExternalAuthError);
+  return thrown(() => check(overrides), ExternalAuthError);
 }
 
 describe("describeError", () => {
   it("uses an Error's message", () => {
-    assertEquals(describeError(new TypeError("network down")), "network down");
+    expect(describeError(new TypeError("network down"))).toStrictEqual(
+      "network down",
+    );
   });
 
   it("stringifies a non-Error throw", () => {
-    assertEquals(describeError("boom"), "boom");
-    assertEquals(describeError(undefined), "undefined");
+    expect(describeError("boom")).toStrictEqual("boom");
+    expect(describeError(undefined)).toStrictEqual("undefined");
   });
 
   it("renders an OAuth2 error as code plus description", () => {
@@ -64,28 +59,27 @@ describe("describeError", () => {
         error_description: "code expired",
       },
     });
-    assertEquals(describeError(error), "invalid_grant: code expired");
+    expect(describeError(error)).toStrictEqual("invalid_grant: code expired");
   });
 
   it("falls back to an OAuth2 error's message when it carries no description", () => {
-    assertEquals(
+    expect(
       describeError(new InvalidGrantError("the code was already used")),
-      "invalid_grant: the code was already used",
-    );
+    ).toStrictEqual("invalid_grant: the code was already used");
   });
 
   it("bounds and flattens a hostile OAuth2 error_description", () => {
     const error = new OAuth2Error({
       extensions: {
         error: "invalid_grant",
-        error_description: `\r\n\u001b[31mFORGED audit line\u0000` +
-          "d".repeat(50_000),
+        error_description:
+          `\r\n\u001b[31mFORGED audit line\u0000` + "d".repeat(50_000),
       },
     });
     const rendered = describeError(error);
-    assertFalse(rendered.includes("\n"), "must stay single-line");
-    assertFalse(rendered.includes("\r"), "must stay single-line");
-    assertFalse(rendered.includes("\u001b"), "ANSI must not survive");
+    expect(rendered.includes("\n"), "must stay single-line").toBeFalsy();
+    expect(rendered.includes("\r"), "must stay single-line").toBeFalsy();
+    expect(rendered.includes("\u001b"), "ANSI must not survive").toBeFalsy();
     assert(
       rendered.length <= 2 * PROVIDER_TEXT_MAX_LENGTH + 2,
       `must stay bounded, got ${rendered.length}`,
@@ -96,54 +90,57 @@ describe("describeError", () => {
     const rendered = describeError(
       new TypeError(`boom\nforged` + "m".repeat(50_000)),
     );
-    assertFalse(rendered.includes("\n"));
-    assertEquals(rendered.length, PROVIDER_TEXT_MAX_LENGTH);
+    expect(rendered.includes("\n")).toBeFalsy();
+    expect(rendered.length).toStrictEqual(PROVIDER_TEXT_MAX_LENGTH);
   });
 
   it("renders the code alone when the description repeats it", () => {
     const error = new OAuth2Error({
       extensions: { error: "server_error", error_description: "server_error" },
     });
-    assertEquals(describeError(error), "server_error");
+    expect(describeError(error)).toStrictEqual("server_error");
   });
 });
 
 describe("readErrorBody", () => {
   it("returns the trimmed body as a suffix", async () => {
     const body = await readErrorBody(new Response("  bad client  "));
-    assertEquals(body, ": bad client");
+    expect(body).toStrictEqual(": bad client");
   });
 
   it("returns an empty string for an empty or blank body", async () => {
-    assertEquals(await readErrorBody(new Response("")), "");
-    assertEquals(await readErrorBody(new Response("   \n ")), "");
+    expect(await readErrorBody(new Response(""))).toStrictEqual("");
+    expect(await readErrorBody(new Response("   \n "))).toStrictEqual("");
   });
 
   it("truncates a long body to 200 characters", async () => {
     const suffix = await readErrorBody(new Response("x".repeat(500)));
-    assertEquals(suffix, `: ${"x".repeat(200)}`);
+    expect(suffix).toStrictEqual(`: ${"x".repeat(200)}`);
   });
 
   it("returns an empty string when the body cannot be read", async () => {
     const res = new Response("already read");
     await res.text();
-    assertEquals(await readErrorBody(res), "");
+    expect(await readErrorBody(res)).toStrictEqual("");
   });
 });
 
 describe("stripTrailingSlash", () => {
   it("drops a single trailing slash", () => {
-    assertEquals(stripTrailingSlash("https://x.example/"), "https://x.example");
+    expect(stripTrailingSlash("https://x.example/")).toStrictEqual(
+      "https://x.example",
+    );
   });
 
   it("leaves a value without a trailing slash untouched", () => {
-    assertEquals(stripTrailingSlash("https://x.example"), "https://x.example");
-    assertEquals(stripTrailingSlash(""), "");
+    expect(stripTrailingSlash("https://x.example")).toStrictEqual(
+      "https://x.example",
+    );
+    expect(stripTrailingSlash("")).toStrictEqual("");
   });
 
   it("drops only the last slash", () => {
-    assertEquals(
-      stripTrailingSlash("https://x.example//"),
+    expect(stripTrailingSlash("https://x.example//")).toStrictEqual(
       "https://x.example/",
     );
   });
@@ -158,18 +155,18 @@ describe("assertIdTokenClaims", () => {
   it("rejects an iss that is not the expected issuer", () => {
     using _time = new FakeTime(NOW_MS);
     const error = rejects({ claims: { iss: "https://evil.example" } });
-    assertEquals(error.code, "provider_error");
-    assertEquals(error.provider, "test");
-    assertStringIncludes(error.message, `"iss"`);
-    assertStringIncludes(error.message, "https://evil.example");
-    assertStringIncludes(error.message, issuer);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.provider).toStrictEqual("test");
+    expect(error.message).toContain(`"iss"`);
+    expect(error.message).toContain("https://evil.example");
+    expect(error.message).toContain(issuer);
   });
 
   it("rejects an aud that does not contain the client id", () => {
     using _time = new FakeTime(NOW_MS);
     const error = rejects({ claims: { aud: "another-client" } });
-    assertEquals(error.code, "provider_error");
-    assertStringIncludes(error.message, `"aud"`);
+    expect(error.code).toStrictEqual("provider_error");
+    expect(error.message).toContain(`"aud"`);
   });
 
   it("accepts an aud array that contains the client id", () => {
@@ -180,7 +177,7 @@ describe("assertIdTokenClaims", () => {
   it("rejects an aud array that omits the client id", () => {
     using _time = new FakeTime(NOW_MS);
     const error = rejects({ claims: { aud: ["a", "b"], azp: clientId } });
-    assertStringIncludes(error.message, `"aud"`);
+    expect(error.message).toContain(`"aud"`);
   });
 
   describe("azp", () => {
@@ -198,15 +195,15 @@ describe("assertIdTokenClaims", () => {
     it("rejects an azp claim naming a different client, even with one audience", () => {
       using _time = new FakeTime(NOW_MS);
       const error = rejects({ claims: { azp: "another-client" } });
-      assertEquals(error.code, "provider_error");
-      assertStringIncludes(error.message, `"azp"`);
-      assertStringIncludes(error.message, "another-client");
+      expect(error.code).toStrictEqual("provider_error");
+      expect(error.message).toContain(`"azp"`);
+      expect(error.message).toContain("another-client");
     });
 
     it("rejects multiple audiences without an azp claim", () => {
       using _time = new FakeTime(NOW_MS);
       const error = rejects({ claims: { aud: [clientId, "other"] } });
-      assertStringIncludes(error.message, `"azp"`);
+      expect(error.message).toContain(`"azp"`);
     });
 
     it("accepts multiple audiences whose azp is the client id", () => {
@@ -216,7 +213,7 @@ describe("assertIdTokenClaims", () => {
 
     it("applies the conditional check when no policy is given", () => {
       using _time = new FakeTime(NOW_MS);
-      const error = assertThrows(
+      const error = thrown(
         () =>
           assertIdTokenClaims({
             provider: "test",
@@ -231,7 +228,7 @@ describe("assertIdTokenClaims", () => {
           }),
         ExternalAuthError,
       );
-      assertStringIncludes(error.message, `"azp"`);
+      expect(error.message).toContain(`"azp"`);
     });
 
     it('skips the check entirely under the "ignore" policy', () => {
@@ -245,14 +242,14 @@ describe("assertIdTokenClaims", () => {
     it("rejects a token with no exp claim", () => {
       using _time = new FakeTime(NOW_MS);
       const error = rejects({ claims: { exp: undefined } });
-      assertEquals(error.code, "provider_error");
-      assertStringIncludes(error.message, "expired");
+      expect(error.code).toStrictEqual("provider_error");
+      expect(error.message).toContain("expired");
     });
 
     it("rejects a non-numeric exp claim", () => {
       using _time = new FakeTime(NOW_MS);
       const error = rejects({ claims: { exp: `${NOW_SECONDS + 600}` } });
-      assertStringIncludes(error.message, "expired");
+      expect(error.message).toContain("expired");
     });
 
     it("accepts a token expired by exactly the leeway", () => {
@@ -265,7 +262,7 @@ describe("assertIdTokenClaims", () => {
       const error = rejects({
         claims: { exp: NOW_SECONDS - ID_TOKEN_EXPIRY_LEEWAY_SECONDS - 1 },
       });
-      assertStringIncludes(error.message, "expired");
+      expect(error.message).toContain("expired");
     });
 
     it("honors a caller-supplied leeway", () => {
@@ -275,7 +272,7 @@ describe("assertIdTokenClaims", () => {
         leewaySeconds: 0,
         claims: { exp: NOW_SECONDS - 1 },
       });
-      assertStringIncludes(error.message, "expired");
+      expect(error.message).toContain("expired");
     });
   });
 
@@ -291,16 +288,17 @@ describe("assertIdTokenClaims", () => {
         expectedNonce: "n-1",
         claims: { nonce: "n-2" },
       });
-      assertEquals(error.code, "nonce_mismatch");
+      expect(error.code).toStrictEqual("nonce_mismatch");
     });
 
     it("rejects a missing or non-string nonce when one was sent", () => {
       using _time = new FakeTime(NOW_MS);
-      assertEquals(rejects({ expectedNonce: "n-1" }).code, "nonce_mismatch");
-      assertEquals(
-        rejects({ expectedNonce: "n-1", claims: { nonce: 42 } }).code,
+      expect(rejects({ expectedNonce: "n-1" }).code).toStrictEqual(
         "nonce_mismatch",
       );
+      expect(
+        rejects({ expectedNonce: "n-1", claims: { nonce: 42 } }).code,
+      ).toStrictEqual("nonce_mismatch");
     });
 
     it("ignores the nonce claim when none was sent", () => {
@@ -312,8 +310,7 @@ describe("assertIdTokenClaims", () => {
 
 describe("sanitizeProviderText", () => {
   it("caps at the echo limit", () => {
-    assertEquals(
-      sanitizeProviderText("y".repeat(5_000)).length,
+    expect(sanitizeProviderText("y".repeat(5_000)).length).toStrictEqual(
       PROVIDER_TEXT_MAX_LENGTH,
     );
   });
@@ -324,6 +321,8 @@ describe("sanitizeProviderText", () => {
   });
 
   it("flattens control characters to spaces", () => {
-    assertEquals(sanitizeProviderText("a\r\n\u001b[31mb\u0000c"), "a [31mb c");
+    expect(sanitizeProviderText("a\r\n\u001b[31mb\u0000c")).toStrictEqual(
+      "a [31mb c",
+    );
   });
 });

@@ -15,7 +15,8 @@ function requireUuid(value: string): void {
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
       value,
     )
-  ) throw new TypeError("Fixture requires an app-valid UUID");
+  )
+    throw new TypeError("Fixture requires an app-valid UUID");
 }
 interface User {
   id: string;
@@ -59,17 +60,22 @@ export function userFixture(
     },
     async replaceCredential(id, expected, credential) {
       const current = credentials.get(id);
-      const same = expected === undefined
-        ? current === undefined
-        : current !== undefined && current.hash === expected.hash &&
-          current.salt === expected.salt &&
-          (fault === "cas-params" ||
-            JSON.stringify(current.params) === JSON.stringify(expected.params));
+      const same =
+        expected === undefined
+          ? current === undefined
+          : current !== undefined &&
+            current.hash === expected.hash &&
+            current.salt === expected.salt &&
+            (fault === "cas-params" ||
+              JSON.stringify(current.params) ===
+                JSON.stringify(expected.params));
       if (!same) {
         if (
-          fault === "cas-stale" && expected?.hash === "11".repeat(32) &&
+          fault === "cas-stale" &&
+          expected?.hash === "11".repeat(32) &&
           current?.hash === "33".repeat(32)
-        ) stale.set(id, structuredClone(expected));
+        )
+          stale.set(id, structuredClone(expected));
         return false;
       }
       if (fault === "cas-race") await Promise.resolve();
@@ -81,7 +87,8 @@ export function userFixture(
       if (
         user &&
         (fault === "email-guard" || email === undefined || user.email === email)
-      ) verified.add(id);
+      )
+        verified.add(id);
       return Promise.resolve();
     },
     getLegacyCredential(id) {
@@ -138,7 +145,8 @@ export function sessionFixture(
     for (const row of rows.values()) {
       if (
         (fault === "revoke-owner" || row.userId === userId) &&
-        row.summary.id !== keep && row.state === "live"
+        row.summary.id !== keep &&
+        row.state === "live"
       ) {
         if (fault !== "revoke-advisory") row.state = "revoked";
         count++;
@@ -159,20 +167,22 @@ export function sessionFixture(
       },
       listByUser(userId) {
         requireUuid(userId);
-        const list = [...rows.values()].filter((row) =>
-          row.userId === userId &&
-          (fault === "list-ended" || row.state === "live")
+        const list = [...rows.values()].filter(
+          (row) =>
+            row.userId === userId &&
+            (fault === "list-ended" || row.state === "live"),
         );
         if (fault !== "list-order") {
-          list.sort((a, b) =>
-            b.summary.lastSeenAt.getTime() - a.summary.lastSeenAt.getTime()
+          list.sort(
+            (a, b) =>
+              b.summary.lastSeenAt.getTime() - a.summary.lastSeenAt.getTime(),
           );
         }
         return Promise.resolve(
           list.map((row) =>
             fault === "list-secret"
               ? { ...structuredClone(row.summary), secret: row.secret }
-              : structuredClone(row.summary)
+              : structuredClone(row.summary),
           ),
         );
       },

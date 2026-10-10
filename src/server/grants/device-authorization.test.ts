@@ -1,11 +1,5 @@
-import {
-  assert,
-  assertEquals,
-  assertInstanceOf,
-  assertRejects,
-  assertStrictEquals,
-} from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { assert, describe, expect, it } from "vitest";
+import { rejection } from "../../_test_assert.ts";
 import type { DeviceAuthorization } from "../../models/device-authorization.ts";
 import { BasicScope } from "../../models/scope.ts";
 import {
@@ -35,8 +29,11 @@ import { DeviceAuthorizationGrant } from "./device-authorization.ts";
  * real store faces under concurrency is exercised deterministically instead of
  * by luck of scheduling.
  */
-class RacingDeviceAuthorizationService
-  extends MemoryDeviceAuthorizationService<TestClient, TestUser, BasicScope> {
+class RacingDeviceAuthorizationService extends MemoryDeviceAuthorizationService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   #bothRead = Promise.withResolvers<void>();
   #reads = 0;
   #claimedDeviceCodes = new Set<string>();
@@ -64,9 +61,10 @@ class RacingDeviceAuthorizationService
       | string,
   ): Promise<boolean> {
     await this.#bothRead.promise;
-    const deviceCode = typeof authorization === "string"
-      ? authorization
-      : authorization.deviceCode;
+    const deviceCode =
+      typeof authorization === "string"
+        ? authorization
+        : authorization.deviceCode;
     if (this.#claimedDeviceCodes.has(deviceCode)) return false;
     this.#claimedDeviceCodes.add(deviceCode);
     return await super.revoke(authorization);
@@ -81,8 +79,11 @@ class RacingDeviceAuthorizationService
  * matches no row; otherwise the record survives and the failure is the store
  * itself breaking.
  */
-class FailingPollWriteService
-  extends MemoryDeviceAuthorizationService<TestClient, TestUser, BasicScope> {
+class FailingPollWriteService extends MemoryDeviceAuthorizationService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   consumedByConcurrentPoll = false;
   readonly failure = new Error("poll-time write failed");
 
@@ -100,8 +101,11 @@ class FailingPollWriteService
  * The grant must surface the **write** failure — the real cause an operator
  * needs — not whatever the recheck raised on its way to answering.
  */
-class UnreachableStoreService
-  extends MemoryDeviceAuthorizationService<TestClient, TestUser, BasicScope> {
+class UnreachableStoreService extends MemoryDeviceAuthorizationService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   readonly writeFailure = new Error("poll-time write failed");
   readonly readFailure = new Error("recheck read failed");
   #reads = 0;
@@ -125,8 +129,11 @@ class UnreachableStoreService
 }
 
 /** A store that counts the poll-time writes the grant performs. */
-class PollWriteCountingService
-  extends MemoryDeviceAuthorizationService<TestClient, TestUser, BasicScope> {
+class PollWriteCountingService extends MemoryDeviceAuthorizationService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
   pollWrites = 0;
 
   override updateLastPolled(
@@ -205,8 +212,7 @@ describe("DeviceAuthorizationGrant", () => {
   describe("grantType", () => {
     it("should return the RFC 8628 grant type URI", async () => {
       const { grant } = await createTestGrant();
-      assertStrictEquals(
-        grant.grantType,
+      expect(grant.grantType).toBe(
         "urn:ietf:params:oauth:grant-type:device_code",
       );
     });
@@ -225,11 +231,11 @@ describe("DeviceAuthorizationGrant", () => {
         request,
       );
 
-      assertStrictEquals(typeof authorization.deviceCode, "string");
-      assertStrictEquals(typeof authorization.userCode, "string");
-      assertStrictEquals(authorization.client.id, testClient.id);
-      assertStrictEquals(typeof authorization.expiresAt, "object");
-      assertStrictEquals(authorization.interval, 5);
+      expect(typeof authorization.deviceCode).toBe("string");
+      expect(typeof authorization.userCode).toBe("string");
+      expect(authorization.client.id).toBe(testClient.id);
+      expect(typeof authorization.expiresAt).toBe("object");
+      expect(authorization.interval).toBe(5);
     });
 
     it("should include scope when provided", async () => {
@@ -246,7 +252,7 @@ describe("DeviceAuthorizationGrant", () => {
         scope,
       );
 
-      assertStrictEquals(authorization.scope?.toString(), "read write");
+      expect(authorization.scope?.toString()).toBe("read write");
     });
 
     it("should not include scope when none is provided", async () => {
@@ -261,7 +267,7 @@ describe("DeviceAuthorizationGrant", () => {
         request,
       );
 
-      assertStrictEquals(authorization.scope, undefined);
+      expect(authorization.scope).toBe(undefined);
     });
 
     it("should save the authorization", async () => {
@@ -280,7 +286,7 @@ describe("DeviceAuthorizationGrant", () => {
       const saved = await deviceAuthorizationService.getByDeviceCode(
         authorization.deviceCode,
       );
-      assertStrictEquals(saved?.deviceCode, authorization.deviceCode);
+      expect(saved?.deviceCode).toBe(authorization.deviceCode);
     });
   });
 
@@ -293,7 +299,7 @@ describe("DeviceAuthorizationGrant", () => {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidRequestError,
         "device_code parameter required",
@@ -309,7 +315,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "non-existent",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "invalid device_code",
@@ -335,7 +341,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "expired-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         ExpiredTokenError,
         "device_code has expired",
@@ -361,15 +367,14 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "expired-revoke",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         ExpiredTokenError,
       );
 
-      const revoked = await deviceAuthorizationService.getByDeviceCode(
-        "expired-revoke",
-      );
-      assertStrictEquals(revoked, undefined);
+      const revoked =
+        await deviceAuthorizationService.getByDeviceCode("expired-revoke");
+      expect(revoked).toBe(undefined);
     });
 
     it("should throw InvalidGrantError when device_code belongs to different client", async () => {
@@ -393,7 +398,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "test-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         InvalidGrantError,
         "device_code was issued to another client",
@@ -428,8 +433,8 @@ describe("DeviceAuthorizationGrant", () => {
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
           device_code: deviceCode,
         });
-        const error = await assertRejects(() =>
-          exchangeToken(grant, request, testClient)
+        const error = await rejection(() =>
+          exchangeToken(grant, request, testClient),
         );
         assert(
           isOAuth2Error(error),
@@ -441,7 +446,7 @@ describe("DeviceAuthorizationGrant", () => {
       it("answers invalid_grant for a device_code that was never issued", async () => {
         const { grant } = await createForeignAuthorization(LIVE());
 
-        assertEquals(await refusalFor(grant, "never-issued"), {
+        expect(await refusalFor(grant, "never-issued")).toStrictEqual({
           code: "invalid_grant",
           message: "invalid device_code",
         });
@@ -450,7 +455,7 @@ describe("DeviceAuthorizationGrant", () => {
       it("answers invalid_grant for a live device_code owned by another client", async () => {
         const { grant } = await createForeignAuthorization(LIVE());
 
-        assertEquals(await refusalFor(grant, "foreign-code"), {
+        expect(await refusalFor(grant, "foreign-code")).toStrictEqual({
           code: "invalid_grant",
           message: "device_code was issued to another client",
         });
@@ -459,7 +464,7 @@ describe("DeviceAuthorizationGrant", () => {
       it("answers invalid_grant, not expired_token, for an expired device_code owned by another client", async () => {
         const { grant } = await createForeignAuthorization(EXPIRED());
 
-        assertEquals(await refusalFor(grant, "foreign-code"), {
+        expect(await refusalFor(grant, "foreign-code")).toStrictEqual({
           code: "invalid_grant",
           message: "device_code was issued to another client",
         });
@@ -471,9 +476,8 @@ describe("DeviceAuthorizationGrant", () => {
 
         await refusalFor(grant, "foreign-code");
 
-        const stillStored = await deviceAuthorizationService.getByDeviceCode(
-          "foreign-code",
-        );
+        const stillStored =
+          await deviceAuthorizationService.getByDeviceCode("foreign-code");
         assert(
           stillStored,
           "an unauthenticated poll must not destroy another client's record",
@@ -501,7 +505,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "pending-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         AuthorizationPendingError,
         "authorization request is pending user approval",
@@ -530,16 +534,15 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "poll-track",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         AuthorizationPendingError,
       );
 
-      const updated = await deviceAuthorizationService.getByDeviceCode(
-        "poll-track",
-      );
-      assertStrictEquals(updated?.lastPolled instanceof Date, true);
-      assertStrictEquals(updated!.lastPolled!.getTime() >= before, true);
+      const updated =
+        await deviceAuthorizationService.getByDeviceCode("poll-track");
+      expect(updated?.lastPolled instanceof Date).toBe(true);
+      expect(updated!.lastPolled!.getTime() >= before).toBe(true);
     });
 
     it("should throw AccessDeniedError when user denied the request", async () => {
@@ -562,7 +565,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "denied-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         AccessDeniedError,
         "authorization request was denied",
@@ -589,15 +592,14 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "denied-revoke",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         AccessDeniedError,
       );
 
-      const revoked = await deviceAuthorizationService.getByDeviceCode(
-        "denied-revoke",
-      );
-      assertStrictEquals(revoked, undefined);
+      const revoked =
+        await deviceAuthorizationService.getByDeviceCode("denied-revoke");
+      expect(revoked).toBe(undefined);
     });
 
     it("should throw SlowDownError when polling too frequently", async () => {
@@ -620,7 +622,7 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "fast-poll-code",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         SlowDownError,
         "polling too frequently",
@@ -647,15 +649,14 @@ describe("DeviceAuthorizationGrant", () => {
         device_code: "interval-increase",
       });
 
-      await assertRejects(
+      await rejection(
         () => exchangeToken(grant, request, testClient),
         SlowDownError,
       );
 
-      const updated = await deviceAuthorizationService.getByDeviceCode(
-        "interval-increase",
-      );
-      assertStrictEquals(updated?.interval, 10);
+      const updated =
+        await deviceAuthorizationService.getByDeviceCode("interval-increase");
+      expect(updated?.interval).toBe(10);
     });
 
     it("issues a token to only one of two concurrent polls of the same approved device_code", async () => {
@@ -686,9 +687,9 @@ describe("DeviceAuthorizationGrant", () => {
 
       const issued = results.filter((result) => result.status === "fulfilled");
       const refused = results.filter((result) => result.status === "rejected");
-      assertStrictEquals(issued.length, 1);
-      assertStrictEquals(refused.length, 1);
-      assertInstanceOf(
+      expect(issued.length).toBe(1);
+      expect(refused.length).toBe(1);
+      assert.instanceOf(
         (refused[0] as PromiseRejectedResult).reason,
         InvalidGrantError,
       );
@@ -708,7 +709,7 @@ describe("DeviceAuthorizationGrant", () => {
         interval: 5,
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -738,7 +739,7 @@ describe("DeviceAuthorizationGrant", () => {
         lastPolled: new Date(),
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -766,7 +767,7 @@ describe("DeviceAuthorizationGrant", () => {
         interval: 5,
       });
 
-      const error = await assertRejects(() =>
+      const error = await rejection(() =>
         exchangeToken(
           grant,
           tokenRequest({
@@ -774,9 +775,9 @@ describe("DeviceAuthorizationGrant", () => {
             device_code: "store-broken",
           }),
           testClient,
-        )
+        ),
       );
-      assertStrictEquals(error, deviceAuthorizationService.failure);
+      expect(error).toBe(deviceAuthorizationService.failure);
     });
 
     it("surfaces the write failure, not the recheck's, when the store is down", async () => {
@@ -791,7 +792,7 @@ describe("DeviceAuthorizationGrant", () => {
         interval: 5,
       });
 
-      const error = await assertRejects(() =>
+      const error = await rejection(() =>
         exchangeToken(
           grant,
           tokenRequest({
@@ -799,13 +800,12 @@ describe("DeviceAuthorizationGrant", () => {
             device_code: "store-down",
           }),
           testClient,
-        )
+        ),
       );
-      assertStrictEquals(
+      expect(
         error,
-        deviceAuthorizationService.writeFailure,
         "the recheck classifies the failure; it must never replace it",
-      );
+      ).toBe(deviceAuthorizationService.writeFailure);
     });
 
     it("issues one token however many polls race for the same code", async () => {
@@ -844,14 +844,13 @@ describe("DeviceAuthorizationGrant", () => {
         poll(),
       ]);
 
-      assertStrictEquals(
+      expect(
         results.filter((result) => result.status === "fulfilled").length,
-        1,
         "the compare-and-delete claim admits exactly one poll at any width",
-      );
+      ).toBe(1);
       for (const result of results) {
         if (result.status === "rejected") {
-          assertInstanceOf(result.reason, InvalidGrantError);
+          assert.instanceOf(result.reason, InvalidGrantError);
         }
       }
     });
@@ -880,7 +879,7 @@ describe("DeviceAuthorizationGrant", () => {
         testClient,
       );
 
-      assertStrictEquals(deviceAuthorizationService.pollWrites, 0);
+      expect(deviceAuthorizationService.pollWrites).toBe(0);
     });
 
     it("does not record a poll time on a denied authorization it revokes", async () => {
@@ -897,7 +896,7 @@ describe("DeviceAuthorizationGrant", () => {
         denied: true,
       });
 
-      await assertRejects(
+      await rejection(
         () =>
           exchangeToken(
             grant,
@@ -910,7 +909,7 @@ describe("DeviceAuthorizationGrant", () => {
         AccessDeniedError,
       );
 
-      assertStrictEquals(deviceAuthorizationService.pollWrites, 0);
+      expect(deviceAuthorizationService.pollWrites).toBe(0);
     });
 
     it("should return token when user has authorized", async () => {
@@ -937,10 +936,10 @@ describe("DeviceAuthorizationGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.client.id, testClient.id);
-      assertStrictEquals(token.user?.id, testUser.id);
-      assertStrictEquals(token.scope?.toString(), "read write");
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.client.id).toBe(testClient.id);
+      expect(token.user?.id).toBe(testUser.id);
+      expect(token.scope?.toString()).toBe("read write");
     });
 
     it("should return token without scope when authorization has no scope", async () => {
@@ -966,8 +965,8 @@ describe("DeviceAuthorizationGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals(typeof token.accessToken, "string");
-      assertStrictEquals(token.scope, undefined);
+      expect(typeof token.accessToken).toBe("string");
+      expect(token.scope).toBe(undefined);
     });
 
     it("should include refresh token by default", async () => {
@@ -993,7 +992,7 @@ describe("DeviceAuthorizationGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals("refreshToken" in token, true);
+      expect("refreshToken" in token).toBe(true);
     });
 
     it("should not include refresh token when allowRefreshToken is false", async () => {
@@ -1042,7 +1041,7 @@ describe("DeviceAuthorizationGrant", () => {
 
       const token = await exchangeToken(grant, request, testClient);
 
-      assertStrictEquals("refreshToken" in token, false);
+      expect("refreshToken" in token).toBe(false);
     });
 
     it("should revoke device authorization after token issuance", async () => {
@@ -1068,19 +1067,14 @@ describe("DeviceAuthorizationGrant", () => {
 
       await exchangeToken(grant, request, testClient);
 
-      const revoked = await deviceAuthorizationService.getByDeviceCode(
-        "revoke-after-use",
-      );
-      assertStrictEquals(revoked, undefined);
+      const revoked =
+        await deviceAuthorizationService.getByDeviceCode("revoke-after-use");
+      expect(revoked).toBe(undefined);
     });
 
     it("should save the generated token", async () => {
-      const {
-        grant,
-        clientService,
-        deviceAuthorizationService,
-        tokenService,
-      } = await createTestGrant();
+      const { grant, clientService, deviceAuthorizationService, tokenService } =
+        await createTestGrant();
       await clientService.add(testClient, "secret", testUser.id);
 
       const authorization = {
@@ -1102,7 +1096,7 @@ describe("DeviceAuthorizationGrant", () => {
       const token = await exchangeToken(grant, request, testClient);
 
       const savedToken = await tokenService.getToken(token.accessToken);
-      assertStrictEquals(savedToken?.accessToken, token.accessToken);
+      expect(savedToken?.accessToken).toBe(token.accessToken);
     });
   });
 });

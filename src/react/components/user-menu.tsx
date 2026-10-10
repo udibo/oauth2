@@ -118,9 +118,11 @@ export function UserMenu(props: UserMenuProps): ReactNode {
 
   if (!user) return <>{signedOut}</>;
 
-  const runLogout = onLogout ?? (async (): Promise<void> => {
-    await logout();
-  });
+  const runLogout =
+    onLogout ??
+    (async (): Promise<void> => {
+      await logout();
+    });
 
   if (children) return <>{children({ user, logout: runLogout })}</>;
 
@@ -138,43 +140,39 @@ export function UserMenu(props: UserMenuProps): ReactNode {
         data-oauth2-user-trigger=""
         className={classNames?.trigger}
       >
-        {renderUser
-          ? renderUser(user)
-          : (
-            <span data-oauth2-user-name="" className={classNames?.name}>
-              {displayName(user)}
-            </span>
-          )}
+        {renderUser ? (
+          renderUser(user)
+        ) : (
+          <span data-oauth2-user-name="" className={classNames?.name}>
+            {displayName(user)}
+          </span>
+        )}
       </button>
-      {open
-        ? (
-          <div
-            id={panelId}
-            data-oauth2-user-panel=""
-            className={classNames?.menu}
+      {open ? (
+        <div
+          id={panelId}
+          data-oauth2-user-panel=""
+          className={classNames?.menu}
+        >
+          {items ? (
+            <div data-oauth2-user-items="" className={classNames?.menuItem}>
+              {items}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              void Promise.resolve(runLogout()).catch((error) => {
+                console.error("[@udibo/oauth2] logout failed:", error);
+              });
+            }}
+            data-oauth2-logout=""
+            className={classNames?.logout}
           >
-            {items
-              ? (
-                <div data-oauth2-user-items="" className={classNames?.menuItem}>
-                  {items}
-                </div>
-              )
-              : null}
-            <button
-              type="button"
-              onClick={() => {
-                void Promise.resolve(runLogout()).catch((error) => {
-                  console.error("[@udibo/oauth2] logout failed:", error);
-                });
-              }}
-              data-oauth2-logout=""
-              className={classNames?.logout}
-            >
-              {labels?.logout ?? "Sign out"}
-            </button>
-          </div>
-        )
-        : null}
+            {labels?.logout ?? "Sign out"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -4,13 +4,8 @@
  * cannot silently pass a capability the application intends to provide.
  * @module
  */
-import {
-  assert,
-  assertEquals,
-  assertExists,
-  assertStrictEquals,
-} from "@std/assert";
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
   IdentityUser,
   IdentityUserStore,
@@ -83,7 +78,7 @@ async function drain<T>(calls: Promise<T>[]): Promise<T[]> {
 }
 
 /**
- * Register the IdentityUserStore suite in a Deno test file. Credential fixtures
+ * Register the IdentityUserStore suite in a Vitest test file. Credential fixtures
  * are serialized values, not real passwords: these checks verify persistence,
  * lookup, and conditional writes, rather than password hashing. Concurrent
  * checks can expose read-then-write races but cannot prove every interleaving.
@@ -113,20 +108,15 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
     }
 
     it("returns undefined for unknown lookup keys and credentials", async () => {
-      assertStrictEquals(
+      expect(
         await store.findByIdentifier(
           "missing-identity-contract@example.invalid",
         ),
-        undefined,
-      );
-      assertStrictEquals(
+      ).toBe(undefined);
+      expect(
         await store.findByEmail("missing-identity-contract@example.invalid"),
-        undefined,
-      );
-      assertStrictEquals(
-        await store.getCredential(fixture.unknownUserId),
-        undefined,
-      );
+      ).toBe(undefined);
+      expect(await store.getCredential(fixture.unknownUserId)).toBe(undefined);
     });
     it("creates distinct users and resolves each profile's lookup keys", async () => {
       const first = await create();
@@ -134,27 +124,31 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
       assert(first.id.length > 0);
       assert(second.id.length > 0);
       assert(first.id !== second.id, "distinct users must have distinct ids");
-      for (const [sequence, user] of [[1, first], [2, second]] as const) {
+      for (const [sequence, user] of [
+        [1, first],
+        [2, second],
+      ] as const) {
         const profile = fixture.makeProfile(sequence);
-        assertEquals(
+        expect(
           (await store.findByIdentifier(profile.identifier))?.id,
+        ).toStrictEqual(user.id);
+        expect((await store.findByEmail(profile.email))?.id).toStrictEqual(
           user.id,
         );
-        assertEquals((await store.findByEmail(profile.email))?.id, user.id);
-        assertEquals(await store.getCredential(user.id), ORIGINAL);
+        expect(await store.getCredential(user.id)).toStrictEqual(ORIGINAL);
       }
     });
     it("replaces every credential field without changing another user", async () => {
       const first = await create();
       const second = await create(2);
       await store.setCredential(first.id, structuredClone(REPLACEMENT));
-      assertEquals(await store.getCredential(first.id), REPLACEMENT);
-      assertEquals(await store.getCredential(second.id), ORIGINAL);
+      expect(await store.getCredential(first.id)).toStrictEqual(REPLACEMENT);
+      expect(await store.getCredential(second.id)).toStrictEqual(ORIGINAL);
       await store.setCredential(first.id, {
         hash: ORIGINAL.hash,
         salt: ORIGINAL.salt,
       });
-      assertEquals(await store.getCredential(first.id), {
+      expect(await store.getCredential(first.id)).toStrictEqual({
         hash: ORIGINAL.hash,
         salt: ORIGINAL.salt,
       });
@@ -163,7 +157,7 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
     if (options.replaceCredential) {
       it("compares credential values, including every parameter and absent params", async () => {
         const user = await create();
-        assertExists(
+        assert.exists(
           store.replaceCredential,
           "replaceCredential capability is required",
         );
@@ -178,156 +172,146 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
           { hash: ORIGINAL.hash, salt: ORIGINAL.salt },
         ];
         for (const expected of mismatches) {
-          assertStrictEquals(
+          expect(
             await store.replaceCredential(user.id, expected, REPLACEMENT),
-            false,
-          );
-          assertEquals(
+          ).toBe(false);
+          expect(
             await store.getCredential(user.id),
-            ORIGINAL,
             "a failed compare-and-set must preserve the winner",
-          );
+          ).toStrictEqual(ORIGINAL);
         }
-        assertStrictEquals(
+        expect(
           await store.replaceCredential(
             user.id,
             structuredClone(ORIGINAL),
             REPLACEMENT,
           ),
-          true,
-        );
-        assertEquals(await store.getCredential(user.id), REPLACEMENT);
-        assertStrictEquals(
-          await store.replaceCredential(user.id, ORIGINAL, ORIGINAL),
+        ).toBe(true);
+        expect(await store.getCredential(user.id)).toStrictEqual(REPLACEMENT);
+        expect(await store.replaceCredential(user.id, ORIGINAL, ORIGINAL)).toBe(
           false,
         );
-        assertEquals(
+        expect(
           await store.getCredential(user.id),
-          REPLACEMENT,
           "read after a lost compare-and-set must see the committed credential",
-        );
+        ).toStrictEqual(REPLACEMENT);
         await store.setCredential(user.id, {
           hash: ORIGINAL.hash,
           salt: ORIGINAL.salt,
         });
-        assertStrictEquals(
-          await store.replaceCredential(user.id, {
-            hash: ORIGINAL.hash,
-            salt: ORIGINAL.salt,
-          }, REPLACEMENT),
-          true,
-        );
+        expect(
+          await store.replaceCredential(
+            user.id,
+            {
+              hash: ORIGINAL.hash,
+              salt: ORIGINAL.salt,
+            },
+            REPLACEMENT,
+          ),
+        ).toBe(true);
       });
       it("upgrades an absent credential only once", async () => {
         const user = await create();
-        assertExists(store.replaceCredential);
-        assertExists(
+        assert.exists(store.replaceCredential);
+        assert.exists(
           fixture.removeCredential,
           "removeCredential setup helper is required",
         );
         await fixture.removeCredential(user.id);
-        assertStrictEquals(await store.getCredential(user.id), undefined);
+        expect(await store.getCredential(user.id)).toBe(undefined);
         const results = await drain(
           Array.from({ length: 8 }, () =>
             store.replaceCredential!(
               user.id,
               undefined,
               structuredClone(REPLACEMENT),
-            )),
+            ),
+          ),
         );
-        assertEquals(
+        expect(
           results.filter(Boolean).length,
-          1,
           "exactly one concurrent imported upgrade may win",
-        );
-        assertEquals(await store.getCredential(user.id), REPLACEMENT);
+        ).toStrictEqual(1);
+        expect(await store.getCredential(user.id)).toStrictEqual(REPLACEMENT);
       });
       it("allows exactly one concurrent replacement of the same credential", async () => {
         const user = await create();
         const other = await create(2);
-        assertExists(store.replaceCredential);
-        const candidates = Array.from(
-          { length: 8 },
-          (_, index) => ({
-            ...REPLACEMENT,
-            hash: (index + 5).toString(16).padStart(2, "0").repeat(32),
-          }),
-        );
+        assert.exists(store.replaceCredential);
+        const candidates = Array.from({ length: 8 }, (_, index) => ({
+          ...REPLACEMENT,
+          hash: (index + 5).toString(16).padStart(2, "0").repeat(32),
+        }));
         const results = await drain(
           candidates.map((credential) =>
             store.replaceCredential!(
               user.id,
               structuredClone(ORIGINAL),
               credential,
-            )
+            ),
           ),
         );
-        assertEquals(
+        expect(
           results.filter(Boolean).length,
-          1,
           "exactly one concurrent replacement may win",
-        );
-        assertEquals(
-          await store.getCredential(user.id),
+        ).toStrictEqual(1);
+        expect(await store.getCredential(user.id)).toStrictEqual(
           candidates[results.indexOf(true)],
         );
-        assertEquals(await store.getCredential(other.id), ORIGINAL);
+        expect(await store.getCredential(other.id)).toStrictEqual(ORIGINAL);
       });
     }
     if (options.emailVerification) {
       it("verifies only the issued-for email and is idempotent", async () => {
         const user = await create();
         const other = await create(2);
-        assertExists(
+        assert.exists(
           store.markEmailVerified,
           "email verification capability is required",
         );
-        assertExists(fixture.setEmail);
-        assertExists(fixture.isEmailVerified);
+        assert.exists(fixture.setEmail);
+        assert.exists(fixture.isEmailVerified);
         const originalEmail = fixture.makeProfile(1).email;
         const changedEmail = "changed-identity-contract@example.invalid";
-        assertStrictEquals(await fixture.isEmailVerified(user.id), false);
+        expect(await fixture.isEmailVerified(user.id)).toBe(false);
         await fixture.setEmail(user.id, changedEmail);
         await store.markEmailVerified(user.id, originalEmail);
-        assertStrictEquals(
+        expect(
           await fixture.isEmailVerified(user.id),
-          false,
           "a token for an old email must not verify the new email",
-        );
+        ).toBe(false);
         await store.markEmailVerified(user.id, changedEmail);
         await store.markEmailVerified(user.id, changedEmail);
-        assertStrictEquals(await fixture.isEmailVerified(user.id), true);
-        assertStrictEquals(await fixture.isEmailVerified(other.id), false);
+        expect(await fixture.isEmailVerified(user.id)).toBe(true);
+        expect(await fixture.isEmailVerified(other.id)).toBe(false);
       });
     }
     if (options.legacyCredentials) {
       it("clears the selected imported credential and is idempotent", async () => {
         const user = await create();
         const other = await create(2);
-        assertExists(
+        assert.exists(
           store.getLegacyCredential,
           "legacy credential lookup capability is required",
         );
-        assertExists(
+        assert.exists(
           store.clearLegacyCredential,
           "legacy credential clearing capability is required",
         );
-        assertExists(fixture.setLegacyCredential);
-        assertStrictEquals(await store.getLegacyCredential(user.id), null);
+        assert.exists(fixture.setLegacyCredential);
+        expect(await store.getLegacyCredential(user.id)).toBe(null);
         await fixture.setLegacyCredential(user.id, "imported-hash-one");
         await fixture.setLegacyCredential(other.id, "imported-hash-two");
-        assertEquals(
-          await store.getLegacyCredential(user.id),
+        expect(await store.getLegacyCredential(user.id)).toStrictEqual(
           "imported-hash-one",
         );
         await store.clearLegacyCredential(user.id);
         await store.clearLegacyCredential(user.id);
-        assertStrictEquals(await store.getLegacyCredential(user.id), null);
-        assertEquals(
-          await store.getLegacyCredential(other.id),
+        expect(await store.getLegacyCredential(user.id)).toBe(null);
+        expect(await store.getLegacyCredential(other.id)).toStrictEqual(
           "imported-hash-two",
         );
-        assertEquals(await store.getCredential(user.id), ORIGINAL);
+        expect(await store.getCredential(user.id)).toStrictEqual(ORIGINAL);
       });
     }
   });

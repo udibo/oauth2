@@ -1,6 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-
+import { assert, describe, expect, it } from "vitest";
 import {
   findLegacyVerifier,
   type LegacyPasswordVerifier,
@@ -19,8 +17,8 @@ describe("pbkdf2Verifier", () => {
   const verifier = pbkdf2Verifier();
 
   it("has a default id", () => {
-    assertEquals(verifier.id, "pbkdf2");
-    assertEquals(pbkdf2Verifier({ id: "django" }).id, "django");
+    expect(verifier.id).toStrictEqual("pbkdf2");
+    expect(pbkdf2Verifier({ id: "django" }).id).toStrictEqual("django");
   });
 
   it("verifies a correct Django-format password", async () => {
@@ -29,47 +27,53 @@ describe("pbkdf2Verifier", () => {
   });
 
   it("rejects a wrong password against a Django hash", async () => {
-    assertFalse(await verifier.verify("wrong password", DJANGO_HASH));
+    expect(await verifier.verify("wrong password", DJANGO_HASH)).toBeFalsy();
   });
 
   it("verifies a correct PHC-format password", async () => {
     assert(verifier.canVerify(PHC_HASH));
     assert(await verifier.verify(DJANGO_PASSWORD, PHC_HASH));
-    assertFalse(await verifier.verify("nope", PHC_HASH));
+    expect(await verifier.verify("nope", PHC_HASH)).toBeFalsy();
   });
 
   it("canVerify is false for malformed or foreign hashes", () => {
-    assertFalse(verifier.canVerify("$2b$12$abcdefghijklmnopqrstuv"));
-    assertFalse(verifier.canVerify("pbkdf2_sha256$notanumber$salt$aGFzaA=="));
-    assertFalse(verifier.canVerify("pbkdf2_sha256$100000$salt"));
-    assertFalse(verifier.canVerify("pbkdf2_md5$1000$salt$aGFzaA=="));
-    assertFalse(verifier.canVerify("plaintext"));
-    assertFalse(verifier.canVerify(""));
+    expect(verifier.canVerify("$2b$12$abcdefghijklmnopqrstuv")).toBeFalsy();
+    expect(
+      verifier.canVerify("pbkdf2_sha256$notanumber$salt$aGFzaA=="),
+    ).toBeFalsy();
+    expect(verifier.canVerify("pbkdf2_sha256$100000$salt")).toBeFalsy();
+    expect(verifier.canVerify("pbkdf2_md5$1000$salt$aGFzaA==")).toBeFalsy();
+    expect(verifier.canVerify("plaintext")).toBeFalsy();
+    expect(verifier.canVerify("")).toBeFalsy();
   });
 
   it("verify returns false (never throws) for a hash it can't parse", async () => {
-    assertFalse(await verifier.verify(DJANGO_PASSWORD, "garbage"));
+    expect(await verifier.verify(DJANGO_PASSWORD, "garbage")).toBeFalsy();
   });
 
   it("rejects a hash with an empty/short checksum (no universal password)", async () => {
     const empty = "pbkdf2_sha256$100000$saltysaltZ12$";
-    assertFalse(verifier.canVerify(empty), "an empty checksum must not parse");
-    assertFalse(
+    expect(
+      verifier.canVerify(empty),
+      "an empty checksum must not parse",
+    ).toBeFalsy();
+    expect(
       await verifier.verify("anything", empty),
       "an empty stored hash must never authenticate any password",
-    );
+    ).toBeFalsy();
     // A short but non-empty checksum (8 bytes) is below the floor.
     const short = "pbkdf2_sha256$100000$saltysaltZ12$aGFzaGhhc2g=";
-    assertFalse(verifier.canVerify(short));
+    expect(verifier.canVerify(short)).toBeFalsy();
   });
 
   it("rejects an implausibly high iteration count (DoS guard)", () => {
-    const huge = "pbkdf2_sha256$99999999999$saltysaltZ12$" +
+    const huge =
+      "pbkdf2_sha256$99999999999$saltysaltZ12$" +
       "EQSwFOiYCoPexswCmQxKexbKLdLHxTCke89Wx+gNvTs=";
-    assertFalse(
+    expect(
       verifier.canVerify(huge),
       "an unbounded iteration count must be rejected before deriveBits",
-    );
+    ).toBeFalsy();
   });
 });
 
@@ -79,27 +83,27 @@ describe("parsePhc", () => {
       "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$c29tZWhhc2g",
     );
     assert(parsed);
-    assertEquals(parsed.id, "argon2id");
-    assertEquals(parsed.version, 19);
-    assertEquals(parsed.params, { m: "65536", t: "3", p: "4" });
-    assertEquals(new TextDecoder().decode(parsed.salt), "somesalt");
-    assertEquals(new TextDecoder().decode(parsed.hash), "somehash");
+    expect(parsed.id).toStrictEqual("argon2id");
+    expect(parsed.version).toStrictEqual(19);
+    expect(parsed.params).toStrictEqual({ m: "65536", t: "3", p: "4" });
+    expect(new TextDecoder().decode(parsed.salt)).toStrictEqual("somesalt");
+    expect(new TextDecoder().decode(parsed.hash)).toStrictEqual("somehash");
   });
 
   it("parses a params-less string", () => {
     const parsed = parsePhc("$scrypt$c29tZXNhbHQ$c29tZWhhc2g");
     assert(parsed);
-    assertEquals(parsed.id, "scrypt");
-    assertEquals(parsed.version, undefined);
-    assertEquals(parsed.params, {});
+    expect(parsed.id).toStrictEqual("scrypt");
+    expect(parsed.version).toStrictEqual(undefined);
+    expect(parsed.params).toStrictEqual({});
     assert(parsed.salt);
     assert(parsed.hash);
   });
 
   it("returns null for non-PHC input", () => {
-    assertEquals(parsePhc("not-a-phc-string"), null);
-    assertEquals(parsePhc(""), null);
-    assertEquals(parsePhc("$"), null);
+    expect(parsePhc("not-a-phc-string")).toStrictEqual(null);
+    expect(parsePhc("")).toStrictEqual(null);
+    expect(parsePhc("$")).toStrictEqual(null);
   });
 });
 
@@ -119,35 +123,41 @@ describe("findLegacyVerifier / verifyLegacyPassword", () => {
   const verifiers = [pbkdf2Verifier(), bcryptish];
 
   it("selects the verifier whose canVerify matches", () => {
-    assertEquals(findLegacyVerifier(verifiers, DJANGO_HASH)?.id, "pbkdf2");
-    assertEquals(findLegacyVerifier(verifiers, "$2b$12$xyz")?.id, "bcrypt");
-    assertEquals(findLegacyVerifier(verifiers, "$argon2id$x"), undefined);
+    expect(findLegacyVerifier(verifiers, DJANGO_HASH)?.id).toStrictEqual(
+      "pbkdf2",
+    );
+    expect(findLegacyVerifier(verifiers, "$2b$12$xyz")?.id).toStrictEqual(
+      "bcrypt",
+    );
+    expect(findLegacyVerifier(verifiers, "$argon2id$x")).toStrictEqual(
+      undefined,
+    );
   });
 
   it("skips a verifier that throws from canVerify", () => {
-    assertEquals(
+    expect(
       findLegacyVerifier([throwing, bcryptish], "$2b$x")?.id,
-      "bcrypt",
-    );
+    ).toStrictEqual("bcrypt");
   });
 
   it("verifyLegacyPassword routes to the matching verifier", async () => {
     assert(await verifyLegacyPassword(verifiers, DJANGO_PASSWORD, DJANGO_HASH));
     assert(await verifyLegacyPassword(verifiers, "secret", "$2b$12$x"));
-    assertFalse(await verifyLegacyPassword(verifiers, "nope", "$2b$12$x"));
+    expect(
+      await verifyLegacyPassword(verifiers, "nope", "$2b$12$x"),
+    ).toBeFalsy();
   });
 
   it("returns false when no verifier claims the hash — scrypt is BYO, not built-in", async () => {
-    assertEquals(
+    expect(
       findLegacyVerifier([pbkdf2Verifier()], "$scrypt$ln=16$c2FsdA$aGFzaA"),
-      undefined,
-    );
-    assertFalse(
+    ).toStrictEqual(undefined);
+    expect(
       await verifyLegacyPassword(
         [pbkdf2Verifier()],
         "any",
         "$scrypt$ln=16$c2FsdA$aGFzaA",
       ),
-    );
+    ).toBeFalsy();
   });
 });

@@ -21,11 +21,10 @@
  * for real `fetch`, and point the endpoints at the external IDP.
  *
  * **Pairing for local dev**: by default the IDP URLs point at
- * `app-with-own-auth/` on port 8001, so you can `cd app-with-own-auth &&
- * deno task serve` in one terminal and `cd app-with-external-auth &&
- * deno task serve` in another to exercise the end-to-end flow without a
- * real Udibo deployment. Swap `IDP_BASE_URL` and the credentials in
- * production.
+ * `app-with-own-auth/` on port 8001, so you can run `pnpm start` in that
+ * example in one terminal and in this one in another to exercise the
+ * end-to-end flow without a real Udibo deployment. Set `IDP_BASE_URL` and the
+ * credentials in production.
  *
  * @module
  */
@@ -34,6 +33,8 @@ import { HonoBff } from "@udibo/oauth2/hono/bff";
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
 import { DirectClient } from "@udibo/oauth2/client";
 import { IntrospectionTokenReader } from "@udibo/oauth2/server/resource";
+
+import { config } from "../config.ts";
 
 /**
  * Client identity returned by the IDP's introspection endpoint. Real
@@ -54,15 +55,15 @@ export interface ExternalUser {
 }
 
 /**
- * **Production swap point.** In a real deployment these come from
- * environment variables and point at Udibo (or whichever IDP you've
- * registered with). The defaults below pair the example with
- * `app-with-own-auth/` running locally on port 8001.
+ * **Production swap point.** These come from the environment (see
+ * `../config.ts`) and point at Udibo, or whichever IDP you've registered with.
+ * The defaults pair the example with `app-with-own-auth/` running locally on
+ * port 8001.
  */
-export const IDP_BASE_URL = "http://localhost:8001";
-export const APP_BASE_URL = "http://localhost:8003";
-export const IDP_CLIENT_ID = "spa";
-export const IDP_CLIENT_SECRET = "spa-secret";
+export const IDP_BASE_URL = config.idpBaseUrl;
+export const APP_BASE_URL = config.publicUrl;
+export const IDP_CLIENT_ID = config.idpClientId;
+export const IDP_CLIENT_SECRET = config.idpClientSecret;
 
 /**
  * Base URL of a **separate** resource server, proxied through the BFF by
@@ -70,7 +71,7 @@ export const IDP_CLIENT_SECRET = "spa-secret";
  * introspects against the same IDP, so the session's access token is valid
  * there too.
  */
-export const API_SERVICE_URL = "http://localhost:8002/api";
+export const API_SERVICE_URL = config.apiServiceUrl;
 
 /** Exported so tests can stub `getToken` directly. */
 export const tokenReader = new IntrospectionTokenReader<
