@@ -74,6 +74,7 @@ import {
 import type { ClientInterface } from "../../../models/client.ts";
 import type { AbstractScope, BasicScope } from "../../../models/scope.ts";
 import { defaultFetch } from "../../../utils/_default-fetch.ts";
+import { inboundRequestWithHeaders } from "../../../utils/_inbound-request.ts";
 import { timingSafeMatchIndex } from "../../../utils/_timing-safe.ts";
 import { sha256Hash } from "../../../server/utils/hash.ts";
 import type { HonoAuthorizationServer } from "../authorization-server.ts";
@@ -1860,7 +1861,7 @@ export class HonoBff {
         "Authorization",
         `Bearer ${resolution.entry.data.tokens.accessToken}`,
       );
-      c.req.raw = new Request(c.req.raw, { headers });
+      c.req.raw = inboundRequestWithHeaders(c.req.raw, headers);
       await next();
     };
   }
