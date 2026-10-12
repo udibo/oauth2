@@ -10,11 +10,14 @@
  *   used to correlate an authorize redirect with its callback.
  *
  * The implementations here are in-memory and live only for the process / tab
- * lifetime. `DirectClient` uses them by default, except that in a browser
- * document its auth-request storage defaults to `sessionStorage`. A browser
- * app that must stay signed in across reloads passes
- * `IndexedDBRefreshTokenStorage` for the refresh token and keeps the access
- * token in memory.
+ * lifetime. In a browser document `DirectClient` keeps the token bundle and
+ * refresh token in them by default and its auth-request map in
+ * `sessionStorage`. A browser app that must stay signed in across reloads
+ * passes `IndexedDBRefreshTokenStorage` for the refresh token and keeps the
+ * access token in memory. Outside a browser only the token bundle has a
+ * default: a sign-in requires the auth-request and refresh-token storage to be
+ * passed, these memory ones only for a single process, tests and local
+ * development.
  *
  * @module
  */
@@ -133,8 +136,9 @@ export class MemoryTokenStorage implements TokenStorage {
 }
 
 /**
- * Default in-memory {@link RefreshTokenStorage}. Data is lost when the
- * process exits.
+ * In-memory {@link RefreshTokenStorage}: `DirectClient`'s default in a browser
+ * document, and an explicit choice elsewhere for a single process, tests and
+ * local development. Data is lost when the process exits.
  */
 export class MemoryRefreshTokenStorage implements RefreshTokenStorage {
   #token: string | null = null;
@@ -172,8 +176,9 @@ export interface MemoryAuthRequestStorageOptions {
 const DEFAULT_MAX_AUTH_REQUESTS = 1000;
 
 /**
- * In-memory {@link AuthRequestStorage}, `DirectClient`'s default outside a
- * browser document. Data is lost when the process exits. Every write prunes
+ * In-memory {@link AuthRequestStorage} for a single process, tests and local
+ * development; `DirectClient` falls back to it only in a browser document
+ * without `sessionStorage`. Data is lost when the process exits. Every write prunes
  * records older than {@link MemoryAuthRequestStorageOptions.ttlMs}, then
  * evicts the oldest-written records beyond
  * {@link MemoryAuthRequestStorageOptions.maxEntries}, so neither logins that

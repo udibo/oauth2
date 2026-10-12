@@ -134,21 +134,33 @@ export interface DirectClientOptions extends BaseOptions {
   discoveryCache?: DiscoveryCache;
   /** Access-token storage. Defaults to {@link MemoryTokenStorage}. */
   tokenStorage?: TokenStorage;
-  /** Refresh-token storage. Defaults to {@link MemoryRefreshTokenStorage}. */
+  /**
+   * Refresh-token storage.
+   *
+   * In a browser document it defaults to {@link MemoryRefreshTokenStorage},
+   * which the tab loses on reload; pass `IndexedDBRefreshTokenStorage` to keep
+   * it. Outside a browser there is no default: a sign-in or device
+   * authorization that would store a refresh token throws a `TypeError` until
+   * one is passed. Pass storage that outlives the process, such as a database
+   * or the operating system's keychain, or {@link MemoryRefreshTokenStorage}
+   * for a single process, tests and local development. Client-credentials
+   * use needs none.
+   */
   refreshTokenStorage?: RefreshTokenStorage;
   /**
-   * Auth-request storage.
+   * Where a pending sign-in (`state` → PKCE verifier, return-to) waits for
+   * its callback.
    *
-   * Defaults to {@link SessionStorageAuthRequestStorage} in a browser document
-   * and {@link MemoryAuthRequestStorage} everywhere else. The browser default
-   * is what makes the authorize redirect work at all: an in-memory record does
-   * not survive the navigation away and back, so the callback rejects every
-   * `state` as unknown. Servers keep the in-memory default so a per-request
-   * client does not write pending logins into one process-wide store.
-   *
-   * Override it when the record must live somewhere else — a per-request
-   * cookie store on a server, or a store scoped to something other than the
-   * tab.
+   * In a browser document it defaults to
+   * {@link SessionStorageAuthRequestStorage}, which survives the navigation
+   * to the authorization server and back. Outside a browser there is no
+   * default: {@link DirectClient.login} and
+   * {@link DirectClient.exchangeAuthorizationCode} throw a `TypeError` unless
+   * this or their per-call `authRequestStorage` is given, because the
+   * callback can reach a different instance than the one that started the
+   * sign-in. Pass storage every instance shares, a per-request store on each
+   * call, or {@link MemoryAuthRequestStorage} for a single process, tests and
+   * local development. Client-credentials use needs none.
    */
   authRequestStorage?: AuthRequestStorage;
   /**
@@ -317,8 +329,8 @@ export class DirectClient extends OAuth2ClientBase {
   readonly #issuer?: string;
   readonly #discoveryCache?: DiscoveryCache;
   readonly #tokenStorage: TokenStorage;
-  readonly #refreshTokenStorage: RefreshTokenStorage;
-  readonly #authRequestStorage: AuthRequestStorage;
+  readonly #refreshTokenStorage?: RefreshTokenStorage;
+  readonly #authRequestStorage?: AuthRequestStorage;
   readonly #authRequestTtlMs: number;
 
   #endpoints: AuthorizationServerEndpoints;
@@ -358,11 +370,11 @@ export class DirectClient extends OAuth2ClientBase {
     this.#endpoints = { ...options.endpoints };
     this.#tokenStorage = options.tokenStorage ?? new MemoryTokenStorage();
     this.#refreshTokenStorage =
-      options.refreshTokenStorage ?? new MemoryRefreshTokenStorage();
+      options.refreshTokenStorage ?? browserRefreshTokenStorage();
     this.#authRequestTtlMs = options.authRequestTtlMs ?? 10 * 60 * 1000;
     this.#authRequestStorage =
       options.authRequestStorage ??
-      defaultAuthRequestStorage(this.#authRequestTtlMs);
+      browserAuthRequestStorage(this.#authRequestTtlMs);
   }
 
   /** True when the client was given a secret and authenticates via Basic. */
@@ -591,6 +603,8 @@ export class DirectClient extends OAuth2ClientBase {
    * authorize URL, override `redirect_uri`, or bind the pending request to a
    * per-request store.
    * @returns The authorize URL and the `state` the callback will echo back.
+   * @throws {TypeError} outside a browser when neither the client nor this
+   * call has an `authRequestStorage`.
    * @throws {Error} when no authorization endpoint is configured or
    * discoverable.
    *
@@ -607,6 +621,8 @@ export class DirectClient extends OAuth2ClientBase {
    * ```
    */
   async login(options: LoginOptions = {}): Promise<AuthorizationRedirect> {
+    const authRequestStorage =
+      options.authRequestStorage ?? this.#requireAuthRequestStorage();
     const baseAuthEndpoint = await this.#requireEndpoint("authorization");
     const authEndpoint = options.origin
       ? withOrigin(baseAuthEndpoint, options.origin)
@@ -618,8 +634,6 @@ export class DirectClient extends OAuth2ClientBase {
     const codeChallenge = await challengeMethods.S256(codeVerifier);
     const scope = options.scope ?? this.#scope;
 
-    const authRequestStorage =
-      options.authRequestStorage ?? this.#authRequestStorage;
     await authRequestStorage.set(state, {
       codeVerifier,
       returnTo: options.returnTo,
@@ -659,7 +673,9 @@ export class DirectClient extends OAuth2ClientBase {
    * `cause` is the transport failure.
    * @throws {OAuth2Error} when the callback carries `?error=…`, or the token
    * exchange fails.
-   * @throws {TypeError} when `code` or `state` is missing.
+   * @throws {TypeError} when `code` or `state` is missing, or outside a
+   * browser when the client has no `authRequestStorage` or no
+   * `refreshTokenStorage`; checked before the pending request is claimed.
    * @throws {InvalidGrantError} when `state` is unknown or expired.
    *
    * @example
@@ -694,6 +710,13 @@ export class DirectClient extends OAuth2ClientBase {
       );
       this.emit({ type: "error", error: instance });
       return Promise.reject(instance);
+    }
+
+    try {
+      this.#requireAuthRequestStorage();
+      this.#requireRefreshTokenStorage();
+    } catch (error) {
+      return Promise.reject(error);
     }
 
     const code = params.get("code");
@@ -751,6 +774,8 @@ export class DirectClient extends OAuth2ClientBase {
    * which must match what {@link login} was given.
    * @returns The tokens, the rotated refresh token, and the recorded
    * `returnTo`, plus the raw response.
+   * @throws {TypeError} outside a browser when neither the client nor this
+   * call has an `authRequestStorage`.
    * @throws {InvalidGrantError} when `state` is unknown or older than
    * `authRequestTtlMs`.
    * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
@@ -763,7 +788,7 @@ export class DirectClient extends OAuth2ClientBase {
     options: ExchangeOptions = {},
   ): Promise<ExchangeResult> {
     const authRequestStorage =
-      options.authRequestStorage ?? this.#authRequestStorage;
+      options.authRequestStorage ?? this.#requireAuthRequestStorage();
     const record = await claimAuthRequest(authRequestStorage, state);
     if (!record) throw new InvalidGrantError("unknown state parameter");
     if (
@@ -962,7 +987,7 @@ export class DirectClient extends OAuth2ClientBase {
 
   async #readRefreshToken(reportTransient: boolean): Promise<string | null> {
     try {
-      return await this.#refreshTokenStorage.get();
+      return (await this.#refreshTokenStorage?.get()) ?? null;
     } catch (error) {
       if (reportTransient) this.emit({ type: "error", error });
       throw error;
@@ -976,6 +1001,8 @@ export class DirectClient extends OAuth2ClientBase {
    *
    * @param options `scope` overrides the client's default scope string.
    * @returns The server's device authorization response.
+   * @throws {TypeError} outside a browser when the client has no
+   * `refreshTokenStorage` for the tokens {@link pollDeviceToken} will keep.
    * @throws {Error} when no device authorization endpoint is configured or
    * discoverable.
    * @throws {TemporarilyUnavailableError} when the device authorization
@@ -999,6 +1026,7 @@ export class DirectClient extends OAuth2ClientBase {
   async startDeviceAuthorization(
     options: DeviceAuthorizationOptions = {},
   ): Promise<DeviceAuthorizationResponse> {
+    this.#requireRefreshTokenStorage();
     const endpoint = await this.#requireEndpoint("deviceAuthorization");
     const body = new URLSearchParams({ client_id: this.#clientId });
     const scope = options.scope ?? this.#scope;
@@ -1029,6 +1057,8 @@ export class DirectClient extends OAuth2ClientBase {
    * authorization response so polling respects the server's advertised
    * minimum interval and deadline, and `signal` to cancel.
    * @returns The persisted token bundle.
+   * @throws {TypeError} outside a browser when the client has no
+   * `refreshTokenStorage`.
    * @throws {AccessDeniedError} when `signal` aborts, or the user declines.
    * @throws {InvalidGrantError} when `expiresAt` passes before approval. A
    * server that reports the code expired first throws `ExpiredTokenError`
@@ -1042,6 +1072,7 @@ export class DirectClient extends OAuth2ClientBase {
     deviceCode: string,
     options: PollDeviceTokenOptions = {},
   ): Promise<TokenBundle> {
+    this.#requireRefreshTokenStorage();
     const version = ++this.#sessionVersion;
     let interval = Math.max(1, options.interval ?? 5);
     const deadline = options.expiresAt ?? Infinity;
@@ -1389,7 +1420,7 @@ export class DirectClient extends OAuth2ClientBase {
         ? Math.round((tokens.accessTokenExpiresAt - Date.now()) / 1000)
         : null;
       if (expiresIn !== null && expiresIn <= 0) {
-        const revivable = await this.#refreshTokenStorage.get();
+        const revivable = await this.#refreshTokenStorage?.get();
         if (!revivable) return SIGNED_OUT;
       }
       return {
@@ -1470,6 +1501,20 @@ export class DirectClient extends OAuth2ClientBase {
     return await this.#sharedRefresh(!quiet);
   }
 
+  #requireAuthRequestStorage(): AuthRequestStorage {
+    if (!this.#authRequestStorage) {
+      throw new TypeError(MISSING_AUTH_REQUEST_STORAGE);
+    }
+    return this.#authRequestStorage;
+  }
+
+  #requireRefreshTokenStorage(): RefreshTokenStorage {
+    if (!this.#refreshTokenStorage) {
+      throw new TypeError(MISSING_REFRESH_TOKEN_STORAGE);
+    }
+    return this.#refreshTokenStorage;
+  }
+
   #basicAuth(): string {
     return encodeBasicAuth(this.#clientId, this.#clientSecret!);
   }
@@ -1533,9 +1578,9 @@ export class DirectClient extends OAuth2ClientBase {
       const bundle = responseToBundle(response);
       await this.#tokenStorage.set(bundle);
       if (response.refresh_token) {
-        await this.#refreshTokenStorage.set(response.refresh_token);
+        await this.#refreshTokenStorage?.set(response.refresh_token);
       } else if (!preserveRefreshToken) {
-        await this.#refreshTokenStorage.clear();
+        await this.#refreshTokenStorage?.clear();
       }
       if (version !== this.#sessionVersion) {
         throw new InvalidGrantError("session changed during token exchange");
@@ -1560,8 +1605,8 @@ export class DirectClient extends OAuth2ClientBase {
     this.#sessionVersion++;
     return this.#mutateSession(async () => {
       await this.#tokenStorage.clear();
-      await this.#refreshTokenStorage.clear();
-      await this.#authRequestStorage.clear();
+      await this.#refreshTokenStorage?.clear();
+      await this.#authRequestStorage?.clear();
     });
   }
 }
@@ -1615,12 +1660,37 @@ function toSearchParams(
   }
 }
 
-function defaultAuthRequestStorage(ttlMs: number): AuthRequestStorage {
-  const inBrowserDocument =
-    typeof document !== "undefined" && typeof sessionStorage !== "undefined";
-  return inBrowserDocument
+const MISSING_AUTH_REQUEST_STORAGE =
+  "DirectClient requires options.authRequestStorage outside a browser to " +
+  "start or complete a sign-in. Pass an AuthRequestStorage over storage " +
+  "every instance shares, pass one to login() and " +
+  "exchangeAuthorizationCode() for each call, or pass " +
+  "MemoryAuthRequestStorage for a single process, tests and local " +
+  "development.";
+
+const MISSING_REFRESH_TOKEN_STORAGE =
+  "DirectClient requires options.refreshTokenStorage outside a browser to " +
+  "keep the refresh token a sign-in returns. Pass a RefreshTokenStorage " +
+  "over storage that outlives the process, such as a database or the " +
+  "operating system's keychain, or MemoryRefreshTokenStorage for a single " +
+  "process, tests and local development. Client-credentials use needs " +
+  "neither.";
+
+function inBrowserDocument(): boolean {
+  return typeof document !== "undefined";
+}
+
+function browserAuthRequestStorage(
+  ttlMs: number,
+): AuthRequestStorage | undefined {
+  if (!inBrowserDocument()) return undefined;
+  return typeof sessionStorage !== "undefined"
     ? new SessionStorageAuthRequestStorage({ ttlMs })
     : new MemoryAuthRequestStorage({ ttlMs });
+}
+
+function browserRefreshTokenStorage(): RefreshTokenStorage | undefined {
+  return inBrowserDocument() ? new MemoryRefreshTokenStorage() : undefined;
 }
 
 async function claimAuthRequest(

@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { rejection } from "../_test_assert.ts";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
 import { DirectClient } from "../client/direct-client.ts";
+import {
+  MemoryAuthRequestStorage,
+  MemoryRefreshTokenStorage,
+} from "../client/storage.ts";
 import { ResourceServer } from "../server/resource-server.ts";
 import { createMemoryAuthorizationServer } from "./server.ts";
 
@@ -198,6 +202,8 @@ describe("createMemoryAuthorizationServer", () => {
     });
 
     const client = new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
       clientId: "spa",
       redirectUri: "http://app/cb",
       endpoints: {

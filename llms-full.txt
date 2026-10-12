@@ -1441,7 +1441,7 @@ your app through a small interface you implement:
 | `RevocableSessionService`         | over your session store | revocation on password reset  |
 | `ListableSessionService`          | same store (optional)   | "where you're signed in" list |
 | `DeliveryHooks`                   | your mailer             | emailed action links          |
-| `RateLimitStore` / `LockoutStore` | Redis or DB (optional)  | shared-state protection       |
+| `RateLimitStore` / `LockoutStore` | Redis or DB             | shared-state protection       |
 | `IdentityEventHook`               | your audit log          | observability                 |
 
 There is no adapter package per database and no migration the library imposes.
@@ -1976,21 +1976,50 @@ Two distinct protections, both consulted by `signIn`:
   unknown identifier gets — lockout must not become an oracle for "this account
   exists and the password was close".
 
-```ts
-import { AccountLockout, RateLimiter } from "@udibo/oauth2/identity";
+Both require a `store`; neither has a default, because a limit or a lock only
+holds if every instance that serves sign-in reads the same counters
+([the multi-instance rule](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#the-multi-instance-rule)).
+Implement the small `RateLimitStore` / `LockoutStore` interfaces over Redis or
+your database (lockout columns on the users table also give admins
+visibility). Both `increment` contracts require atomicity — a read-modify-write
+lets concurrent attempts lose counts, undershooting the lockout threshold or
+slipping a burst past the limiter.
 
-const rateLimiter = new RateLimiter();
-const lockout = new AccountLockout();
+```ts
+import {
+  AccountLockout,
+  type LockoutStore,
+  RateLimiter,
+  type RateLimitStore,
+} from "@udibo/oauth2/identity";
+
+declare const rateLimitStore: RateLimitStore;
+declare const lockoutStore: LockoutStore;
+
+const rateLimiter = new RateLimiter({ store: rateLimitStore });
+const lockout = new AccountLockout({ store: lockoutStore });
 ```
 
-Both default to in-memory stores, which are per-process — one instance of
-[the multi-instance rule](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#the-multi-instance-rule).
-Running more than one instance, back them with shared state by implementing the
-small `RateLimitStore` / `LockoutStore` interfaces over Redis or your database
-(lockout columns on the users table also give admins visibility). Both
-`increment` contracts require atomicity — a read-modify-write lets concurrent
-attempts lose counts, undershooting the lockout threshold or slipping a burst
-past the limiter.
+For a single process, tests and local development, pass the in-memory stores
+explicitly. They are bounded, so they cannot grow without limit, but each
+instance keeps its own: behind a load balancer every instance grants its own
+attempts and a lock on one does not stop sign-in on another.
+
+```ts
+import {
+  AccountLockout,
+  MemoryLockoutStore,
+  MemoryRateLimitStore,
+  RateLimiter,
+} from "@udibo/oauth2/identity";
+
+const rateLimiter = new RateLimiter({ store: new MemoryRateLimitStore() });
+const lockout = new AccountLockout({ store: new MemoryLockoutStore() });
+```
+
+`MemoryRateLimitStore` holds at most 10,000 buckets. `MemoryLockoutStore` holds
+at most 10,000 records (`maxEntries`) and forgets an account's failures 24
+hours after the last one (`ttlMs`), never while its lock is active.
 
 If you want a different _algorithm_ rather than different storage, the
 `rateLimiter` and `lockout` options are typed against structural interfaces —
@@ -3434,7 +3463,7 @@ helper (`@udibo/oauth2/identity`) and the forms
 | Seam          | You implement                  | Backs                     |
 | ------------- | ------------------------------ | ------------------------- |
 | `MfaStore`    | one table keyed by user id     | secrets + recovery hashes |
-| `RateLimiter` | in-memory, Redis, or your DB   | throttling `verify`       |
+| `RateLimiter` | a `RateLimitStore`: Redis or DB | throttling `verify`      |
 | `onEvent`     | your audit log                 | `mfa.*` outcomes          |
 | your routes   | enrollment, challenge, step-up | when a code is demanded   |
 
@@ -3494,15 +3523,26 @@ read-then-write defeats each of them:
 ## Construct the service
 
 ```ts
-import { RateLimiter } from "@udibo/oauth2/identity";
+import { MemoryRateLimitStore, RateLimiter } from "@udibo/oauth2/identity";
 import { MemoryMfaStore, MfaService } from "@udibo/oauth2/identity/mfa";
 
 export const mfa = new MfaService({
   store: new MemoryMfaStore(),
-  rateLimiter: new RateLimiter({ limit: 5, windowMs: 5 * 60_000 }),
+  rateLimiter: new RateLimiter({
+    limit: 5,
+    windowMs: 5 * 60_000,
+    store: new MemoryRateLimitStore(),
+  }),
   onEvent: (event) => console.log(event.type),
 });
 ```
+
+Both memory stores keep their state in one process, which suits a single
+process, tests and local development only. With more than one instance, back
+`MfaStore` with your database and give the `RateLimiter` a `RateLimitStore`
+over Redis or a database every instance shares: with per-process counters each
+instance grants its own guesses, multiplying the attacker's budget by the
+instance count. `RateLimiter` requires its `store` and has no default.
 
 The `rateLimiter` is not optional in spirit: a six-digit code is one in a
 million, and an unthrottled `verify` endpoint is a brute-force target — and so
@@ -3867,6 +3907,7 @@ codes is a defensible one.
 import {
   IdentityService,
   MemoryOtpStore,
+  MemoryRateLimitStore,
   MemoryTokenFlowStore,
   RateLimiter,
   TokenFlowService,
@@ -3883,7 +3924,7 @@ export function createIdentityService(
     tokens: new TokenFlowService(new MemoryTokenFlowStore()),
     otp: { store: new MemoryOtpStore() },
     baseUrl: "https://app.example.com",
-    rateLimiter: new RateLimiter(),
+    rateLimiter: new RateLimiter({ store: new MemoryRateLimitStore() }),
     delivery: {
       sendSignInLink: (message) =>
         mail.enqueue({
@@ -3904,7 +3945,16 @@ export function createIdentityService(
 }
 ```
 
-Three things to notice.
+Four things to notice.
+
+Every store in this snippet is an in-memory one, for a single process, tests
+and local development only. Each keeps its records in the process that wrote
+them: a link or code issued by one instance is unknown to another, and each
+instance counts its own rate-limit hits, so behind a load balancer a client
+gets the limit once per instance. Before you run more than one instance,
+replace them with a `TokenFlowStore`, an `OtpStore` and a `RateLimitStore` over
+storage every instance shares. `RateLimiter` requires its `store` and has no
+default.
 
 `sendSignInCode` receives a `CodeDeliveryMessage`, not a `DeliveryMessage`:
 there is no `url`, because a code is typed rather than clicked. Putting the code
@@ -5296,6 +5346,13 @@ app-owned route using the
 [CAPTCHA example](https://github.com/udibo/oauth2/blob/main/docs/guides/add-login.md#captcha-at-the-route-boundary); `IdentityService`
 does not apply them implicitly.
 
+`RateLimiter` and `AccountLockout` require a `store`; neither has a default.
+Give each a store over Redis or a database every instance shares, with an
+atomic `increment`, so a limit or a lock applies however requests are
+balanced. `MemoryRateLimitStore` and `MemoryLockoutStore` are bounded but
+per-process: with more than one instance each grants its own attempts, so keep
+them to a single process, tests and local development.
+
 Apply IP/request throttling at the route layer as well as identifier-based
 limits within identity flows. Rate-limit mail requests and code verification. A
 six-digit code has only a million possibilities: storing its hash does not make
@@ -5371,6 +5428,12 @@ sections apply only when you host those flows.
       [choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.
+- [ ] A server-side `DirectClient` that signs users in or runs the device flow
+      has an `authRequestStorage` (on the client or passed per call) and a
+      `refreshTokenStorage` that every instance can read and that outlives a
+      restart. `MemoryAuthRequestStorage` and `MemoryRefreshTokenStorage`
+      appear only in single-process, test and local configurations. See
+      [DirectClient storage outside a browser](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#directclient-storage-outside-a-browser).
 - [ ] Pending sign-ins are bounded. A multi-instance or internet-facing BFF
       uses `EncryptedCookieAuthRequestStorage`, or shared storage with its own
       cap. The login route has a rate limit, and `maxReturnToLength` (default
@@ -5420,6 +5483,11 @@ sections apply only when you host those flows.
       comparison writes nothing, and the sign-in proceeds only if the password
       re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
+- [ ] `RateLimiter` and `AccountLockout` use a `RateLimitStore` and a
+      `LockoutStore` that every instance shares, with an atomic `increment`.
+      `MemoryRateLimitStore` and `MemoryLockoutStore` appear only in
+      single-process, test and local configurations. See
+      [rate limit and lockout storage](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#rate-limit-and-lockout-storage-across-instances).
 - [ ] Email requests and OTP/MFA attempts are throttled; concurrent resend
       policy is explicit.
 - [ ] OTP consumption and recovery-code consumption permit one successful
@@ -5949,9 +6017,9 @@ unless the row says otherwise.
 | event              | `IdentityEventHook` (`onEvent`)                           | After every flow outcome                                                             | no                                        | fire-and-forget          | Caught and logged, never rethrown — cannot break the flow (deliberate)                                                                                                                                                                                                                                                                   |
 | password-policy    | `PasswordPolicy.validators` (`passwordPolicy`)            | `signUp` and `resetPassword`, before hashing (defaults apply when unset)             | no                                        | blocks                   | Return an issue string to reject (→ `weak_password`); a validator that _throws_ is trapped to `weak_password` too                                                                                                                                                                                                                        |
 | rate-limiter       | `RateLimiterLike` (`rateLimiter` / `rateLimiters`)        | Start of each throttled flow (`check`); reset on success                             | no (opt-in)                               | blocks                   | A limit _hit_ under `enforce` → `rate_limited`; a limiter that _throws_ → `rate_limited` under `enforce` (fail closed), logged-and-allowed under `log-only`                                                                                                                                                                              |
-| rate-limit-store   | `RateLimitStore`                                          | Backs the built-in `RateLimiter`                                                     | no                                        | blocks                   | Propagates through `RateLimiter.check`/`reset`                                                                                                                                                                                                                                                                                           |
+| rate-limit-store   | `RateLimitStore`                                          | Backs the built-in `RateLimiter`                                                     | yes, for the built-in `RateLimiter` | blocks                   | Propagates through `RateLimiter.check`/`reset`                                                                                                                                                                                                                                                                                           |
 | lockout            | `AccountLockoutLike` (`lockout`)                          | `signIn` (`status`/`recordFailure`), reset on success/reset/unlock                   | no (opt-in)                               | blocks                   | Propagates and aborts the flow; enforcement itself is uniform-`null` (no lockout oracle)                                                                                                                                                                                                                                                 |
-| lockout-store      | `LockoutStore`                                            | Backs the built-in `AccountLockout`                                                  | no                                        | blocks                   | Propagates through the `AccountLockoutLike` call sites                                                                                                                                                                                                                                                                                   |
+| lockout-store      | `LockoutStore`                                            | Backs the built-in `AccountLockout`                                                  | yes, for the built-in `AccountLockout` | blocks                   | Propagates through the `AccountLockoutLike` call sites                                                                                                                                                                                                                                                                                   |
 | token-flow-store   | `TokenFlowStore` (via `tokens`)                           | All `request*` / `verify*` / `reset*` / `unlock*` / `consume*` flows                 | required for those flows                  | blocks                   | Propagates and aborts the flow — except while minting in `requestPasswordReset` / `requestSignInLink`, where a throw is trapped like a delivery failure: the call resolves `void`, nothing is sent, and `credential_mint.failed` is the only signal (a store outage is not an enumeration oracle)                                        |
 | otp-store          | `OtpStore` (`otp.store`)                                  | `requestSignInCode` / `verifySignInCode`                                             | required for the code flow                | blocks                   | Propagates and aborts the flow — except while minting in `requestSignInCode`, trapped as for token-flow-store (`credential_mint.failed`)                                                                                                                                                                                                 |
 | session-revocation | `RevocableSessionService` (`sessions`)                    | `resetPassword`, after the new credential is set                                     | no                                        | blocks (side-effect)     | A throw (after the password change) emits `password_reset.failed` (`session_revocation_failed`), suppresses `password_reset.completed`, and rethrows — the reset is reported failed, not silently half-complete. The token is already spent, so re-run `revokeAllByUser` from the event or have the user complete a fresh link           |
@@ -6016,8 +6084,8 @@ seams.
 | --------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
 | event-listener        | `OAuth2ClientEventListener` (`subscribe`)     | Every client state change                                                                                                                                                                                                                                                                             | no                                                                                          | fire-and-forget | **Swallowed** — a synchronous listener throw is isolated so other subscribers still receive the event (deliberate) |
 | token-storage         | `TokenStorage` (`tokenStorage`)               | Token read/persist/clear                                                                                                                                                                                                                                                                              | no (defaults to memory)                                                                     | blocks          | Propagates and aborts the calling method                                                                           |
-| refresh-token-storage | `RefreshTokenStorage` (`refreshTokenStorage`) | Refresh-token read/persist/clear                                                                                                                                                                                                                                                                      | no (defaults to memory)                                                                     | blocks          | Propagates and aborts the calling method                                                                           |
-| auth-request-storage  | `AuthRequestStorage` (`authRequestStorage`)   | `DirectClient.login` / `exchangeAuthorizationCode`                                                                                                                                                                                                                                                    | no (defaults to `SessionStorageAuthRequestStorage` in a browser document, memory elsewhere) | blocks          | Propagates and aborts the calling method                                                                           |
+| refresh-token-storage | `RefreshTokenStorage` (`refreshTokenStorage`) | Refresh-token read/persist/clear                                                                                                                                                                                                                                                                      | in a browser no (defaults to memory); elsewhere yes for a sign-in or device flow, which throw `TypeError` without it | blocks          | Propagates and aborts the calling method                                                                           |
+| auth-request-storage  | `AuthRequestStorage` (`authRequestStorage`)   | `DirectClient.login` / `exchangeAuthorizationCode`                                                                                                                                                                                                                                                    | in a browser no (defaults to `SessionStorageAuthRequestStorage`); elsewhere yes, on the client or per call, or the call throws `TypeError` | blocks          | Propagates and aborts the calling method                                                                           |
 | discovery-cache       | `DiscoveryCache` (`discoveryCache`)           | Every endpoint use of an `issuer` client whose held copy has expired. The client keeps a copy either way: until the `expiresAt` its `resolve` reports when a cache is supplied, or `DEFAULT_DISCOVERY_TTL_MS` (1 h) when one is not — so a cache is read once per entry lifetime, not once per lookup | no                                                                                          | blocks          | Propagates to `discover()`; a rejected load is deliberately not cached                                             |
 | client-fetch          | `fetch` (`BaseOptions`)                       | Every outbound HTTP call                                                                                                                                                                                                                                                                              | no (defaults to `globalThis.fetch`)                                                         | blocks          | Mostly propagates; `#fetchMetadata` retries both well-known paths before rethrowing                                |
 
@@ -6142,6 +6210,31 @@ signed out, and a sign-in whose callback reaches another instance fails. See
 [choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores)
 for which store fits which deployment.
 
+## Rate limit and lockout storage across instances
+
+`RateLimiter` and `AccountLockout` require a `store` and have no default;
+constructing either without one throws a `TypeError` naming the option.
+`MemoryRateLimitStore` and `MemoryLockoutStore` must be chosen explicitly and
+serve one process only: behind a load balancer each instance keeps its own
+counters, so a client gets the rate limit once per instance, an attacker gets
+`maxAttempts` password guesses per instance, and a lock on one instance does not
+stop sign-in on another. Pass a `RateLimitStore` and a `LockoutStore` over
+Redis or a database every instance shares, with an atomic `increment`.
+
+## DirectClient storage outside a browser
+
+In a browser document `DirectClient` keeps pending sign-ins in
+`SessionStorageAuthRequestStorage` and the refresh token in memory. Outside a
+browser it has no default for either. `login` and `exchangeAuthorizationCode`
+throw a `TypeError` unless the client or the call has an `authRequestStorage`,
+and `handleAuthorizationCallback`, `startDeviceAuthorization` and
+`pollDeviceToken` throw one unless the client has a `refreshTokenStorage`. Each
+check runs before any request and before a pending sign-in is claimed. A
+client that only runs client credentials needs neither; it never stores a
+refresh token, and drops one a non-conforming server returns. Pass
+`MemoryAuthRequestStorage` and `MemoryRefreshTokenStorage` explicitly for a
+single process, tests and local development.
+
 ## Pending sign-in limits
 
 Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
@@ -6153,9 +6246,9 @@ so the package bounds what each start can cost:
   `defaultReturnTo` instead. Change the cap with `HonoBffOptions.maxReturnToLength`
   (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
   `maxReturnToLength`); `Infinity` removes it.
-- **`MemoryAuthRequestStorage` holds at most 1000 records.** This is the client's
-  default outside a browser, and what `MemoryAuthRequestStorageFactory` gives
-  the BFF. It keeps pending sign-ins in one process, so a callback served by
+- **`MemoryAuthRequestStorage` holds at most 1000 records.** This is what
+  `MemoryAuthRequestStorageFactory` gives the BFF, and the client's fallback in
+  a browser document without `sessionStorage`. It keeps pending sign-ins in one process, so a callback served by
   another instance fails with an unknown `state`; use it only for a single
   process, tests and local development. A write beyond the cap evicts the oldest-written record,
   so memory stays bounded however many starts arrive. Raise or lower it with
@@ -6368,6 +6461,15 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   impossibility. Bounding memory and resisting eviction are in genuine tension
   in a single process; this is a dev / single-process store, and production
   backs the limiter with Redis or a database where neither compromise is forced.
+- `MemoryLockoutStore` is bounded the same way: it forgets an account's failures
+  `ttlMs` (24 hours) after the last one, never while the account's lock is
+  active, and holds at most `maxEntries` (10,000) records. At the cap it drops
+  expired records first, then evicts unlocked records before locked ones, the
+  fewest failures first. Lockout keys are account ids, so displacing an active
+  lock takes failures against more than 10,000 other accounts that each end
+  locked. The TTL also means a slow guesser who waits a day between failures
+  never reaches the threshold in this store; a store over your database keeps
+  the count until a successful sign-in clears it.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

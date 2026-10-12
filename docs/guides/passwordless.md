@@ -43,6 +43,7 @@ codes is a defensible one.
 import {
   IdentityService,
   MemoryOtpStore,
+  MemoryRateLimitStore,
   MemoryTokenFlowStore,
   RateLimiter,
   TokenFlowService,
@@ -59,7 +60,7 @@ export function createIdentityService(
     tokens: new TokenFlowService(new MemoryTokenFlowStore()),
     otp: { store: new MemoryOtpStore() },
     baseUrl: "https://app.example.com",
-    rateLimiter: new RateLimiter(),
+    rateLimiter: new RateLimiter({ store: new MemoryRateLimitStore() }),
     delivery: {
       sendSignInLink: (message) =>
         mail.enqueue({
@@ -80,7 +81,16 @@ export function createIdentityService(
 }
 ```
 
-Three things to notice.
+Four things to notice.
+
+Every store in this snippet is an in-memory one, for a single process, tests
+and local development only. Each keeps its records in the process that wrote
+them: a link or code issued by one instance is unknown to another, and each
+instance counts its own rate-limit hits, so behind a load balancer a client
+gets the limit once per instance. Before you run more than one instance,
+replace them with a `TokenFlowStore`, an `OtpStore` and a `RateLimitStore` over
+storage every instance shares. `RateLimiter` requires its `store` and has no
+default.
 
 `sendSignInCode` receives a `CodeDeliveryMessage`, not a `DeliveryMessage`:
 there is no `url`, because a code is typed rather than clicked. Putting the code

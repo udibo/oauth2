@@ -216,6 +216,13 @@ app-owned route using the
 [CAPTCHA example](add-login.md#captcha-at-the-route-boundary); `IdentityService`
 does not apply them implicitly.
 
+`RateLimiter` and `AccountLockout` require a `store`; neither has a default.
+Give each a store over Redis or a database every instance shares, with an
+atomic `increment`, so a limit or a lock applies however requests are
+balanced. `MemoryRateLimitStore` and `MemoryLockoutStore` are bounded but
+per-process: with more than one instance each grants its own attempts, so keep
+them to a single process, tests and local development.
+
 Apply IP/request throttling at the route layer as well as identifier-based
 limits within identity flows. Rate-limit mail requests and code verification. A
 six-digit code has only a million possibilities: storing its hash does not make

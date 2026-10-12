@@ -3,7 +3,7 @@ import { FakeTime } from "../../_test_fake-time.ts";
 import { rejection, thrown } from "../../_test_assert.ts";
 import { IdentityError } from "../errors.ts";
 import type { IdentityEvent } from "../events.ts";
-import { RateLimiter } from "../rate-limit.ts";
+import { MemoryRateLimitStore, RateLimiter } from "../rate-limit.ts";
 import { MemoryMfaStore, MfaService } from "./service.ts";
 import { generateTotpCode } from "./totp.ts";
 
@@ -313,7 +313,11 @@ describe("MfaService", () => {
     const store = new MemoryMfaStore();
     const mfa = new MfaService({
       store,
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const { base32 } = await enroll(mfa, "u1");
 
@@ -333,7 +337,11 @@ describe("MfaService", () => {
     const store = new MemoryMfaStore();
     const mfa = new MfaService({
       store,
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       protectionMode: "log-only",
       onEvent: (event) => {
         events.push(event);
@@ -464,7 +472,11 @@ describe("MfaService", () => {
     const store = new MemoryMfaStore();
     const mfa = new MfaService({
       store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60 * 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60 * 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const { base32 } = await enroll(mfa, "u1");
 
@@ -483,7 +495,11 @@ describe("MfaService", () => {
     const store = new MemoryMfaStore();
     const mfa = new MfaService({
       store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60 * 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60 * 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const { recoveryCodes } = await enroll(mfa, "u1");
 
@@ -538,7 +554,11 @@ describe("MfaService", () => {
     const events: IdentityEvent[] = [];
     const mfa = new MfaService({
       store: new MemoryMfaStore(),
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       onEvent: (event) => {
         events.push(event);
       },
@@ -565,7 +585,11 @@ describe("MfaService", () => {
     using _time = new FakeTime(START);
     const mfa = new MfaService({
       store: new MemoryMfaStore(),
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const { base32 } = await mfa.startEnrollment("u1", {
       issuer: "Udibo",
@@ -592,7 +616,11 @@ describe("MfaService", () => {
         .spyOn(console, "error")
         .mockImplementation(() => {});
       using time = new FakeTime(START);
-      const limiter = new RateLimiter({ limit: 5, windowMs: 60_000 });
+      const limiter = new RateLimiter({
+        limit: 5,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      });
       let resetBroken = false;
       const mfa = new MfaService({
         store: new MemoryMfaStore(),

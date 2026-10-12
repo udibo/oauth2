@@ -1,9 +1,10 @@
 /**
  * Fixed-window rate limiting for auth endpoints — throttle sign-in attempts,
  * forgot-password requests, etc. Two seams sit here: {@link RateLimitStore}
- * swaps the counter storage (a {@link MemoryRateLimitStore} ships for
- * dev/single-process; back it with Redis/DB to share limits across instances),
- * and {@link RateLimiterLike} swaps the limiter itself when a fixed window is
+ * is the counter storage {@link RateLimiter} requires (back it with Redis or a
+ * database to share limits across instances, or pass the bounded
+ * {@link MemoryRateLimitStore} for a single process, tests and local
+ * development), and {@link RateLimiterLike} swaps the limiter itself when a fixed window is
  * not the algorithm you want. Tenant-agnostic: scope by keying on whatever you
  * like (IP, identifier, `tenant:ip`).
  *
@@ -97,20 +98,35 @@ export interface RateLimiterOptions {
   limit?: number;
   /** Window length in ms. Defaults to 15 minutes. */
   windowMs?: number;
-  /** Counter storage. Defaults to {@link MemoryRateLimitStore}. */
-  store?: RateLimitStore;
+  /**
+   * Where the counters live. Required, because a limit only holds if every
+   * instance that serves the flow counts in the same place:
+   *
+   * - A {@link RateLimitStore} over Redis or a database every instance
+   *   shares. Its `increment` must be atomic.
+   * - {@link MemoryRateLimitStore} for a single process, tests and local
+   *   development. Each instance keeps its own counters, so behind a load
+   *   balancer a client gets `limit` hits per instance per window.
+   */
+  store: RateLimitStore;
 }
 
 const DEFAULT_LIMIT = 10;
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 
+const MISSING_RATE_LIMIT_STORE =
+  "RateLimiter requires options.store. Pass a RateLimitStore over Redis or " +
+  "a database every instance shares, or MemoryRateLimitStore for a single " +
+  "process, tests and local development.";
+
 /**
- * Fixed-window limiter — the default {@link RateLimiterLike}. Swap in your own
+ * Fixed-window limiter — the shipped {@link RateLimiterLike}. Swap in your own
  * `RateLimiterLike` for anything the fixed window cannot express.
  *
  * @example
  * ```ts
- * const limiter = new RateLimiter({ limit: 5, windowMs: 15 * 60_000 });
+ * declare const store: RateLimitStore;
+ * const limiter = new RateLimiter({ limit: 5, windowMs: 15 * 60_000, store });
  * const r = await limiter.check(`signin:${ip}`);
  * if (!r.allowed) throw new IdentityError("rate_limited", undefined, { retryAfterMs: r.retryAfterMs });
  * // …on success: await limiter.reset(`signin:${ip}`);
@@ -121,11 +137,16 @@ export class RateLimiter implements RateLimiterLike {
   readonly #windowMs: number;
   readonly #store: RateLimitStore;
 
-  /** Fixes the `limit`/`windowMs` and the backing store (defaults to {@linkcode MemoryRateLimitStore}). */
-  constructor(options: RateLimiterOptions = {}) {
+  /**
+   * Fixes the `limit`/`windowMs` and the backing store.
+   *
+   * @throws {TypeError} When {@linkcode RateLimiterOptions.store} is missing.
+   */
+  constructor(options: RateLimiterOptions) {
+    if (!options?.store) throw new TypeError(MISSING_RATE_LIMIT_STORE);
     this.#limit = options.limit ?? DEFAULT_LIMIT;
     this.#windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
-    this.#store = options.store ?? new MemoryRateLimitStore();
+    this.#store = options.store;
   }
 
   /** Record a hit for `key` and report whether it is within the limit. */
@@ -228,9 +249,10 @@ const SWEEP_INTERVAL = 1_000;
 const EVICTION_TARGET = 9_000;
 
 /**
- * In-memory {@link RateLimitStore} for dev / single-process use. Counters are
- * per-process, so replicas do not share limits — back {@link RateLimiter} with
- * Redis or a database in production.
+ * In-memory {@link RateLimitStore} for a single process, tests and local
+ * development. Counters are per-process, so replicas do not share limits —
+ * back {@link RateLimiter} with Redis or a database when more than one
+ * instance serves the flow.
  *
  * Bounded on purpose: limiter keys are built from unauthenticated request
  * input, so the store is capped at 10,000 buckets and evicts to stay under it.

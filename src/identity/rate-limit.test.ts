@@ -7,11 +7,16 @@ import {
   MemoryRateLimitStore,
   RateLimiter,
   type RateLimiterLike,
+  type RateLimiterOptions,
 } from "./rate-limit.ts";
 
 describe("RateLimiter", () => {
   it("allows up to the limit, then blocks within the window", async () => {
-    const limiter = new RateLimiter({ limit: 3, windowMs: 1000 });
+    const limiter = new RateLimiter({
+      limit: 3,
+      windowMs: 1000,
+      store: new MemoryRateLimitStore(),
+    });
     const t0 = 1_000_000;
     for (let i = 1; i <= 3; i++) {
       const r = await limiter.check("k", t0);
@@ -25,7 +30,11 @@ describe("RateLimiter", () => {
   });
 
   it("starts a fresh window after it elapses", async () => {
-    const limiter = new RateLimiter({ limit: 1, windowMs: 1000 });
+    const limiter = new RateLimiter({
+      limit: 1,
+      windowMs: 1000,
+      store: new MemoryRateLimitStore(),
+    });
     const t0 = 1_000_000;
     expect((await limiter.check("k", t0)).allowed).toStrictEqual(true);
     expect((await limiter.check("k", t0)).allowed).toStrictEqual(false);
@@ -33,13 +42,65 @@ describe("RateLimiter", () => {
   });
 
   it("tracks keys independently and reset() clears one", async () => {
-    const limiter = new RateLimiter({ limit: 1, windowMs: 1000 });
+    const limiter = new RateLimiter({
+      limit: 1,
+      windowMs: 1000,
+      store: new MemoryRateLimitStore(),
+    });
     const t0 = 1_000_000;
     expect((await limiter.check("a", t0)).allowed).toStrictEqual(true);
     expect((await limiter.check("b", t0)).allowed).toStrictEqual(true);
     expect((await limiter.check("a", t0)).allowed).toStrictEqual(false);
     await limiter.reset("a");
     expect((await limiter.check("a", t0)).allowed).toStrictEqual(true);
+  });
+});
+
+describe("RateLimiter store", () => {
+  it("two instances sharing a store agree on the limit", async () => {
+    const store = new MemoryRateLimitStore();
+    const first = new RateLimiter({ limit: 3, windowMs: 1000, store });
+    const second = new RateLimiter({ limit: 3, windowMs: 1000, store });
+    const t0 = 1_000_000;
+
+    expect((await first.check("signin:a", t0)).remaining).toBe(2);
+    expect((await second.check("signin:a", t0)).remaining).toBe(1);
+    expect((await first.check("signin:a", t0)).allowed).toBe(true);
+    expect(await second.check("signin:a", t0 + 400)).toStrictEqual({
+      allowed: false,
+      remaining: 0,
+      resetAt: t0 + 1000,
+      retryAfterMs: 600,
+    });
+
+    await first.reset("signin:a");
+    expect((await second.check("signin:a", t0 + 400)).allowed).toBe(true);
+  });
+
+  it("requires a store, naming the option and the choices", () => {
+    expect(
+      () =>
+        // @ts-expect-error store is required
+        new RateLimiter({ limit: 5 }),
+    ).toThrow(
+      new TypeError(
+        "RateLimiter requires options.store. Pass a RateLimitStore over " +
+          "Redis or a database every instance shares, or " +
+          "MemoryRateLimitStore for a single process, tests and local " +
+          "development.",
+      ),
+    );
+  });
+
+  it("requires options at all", () => {
+    expect(
+      () =>
+        // @ts-expect-error options are required
+        new RateLimiter(),
+    ).toThrow(/RateLimiter requires options\.store/);
+    expect(
+      () => new RateLimiter(undefined as unknown as RateLimiterOptions),
+    ).toThrow(TypeError);
   });
 });
 

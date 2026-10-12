@@ -131,8 +131,9 @@ that, and a change that erodes one is a change to the positioning.
 - **Rate limiting is a bring-your-own seam.** `IdentityService` keeps the small
   `RateLimiter` contract (`check` / `reset`) and the package takes no dependency
   on any limiter library. The built-in fixed-window `RateLimiter` /
-  `MemoryRateLimitStore` is the zero-dependency default and is **feature
-  frozen** — no bursts, penalties, or distributed stores. Anything beyond
+  `MemoryRateLimitStore` is the zero-dependency implementation and is **feature
+  frozen** — no bursts, penalties, or distributed stores. Its `store` is
+  required, so the caller chooses where counters live. Anything beyond
   fixed-window arrives through the seam, wired app-side or shown in a docs
   example.
 - **Examples contain no test-only seams.** They are reference implementations of

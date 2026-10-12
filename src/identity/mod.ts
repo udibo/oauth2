@@ -129,6 +129,7 @@ export {
   type LockoutStatus,
   type LockoutStore,
   MemoryLockoutStore,
+  type MemoryLockoutStoreOptions,
 } from "./lockout.ts";
 export type {
   IdentityEvent,

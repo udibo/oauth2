@@ -23,7 +23,7 @@ helper (`@udibo/oauth2/identity`) and the forms
 | Seam          | You implement                  | Backs                     |
 | ------------- | ------------------------------ | ------------------------- |
 | `MfaStore`    | one table keyed by user id     | secrets + recovery hashes |
-| `RateLimiter` | in-memory, Redis, or your DB   | throttling `verify`       |
+| `RateLimiter` | a `RateLimitStore`: Redis or DB | throttling `verify`      |
 | `onEvent`     | your audit log                 | `mfa.*` outcomes          |
 | your routes   | enrollment, challenge, step-up | when a code is demanded   |
 
@@ -83,15 +83,26 @@ read-then-write defeats each of them:
 ## Construct the service
 
 ```ts
-import { RateLimiter } from "@udibo/oauth2/identity";
+import { MemoryRateLimitStore, RateLimiter } from "@udibo/oauth2/identity";
 import { MemoryMfaStore, MfaService } from "@udibo/oauth2/identity/mfa";
 
 export const mfa = new MfaService({
   store: new MemoryMfaStore(),
-  rateLimiter: new RateLimiter({ limit: 5, windowMs: 5 * 60_000 }),
+  rateLimiter: new RateLimiter({
+    limit: 5,
+    windowMs: 5 * 60_000,
+    store: new MemoryRateLimitStore(),
+  }),
   onEvent: (event) => console.log(event.type),
 });
 ```
+
+Both memory stores keep their state in one process, which suits a single
+process, tests and local development only. With more than one instance, back
+`MfaStore` with your database and give the `RateLimiter` a `RateLimitStore`
+over Redis or a database every instance shares: with per-process counters each
+instance grants its own guesses, multiplying the attacker's budget by the
+instance count. `RateLimiter` requires its `store` and has no default.
 
 The `rateLimiter` is not optional in spirit: a six-digit code is one in a
 million, and an unthrottled `verify` endpoint is a brute-force target — and so
