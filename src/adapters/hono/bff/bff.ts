@@ -59,6 +59,7 @@ import {
 } from "../../../utils/_body.ts";
 
 import type {
+  AuthRequestStorage,
   DirectClient,
   SessionState,
   TokenBundle,
@@ -1279,6 +1280,16 @@ export class HonoBff {
     return null;
   }
 
+  #authRequestStorage(c: Context): AuthRequestStorage {
+    const storage = this.#options.authRequestStorage.forRequest(c);
+    if (!storage) {
+      throw new TypeError(
+        "HonoBff options.authRequestStorage.forRequest(c) returned no storage.",
+      );
+    }
+    return storage;
+  }
+
   #noStore(c: Context): void {
     c.header("Cache-Control", "no-store");
     c.header("Vary", "Cookie");
@@ -1476,7 +1487,7 @@ export class HonoBff {
         prompt: requested.prompt,
         extraParams: requested.extraParams,
         redirectUri: this.#derivedRedirectUri(c, origin),
-        authRequestStorage: this.#options.authRequestStorage.forRequest(c),
+        authRequestStorage: this.#authRequestStorage(c),
       });
       this.#writeLoginStateHashes(c, [
         ...this.#loginStateHashes(c),
@@ -1544,7 +1555,7 @@ export class HonoBff {
           await this.#client.exchangeAuthorizationCode(code, state, {
             origin,
             redirectUri: this.#derivedRedirectUri(c, origin),
-            authRequestStorage: this.#options.authRequestStorage.forRequest(c),
+            authRequestStorage: this.#authRequestStorage(c),
           });
 
         let user: UserInfoClaims | null = null;

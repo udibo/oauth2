@@ -439,6 +439,23 @@ describe("HonoBff", () => {
     });
   });
 
+  describe("a factory that returns no storage", () => {
+    it("refuses the sign-in rather than use the client's own storage", async () => {
+      const bff = makeBff({
+        authRequestStorage: { forRequest: () => undefined as never },
+      });
+      const app = new Hono();
+      app.route("/auth", bff.routes());
+      app.onError((error, c) => c.text(error.message, 500));
+
+      const loginRes = await app.request("/auth/login?return_to=/dashboard");
+      expect(loginRes.status).toBe(500);
+      expect(await loginRes.text()).toBe(
+        "HonoBff options.authRequestStorage.forRequest(c) returned no storage.",
+      );
+    });
+  });
+
   describe("MemoryAuthRequestStorageFactory", () => {
     it("completes a sign-in on the instance that started it", async () => {
       const app = makeApp(
