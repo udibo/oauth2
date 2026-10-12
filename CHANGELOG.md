@@ -1,3 +1,9 @@
+## [0.15.2](https://github.com/udibo/oauth2/compare/0.15.1...0.15.2) (2026-10-12)
+
+### Bug Fixes
+
+* cap the body reads the resource server and identity routes make before authenticating ([#90](https://github.com/udibo/oauth2/issues/90)) ([050c345](https://github.com/udibo/oauth2/commit/050c34585ff468c8254c70c3f915753c6cc5fb5d))
+
 ## [0.15.1](https://github.com/udibo/oauth2/compare/0.15.0...0.15.1) (2026-10-12)
 
 ### Bug Fixes
