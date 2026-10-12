@@ -81,6 +81,7 @@ import type { HonoAuthorizationServer } from "../authorization-server.ts";
 import type { HonoResourceServer } from "../resource-server.ts";
 import { OAUTH2_CONTEXT_KEY } from "../_common.ts";
 import {
+  DEFAULT_MAX_RETURN_TO_LENGTH,
   loginContinuation as computeLoginContinuation,
   safeReturnTo,
 } from "../../../utils/url.ts";
@@ -221,6 +222,9 @@ export interface HonoBffCookieOptions {
  * header, so it is guarded instead by a same-origin check that reads
  * `Sec-Fetch-Site` (accepting only `same-origin` and `none`) and falls back to
  * comparing `Origin`, else `Referer`, for clients that send no fetch metadata.
+ * That comparison accepts the request's own origin and the application's
+ * (see {@link HonoBffOptions.rpInitiatedLogout}), so the fallback still passes
+ * behind a TLS-terminating proxy that hands the BFF a plain-HTTP request.
  * `same-site` is rejected along with `cross-site`, so a `GET` logout link
  * followed from a sibling subdomain does not pass. That check **fails closed**:
  * a request carrying none of the three signals is rejected. Two residuals come
@@ -494,9 +498,17 @@ export interface HonoBffOptions {
    * `/auth/logout` — after destroying the local session — additionally
    * redirects the browser to the OP's `end_session_endpoint` with
    * `id_token_hint` (the session's id_token, if any), `client_id`, and a
-   * `post_logout_redirect_uri` built from the resolved origin + the
+   * `post_logout_redirect_uri` built from the application's origin + the
    * open-redirect-guarded `return_to`. This ends the upstream IDP SSO session,
    * not just the local BFF session.
+   *
+   * The application's origin is {@link resolveOrigin}'s, else the configured
+   * client `redirectUri`'s, else the request's — the last only when no
+   * `redirectUri` is configured or {@link deriveRedirectUri} is on, matching
+   * the origin sign-in sends. Behind a TLS-terminating proxy the request
+   * reports `http:`, so a deployment that derives its redirect URI there sets
+   * {@link resolveOrigin}; otherwise the URI would miss the registered
+   * `https:` one.
    *
    * Defaults to `false` (local logout only): not every IDP supports it, and it
    * adds a redirect hop. When enabled but no end-session endpoint is known,
@@ -627,6 +639,14 @@ export interface HonoBffOptions {
   forwardedParams?: readonly string[];
   /** Default `return_to` applied when the browser doesn't pass one. */
   defaultReturnTo?: string;
+  /**
+   * Longest `return_to` accepted, in characters. `/auth/login` stores the
+   * value with the pending sign-in before any authentication, so a longer one
+   * is replaced by {@link defaultReturnTo} rather than kept — at login,
+   * callback, logout and in {@link HonoBff.loginContinuation}. Defaults to
+   * 2048; `Infinity` accepts any length.
+   */
+  maxReturnToLength?: number;
   /**
    * Optional hook run after the authorization code is exchanged. Lets
    * apps enrich the session with database-backed user info before the
@@ -1005,6 +1025,7 @@ export class HonoBff {
   readonly #sessionMode: "own" | "shared";
   readonly #csrf: ResolvedCsrf | null;
   readonly #extraAuthorizeParams: ResolvedExtraAuthorizeParams;
+  readonly #maxReturnToLength: number;
   readonly #refreshes = new Map<string, Promise<RefreshOutcome>>();
 
   /**
@@ -1024,7 +1045,9 @@ export class HonoBff {
    * {@linkcode HonoBffOptions.sessionMaxAgeMs}), when `sessionMaxAgeMs` or a
    * numeric `cookie.maxAge` is not positive or exceeds 400 days, when
    * {@linkcode HonoBffBackchannelOptions.maxBodyBytes} is not a positive
-   * integer (a `RangeError`), or when
+   * integer (a `RangeError`), when
+   * {@linkcode HonoBffOptions.maxReturnToLength} is neither a positive
+   * integer nor `Infinity` (a `RangeError`), or when
    * {@linkcode HonoBffOptions.extraParams} or
    * {@linkcode HonoBffOptions.forwardedParams} names a reserved authorize
    * parameter, gives one a name that is empty or not equal to its trimmed
@@ -1047,6 +1070,19 @@ export class HonoBff {
     this.#sessionMode = options.sessionMode ?? "own";
     this.#csrf = resolveCsrf(options.csrf);
     this.#extraAuthorizeParams = resolveExtraAuthorizeParams(options);
+    this.#maxReturnToLength =
+      options.maxReturnToLength ?? DEFAULT_MAX_RETURN_TO_LENGTH;
+    if (
+      this.#maxReturnToLength !== Infinity &&
+      !(
+        Number.isInteger(this.#maxReturnToLength) && this.#maxReturnToLength > 0
+      )
+    ) {
+      throw new RangeError(
+        "HonoBff maxReturnToLength must be a positive integer or Infinity, " +
+          `got ${this.#maxReturnToLength}.`,
+      );
+    }
 
     const sessionMaxAgeMs = positiveMs(
       options.sessionMaxAgeMs ?? DEFAULT_SESSION_MAX_AGE_MS,
@@ -1209,6 +1245,21 @@ export class HonoBff {
     );
   }
 
+  #safeReturnTo(value: string | null | undefined): string {
+    return safeReturnTo(value, this.#options.defaultReturnTo ?? "/", {
+      maxLength: this.#maxReturnToLength,
+    });
+  }
+
+  #appOrigin(c: Context): string {
+    const resolved = this.#options.resolveOrigin?.(c);
+    if (resolved !== undefined) return resolved;
+    const configured = this.#options.deriveRedirectUri
+      ? undefined
+      : this.#client.redirectUri;
+    return new URL(configured ?? c.req.url).origin;
+  }
+
   #derivedRedirectUri(
     c: Context,
     origin: string | undefined,
@@ -1230,11 +1281,11 @@ export class HonoBff {
   #sameOriginOk(c: Context): boolean {
     const fetchSite = c.req.header("sec-fetch-site");
     if (fetchSite) return fetchSite === "same-origin" || fetchSite === "none";
-    const target = new URL(c.req.url).origin;
+    const targets = [new URL(c.req.url).origin, this.#appOrigin(c)];
     const check = (val: string | undefined): boolean | undefined => {
       if (!val) return undefined;
       try {
-        return new URL(val).origin === target;
+        return targets.includes(new URL(val).origin);
       } catch {
         return false;
       }
@@ -1315,6 +1366,7 @@ export class HonoBff {
       authorizeEndpoint: this.#client.authorizationEndpoint,
       loginPath: this.#paths.login,
       defaultReturnTo: this.#options.defaultReturnTo,
+      maxReturnToLength: this.#maxReturnToLength,
     });
   }
 
@@ -1346,10 +1398,7 @@ export class HonoBff {
   loginHandler(): Handler {
     return async (c) => {
       this.#noStore(c);
-      const returnTo = safeReturnTo(
-        c.req.query("return_to"),
-        this.#options.defaultReturnTo ?? "/",
-      );
+      const returnTo = this.#safeReturnTo(c.req.query("return_to"));
       const origin = this.#options.resolveOrigin?.(c);
       const requested = authorizeParamsForRequest(
         this.#extraAuthorizeParams,
@@ -1469,9 +1518,7 @@ export class HonoBff {
           setCookie(c, this.#cookieName, cookieValue, this.#cookieOptions());
         }
 
-        return c.redirect(
-          safeReturnTo(returnTo, this.#options.defaultReturnTo ?? "/"),
-        );
+        return c.redirect(this.#safeReturnTo(returnTo));
       } catch (cause) {
         return await fail({
           error: "invalid_grant",
@@ -1511,16 +1558,12 @@ export class HonoBff {
         deleteCookie(c, this.#cookieName, this.#cookieOptions());
       }
 
-      const returnTo = safeReturnTo(
-        c.req.query("return_to"),
-        this.#options.defaultReturnTo ?? "/",
-      );
+      const returnTo = this.#safeReturnTo(c.req.query("return_to"));
 
       if (this.#options.rpInitiatedLogout) {
         const endSession = this.#client.endSessionEndpoint;
         if (endSession) {
-          const origin =
-            this.#options.resolveOrigin?.(c) ?? new URL(c.req.url).origin;
+          const origin = this.#appOrigin(c);
           const url = new URL(endSession, origin);
           if (idToken) url.searchParams.set("id_token_hint", idToken);
           url.searchParams.set("client_id", this.#client.clientId);

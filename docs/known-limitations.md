@@ -59,6 +59,35 @@ your framework (for example Hono's `bodyLimit` middleware) or your reverse
 proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
 refused before any authentication work.
 
+## Pending sign-in limits
+
+Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
+request (`state`, PKCE verifier, return path) before it knows who the caller is,
+so the package bounds what each start can cost:
+
+- **`return_to` is capped at 2048 characters.** `safeReturnTo` treats a longer
+  value as unsafe and returns the fallback, so `HonoBff` stores and redirects to
+  `defaultReturnTo` instead. Change the cap with `HonoBffOptions.maxReturnToLength`
+  (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
+  `maxReturnToLength`); `Infinity` removes it.
+- **`MemoryAuthRequestStorage` holds at most 1000 records.** This is the client's
+  default outside a browser, and the BFF's unless you configure
+  `authRequestStorage`. A write beyond the cap evicts the oldest-written record,
+  so memory stays bounded however many starts arrive. Raise or lower it with
+  `maxEntries`. The cap protects memory, not sign-in: a burst of anonymous starts
+  evicts real users' pending sign-ins, and their callbacks then fail with an
+  unknown `state`.
+- **`EncryptedCookieAuthRequestStorage` keeps nothing on the server.** Each
+  browser carries its own pending requests: at most `maxPending` (3), and fewer
+  when keeping them all would push the sealed cookie past about 4 KB, which a
+  browser drops silently. One browser's starts cannot evict another browser's.
+  Use this store for any deployment with more than one instance, and for any
+  deployment where sign-in can be reached anonymously from the internet.
+
+A rate limit on the login route, in your framework or reverse proxy, still
+limits how often one client can start a sign-in. The caps only bound the memory
+each start can cost.
+
 ## Deliberate deviations (stricter than spec)
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists
@@ -320,6 +349,16 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   record stays until it expires.
 - Back-channel logout is unavailable on any store that cannot enumerate
   sessions, and `HonoBff` throws at construction rather than degrading silently.
+- **Behind a TLS-terminating proxy, the request URL reports `http:`.** A Node
+  server such as `@hono/node-server` sees the proxy's plain-HTTP hop. The BFF
+  therefore takes the application's origin from configuration wherever that
+  origin must match a registration. RP-Initiated Logout's
+  `post_logout_redirect_uri` uses `resolveOrigin`, else the origin of the
+  client's configured `redirectUri`. The `GET /auth/logout` same-origin
+  fallback accepts that origin as well as the request's own. Only with
+  `deriveRedirectUri`, or with no `redirectUri` configured, does the BFF use the
+  request's origin. That is how sign-in builds its `redirect_uri` then, so a
+  deployment like that behind a TLS proxy must set `resolveOrigin`.
 - **`attachToken()` overwrites an inbound bearer; `protect()` lets it win.** The
   two guards are presented as alternatives, and they differ here:
   `attachToken()` resolves the session and `set`s

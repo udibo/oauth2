@@ -27,6 +27,25 @@ describe("safeReturnTo", () => {
     expect(safeReturnTo("relative/path")).toStrictEqual("/");
   });
 
+  it("falls back for a value longer than 2048 characters by default", () => {
+    const atLimit = `/${"a".repeat(2047)}`;
+    expect(safeReturnTo(atLimit)).toStrictEqual(atLimit);
+    expect(safeReturnTo(`${atLimit}a`, "/home")).toStrictEqual("/home");
+  });
+
+  it("honours a configured maxLength", () => {
+    expect(safeReturnTo("/abcdef", "/home", { maxLength: 6 })).toStrictEqual(
+      "/home",
+    );
+    expect(safeReturnTo("/abcde", "/home", { maxLength: 6 })).toStrictEqual(
+      "/abcde",
+    );
+    const long = `/${"a".repeat(10_000)}`;
+    expect(safeReturnTo(long, "/", { maxLength: Infinity })).toStrictEqual(
+      long,
+    );
+  });
+
   it("uses the provided fallback", () => {
     expect(safeReturnTo("https://evil.com", "/home")).toStrictEqual("/home");
     expect(safeReturnTo(undefined, "/home")).toStrictEqual("/home");
@@ -147,6 +166,15 @@ describe("loginContinuation", () => {
 
   it("falls back to the default for a control-character return_to", () => {
     expect(loginContinuation("/\u0009/evil.example", opts)).toStrictEqual(
+      "/auth/login?return_to=%2Fhome",
+    );
+  });
+
+  it("falls back to the default for a return_to past maxReturnToLength", () => {
+    expect(
+      loginContinuation("/dashboard", { ...opts, maxReturnToLength: 5 }),
+    ).toStrictEqual("/auth/login?return_to=%2Fhome");
+    expect(loginContinuation(`/${"a".repeat(2048)}`, opts)).toStrictEqual(
       "/auth/login?return_to=%2Fhome",
     );
   });

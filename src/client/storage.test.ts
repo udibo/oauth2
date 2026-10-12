@@ -92,6 +92,72 @@ describe("MemoryAuthRequestStorage", () => {
     expect(storage.get("rewritten")?.codeVerifier).toStrictEqual("v3");
   });
 
+  it("keeps at most maxEntries records under a burst, evicting the oldest write first", () => {
+    const storage = new MemoryAuthRequestStorage({ maxEntries: 3 });
+    for (let i = 0; i < 20; i++) {
+      storage.set(`state-${i}`, {
+        codeVerifier: `v${i}`,
+        createdAt: Date.now(),
+      });
+    }
+
+    const kept = Array.from({ length: 20 }, (_, i) => `state-${i}`).filter(
+      (state) => storage.get(state) !== null,
+    );
+    expect(kept).toStrictEqual(["state-17", "state-18", "state-19"]);
+  });
+
+  it("caps the store at 1000 records by default", () => {
+    const storage = new MemoryAuthRequestStorage();
+    for (let i = 0; i <= 1000; i++) {
+      storage.set(`state-${i}`, { codeVerifier: "v", createdAt: Date.now() });
+    }
+
+    expect(storage.get("state-0")).toBe(null);
+    expect(storage.get("state-1")?.codeVerifier).toStrictEqual("v");
+    expect(storage.get("state-1000")?.codeVerifier).toStrictEqual("v");
+  });
+
+  it("evicts nothing when a write replaces a record already at the cap", () => {
+    const storage = new MemoryAuthRequestStorage({ maxEntries: 2 });
+    storage.set("a", { codeVerifier: "v1", createdAt: Date.now() });
+    storage.set("b", { codeVerifier: "v2", createdAt: Date.now() });
+    storage.set("a", { codeVerifier: "v3", createdAt: Date.now() });
+
+    expect(storage.get("a")?.codeVerifier).toStrictEqual("v3");
+    expect(storage.get("b")?.codeVerifier).toStrictEqual("v2");
+  });
+
+  it("counts a rewritten record as the newest when choosing what to evict", () => {
+    const storage = new MemoryAuthRequestStorage({ maxEntries: 2 });
+    storage.set("a", { codeVerifier: "v1", createdAt: Date.now() });
+    storage.set("b", { codeVerifier: "v2", createdAt: Date.now() });
+    storage.set("a", { codeVerifier: "v3", createdAt: Date.now() });
+    storage.set("c", { codeVerifier: "v4", createdAt: Date.now() });
+
+    expect(storage.get("b")).toBe(null);
+    expect(storage.get("a")?.codeVerifier).toStrictEqual("v3");
+    expect(storage.get("c")?.codeVerifier).toStrictEqual("v4");
+  });
+
+  it("never evicts by count with an infinite maxEntries", () => {
+    const storage = new MemoryAuthRequestStorage({ maxEntries: Infinity });
+    for (let i = 0; i <= 1000; i++) {
+      storage.set(`state-${i}`, { codeVerifier: "v", createdAt: Date.now() });
+    }
+
+    expect(storage.get("state-0")?.codeVerifier).toStrictEqual("v");
+  });
+
+  it("refuses a maxEntries that is not a positive integer", () => {
+    for (const maxEntries of [0, -1, 1.5, Number.NaN]) {
+      expect(
+        () => new MemoryAuthRequestStorage({ maxEntries }),
+        `maxEntries ${maxEntries}`,
+      ).toThrow(RangeError);
+    }
+  });
+
   it("take returns a record once and removes it", () => {
     const storage = new MemoryAuthRequestStorage();
     storage.set("state-1", { codeVerifier: "v1", createdAt: Date.now() });

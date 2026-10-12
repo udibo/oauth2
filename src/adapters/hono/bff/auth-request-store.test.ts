@@ -163,6 +163,32 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     expect((await readBack(app, cookie, "newest"))?.createdAt).toBe(now);
   });
 
+  it("drops the oldest pending records rather than emit a cookie past the browser's 4096-byte limit", async () => {
+    const now = Date.now();
+    const longReturnTo = `/${"a".repeat(2047)}`;
+    const cookie = await seal(app, [
+      ["oldest", record({ returnTo: longReturnTo, createdAt: now - 2000 })],
+      ["older", record({ returnTo: longReturnTo, createdAt: now - 1000 })],
+      ["newest", record({ returnTo: longReturnTo, createdAt: now })],
+    ]);
+
+    expect(cookie!.length).toBeLessThanOrEqual(4096);
+    expect(await readBack(app, cookie, "oldest")).toStrictEqual(null);
+    expect((await readBack(app, cookie, "newest"))?.returnTo).toBe(
+      longReturnTo,
+    );
+  });
+
+  it("refuses a maxPending that is not a positive integer", () => {
+    for (const maxPending of [0, -1, 1.5, Number.NaN]) {
+      expect(
+        () =>
+          new EncryptedCookieAuthRequestStorage({ secret: SECRET, maxPending }),
+        `maxPending ${maxPending}`,
+      ).toThrow(RangeError);
+    }
+  });
+
   it("starts no key derivation until a request touches the storage", async () => {
     using digest = vi.spyOn(crypto.subtle, "digest");
     const lazy = storageApp({ secret: SECRET, cookie: { secure: false } });

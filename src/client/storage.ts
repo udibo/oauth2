@@ -159,22 +159,53 @@ export interface MemoryAuthRequestStorageOptions {
    * in ms. Defaults to 10 minutes; `Infinity` never prunes.
    */
   ttlMs?: number;
+  /**
+   * Most records held at once. A write beyond it evicts the oldest-written
+   * record, so a flood of sign-in starts that never reach the callback cannot
+   * grow the process without bound — at the cost of failing each evicted
+   * sign-in with an unknown `state`. Defaults to 1000; `Infinity` never
+   * evicts by count.
+   */
+  maxEntries?: number;
 }
+
+const DEFAULT_MAX_AUTH_REQUESTS = 1000;
 
 /**
  * In-memory {@link AuthRequestStorage}, `DirectClient`'s default outside a
  * browser document. Data is lost when the process exits. Every write prunes
- * records older than {@link MemoryAuthRequestStorageOptions.ttlMs}, so logins
- * that never return to the callback do not accumulate in a long-running
- * server.
+ * records older than {@link MemoryAuthRequestStorageOptions.ttlMs}, then
+ * evicts the oldest-written records beyond
+ * {@link MemoryAuthRequestStorageOptions.maxEntries}, so neither logins that
+ * never return to the callback nor an anonymous burst of sign-in starts can
+ * grow a long-running server without bound. A deployment with more than one
+ * instance, or more pending sign-ins than the cap, needs storage every
+ * instance shares instead.
  */
 export class MemoryAuthRequestStorage implements AuthRequestStorage {
   #records = new Map<string, AuthRequestRecord>();
   readonly #ttlMs: number;
+  readonly #maxEntries: number;
 
-  /** Configures the pruning TTL, 10 minutes by default. */
+  /**
+   * Configures the pruning TTL (10 minutes by default) and the record cap
+   * (1000 by default).
+   *
+   * @throws {RangeError} When `maxEntries` is neither a positive integer nor
+   * `Infinity`.
+   */
   constructor(options: MemoryAuthRequestStorageOptions = {}) {
     this.#ttlMs = options.ttlMs ?? 10 * 60 * 1000;
+    this.#maxEntries = options.maxEntries ?? DEFAULT_MAX_AUTH_REQUESTS;
+    if (
+      this.#maxEntries !== Infinity &&
+      !(Number.isInteger(this.#maxEntries) && this.#maxEntries > 0)
+    ) {
+      throw new RangeError(
+        "MemoryAuthRequestStorage maxEntries must be a positive integer or " +
+          `Infinity, got ${this.#maxEntries}.`,
+      );
+    }
   }
 
   /** Returns the record for {@linkcode state}, or `null` if none is stored. */
@@ -189,7 +220,8 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
   }
   /**
    * Stores {@linkcode value} under {@linkcode state}, first pruning records
-   * past the TTL. Pruning walks records oldest-write-first and stops at the
+   * past the TTL, then evicting the oldest-written records beyond
+   * `maxEntries`. Pruning walks records oldest-write-first and stops at the
    * first one inside the TTL, so it assumes each `createdAt` is the time of
    * its write, as `DirectClient.login` sets it.
    */
@@ -197,6 +229,7 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
     this.#pruneExpired();
     this.#records.delete(state);
     this.#records.set(state, value);
+    this.#evictOverflow();
   }
   /** Removes the record for {@linkcode state}. */
   delete(state: string): void {
@@ -205,6 +238,13 @@ export class MemoryAuthRequestStorage implements AuthRequestStorage {
   /** Removes every stored record. */
   clear(): void {
     this.#records.clear();
+  }
+
+  #evictOverflow(): void {
+    for (const state of this.#records.keys()) {
+      if (this.#records.size <= this.#maxEntries) return;
+      this.#records.delete(state);
+    }
   }
 
   #pruneExpired(): void {

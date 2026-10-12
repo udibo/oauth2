@@ -6,6 +6,19 @@
 
 const RESOLUTION_ORIGIN = "http://safe-return-to.invalid";
 
+/** {@link SafeReturnToOptions.maxLength}'s default, in characters. */
+export const DEFAULT_MAX_RETURN_TO_LENGTH = 2048;
+
+/** Options for {@link safeReturnTo}. */
+export interface SafeReturnToOptions {
+  /**
+   * Longest value accepted, in characters; a longer one collapses to the
+   * fallback. Defaults to {@link DEFAULT_MAX_RETURN_TO_LENGTH} (2048).
+   * `Infinity` accepts any length.
+   */
+  maxLength?: number;
+}
+
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index);
@@ -30,6 +43,11 @@ function hasControlCharacter(value: string): boolean {
  * Percent-encoded control characters (`/%09/x`) are safe and pass through: a
  * browser does not decode them before parsing, so they stay on the origin.
  *
+ * A value longer than {@link SafeReturnToOptions.maxLength} (2048 characters
+ * by default) also collapses to `fallback`, so a caller that stores the
+ * result — a pending sign-in, a session — cannot be made to hold an
+ * arbitrarily large string per anonymous request.
+ *
  * Use this anywhere a user-influenced value — a `return_to` / `redirect` query
  * param or form field — is fed into a redirect `Location`, so a crafted
  * absolute target can't turn the (often post-authentication) redirect into an
@@ -43,13 +61,18 @@ function hasControlCharacter(value: string): boolean {
  * safeReturnTo("/\\evil.com");       // → "/"
  * safeReturnTo("/\t/evil.com");      // → "/"
  * safeReturnTo(undefined, "/home");  // → "/home"
+ * safeReturnTo("/a-long-path", "/", { maxLength: 8 }); // → "/"
  * ```
  */
 export function safeReturnTo(
   value: string | null | undefined,
   fallback = "/",
+  options: SafeReturnToOptions = {},
 ): string {
   if (!value || !value.startsWith("/")) return fallback;
+  if (value.length > (options.maxLength ?? DEFAULT_MAX_RETURN_TO_LENGTH)) {
+    return fallback;
+  }
   if (hasControlCharacter(value)) return fallback;
 
   let resolved: URL;
@@ -76,6 +99,11 @@ export interface LoginContinuationOptions {
   loginPath?: string;
   /** Trusted fallback for missing/unsafe `returnTo`. Defaults to `"/"`. */
   defaultReturnTo?: string;
+  /**
+   * Longest `returnTo` accepted, in characters; a longer one falls back to
+   * {@link defaultReturnTo}. Defaults to 2048 ({@link safeReturnTo}'s cap).
+   */
+  maxReturnToLength?: number;
 }
 
 /**
@@ -99,7 +127,9 @@ export function loginContinuation(
   returnTo: string | null | undefined,
   options: LoginContinuationOptions = {},
 ): string {
-  const safe = safeReturnTo(returnTo, options.defaultReturnTo ?? "/");
+  const safe = safeReturnTo(returnTo, options.defaultReturnTo ?? "/", {
+    maxLength: options.maxReturnToLength,
+  });
   if (options.authorizeEndpoint) {
     const base = "http://login.continuation.local";
     const authorizePath = new URL(options.authorizeEndpoint, base).pathname;

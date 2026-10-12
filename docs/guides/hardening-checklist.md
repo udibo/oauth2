@@ -22,6 +22,14 @@ sections apply only when you host those flows.
       the CSRF header.
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.
+- [ ] Pending sign-ins are bounded. A multi-instance or internet-facing BFF
+      uses `EncryptedCookieAuthRequestStorage`, or shared storage with its own
+      cap. The login route has a rate limit, and `maxReturnToLength` (default
+      2048) suits your return paths. See
+      [pending sign-in limits](../known-limitations.md#pending-sign-in-limits).
+- [ ] Behind a TLS-terminating proxy, the app origin comes from configuration
+      (`redirectUri` or `resolveOrigin`), and SSO logout sends the registered
+      `https` post-logout redirect URI.
 - [ ] Sessions expire consistently and stateful updates reject revoked or
       missing sessions.
 - [ ] Local logout, upstream revocation, and optional SSO logout have each been
