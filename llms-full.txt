@@ -6102,7 +6102,7 @@ Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
 request (`state`, PKCE verifier, return path) before it knows who the caller is,
 so the package bounds what each start can cost:
 
-- **`return_to` is capped at 2048 characters.** `safeReturnTo` treats a longer
+- **`return_to` is capped at 2048 UTF-16 code units.** `safeReturnTo` treats a longer
   value as unsafe and returns the fallback, so `HonoBff` stores and redirects to
   `defaultReturnTo` instead. Change the cap with `HonoBffOptions.maxReturnToLength`
   (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
@@ -6118,6 +6118,10 @@ so the package bounds what each start can cost:
   browser carries its own pending requests: at most `maxPending` (3), and fewer
   when keeping them all would push the sealed cookie past about 4 KB, which a
   browser drops silently. One browser's starts cannot evict another browser's.
+  The size trim never drops the record being written, so a single record with a
+  long non-ASCII `return_to` (up to three UTF-8 bytes per code unit) can still
+  exceed 4 KB; that browser's cookie is dropped and the sign-in fails. Lower
+  `maxReturnToLength` if your return paths are not ASCII.
   Use this store for any deployment with more than one instance, and for any
   deployment where sign-in can be reached anonymously from the internet.
 

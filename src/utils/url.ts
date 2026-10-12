@@ -6,14 +6,14 @@
 
 const RESOLUTION_ORIGIN = "http://safe-return-to.invalid";
 
-/** {@link SafeReturnToOptions.maxLength}'s default, in characters. */
+/** {@link SafeReturnToOptions.maxLength}'s default, in UTF-16 code units. */
 export const DEFAULT_MAX_RETURN_TO_LENGTH = 2048;
 
 /** Options for {@link safeReturnTo}. */
 export interface SafeReturnToOptions {
   /**
-   * Longest value accepted, in characters; a longer one collapses to the
-   * fallback. Defaults to {@link DEFAULT_MAX_RETURN_TO_LENGTH} (2048).
+   * Longest value accepted, in UTF-16 code units (`String.length`), not
+   * bytes; a longer one collapses to the fallback. Defaults to {@link DEFAULT_MAX_RETURN_TO_LENGTH} (2048).
    * `Infinity` accepts any length.
    */
   maxLength?: number;
