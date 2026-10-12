@@ -21,6 +21,7 @@ import {
   type AuthRequestRecord,
   type AuthRequestStorage,
   DirectClient,
+  MemoryAuthRequestStorage,
 } from "../../../client/mod.ts";
 import { HonoAuthorizationServer } from "../authorization-server.ts";
 import { HonoResourceServer } from "../resource-server.ts";
@@ -211,6 +212,29 @@ describe("HonoBff", () => {
   }
 
   /**
+   * A client registered on `https://app.example`, for a BFF behind a
+   * TLS-terminating proxy that hands it plain `http://app.example` requests.
+   */
+  function proxiedClient(
+    options: { redirectUri?: string | undefined } = {
+      redirectUri: "https://app.example/auth/callback",
+    },
+  ): DirectClient {
+    return new DirectClient({
+      clientId: testClient.id,
+      clientSecret: CLIENT_SECRET,
+      ...(options.redirectUri ? { redirectUri: options.redirectUri } : {}),
+      endpoints: {
+        authorization: AUTHORIZE_URL,
+        token: TOKEN_URL,
+        revocation: REVOKE_URL,
+        endSession: "https://idp.example/end_session",
+      },
+      fetch: localAuthServerFetch(fixture.authServer),
+    });
+  }
+
+  /**
    * Drives the real login flow end to end and returns the callback response —
    * for tests where the authorize / callback round-trip is the subject. Tests
    * that only need an authenticated caller should seed one with the shipped
@@ -303,6 +327,13 @@ describe("HonoBff", () => {
       const bff = makeBff();
       expect(bff.loginContinuation("/authorized-devices")).toBe(
         "/auth/login?return_to=%2Fauthorized-devices",
+      );
+    });
+
+    it("falls back to defaultReturnTo for a returnTo past maxReturnToLength", () => {
+      const bff = makeBff({ maxReturnToLength: 5 });
+      expect(bff.loginContinuation("/dashboard")).toBe(
+        "/auth/login?return_to=%2Fhome",
       );
     });
 
@@ -433,6 +464,60 @@ describe("HonoBff", () => {
       });
       expect(res.status).toBe(302);
       await res.body?.cancel();
+    });
+
+    it("accepts the configured redirect URI's https origin on a GET /auth/logout a TLS proxy forwarded as http", async () => {
+      const { bff, app } = csrfApp({ client: proxiedClient() });
+      const res = await app.request("http://app.example/auth/logout", {
+        headers: {
+          cookie: await seedSession(bff),
+          origin: "https://app.example",
+        },
+      });
+      expect(res.status).toBe(302);
+      await res.body?.cancel();
+    });
+
+    it("still rejects a foreign Origin on a GET /auth/logout behind a TLS proxy", async () => {
+      const { bff, app } = csrfApp({ client: proxiedClient() });
+      const cookie = await seedSession(bff);
+      const res = await app.request("http://app.example/auth/logout", {
+        headers: { cookie, origin: "https://evil.example" },
+      });
+      expect(res.status).toBe(403);
+      await res.body?.cancel();
+      assert(await readTestSession(bff, cookie));
+    });
+
+    it("accepts the configured redirect URI's https origin as a Referer on a GET /auth/logout a TLS proxy forwarded as http", async () => {
+      const { bff, app } = csrfApp({ client: proxiedClient() });
+      const cookie = await seedSession(bff);
+      const res = await app.request("http://app.example/auth/logout", {
+        headers: { cookie, referer: "https://app.example/dashboard" },
+      });
+      expect(res.status).toBe(302);
+      await res.body?.cancel();
+      expect(await readTestSession(bff, cookie)).toBe(null);
+    });
+
+    it("rejects a GET /auth/logout whose Origin or Referer only begins with the request's or the application's origin", async () => {
+      const { bff, app } = csrfApp({ client: proxiedClient() });
+      const lookalikes: Record<string, string>[] = [
+        { origin: "https://app.example.evil.example" },
+        { origin: "http://app.example.evil.example" },
+        { origin: "https://app.example:8443" },
+        { referer: "https://app.example.evil.example/dashboard" },
+        { referer: "http://app.example@evil.example/dashboard" },
+      ];
+      for (const headers of lookalikes) {
+        const cookie = await seedSession(bff);
+        const res = await app.request("http://app.example/auth/logout", {
+          headers: { cookie, ...headers },
+        });
+        expect(res.status, JSON.stringify(headers)).toBe(403);
+        await res.body?.cancel();
+        assert(await readTestSession(bff, cookie));
+      }
     });
 
     it("allows a same-origin GET /auth/logout via the Referer fallback", async () => {
@@ -1231,6 +1316,70 @@ describe("HonoBff", () => {
         `${ISSUER}/`,
       );
       await res.body?.cancel();
+    });
+
+    async function postLogoutRedirectUri(
+      bff: HonoBff,
+      url: string,
+    ): Promise<string | null> {
+      const cookie = await seed(bff, "x");
+      const res = await makeApp(bff).request(url, {
+        method: "POST",
+        headers: { cookie: `oauth2_session=${cookie}` },
+      });
+      expect(res.status).toBe(302);
+      await res.body?.cancel();
+      return new URL(res.headers.get("Location")!).searchParams.get(
+        "post_logout_redirect_uri",
+      );
+    }
+
+    it("builds post_logout_redirect_uri on the redirect URI's origin when a TLS proxy forwards the request as http", async () => {
+      const bff = makeRpBff({ client: proxiedClient() });
+      expect(
+        await postLogoutRedirectUri(
+          bff,
+          "http://app.example/auth/logout?return_to=/done",
+        ),
+      ).toBe("https://app.example/done");
+    });
+
+    it("prefers resolveOrigin over the redirect URI's origin for post_logout_redirect_uri", async () => {
+      const bff = makeRpBff({
+        client: proxiedClient(),
+        resolveOrigin: () => "https://tenant.example",
+      });
+      expect(
+        await postLogoutRedirectUri(
+          bff,
+          "http://app.example/auth/logout?return_to=/done",
+        ),
+      ).toBe("https://tenant.example/done");
+    });
+
+    it("uses the request's origin for post_logout_redirect_uri when no redirect URI is configured", async () => {
+      const bff = makeRpBff({
+        client: proxiedClient({ redirectUri: undefined }),
+      });
+      expect(
+        await postLogoutRedirectUri(
+          bff,
+          "http://app.example/auth/logout?return_to=/done",
+        ),
+      ).toBe("http://app.example/done");
+    });
+
+    it("uses the request's origin for post_logout_redirect_uri under deriveRedirectUri, as sign-in does", async () => {
+      const bff = makeRpBff({
+        client: proxiedClient(),
+        deriveRedirectUri: true,
+      });
+      expect(
+        await postLogoutRedirectUri(
+          bff,
+          "http://preview.example/auth/logout?return_to=/done",
+        ),
+      ).toBe("http://preview.example/done");
     });
 
     it("guards post_logout_redirect_uri against open redirects", async () => {
@@ -2127,6 +2276,77 @@ describe("HonoBff", () => {
   });
 
   describe("login handler", () => {
+    function boundedApp(
+      storage: AuthRequestStorage,
+      extra: Partial<ConstructorParameters<typeof HonoBff>[0]> = {},
+    ): Hono {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: localAuthServerFetch(fixture.authServer),
+        authRequestStorage: storage,
+      });
+      return makeApp(makeBff({ client, ...extra }));
+    }
+
+    async function startLogin(app: Hono, path: string): Promise<string> {
+      const res = await app.request(path);
+      expect(res.status).toBe(302);
+      await res.body?.cancel();
+      return new URL(res.headers.get("Location")!).searchParams.get("state")!;
+    }
+
+    it("keeps the in-memory auth-request store at its cap under a burst of anonymous starts", async () => {
+      const storage = new MemoryAuthRequestStorage({ maxEntries: 5 });
+      const app = boundedApp(storage);
+      const states: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        states.push(await startLogin(app, "/auth/login?return_to=/dashboard"));
+      }
+
+      expect(
+        states.filter((state) => storage.get(state) !== null),
+      ).toStrictEqual(states.slice(-5));
+    });
+
+    it("stores defaultReturnTo instead of a return_to longer than 2048 characters", async () => {
+      const storage = new MemoryAuthRequestStorage();
+      const app = boundedApp(storage);
+      const longPath = `/${"a".repeat(12 * 1024)}`;
+
+      const state = await startLogin(
+        app,
+        `/auth/login?return_to=${encodeURIComponent(longPath)}`,
+      );
+
+      expect(storage.get(state)?.returnTo).toBe("/home");
+    });
+
+    it("honours a configured maxReturnToLength at login", async () => {
+      const storage = new MemoryAuthRequestStorage();
+      const app = boundedApp(storage, { maxReturnToLength: 10 });
+
+      const kept = await startLogin(app, "/auth/login?return_to=/dashboard");
+      const dropped = await startLogin(
+        app,
+        "/auth/login?return_to=/dashboard/x",
+      );
+
+      expect(storage.get(kept)?.returnTo).toBe("/dashboard");
+      expect(storage.get(dropped)?.returnTo).toBe("/home");
+    });
+
+    it("refuses a maxReturnToLength that is not a positive integer", () => {
+      for (const maxReturnToLength of [0, -1, 2.5, Number.NaN]) {
+        expect(
+          () => makeBff({ maxReturnToLength }),
+          `maxReturnToLength ${maxReturnToLength}`,
+        ).toThrow(RangeError);
+      }
+    });
+
     it("forwards prompt=none once forwardedParams names prompt (silent renew)", async () => {
       const bff = makeBff({ forwardedParams: ["prompt"] });
       const app = makeApp(bff);
@@ -2246,6 +2466,56 @@ describe("HonoBff", () => {
         `/auth/login?return_to=${encodeURIComponent("https://evil.example/x")}`,
       );
       expect(res.headers.get("Location")).toBe("/home");
+    });
+
+    function storageApp(
+      storage: AuthRequestStorage,
+      extra: Partial<ConstructorParameters<typeof HonoBff>[0]> = {},
+    ): Hono {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: localAuthServerFetch(fixture.authServer),
+        authRequestStorage: storage,
+      });
+      return makeApp(makeBff({ client, ...extra }));
+    }
+
+    it("re-checks the stored return_to at the callback, falling back for one that is off-origin or past maxReturnToLength", async () => {
+      for (const returnTo of ["https://evil.example/x", "/dashboard/x"]) {
+        const storage = new MemoryAuthRequestStorage();
+        const app = storageApp(storage, { maxReturnToLength: 10 });
+        const { callbackPath, state, cookies } = await beginLogin(app);
+        storage.set(state, { ...storage.get(state)!, returnTo });
+
+        const res = await app.request(
+          callbackPath,
+          withCookies(undefined, cookies),
+        );
+        expect(res.status, returnTo).toBe(302);
+        expect(res.headers.get("Location"), returnTo).toBe("/home");
+      }
+    });
+
+    it("fails a callback whose pending sign-in a burst of starts evicted, opening no session", async () => {
+      const storage = new MemoryAuthRequestStorage({ maxEntries: 3 });
+      const app = storageApp(storage);
+      const { callbackPath, state, cookies } = await beginLogin(app);
+      for (let i = 0; i < 3; i++) {
+        const res = await app.request("/auth/login");
+        await res.body?.cancel();
+      }
+      expect(storage.get(state)).toBe(null);
+
+      const res = await app.request(
+        callbackPath,
+        withCookies(undefined, cookies),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_grant");
+      expect(cookieValue(res, "oauth2_session")).toBe(undefined);
     });
   });
 
@@ -2774,6 +3044,13 @@ describe("HonoBff", () => {
         isAuthenticated: false,
         user: null,
       });
+    });
+
+    it("redirects to defaultReturnTo for a return_to past maxReturnToLength", async () => {
+      const app = makeApp(makeBff({ maxReturnToLength: 10 }));
+      const res = await app.request("/auth/logout?return_to=/dashboard/x");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/home");
     });
 
     it("ignores an external return_to (open-redirect guard)", async () => {

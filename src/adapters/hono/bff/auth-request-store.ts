@@ -109,7 +109,11 @@ export interface EncryptedCookieAuthRequestStorageOptions {
   /**
    * How many pending requests the cookie carries at once. A second sign-in
    * started in another tab would otherwise evict the first, so its callback
-   * would fail. Defaults to 3; the oldest is dropped beyond that.
+   * would fail. Defaults to 3; the oldest is dropped beyond that, and also
+   * whenever keeping it would push the sealed cookie past what every browser
+   * stores (about 4 KB), since a browser silently drops an oversized cookie
+   * and every pending sign-in in it with it. The sign-in being started is
+   * never the one dropped. Must be a positive integer.
    */
   maxPending?: number;
 }
@@ -117,6 +121,8 @@ export interface EncryptedCookieAuthRequestStorageOptions {
 const BASE_NAME = "oauth2_auth_request";
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_PENDING = 3;
+// RFC 6265 §6.1 only guarantees 4096 bytes per cookie, attributes included.
+const MAX_COOKIE_NAME_VALUE_BYTES = 3900;
 
 interface PendingRequests {
   [state: string]: AuthRequestRecord;
@@ -190,6 +196,9 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
    * carries a `__Host-`/`__Secure-` prefix the other cookie options contradict,
    * or when {@link AuthRequestCookieOptions.sameSite} is `"None"` without
    * {@link AuthRequestCookieOptions.secure}.
+   * @throws {RangeError} When
+   * {@link EncryptedCookieAuthRequestStorageOptions.maxPending} is not a
+   * positive integer.
    */
   constructor(options: EncryptedCookieAuthRequestStorageOptions) {
     this.#cookie = options.cookie;
@@ -204,6 +213,12 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
     });
     this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.#maxPending = options.maxPending ?? DEFAULT_MAX_PENDING;
+    if (!(Number.isInteger(this.#maxPending) && this.#maxPending > 0)) {
+      throw new RangeError(
+        "EncryptedCookieAuthRequestStorage maxPending must be a positive " +
+          `integer, got ${this.#maxPending}.`,
+      );
+    }
   }
 
   #key(): Promise<CryptoKey> {
@@ -225,9 +240,17 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
     );
   }
 
-  async #write(c: Context, pending: PendingRequests): Promise<void> {
+  async #write(
+    c: Context,
+    pending: PendingRequests,
+    keep?: string,
+  ): Promise<void> {
     const entries = Object.entries(pending)
-      .sort(([, a], [, b]) => b.createdAt - a.createdAt)
+      .sort(
+        ([stateA, a], [stateB, b]) =>
+          Number(stateB === keep) - Number(stateA === keep) ||
+          b.createdAt - a.createdAt,
+      )
       .slice(0, this.#maxPending);
 
     if (entries.length === 0) {
@@ -235,10 +258,20 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
       return;
     }
 
+    const key = await this.#key();
+    let sealed = await sealJson(key, Object.fromEntries(entries));
+    while (
+      entries.length > 1 &&
+      this.#name.length + 1 + sealed.length > MAX_COOKIE_NAME_VALUE_BYTES
+    ) {
+      entries.pop();
+      sealed = await sealJson(key, Object.fromEntries(entries));
+    }
+
     setCookie(
       c,
       this.#name,
-      await sealJson(await this.#key(), Object.fromEntries(entries)),
+      sealed,
       cookieAttributes(this.#cookie, Math.ceil(this.#ttlMs / 1000)),
     );
   }
@@ -255,7 +288,7 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
       set: async (state: string, value: AuthRequestRecord): Promise<void> => {
         const pending = await this.#read(c);
         pending[state] = value;
-        await this.#write(c, pending);
+        await this.#write(c, pending, state);
       },
       delete: async (state: string): Promise<void> => {
         const pending = await this.#read(c);

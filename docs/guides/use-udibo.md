@@ -91,6 +91,19 @@ instance of this application. It protects the pending state and PKCE verifier
 across the redirect. Store it in your deployment's secret manager. The example
 keeps the BFF's HTTPS cookie and CSRF defaults enabled.
 
+Keep `EncryptedCookieAuthRequestStorage` for any deployment with more than one
+instance. Without it the BFF keeps pending sign-ins in its process's memory, so
+a callback served by another instance fails with an unknown `state`. That
+in-memory store is capped at 1000 pending sign-ins and evicts the oldest first,
+so anonymous starts cannot exhaust memory, but a burst of them can push out
+real users' sign-ins. The cookie store keeps each browser's pending sign-ins in
+that browser, so one client cannot evict another's. See
+[pending sign-in limits](../known-limitations.md#pending-sign-in-limits).
+
+Behind a TLS-terminating proxy, the BFF sees `http:` request URLs. It builds
+the SSO-logout `post_logout_redirect_uri` from `AUTH_CALLBACK_URL`'s origin, so
+that URI matches the `https` one you registered.
+
 `requestLogger()` redacts every query value on both log lines, including
 callback `code` and `state`. Configure reverse proxies and tracing separately;
 this middleware cannot redact logs emitted by other systems.

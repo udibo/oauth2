@@ -540,6 +540,18 @@ export class DirectClient extends OAuth2ClientBase {
     return this.#clientId;
   }
 
+  /**
+   * The configured `redirect_uri`, or `undefined` when none was given.
+   *
+   * Exposed so a Backend-for-Frontend behind a TLS-terminating proxy can
+   * take the application's public origin from configuration rather than from
+   * a request URL that reports the proxy's plain-HTTP hop. See
+   * `HonoBffOptions.rpInitiatedLogout`.
+   */
+  get redirectUri(): string | undefined {
+    return this.#redirectUri;
+  }
+
   async #endpoint<K extends keyof AuthorizationServerEndpoints>(
     key: K,
   ): Promise<AuthorizationServerEndpoints[K]> {

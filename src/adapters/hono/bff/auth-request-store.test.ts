@@ -163,6 +163,59 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     expect((await readBack(app, cookie, "newest"))?.createdAt).toBe(now);
   });
 
+  it("drops the oldest pending records rather than emit a cookie past the browser's 4096-byte limit", async () => {
+    const now = Date.now();
+    const longReturnTo = `/${"a".repeat(2047)}`;
+    const cookie = await seal(app, [
+      ["oldest", record({ returnTo: longReturnTo, createdAt: now - 2000 })],
+      ["older", record({ returnTo: longReturnTo, createdAt: now - 1000 })],
+      ["newest", record({ returnTo: longReturnTo, createdAt: now })],
+    ]);
+
+    expect(cookie!.length).toBeLessThanOrEqual(4096);
+    expect(await readBack(app, cookie, "oldest")).toStrictEqual(null);
+    expect((await readBack(app, cookie, "newest"))?.returnTo).toBe(
+      longReturnTo,
+    );
+  });
+
+  it("never drops the record being written, even when another instance's clock stamped an existing one later", async () => {
+    const now = Date.now();
+    const longReturnTo = `/${"a".repeat(2047)}`;
+    const cookie = await seal(app, [
+      ["skewed", record({ returnTo: longReturnTo, createdAt: now + 60_000 })],
+      ["current", record({ returnTo: longReturnTo, createdAt: now })],
+    ]);
+
+    expect((await readBack(app, cookie, "current"))?.returnTo).toBe(
+      longReturnTo,
+    );
+    expect(await readBack(app, cookie, "skewed")).toStrictEqual(null);
+
+    const single = storageApp({
+      secret: SECRET,
+      cookie: { secure: false },
+      maxPending: 1,
+    });
+    const singleCookie = await seal(single, [
+      ["skewed", record({ createdAt: now + 60_000 })],
+      ["current", record({ createdAt: now })],
+    ]);
+    expect((await readBack(single, singleCookie, "current"))?.createdAt).toBe(
+      now,
+    );
+  });
+
+  it("refuses a maxPending that is not a positive integer", () => {
+    for (const maxPending of [0, -1, 1.5, Number.NaN]) {
+      expect(
+        () =>
+          new EncryptedCookieAuthRequestStorage({ secret: SECRET, maxPending }),
+        `maxPending ${maxPending}`,
+      ).toThrow(RangeError);
+    }
+  });
+
   it("starts no key derivation until a request touches the storage", async () => {
     using digest = vi.spyOn(crypto.subtle, "digest");
     const lazy = storageApp({ secret: SECRET, cookie: { secure: false } });
