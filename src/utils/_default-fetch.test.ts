@@ -241,7 +241,7 @@ const GLOBAL_FETCH_FALLBACK =
   /globalThis\.fetch\b|\?\?\s*\(?\s*fetch\b|=>\s*fetch\s*\(/;
 const UNMARKED_SIGNAL = /\bsignal:(?!\s*packageDeadlineSignal\()/;
 const NOT_LIBRARY_CODE =
-  /(\.test\.tsx?|\.e2e\.ts)$|(^|\/)_test_|^testing\/|^react\/testing\.tsx$|^utils\/_default-fetch\.ts$/;
+  /(\.test\.tsx?|\.e2e\.ts)$|(^|\/)_test_|^testing\/|^react\/testing\.tsx$|^utils\/_default-fetch\.ts$|^utils\/_inbound-request\.ts$/;
 
 function librarySourcesMatching(pattern: RegExp): string[] {
   return librarySources("").filter((path) => {

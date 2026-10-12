@@ -2929,6 +2929,68 @@ describe("HonoBff", () => {
       expect(user.id).toBe(testUser.id);
     });
 
+    it("attaches Authorization behind a Node adapter that leaves the native Request global, keeping the method and body", async () => {
+      const bff = makeBff();
+      const resourceServer = new HonoResourceServer({
+        resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+      });
+      const app = new Hono();
+      app.use("/api/*", bff.attachToken(), resourceServer.protect());
+      app.all("/api/echo", async (c) =>
+        c.json({
+          user: resourceServer.getContext(c).user?.id,
+          method: c.req.method,
+          url: c.req.url,
+          body: await c.req.text(),
+        }),
+      );
+      const cookie = await protectedSession(bff);
+      await using server = await serve(app.fetch);
+
+      for (const [method, body] of [
+        ["POST", JSON.stringify({ name: "kept" })],
+        ["PATCH", "a".repeat(200_000)],
+        ["GET", undefined],
+      ] as const) {
+        const res = await fetch(`${server.origin}/api/echo?q=1`, {
+          method,
+          headers: { cookie, "content-type": "application/json" },
+          body,
+        });
+        expect(res.status, method).toBe(200);
+        expect(await res.json()).toStrictEqual({
+          user: testUser.id,
+          method,
+          url: `${server.origin}/api/echo?q=1`,
+          body: body ?? "",
+        });
+      }
+    });
+
+    it("keeps the inbound abort signal on the request it attaches Authorization to", async () => {
+      const bff = makeBff();
+      const client = new AbortController();
+      const app = new Hono();
+      app.use("/api/*", bff.attachToken());
+      app.get("/api/me", (c) => {
+        client.abort();
+        return c.json({
+          authorized: c.req.header("Authorization")?.startsWith("Bearer "),
+          aborted: c.req.raw.signal.aborted,
+        });
+      });
+      const cookie = await protectedSession(bff);
+
+      const res = await app.request("/api/me", {
+        headers: { cookie },
+        signal: client.signal,
+      });
+      expect(await res.json()).toStrictEqual({
+        authorized: true,
+        aborted: true,
+      });
+    });
+
     it("refreshes the access token when it's near expiry and updates the session", async () => {
       const { tokenService } = fixture;
       tokenService.accessTokenLifetime = 1;
