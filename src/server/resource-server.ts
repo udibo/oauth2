@@ -26,6 +26,11 @@ import {
 } from "../models/authorization.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
 import { assertClockSkewSeconds } from "./_clock-skew.ts";
+import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_TOKEN_BODY_BYTES,
+  peekBoundedBody,
+} from "../utils/_body.ts";
 
 /** Bearer token regex pattern. */
 export const BEARER_TOKEN: RegExp =
@@ -102,6 +107,27 @@ export interface ResourceServerOptions<
    * matter which reader is in play.
    */
   clockSkewSeconds?: number;
+  /**
+   * The most bytes {@linkcode ResourceServer.getAccessToken} reads from a
+   * form-encoded `POST` body while looking for an RFC 6750 §2.2
+   * `access_token`, which it does only when no bearer `Authorization` header
+   * is sent. That read happens before the caller is authenticated, so the cap
+   * bounds what an anonymous request can make the server buffer, including
+   * through `protect()` middleware mounted ahead of a route's own body limit.
+   * Bytes are counted as they arrive, so a chunked body or an understated
+   * `Content-Length` cannot get past it.
+   *
+   * A larger body is not searched: the request is treated as carrying no
+   * token (`authenticate` throws {@linkcode AccessDeniedError}, a `401`), and
+   * the body is left for the route. A client that sends a bigger form body
+   * should send its token in the `Authorization` header instead, as RFC 6750
+   * §2.1 recommends.
+   *
+   * @default 16384
+   * @throws {RangeError} From the constructor when it is not a positive
+   *   integer.
+   */
+  maxTokenBodyBytes?: number;
   /**
    * Format for error responses.
    * - `"oauth2"` (default): Standard OAuth2 error format with `error`,
@@ -207,6 +233,7 @@ export class ResourceServer<
     | Promise<ResourceServerContext<Client, User, S>>;
 
   #clockSkewSeconds = 0;
+  #maxTokenBodyBytes: number;
 
   /**
    * Leeway in seconds applied to the access token's expiry. Defaults to `0`.
@@ -232,13 +259,17 @@ export class ResourceServer<
    * Creates a resource server from the given {@linkcode ResourceServerOptions}.
    *
    * @throws {RangeError} If `clockSkewSeconds` is negative, non-finite, or
-   *   overflows when converted to milliseconds.
+   *   overflows when converted to milliseconds, or if `maxTokenBodyBytes` is
+   *   not a positive integer.
    */
   constructor(options: ResourceServerOptions<Client, User, S>) {
     this.Scope =
       options.Scope ?? (BasicScope as unknown as ScopeConstructor<S>);
     this.realm = options.realm ?? "Service";
     this.clockSkewSeconds = options.clockSkewSeconds ?? 0;
+    this.#maxTokenBodyBytes =
+      options.maxTokenBodyBytes ?? DEFAULT_MAX_TOKEN_BODY_BYTES;
+    assertMaxBodyBytes(this.#maxTokenBodyBytes, "maxTokenBodyBytes");
     this.errorFormat = options.errorFormat ?? "oauth2";
     this.throwOnError = options.throwOnError ?? false;
     this.resolveContext = options.resolve;
@@ -397,8 +428,11 @@ export class ResourceServer<
 
   /**
    * Extracts an access token from a request.
-   * Looks in the Authorization header (Bearer token) first,
-   * then in the request body for form-encoded requests.
+   * Looks in the Authorization header (Bearer token) first, then in the body
+   * of a form-encoded `POST` (RFC 6750 §2.2), read from a clone so the
+   * original body stays readable. A body over
+   * {@linkcode ResourceServerOptions.maxTokenBodyBytes} is not searched, and
+   * no more of it is read than the cap.
    */
   async getAccessToken(request: Request): Promise<string | null> {
     const authorization = request.headers.get("authorization");
@@ -413,11 +447,15 @@ export class ResourceServer<
       contentType?.includes("application/x-www-form-urlencoded")
     ) {
       try {
-        const body = await request.clone().formData();
+        const bytes = await peekBoundedBody(request, this.#maxTokenBodyBytes);
+        if (!bytes) return null;
+        const body = await new Response(bytes, {
+          headers: { "content-type": contentType },
+        }).formData();
         const accessToken = body.get("access_token");
         if (typeof accessToken === "string") return accessToken;
       } catch {
-        // ignore
+        return null;
       }
     }
 
