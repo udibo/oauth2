@@ -126,18 +126,18 @@ in
 - **Register your `redirect_uri` with the IDP**. The default is
   `${PUBLIC_URL}/auth/callback`. The IDP rejects any redirect URI not in its
   registered list.
-- **Replace `MemorySessionStore`** with a persistent store: the included
-  `EncryptedCookieSessionStore` (stateless, in `@udibo/oauth2/hono/bff`), or
-  your own server-side `SessionStore` implementation (Redis, Postgres, …)
-  verified with `runSessionStoreContractTests`.
-- **Replace the client's in-memory auth-request storage** if requests can land
-  on more than one instance. The pending `state` → PKCE verifier record defaults
-  to `MemoryAuthRequestStorage`, so `/auth/login` and `/auth/callback` served by
-  different isolates fail with `unknown state parameter` — the characteristic
-  intermittent sign-in failure on serverless platforms. Pass
-  `authRequestStorage: new EncryptedCookieAuthRequestStorage({ secret })` to the
-  BFF to carry it in an encrypted cookie, or implement `AuthRequestStorage` over
-  your database and pass it as `{ forRequest: (c) => yourStorage(c) }`.
+- **Choose the BFF's two stores for your deployment.** The example passes
+  `MemorySessionStore` and `MemoryAuthRequestStorageFactory`, which keep
+  sessions and pending sign-ins in this one process: a restart signs everyone
+  out, and once requests land on more than one instance a session is unknown on
+  the others (the user appears signed out) and a callback served elsewhere
+  fails with `unknown state parameter`. For more than one instance, pass
+  `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage` with a
+  secret every instance shares (stateless, in `@udibo/oauth2/hono/bff`; sign-out
+  cannot invalidate a copied session cookie before its `maxAgeMs`), or a
+  `SessionStore` and an `AuthRequestStorageFactory` over a database or cache
+  every instance shares, verified with `runSessionStoreContractTests` and
+  `runAuthRequestStorageContractTests`.
 - **Remove the `secure: false` cookie override** on the BFF — it defaults to
   `secure: true`; the example sets `false` only so it works over local HTTP.
 - **Cache introspection responses** until the token's `exp` — the default

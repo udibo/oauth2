@@ -128,6 +128,29 @@ cookie needs to survive the authorization server's redirect back to your app;
 use the provided pending-login cookie factory or a correctly scoped app-owned
 store.
 
+### Choosing the BFF's stores
+
+`HonoBff` requires both `sessionStore` and `authRequestStorage`; it has no
+default, so a deployment cannot reach production on a store that only works in
+one process. Pick each one by where your requests can land:
+
+| Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`                          | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
+
+Give the encrypted-cookie stores a secret every instance shares, so any of them
+can unseal a cookie another sealed. The memory stores keep their records in the
+process that wrote them: a restart signs everyone out, a session is unknown to
+every other instance, and a callback served by another instance fails with an
+unknown `state`. An `AuthRequestStorage` that needs no request context, such as
+one over your database, is passed as `{ forRequest: () => storage }`; the BFF
+never falls back to the `DirectClient`'s own `authRequestStorage`. Check
+your own stores with `runSessionStoreContractTests` from
+`@udibo/oauth2/hono/bff/testing` and `runAuthRequestStorageContractTests` from
+`@udibo/oauth2/testing/contract`.
+
 Prefer a stateful `SessionStore` when your app needs immediate revocation,
 session listings, or backchannel logout. `EncryptedCookieSessionStore` is an
 alternative with a different contract: a copied cookie remains usable until

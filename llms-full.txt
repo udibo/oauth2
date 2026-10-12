@@ -432,9 +432,10 @@ across the redirect. Store it in your deployment's secret manager. The example
 keeps the BFF's HTTPS cookie and CSRF defaults enabled.
 
 Keep `EncryptedCookieAuthRequestStorage` for any deployment with more than one
-instance. Without it the BFF keeps pending sign-ins in its process's memory, so
-a callback served by another instance fails with an unknown `state`. That
-in-memory store is capped at 1000 pending sign-ins and evicts the oldest first,
+instance. `MemoryAuthRequestStorageFactory` keeps pending sign-ins in its
+process's memory, so a callback served by another instance fails with an
+unknown `state`; pass it only for a single process, tests and local
+development. That in-memory store is capped at 1000 pending sign-ins and evicts the oldest first,
 so anonymous starts cannot exhaust memory, but a burst of them can push out
 real users' sign-ins. The cookie store keeps each browser's pending sign-ins in
 that browser, so one client cannot evict another's. See
@@ -5008,6 +5009,7 @@ origin, registered callback, and browser address bar.
 import {
   EncryptedCookieAuthRequestStorage,
   HonoBff,
+  MemorySessionStore,
 } from "@udibo/oauth2/hono/bff";
 import type { DirectClient } from "@udibo/oauth2/client";
 
@@ -5017,6 +5019,7 @@ declare const localDevelopmentSecret: string;
 const bff = new HonoBff({
   client,
   cookie: { secure: false },
+  sessionStore: new MemorySessionStore(),
   authRequestStorage: new EncryptedCookieAuthRequestStorage({
     secret: localDevelopmentSecret,
     cookie: { secure: false },
@@ -5024,7 +5027,7 @@ const bff = new HonoBff({
 });
 ```
 
-This snippet uses the default in-memory session store and is local-only. It
+This snippet keeps sessions in a `MemorySessionStore` and is local-only. It
 deliberately leaves state, PKCE, and CSRF protection enabled.
 
 ## Production
@@ -5036,8 +5039,9 @@ validates them at a known proxy boundary.
 
 Use persistent sessions and pending-login storage that survives process restarts
 and works across replicas. An encrypted pending-login cookie is one option;
-`MemoryAuthRequestStorage` requires the same process for login and callback. See
-[application deployment](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#cookies-and-sessions).
+`MemoryAuthRequestStorageFactory` requires the same process for login and
+callback. See
+[choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores).
 
 ## Preview deployments
 
@@ -5204,6 +5208,29 @@ cookie needs to survive the authorization server's redirect back to your app;
 use the provided pending-login cookie factory or a correctly scoped app-owned
 store.
 
+### Choosing the BFF's stores
+
+`HonoBff` requires both `sessionStore` and `authRequestStorage`; it has no
+default, so a deployment cannot reach production on a store that only works in
+one process. Pick each one by where your requests can land:
+
+| Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`                          | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
+
+Give the encrypted-cookie stores a secret every instance shares, so any of them
+can unseal a cookie another sealed. The memory stores keep their records in the
+process that wrote them: a restart signs everyone out, a session is unknown to
+every other instance, and a callback served by another instance fails with an
+unknown `state`. An `AuthRequestStorage` that needs no request context, such as
+one over your database, is passed as `{ forRequest: () => storage }`; the BFF
+never falls back to the `DirectClient`'s own `authRequestStorage`. Check
+your own stores with `runSessionStoreContractTests` from
+`@udibo/oauth2/hono/bff/testing` and `runAuthRequestStorageContractTests` from
+`@udibo/oauth2/testing/contract`.
+
 Prefer a stateful `SessionStore` when your app needs immediate revocation,
 session listings, or backchannel logout. `EncryptedCookieSessionStore` is an
 alternative with a different contract: a copied cookie remains usable until
@@ -5334,6 +5361,14 @@ sections apply only when you host those flows.
 
 - [ ] HTTPS cookie and CSRF defaults are enabled; custom browser requests send
       the CSRF header.
+- [ ] The BFF's `sessionStore` and `authRequestStorage` work on every instance
+      that serves the app: encrypted-cookie stores with a shared secret, or
+      stores over shared storage. `MemorySessionStore` and
+      `MemoryAuthRequestStorageFactory` appear only in single-process, test and
+      local configurations. If sign-out must revoke a stolen session cookie,
+      use a shared `SessionStore`: `EncryptedCookieSessionStore` keeps a copied
+      cookie valid until its `maxAgeMs`. See
+      [choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.
 - [ ] Pending sign-ins are bounded. A multi-instance or internet-facing BFF
@@ -5958,12 +5993,12 @@ seams.
 
 | Trigger point            | Symbol                                        | Fires                                             | Required                 | Control | On throw                                                                                                         |
 | ------------------------ | --------------------------------------------- | ------------------------------------------------- | ------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| session-store            | `SessionStore` (`sessionStore`)               | Callback, refresh, session read, logout           | no (defaults to memory)  | blocks  | In `/auth/callback` → `invalid_grant`; in refresh/logout/session paths → propagates to Hono                      |
+| session-store            | `SessionStore` (`sessionStore`)               | Callback, refresh, session read, logout           | yes                      | blocks  | In `/auth/callback` → `invalid_grant`; in refresh/logout/session paths → propagates to Hono                      |
 | backchannel-logout-store | `destroyByLogout` (`SessionStore` capability) | `POST /auth/backchannel`                          | with `backchannelLogout` | blocks  | Propagates to Hono (500)                                                                                         |
 | resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Failure behavior) |
 | callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Failure behavior)                        |
 | resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"                |
-| auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | no                       | blocks  | Login → propagates; callback → `invalid_grant`                                                                   |
+| auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | yes                      | blocks  | Login → propagates; callback → `invalid_grant`                                                                   |
 | logout-token-verifier    | `verifyLogoutToken` (`backchannelLogout`)     | `POST /auth/backchannel`, verifying the JWT       | with `backchannelLogout` | blocks  | Throw or `null` → `400 invalid_request` (deliberate "throw-or-null to reject" contract)                          |
 | proxy-fetch              | `fetch` (`HonoBffProxyOptions`)               | The upstream call in `bff.proxy`                  | no                       | blocks  | Wrapped → `502` `temporarily_unavailable`                                                                        |
 
@@ -6096,6 +6131,17 @@ your framework (for example Hono's `bodyLimit` middleware) or your reverse
 proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
 refused before any authentication work.
 
+## BFF storage across instances
+
+`HonoBff` requires `sessionStore` and `authRequestStorage` and has no default
+for either; constructing it without one throws a `TypeError` naming the option.
+The memory stores, `MemorySessionStore` and `MemoryAuthRequestStorageFactory`,
+must be chosen explicitly and serve one process only: behind a load balancer a
+session created on one instance is unknown on the others, so the user appears
+signed out, and a sign-in whose callback reaches another instance fails. See
+[choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores)
+for which store fits which deployment.
+
 ## Pending sign-in limits
 
 Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
@@ -6108,8 +6154,10 @@ so the package bounds what each start can cost:
   (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
   `maxReturnToLength`); `Infinity` removes it.
 - **`MemoryAuthRequestStorage` holds at most 1000 records.** This is the client's
-  default outside a browser, and the BFF's unless you configure
-  `authRequestStorage`. A write beyond the cap evicts the oldest-written record,
+  default outside a browser, and what `MemoryAuthRequestStorageFactory` gives
+  the BFF. It keeps pending sign-ins in one process, so a callback served by
+  another instance fails with an unknown `state`; use it only for a single
+  process, tests and local development. A write beyond the cap evicts the oldest-written record,
   so memory stays bounded however many starts arrive. Raise or lower it with
   `maxEntries`. The cap protects memory, not sign-in: a burst of anonymous starts
   evicts real users' pending sign-ins, and their callbacks then fail with an

@@ -36,6 +36,7 @@ origin, registered callback, and browser address bar.
 import {
   EncryptedCookieAuthRequestStorage,
   HonoBff,
+  MemorySessionStore,
 } from "@udibo/oauth2/hono/bff";
 import type { DirectClient } from "@udibo/oauth2/client";
 
@@ -45,6 +46,7 @@ declare const localDevelopmentSecret: string;
 const bff = new HonoBff({
   client,
   cookie: { secure: false },
+  sessionStore: new MemorySessionStore(),
   authRequestStorage: new EncryptedCookieAuthRequestStorage({
     secret: localDevelopmentSecret,
     cookie: { secure: false },
@@ -52,7 +54,7 @@ const bff = new HonoBff({
 });
 ```
 
-This snippet uses the default in-memory session store and is local-only. It
+This snippet keeps sessions in a `MemorySessionStore` and is local-only. It
 deliberately leaves state, PKCE, and CSRF protection enabled.
 
 ## Production
@@ -64,8 +66,9 @@ validates them at a known proxy boundary.
 
 Use persistent sessions and pending-login storage that survives process restarts
 and works across replicas. An encrypted pending-login cookie is one option;
-`MemoryAuthRequestStorage` requires the same process for login and callback. See
-[application deployment](production-deployment.md#cookies-and-sessions).
+`MemoryAuthRequestStorageFactory` requires the same process for login and
+callback. See
+[choosing the BFF's stores](production-deployment.md#choosing-the-bffs-stores).
 
 ## Preview deployments
 

@@ -26,7 +26,11 @@ import {
 import { HonoAuthorizationServer } from "../authorization-server.ts";
 import { HonoResourceServer } from "../resource-server.ts";
 
-import { HonoBff } from "./bff.ts";
+import {
+  EncryptedCookieAuthRequestStorage,
+  MemoryAuthRequestStorageFactory,
+} from "./auth-request-store.ts";
+import { HonoBff, type HonoBffOptions } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
   MemorySessionStore,
@@ -174,6 +178,16 @@ function withCookies(
   return { ...init, headers };
 }
 
+function memoryStores(): Pick<
+  HonoBffOptions,
+  "sessionStore" | "authRequestStorage"
+> {
+  return {
+    sessionStore: new MemorySessionStore(),
+    authRequestStorage: new MemoryAuthRequestStorageFactory(),
+  };
+}
+
 describe("HonoBff", () => {
   let fixture: Awaited<ReturnType<typeof buildFixture>>;
 
@@ -186,6 +200,7 @@ describe("HonoBff", () => {
   ) {
     return new HonoBff({
       client: fixture.oauthClient,
+      ...memoryStores(),
       defaultReturnTo: "/home",
       cookie: { secure: false },
       csrf: false,
@@ -199,6 +214,7 @@ describe("HonoBff", () => {
   ) {
     return new HonoBff({
       client: fixture.oauthClient,
+      ...memoryStores(),
       defaultReturnTo: "/home",
       cookie: { secure: false },
       ...extra,
@@ -291,6 +307,189 @@ describe("HonoBff", () => {
       user: testUser,
     });
   }
+
+  describe("store configuration", () => {
+    const SHARED_SECRET = "a-secret-every-instance-shares-32-bytes!";
+
+    /**
+     * One BFF instance as a separate process would build it: its own client
+     * and its own store objects, sharing only configuration with its peers.
+     */
+    function instance(): Hono {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: localAuthServerFetch(fixture.authServer),
+      });
+      return makeApp(
+        new HonoBff({
+          client,
+          defaultReturnTo: "/home",
+          cookie: { secure: false },
+          csrf: false,
+          resolveUser: () => ({ id: testUser.id }),
+          sessionStore: new EncryptedCookieSessionStore({
+            secret: SHARED_SECRET,
+          }),
+          authRequestStorage: new EncryptedCookieAuthRequestStorage({
+            secret: SHARED_SECRET,
+            cookie: { secure: false },
+          }),
+        }),
+      );
+    }
+
+    it("completes a sign-in started on one instance on another that shares the configured stores", async () => {
+      const first = instance();
+      const second = instance();
+      const third = instance();
+
+      const loginRes = await first.request("/auth/login?return_to=/dashboard");
+      expect(loginRes.status).toBe(302);
+      await loginRes.body?.cancel();
+      const callback = await performAuthorizeRedirect(
+        fixture.authServer,
+        loginRes.headers.get("Location")!,
+      );
+
+      const callbackRes = await second.request(
+        callback.slice(ISSUER.length),
+        withCookies(undefined, jar(loginRes)),
+      );
+      expect(callbackRes.status).toBe(302);
+      expect(callbackRes.headers.get("Location")).toBe("/dashboard");
+      const session = cookieValue(callbackRes, "oauth2_session");
+      assert(session, "the callback opened no session");
+
+      const sessionRes = await third.request("/auth/session", {
+        headers: { cookie: `oauth2_session=${session}` },
+      });
+      const body = await sessionRes.json();
+      expect(body.isAuthenticated).toBe(true);
+      expect(body.user).toStrictEqual({ id: testUser.id });
+    });
+
+    it("refuses a config without a session store, naming the option and the choices", () => {
+      const error = thrown(
+        () =>
+          // @ts-expect-error -- sessionStore is required
+          new HonoBff({
+            client: fixture.oauthClient,
+            authRequestStorage: new MemoryAuthRequestStorageFactory(),
+          }),
+        TypeError,
+        "HonoBff requires options.sessionStore",
+      );
+      for (const choice of [
+        "EncryptedCookieSessionStore",
+        "SessionStore",
+        "MemorySessionStore",
+      ]) {
+        expect(error.message).toContain(choice);
+      }
+      expect(error.message).not.toContain("authRequestStorage");
+    });
+
+    it("refuses a config without auth-request storage, naming the option and the choices", () => {
+      const error = thrown(
+        () =>
+          // @ts-expect-error -- authRequestStorage is required
+          new HonoBff({
+            client: fixture.oauthClient,
+            sessionStore: new MemorySessionStore(),
+          }),
+        TypeError,
+        "HonoBff requires options.authRequestStorage",
+      );
+      for (const choice of [
+        "EncryptedCookieAuthRequestStorage",
+        "AuthRequestStorageFactory",
+        "MemoryAuthRequestStorageFactory",
+      ]) {
+        expect(error.message).toContain(choice);
+      }
+      expect(error.message).not.toContain("options.sessionStore");
+    });
+
+    it("names both missing stores in one error", () => {
+      const error = thrown(
+        () =>
+          // @ts-expect-error -- both stores are required
+          new HonoBff({ client: fixture.oauthClient }),
+        TypeError,
+      );
+      expect(error.message).toContain("HonoBff requires options.sessionStore");
+      expect(error.message).toContain("options.authRequestStorage");
+    });
+
+    it("refuses a bare AuthRequestStorage where a factory is expected", () => {
+      thrown(
+        () =>
+          new HonoBff({
+            client: fixture.oauthClient,
+            sessionStore: new MemorySessionStore(),
+            // @ts-expect-error -- a storage is not a per-request factory
+            authRequestStorage: new MemoryAuthRequestStorage(),
+          }),
+        TypeError,
+        "{ forRequest: () => storage }",
+      );
+    });
+  });
+
+  describe("a factory that returns no storage", () => {
+    it("refuses the sign-in rather than use the client's own storage", async () => {
+      const bff = makeBff({
+        authRequestStorage: { forRequest: () => undefined as never },
+      });
+      const app = new Hono();
+      app.route("/auth", bff.routes());
+      app.onError((error, c) => c.text(error.message, 500));
+
+      const loginRes = await app.request("/auth/login?return_to=/dashboard");
+      expect(loginRes.status).toBe(500);
+      expect(await loginRes.text()).toBe(
+        "HonoBff options.authRequestStorage.forRequest(c) returned no storage.",
+      );
+    });
+  });
+
+  describe("MemoryAuthRequestStorageFactory", () => {
+    it("completes a sign-in on the instance that started it", async () => {
+      const app = makeApp(
+        makeBff({ authRequestStorage: new MemoryAuthRequestStorageFactory() }),
+      );
+      const res = await completeLogin(app, "/auth/login?return_to=/dashboard");
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/dashboard");
+      expect(cookieValue(res, "oauth2_session")).toBeTruthy();
+    });
+
+    it("holds at most maxEntries pending sign-ins", async () => {
+      const app = makeApp(
+        makeBff({
+          authRequestStorage: new MemoryAuthRequestStorageFactory({
+            maxEntries: 1,
+          }),
+        }),
+      );
+      const evicted = await beginLogin(app);
+      const kept = await beginLogin(app);
+
+      const evictedRes = await app.request(
+        evicted.callbackPath,
+        withCookies(undefined, [...evicted.cookies, ...kept.cookies]),
+      );
+      expect(evictedRes.status).toBe(400);
+      const keptRes = await app.request(
+        kept.callbackPath,
+        withCookies(undefined, kept.cookies),
+      );
+      expect(keptRes.status).toBe(302);
+    });
+  });
 
   describe("loginContinuation", () => {
     it("resumes an in-flight authorize URL unchanged", () => {
@@ -782,6 +981,7 @@ describe("HonoBff", () => {
 
     it("defaults to __Host- + SameSite=Strict + Secure + Path=/ when secure", async () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -803,6 +1003,7 @@ describe("HonoBff", () => {
 
     it("honors an explicit name and SameSite override", async () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -815,6 +1016,7 @@ describe("HonoBff", () => {
 
     it("drops the __Host- prefix when cookie.domain is set without a name", () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -825,6 +1027,7 @@ describe("HonoBff", () => {
 
     it("drops the __Host- prefix when cookie.path is not / without a name", () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -835,6 +1038,7 @@ describe("HonoBff", () => {
 
     it("emits a Domain-scoped cookie with no prefix for a domain deployment", async () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -850,6 +1054,7 @@ describe("HonoBff", () => {
 
     it("keeps the __Host- prefix when only SameSite and Max-Age are customized", () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -863,6 +1068,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             defaultReturnTo: "/",
             csrf: false,
@@ -877,6 +1083,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             defaultReturnTo: "/",
             csrf: false,
@@ -891,6 +1098,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             defaultReturnTo: "/",
             csrf: false,
@@ -905,6 +1113,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             defaultReturnTo: "/",
             csrf: false,
@@ -919,6 +1128,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             defaultReturnTo: "/",
             csrf: false,
@@ -931,6 +1141,7 @@ describe("HonoBff", () => {
 
     it("accepts an explicit __Host- name when every attribute satisfies it", () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -941,6 +1152,7 @@ describe("HonoBff", () => {
 
     it("accepts an unprefixed explicit name alongside a domain", () => {
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         defaultReturnTo: "/",
         csrf: false,
@@ -1263,6 +1475,7 @@ describe("HonoBff", () => {
         fetch: localAuthServerFetch(fixture.authServer),
       });
       return new HonoBff({
+        ...memoryStores(),
         client,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -1451,6 +1664,7 @@ describe("HonoBff", () => {
     ) {
       const store = new MemorySessionStore();
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -1727,6 +1941,7 @@ describe("HonoBff", () => {
       thrown(
         () =>
           new HonoBff({
+            ...memoryStores(),
             client: fixture.oauthClient,
             sessionStore: new EncryptedCookieSessionStore({
               secret: crypto.getRandomValues(new Uint8Array(32)),
@@ -1750,6 +1965,7 @@ describe("HonoBff", () => {
         fetch: localAuthServerFetch(fixture.authServer),
       });
       const bff = new HonoBff({
+        ...memoryStores(),
         client,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -2286,9 +2502,14 @@ describe("HonoBff", () => {
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         fetch: localAuthServerFetch(fixture.authServer),
-        authRequestStorage: storage,
       });
-      return makeApp(makeBff({ client, ...extra }));
+      return makeApp(
+        makeBff({
+          client,
+          authRequestStorage: { forRequest: () => storage },
+          ...extra,
+        }),
+      );
     }
 
     async function startLogin(app: Hono, path: string): Promise<string> {
@@ -2478,9 +2699,14 @@ describe("HonoBff", () => {
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
         fetch: localAuthServerFetch(fixture.authServer),
-        authRequestStorage: storage,
       });
-      return makeApp(makeBff({ client, ...extra }));
+      return makeApp(
+        makeBff({
+          client,
+          authRequestStorage: { forRequest: () => storage },
+          ...extra,
+        }),
+      );
     }
 
     it("re-checks the stored return_to at the callback, falling back for one that is off-origin or past maxReturnToLength", async () => {
@@ -3273,6 +3499,7 @@ describe("HonoBff", () => {
       tokenService.accessTokenLifetime = 1;
 
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -3310,6 +3537,7 @@ describe("HonoBff", () => {
       tokenService.accessTokenLifetime = 1;
 
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -3344,6 +3572,7 @@ describe("HonoBff", () => {
 
       const store = new MemorySessionStore();
       const bff = new HonoBff({
+        ...memoryStores(),
         client: fixture.oauthClient,
         cookie: { secure: false },
         defaultReturnTo: "/",
@@ -3614,7 +3843,10 @@ describe("HonoBff", () => {
     });
 
     it("names the login-state cookie __Host- and marks it Secure by default", () => {
-      const bff = new HonoBff({ client: fixture.oauthClient });
+      const bff = new HonoBff({
+        client: fixture.oauthClient,
+        ...memoryStores(),
+      });
       expect(bff.loginStateCookieName).toBe("__Host-oauth2_login_state");
     });
 
@@ -3787,6 +4019,7 @@ describe("HonoBff", () => {
       extra: Partial<ConstructorParameters<typeof HonoBff>[0]> = {},
     ): HonoBff {
       return new HonoBff({
+        ...memoryStores(),
         client: new DirectClient({
           clientId: testClient.id,
           clientSecret: CLIENT_SECRET,

@@ -6,6 +6,7 @@ import { HonoResourceServer } from "../resource-server.ts";
 import { createMemoryAuthorizationServer } from "../../../testing/server.ts";
 import type { TestClient, TestUser } from "../../../testing/_test_fixtures.ts";
 
+import { MemoryAuthRequestStorageFactory } from "./auth-request-store.ts";
 import { HonoBff } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
@@ -61,7 +62,8 @@ async function buildBff(
     cookie: { secure: false },
     defaultReturnTo: "/",
     resourceServer,
-    sessionStore: options.sessionStore,
+    sessionStore: options.sessionStore ?? new MemorySessionStore(),
+    authRequestStorage: new MemoryAuthRequestStorageFactory(),
   });
   return { oauth, bff, oauthClient, resourceServer };
 }

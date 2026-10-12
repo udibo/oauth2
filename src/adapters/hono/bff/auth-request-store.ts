@@ -1,13 +1,14 @@
 /**
- * Stateless {@link AuthRequestStorage} for {@link HonoBff}.
+ * {@link AuthRequestStorageFactory} implementations for {@link HonoBff}.
  *
  * The pending authorization request — the `state`, its PKCE code verifier, and
  * where to return afterwards — has to survive the round trip to the identity
- * provider. The client's default {@link MemoryAuthRequestStorage} keeps it in
- * the process that started the flow, which breaks on any platform that spreads
- * requests across isolates or instances: `/auth/login` stores the record on one
- * and `/auth/callback` looks for it on another, so sign-in fails intermittently
- * with `unknown state parameter`.
+ * provider. {@link MemoryAuthRequestStorageFactory} keeps it in the process
+ * that started the flow, which breaks on any platform that spreads requests
+ * across isolates or instances: `/auth/login` stores the record on one and
+ * `/auth/callback` looks for it on another, so sign-in fails intermittently
+ * with `unknown state parameter`. `HonoBff` therefore has no default; the
+ * caller chooses.
  *
  * {@link EncryptedCookieAuthRequestStorage} carries the record in an encrypted
  * cookie instead (AES-GCM under a server-held secret, the same construction
@@ -18,7 +19,7 @@
  * **Which storage you pick is a reliability decision, not a security one.**
  * Server-side storage on its own says a `state` is pending somewhere — never
  * that *this* browser is the one that started it, so a process-wide store like
- * the memory default would otherwise let anyone's browser complete anyone
+ * {@link MemoryAuthRequestStorageFactory} would otherwise let anyone's browser complete anyone
  * else's pending sign-in (login CSRF). {@link HonoBff} closes that separately
  * and unconditionally: `/auth/login` also binds the `state` to the browser in
  * a short-lived cookie that `/auth/callback` requires, whichever storage is
@@ -30,9 +31,11 @@
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
-import type {
-  AuthRequestRecord,
-  AuthRequestStorage,
+import {
+  type AuthRequestRecord,
+  type AuthRequestStorage,
+  MemoryAuthRequestStorage,
+  type MemoryAuthRequestStorageOptions,
 } from "../../../client/mod.ts";
 import { deriveAesKey, sealJson, unsealJson } from "../../../utils/crypto.ts";
 import {
@@ -149,8 +152,10 @@ function cookieAttributes(
  * {@link HonoBffOptions.authRequestStorage} takes one of these rather than a
  * bare storage because a cookie-backed store can only read and write through
  * the request's {@link Context}. Pass an
- * {@link EncryptedCookieAuthRequestStorage}, or implement `forRequest` over
- * storage of your own.
+ * {@link EncryptedCookieAuthRequestStorage}, a
+ * {@link MemoryAuthRequestStorageFactory} for a single process, or implement
+ * `forRequest` over storage every instance shares. A storage that needs no
+ * request context is wrapped as `{ forRequest: () => storage }`.
  */
 export interface AuthRequestStorageFactory {
   /** Returns the storage bound to `c`, for the duration of that request. */
@@ -163,7 +168,7 @@ export interface AuthRequestStorageFactory {
  * `/auth/callback` need not be served by the same instance.
  *
  * Reach for it whenever the BFF runs on more than one isolate or instance —
- * the client's default in-memory storage fails those deployments with
+ * {@link MemoryAuthRequestStorageFactory} fails those deployments with
  * `unknown state parameter`. The AES key is derived on first use and shared by
  * every later request.
  *
@@ -318,4 +323,54 @@ export function encryptedCookieAuthRequestStorage(
   options: EncryptedCookieAuthRequestStorageOptions,
 ): EncryptedCookieAuthRequestStorage {
   return new EncryptedCookieAuthRequestStorage(options);
+}
+
+/**
+ * In-process {@link AuthRequestStorageFactory}: every request shares one
+ * {@link MemoryAuthRequestStorage}, so a sign-in completes only on the process
+ * that started it.
+ *
+ * Pass it explicitly for a single long-lived process, tests and local
+ * development. A deployment that can serve `/auth/login` and `/auth/callback`
+ * from different instances or isolates fails sign-in with it, intermittently,
+ * with an unknown `state`; use {@link EncryptedCookieAuthRequestStorage} or a
+ * factory over shared storage there. The options are
+ * {@link MemoryAuthRequestStorage}'s: records older than `ttlMs` (10 minutes
+ * by default) are pruned and at most `maxEntries` (1000 by default) are held.
+ *
+ * @example
+ * ```ts
+ * import {
+ *   HonoBff,
+ *   MemoryAuthRequestStorageFactory,
+ *   MemorySessionStore,
+ * } from "@udibo/oauth2/hono/bff";
+ * import { DirectClient } from "@udibo/oauth2/client";
+ *
+ * const bff = new HonoBff({
+ *   client: new DirectClient({
+ *     clientId: "local-app",
+ *     clientSecret: "dev-secret",
+ *     issuer: "http://localhost:8000",
+ *   }),
+ *   sessionStore: new MemorySessionStore(),
+ *   authRequestStorage: new MemoryAuthRequestStorageFactory(),
+ * });
+ * ```
+ */
+export class MemoryAuthRequestStorageFactory implements AuthRequestStorageFactory {
+  readonly #storage: MemoryAuthRequestStorage;
+
+  /**
+   * @throws {RangeError} When `maxEntries` is neither a positive integer nor
+   * `Infinity`.
+   */
+  constructor(options: MemoryAuthRequestStorageOptions = {}) {
+    this.#storage = new MemoryAuthRequestStorage(options);
+  }
+
+  /** Returns the process-wide storage; `c` is not consulted. */
+  forRequest(_c: Context): AuthRequestStorage {
+    return this.#storage;
+  }
 }

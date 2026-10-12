@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { rejection } from "./_test_assert.ts";
 import { Hono } from "hono";
+import { MemoryAuthRequestStorageFactory } from "./adapters/hono/bff/auth-request-store.ts";
 import { HonoBff } from "./adapters/hono/bff/bff.ts";
 import { IdentityService } from "./identity/service.ts";
 import type {
@@ -336,6 +337,7 @@ it("release: backchannel logout wins against an in-flight BFF refresh", async ()
   const bff = new HonoBff({
     client,
     sessionStore: store,
+    authRequestStorage: new MemoryAuthRequestStorageFactory(),
     cookie: { secure: false },
     backchannelLogout: { verifyLogoutToken: () => ({ sub: "victim" }) },
   });

@@ -82,7 +82,8 @@ if (isPublicSuffix("com") !== true) {
 
 const { BffClient } = await import("@udibo/oauth2/client");
 const { DirectClient } = await import("@udibo/oauth2/client");
-const { HonoBff } = await import("@udibo/oauth2/hono/bff");
+const { HonoBff, MemoryAuthRequestStorageFactory, MemorySessionStore } =
+  await import("@udibo/oauth2/hono/bff");
 for (const options of [
   { forwardedParams: ["__proto__"] },
   { extraParams: { ["__proto__"]: "configured" } },
@@ -95,7 +96,12 @@ for (const options of [
       token: "https://issuer.example.com/token",
     },
   });
-  const bff = new HonoBff({ client, ...options });
+  const bff = new HonoBff({
+    client,
+    sessionStore: new MemorySessionStore(),
+    authRequestStorage: new MemoryAuthRequestStorageFactory(),
+    ...options,
+  });
   const app = new Hono().route("/auth", bff.routes());
   const response = await app.request(
     "https://app.example.com/auth/login?__proto__=configured",

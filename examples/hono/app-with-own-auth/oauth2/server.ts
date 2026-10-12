@@ -24,7 +24,11 @@
  */
 
 import { HonoAuthorizationServer } from "@udibo/oauth2/hono/authorization-server";
-import { HonoBff } from "@udibo/oauth2/hono/bff";
+import {
+  HonoBff,
+  MemoryAuthRequestStorageFactory,
+  MemorySessionStore,
+} from "@udibo/oauth2/hono/bff";
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
 import { DirectClient } from "@udibo/oauth2/client";
 import {
@@ -181,6 +185,8 @@ export const resourceServer = new HonoResourceServer<DemoClient, DemoUser>({
 
 export const bff = new HonoBff({
   client: oauthClient,
+  sessionStore: new MemorySessionStore(),
+  authRequestStorage: new MemoryAuthRequestStorageFactory(),
   resourceServer,
   defaultReturnTo: "/",
   scope: "read write admin",
