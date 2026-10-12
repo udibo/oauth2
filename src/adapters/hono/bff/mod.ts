@@ -4,7 +4,12 @@
  * Exposes a {@link HonoBff} class that wraps an
  * `DirectClient` constructed with a client secret, plus the
  * {@link SessionStore} contract and two ready-to-use implementations
- * ({@link MemorySessionStore}, {@link EncryptedCookieSessionStore}).
+ * ({@link MemorySessionStore}, {@link EncryptedCookieSessionStore}), and the
+ * {@link AuthRequestStorageFactory} contract with two of its own
+ * ({@link MemoryAuthRequestStorageFactory},
+ * {@link EncryptedCookieAuthRequestStorage}). `HonoBff` requires one of each:
+ * the encrypted-cookie pair works across instances with no shared server, and
+ * the memory pair serves a single process, tests and local development.
  *
  * Need a server-side store (Postgres, Redis, …)? Implement the
  * {@link SessionStore} interface and verify it with
@@ -30,6 +35,7 @@ export {
   EncryptedCookieAuthRequestStorage,
   encryptedCookieAuthRequestStorage,
   type EncryptedCookieAuthRequestStorageOptions,
+  MemoryAuthRequestStorageFactory,
 } from "./auth-request-store.ts";
 export {
   DEFAULT_PROXY_FORWARD_HEADERS,

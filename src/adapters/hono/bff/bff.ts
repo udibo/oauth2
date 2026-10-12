@@ -92,7 +92,6 @@ import {
 } from "./cookie-prefix.ts";
 import {
   DEFAULT_SESSION_MAX_AGE_MS,
-  MemorySessionStore,
   type SessionData,
   type SessionStore,
   sessionStoreMaxAgeMs,
@@ -381,10 +380,21 @@ export interface HonoBffOptions {
    */
   client: DirectClient;
   /**
-   * Where session data lives. Defaults to {@link MemorySessionStore},
-   * which is fine for dev and tests but must be replaced for production.
+   * Where session data lives. Required, because the right store depends on
+   * how many instances serve the app:
+   *
+   * - {@link EncryptedCookieSessionStore} keeps the session in an encrypted
+   *   cookie, so every instance that shares its secret can read it and no
+   *   server-side store is needed. It cannot list sessions, so it does not
+   *   support {@link HonoBffOptions.backchannelLogout}.
+   * - A {@link SessionStore} over a database or cache every instance shares,
+   *   for server-side revocation and back-channel logout. Check it with
+   *   `runSessionStoreContractTests`.
+   * - {@link MemorySessionStore} for a single process, tests and local
+   *   development. A session it holds is unknown to every other instance, so
+   *   behind a load balancer the user appears signed out.
    */
-  sessionStore?: SessionStore;
+  sessionStore: SessionStore;
   /**
    * How long a BFF session is meant to live, in milliseconds. Defaults to 14
    * days ({@link DEFAULT_SESSION_MAX_AGE_MS}). Milliseconds match the store's
@@ -416,19 +426,25 @@ export interface HonoBffOptions {
   sessionMaxAgeMs?: number;
   /**
    * Where the pending authorization request (`state` → PKCE verifier,
-   * return-to) lives, resolved per request. Defaults to the client's
-   * configured `authRequestStorage`, which is in-memory unless the client was
-   * given something else — fine for a single long-lived process, wrong for any
-   * platform that can serve `/auth/login` and `/auth/callback` from different
-   * isolates. Pass an {@link EncryptedCookieAuthRequestStorage} to carry the
-   * record in an encrypted cookie instead, or implement
-   * {@link AuthRequestStorageFactory} over storage of your own.
+   * return-to) lives, resolved per request. Required, because `/auth/login`
+   * and `/auth/callback` can be served by different instances or isolates.
+   * The BFF always uses this, never the client's own `authRequestStorage`.
+   *
+   * - {@link EncryptedCookieAuthRequestStorage} carries the record in an
+   *   encrypted cookie, so any instance sharing its secret completes the
+   *   sign-in with no server-side store.
+   * - An {@link AuthRequestStorageFactory} over storage every instance shares;
+   *   wrap a context-free `AuthRequestStorage` as
+   *   `{ forRequest: () => storage }`.
+   * - {@link MemoryAuthRequestStorageFactory} for a single process, tests and
+   *   local development. A callback that reaches another instance fails with
+   *   an unknown `state`.
    *
    * Whatever this resolves to, the pending request is **also** bound to the
    * browser that started it by the login-state cookie, which no option turns
    * off. See {@link loginStateTtlMs}.
    */
-  authRequestStorage?: AuthRequestStorageFactory;
+  authRequestStorage: AuthRequestStorageFactory;
   /**
    * How long, in ms, the browser keeps the login-state cookie `/auth/login`
    * sets and `/auth/callback` requires — the `Max-Age` on that cookie, and so
@@ -562,8 +578,16 @@ export interface HonoBffOptions {
    * @example Pin every sign-in to one organization
    * ```ts
    * declare const client: DirectClient;
+   * declare const stores: Pick<
+   *   HonoBffOptions,
+   *   "sessionStore" | "authRequestStorage"
+   * >;
    *
-   * const bff = new HonoBff({ client, extraParams: { organization: "acme" } });
+   * const bff = new HonoBff({
+   *   client,
+   *   ...stores,
+   *   extraParams: { organization: "acme" },
+   * });
    * ```
    */
   extraParams?: Record<string, string>;
@@ -629,8 +653,16 @@ export interface HonoBffOptions {
    * @example Let a sign-in link choose the organization
    * ```ts
    * declare const client: DirectClient;
+   * declare const stores: Pick<
+   *   HonoBffOptions,
+   *   "sessionStore" | "authRequestStorage"
+   * >;
    *
-   * const bff = new HonoBff({ client, forwardedParams: ["organization"] });
+   * const bff = new HonoBff({
+   *   client,
+   *   ...stores,
+   *   forwardedParams: ["organization"],
+   * });
    * ```
    *
    * A link to `/auth/login?organization=acme&return_to=/dashboard` then
@@ -1004,6 +1036,35 @@ function loginStateCookieOpts(
   };
 }
 
+const MISSING_SESSION_STORE =
+  "HonoBff requires options.sessionStore. Pass EncryptedCookieSessionStore " +
+  "to keep sessions in an encrypted cookie any instance can read, a " +
+  "SessionStore over a database or cache every instance shares, or " +
+  "MemorySessionStore for a single process, tests and local development.";
+
+const MISSING_AUTH_REQUEST_STORAGE =
+  "HonoBff requires options.authRequestStorage. Pass " +
+  "EncryptedCookieAuthRequestStorage to keep pending sign-ins in an " +
+  "encrypted cookie any instance can read, an AuthRequestStorageFactory " +
+  "over storage every instance shares, or MemoryAuthRequestStorageFactory " +
+  "for a single process, tests and local development.";
+
+function assertStoresConfigured(options: Partial<HonoBffOptions>): void {
+  const missing = [
+    ...(options.sessionStore ? [] : [MISSING_SESSION_STORE]),
+    ...(options.authRequestStorage ? [] : [MISSING_AUTH_REQUEST_STORAGE]),
+  ];
+  if (missing.length > 0) throw new TypeError(missing.join(" "));
+  if (typeof options.authRequestStorage?.forRequest !== "function") {
+    throw new TypeError(
+      "HonoBff options.authRequestStorage must be an " +
+        "AuthRequestStorageFactory, an object whose forRequest(c) returns the " +
+        "storage for that request. Wrap an AuthRequestStorage that needs no " +
+        "request context as { forRequest: () => storage }.",
+    );
+  }
+}
+
 /**
  * Backend-for-Frontend adapter for Hono. Construct once per app, mount
  * `routes()` under `/auth`, and use `attachToken()` as middleware on
@@ -1029,9 +1090,12 @@ export class HonoBff {
   readonly #refreshes = new Map<string, Promise<RefreshOutcome>>();
 
   /**
-   * Defaults are applied for the session store ({@linkcode MemorySessionStore}),
-   * session mode (`"own"`), cookie name, and CSRF.
+   * Defaults are applied for session mode (`"own"`), cookie name, and CSRF.
+   * The session store and auth-request storage have no default.
    *
+   * @throws {TypeError} When {@linkcode HonoBffOptions.sessionStore} or
+   * {@linkcode HonoBffOptions.authRequestStorage} is missing, or when
+   * `authRequestStorage` has no `forRequest` method.
    * @throws {Error} When {@linkcode HonoBffOptions.backchannelLogout} is
    * configured against a store that cannot enumerate sessions (e.g.
    * {@linkcode EncryptedCookieSessionStore}), when an explicit
@@ -1057,9 +1121,10 @@ export class HonoBff {
    * {@linkcode HonoBffOptions.scope} is also set.
    */
   constructor(options: HonoBffOptions) {
+    assertStoresConfigured(options);
     this.#options = options;
     this.#client = options.client;
-    this.#store = options.sessionStore ?? new MemorySessionStore();
+    this.#store = options.sessionStore;
     this.#paths = resolvePaths(options.paths, {
       backchannelMounted: options.backchannelLogout !== undefined,
     });
@@ -1411,7 +1476,7 @@ export class HonoBff {
         prompt: requested.prompt,
         extraParams: requested.extraParams,
         redirectUri: this.#derivedRedirectUri(c, origin),
-        authRequestStorage: this.#options.authRequestStorage?.forRequest(c),
+        authRequestStorage: this.#options.authRequestStorage.forRequest(c),
       });
       this.#writeLoginStateHashes(c, [
         ...this.#loginStateHashes(c),
@@ -1479,7 +1544,7 @@ export class HonoBff {
           await this.#client.exchangeAuthorizationCode(code, state, {
             origin,
             redirectUri: this.#derivedRedirectUri(c, origin),
-            authRequestStorage: this.#options.authRequestStorage?.forRequest(c),
+            authRequestStorage: this.#options.authRequestStorage.forRequest(c),
           });
 
         let user: UserInfoClaims | null = null;

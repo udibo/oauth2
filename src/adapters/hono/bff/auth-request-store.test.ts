@@ -22,6 +22,7 @@ import {
   EncryptedCookieAuthRequestStorage,
   encryptedCookieAuthRequestStorage,
   type EncryptedCookieAuthRequestStorageOptions,
+  MemoryAuthRequestStorageFactory,
 } from "./auth-request-store.ts";
 import { HonoBff } from "./bff.ts";
 import { EncryptedCookieSessionStore } from "./session-store.ts";
@@ -450,14 +451,12 @@ async function buildFixture() {
       cookie: { secure: false },
       csrf: false,
       sessionStore: new EncryptedCookieSessionStore({ secret: SECRET }),
-      ...(options.statelessAuthRequests
-        ? {
-            authRequestStorage: new EncryptedCookieAuthRequestStorage({
-              secret: SECRET,
-              cookie: { secure: false },
-            }),
-          }
-        : {}),
+      authRequestStorage: options.statelessAuthRequests
+        ? new EncryptedCookieAuthRequestStorage({
+            secret: SECRET,
+            cookie: { secure: false },
+          })
+        : new MemoryAuthRequestStorageFactory(),
     });
     const app = new Hono();
     app.route("/auth", bff.routes());

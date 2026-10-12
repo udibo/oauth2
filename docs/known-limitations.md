@@ -59,6 +59,17 @@ your framework (for example Hono's `bodyLimit` middleware) or your reverse
 proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
 refused before any authentication work.
 
+## BFF storage across instances
+
+`HonoBff` requires `sessionStore` and `authRequestStorage` and has no default
+for either; constructing it without one throws a `TypeError` naming the option.
+The memory stores, `MemorySessionStore` and `MemoryAuthRequestStorageFactory`,
+must be chosen explicitly and serve one process only: behind a load balancer a
+session created on one instance is unknown on the others, so the user appears
+signed out, and a sign-in whose callback reaches another instance fails. See
+[choosing the BFF's stores](guides/production-deployment.md#choosing-the-bffs-stores)
+for which store fits which deployment.
+
 ## Pending sign-in limits
 
 Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
@@ -71,8 +82,10 @@ so the package bounds what each start can cost:
   (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
   `maxReturnToLength`); `Infinity` removes it.
 - **`MemoryAuthRequestStorage` holds at most 1000 records.** This is the client's
-  default outside a browser, and the BFF's unless you configure
-  `authRequestStorage`. A write beyond the cap evicts the oldest-written record,
+  default outside a browser, and what `MemoryAuthRequestStorageFactory` gives
+  the BFF. It keeps pending sign-ins in one process, so a callback served by
+  another instance fails with an unknown `state`; use it only for a single
+  process, tests and local development. A write beyond the cap evicts the oldest-written record,
   so memory stays bounded however many starts arrive. Raise or lower it with
   `maxEntries`. The cap protects memory, not sign-in: a burst of anonymous starts
   evicts real users' pending sign-ins, and their callbacks then fail with an

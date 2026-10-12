@@ -172,19 +172,20 @@ The demo shortcuts to replace before shipping:
 - Swap the `Memory*Service` stores (`server/oauth2/server.ts`) and the in-memory
   session `Map` (`server/sessions.ts`) for persistent implementations —
   `@udibo/oauth2/testing/contract` has conformance tests for yours.
-- **The BFF session store.** `HonoBff` defaults to `MemorySessionStore`,
-  separate from the issuer's login `Map` in `sessions.ts`. Configure its
-  `sessionStore` in `server/oauth2/server.ts` for restarts and multiple
-  instances. Choose a shared stateful store, or `EncryptedCookieSessionStore`
-  when its
+- **The BFF session store.** `server/oauth2/server.ts` passes `HonoBff` a
+  `MemorySessionStore`, separate from the issuer's login `Map` in
+  `sessions.ts`, so a restart signs everyone out and a second instance does
+  not know the sessions the first holds. Replace it with a shared stateful
+  store, or `EncryptedCookieSessionStore` when its
   [revocation and cookie limits](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#cookies-and-sessions)
   suit your app.
-- **Pending browser login.** The server's `DirectClient` defaults to
-  `MemoryAuthRequestStorage` for pending `state` and PKCE verifier records.
-  Configure the BFF's `authRequestStorage` factory or the client's storage so
-  login and callback can use the same record across restarts and instances. See
+- **Pending browser login.** The BFF's `authRequestStorage` is a
+  `MemoryAuthRequestStorageFactory`, which keeps each pending `state` and PKCE
+  verifier in this process, so a callback that reaches another instance fails.
+  Replace it with `EncryptedCookieAuthRequestStorage` or a factory over shared
+  storage. See
   [environment configuration](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md)
-  for shared storage and encrypted pending-login cookie options.
+  for both options.
 - Set `OAUTH2_CLIENT_SECRET` — the app refuses to start in production without
   it, since the development fallback is public in the template source.
 - Wire a real mailer into `server/oauth2/identity.ts`, and add rate limiting on

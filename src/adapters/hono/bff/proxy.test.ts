@@ -3,6 +3,7 @@ import { Hono } from "hono";
 
 import { DirectClient } from "../../../client/mod.ts";
 
+import { MemoryAuthRequestStorageFactory } from "./auth-request-store.ts";
 import { HonoBff, type HonoBffOptions } from "./bff.ts";
 import {
   DEFAULT_PROXY_FORWARD_HEADERS,
@@ -111,6 +112,8 @@ function makeBff(idp: Idp, overrides: Partial<HonoBffOptions> = {}): HonoBff {
       },
       fetch: idp.fetch,
     }),
+    sessionStore: new MemorySessionStore(),
+    authRequestStorage: new MemoryAuthRequestStorageFactory(),
     cookie: { secure: false },
     ...overrides,
   });

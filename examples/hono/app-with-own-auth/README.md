@@ -106,11 +106,15 @@ on a free port.
   with DB-backed implementations of the corresponding interfaces. The contract
   test runners in `@udibo/oauth2/testing/contract` will verify your
   implementations conform.
-- **Replace `MemorySessionStore`** with a persistent store. The only persistent
-  store that ships is `EncryptedCookieSessionStore` (stateless, AES-GCM cookie,
-  in `@udibo/oauth2/hono/bff`). For a server-side store (Redis, Postgres, …),
-  implement the exported `SessionStore` interface —
-  `runSessionStoreContractTests` verifies your implementation conforms.
+- **Replace the BFF's `MemorySessionStore` and
+  `MemoryAuthRequestStorageFactory`**, which keep sessions and pending sign-ins
+  in this one process. The stateless choices that ship are
+  `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage`
+  (AES-GCM cookies, in `@udibo/oauth2/hono/bff`): every instance that shares
+  the secret can read them. For server-side storage (Redis, Postgres, …),
+  implement `SessionStore` and `AuthRequestStorageFactory` —
+  `runSessionStoreContractTests` and `runAuthRequestStorageContractTests`
+  verify your implementations conform.
 - **Remove the `secure: false` cookie overrides** — the BFF cookie defaults to
   `secure: true`, and the `idp_session` cookie in `sessions.ts` also hardcodes
   `secure: false`. The example sets `false` only so it works over local HTTP;

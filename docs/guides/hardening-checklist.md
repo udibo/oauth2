@@ -20,6 +20,12 @@ sections apply only when you host those flows.
 
 - [ ] HTTPS cookie and CSRF defaults are enabled; custom browser requests send
       the CSRF header.
+- [ ] The BFF's `sessionStore` and `authRequestStorage` work on every instance
+      that serves the app: encrypted-cookie stores with a shared secret, or
+      stores over shared storage. `MemorySessionStore` and
+      `MemoryAuthRequestStorageFactory` appear only in single-process, test and
+      local configurations. See
+      [choosing the BFF's stores](production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.
 - [ ] Pending sign-ins are bounded. A multi-instance or internet-facing BFF
