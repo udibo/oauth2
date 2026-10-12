@@ -1,3 +1,25 @@
+## [0.17.0](https://github.com/udibo/oauth2/compare/0.16.0...0.17.0) (2026-10-12)
+
+### ⚠ BREAKING CHANGES
+
+* `HonoBffOptions.sessionStore` and
+`HonoBffOptions.authRequestStorage` are required, and `HonoBff` no
+longer falls back to the client's `authRequestStorage`. For the old
+single-process behavior pass `sessionStore: new MemorySessionStore()`
+and `authRequestStorage: new MemoryAuthRequestStorageFactory()`. With
+more than one instance pass `EncryptedCookieSessionStore` and
+`EncryptedCookieAuthRequestStorage` with a secret every instance shares
+(sign-out cannot invalidate a copied session cookie before its
+`maxAgeMs`), or stores over shared storage when you need revocation. A
+`forRequest` that returns no storage now fails the sign-in instead of
+falling back. If the `DirectClient` was given its own
+`authRequestStorage`, pass it to the BFF as `authRequestStorage: {
+forRequest: () => storage }`.
+
+### Features
+
+* require HonoBff's session and auth-request stores ([#99](https://github.com/udibo/oauth2/issues/99)) ([6bcb570](https://github.com/udibo/oauth2/commit/6bcb5709ee6252458c6facb7729fc2f21f22c403)), closes [#94](https://github.com/udibo/oauth2/issues/94) [#95](https://github.com/udibo/oauth2/issues/95) [#96](https://github.com/udibo/oauth2/issues/96) [#97](https://github.com/udibo/oauth2/issues/97) [#98](https://github.com/udibo/oauth2/issues/98) [#93](https://github.com/udibo/oauth2/issues/93)
+
 ## [0.16.0](https://github.com/udibo/oauth2/compare/0.15.2...0.16.0) (2026-10-12)
 
 ### ⚠ BREAKING CHANGES
