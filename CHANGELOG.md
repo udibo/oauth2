@@ -1,3 +1,23 @@
+## [0.16.0](https://github.com/udibo/oauth2/compare/0.15.2...0.16.0) (2026-10-12)
+
+### ⚠ BREAKING CHANGES
+
+* `safeReturnTo`, `HonoBff` and `loginContinuation` cap
+`return_to` at 2048 UTF-16 code units by default (`maxReturnToLength` /
+`maxLength` to change it); `MemoryAuthRequestStorage` holds at most 1000
+records (`maxEntries`); `EncryptedCookieAuthRequestStorage` rejects a
+`maxPending` that is not a positive integer; with `rpInitiatedLogout`, a
+configured `redirectUri` and no `resolveOrigin`,
+`post_logout_redirect_uri` uses the `redirectUri`'s origin instead of
+the request's, so a BFF serving several hosts needs `resolveOrigin` or
+`deriveRedirectUri`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Bug Fixes
+
+* bound pending sign-ins and use the app origin behind TLS proxies ([#92](https://github.com/udibo/oauth2/issues/92)) ([5ec0376](https://github.com/udibo/oauth2/commit/5ec0376e385e3400a4e302d0304704b79a4293d6)), closes [#91](https://github.com/udibo/oauth2/issues/91)
+
 ## [0.15.2](https://github.com/udibo/oauth2/compare/0.15.1...0.15.2) (2026-10-12)
 
 ### Bug Fixes
