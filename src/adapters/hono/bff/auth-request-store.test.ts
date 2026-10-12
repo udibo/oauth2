@@ -179,6 +179,33 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     );
   });
 
+  it("never drops the record being written, even when another instance's clock stamped an existing one later", async () => {
+    const now = Date.now();
+    const longReturnTo = `/${"a".repeat(2047)}`;
+    const cookie = await seal(app, [
+      ["skewed", record({ returnTo: longReturnTo, createdAt: now + 60_000 })],
+      ["current", record({ returnTo: longReturnTo, createdAt: now })],
+    ]);
+
+    expect((await readBack(app, cookie, "current"))?.returnTo).toBe(
+      longReturnTo,
+    );
+    expect(await readBack(app, cookie, "skewed")).toStrictEqual(null);
+
+    const single = storageApp({
+      secret: SECRET,
+      cookie: { secure: false },
+      maxPending: 1,
+    });
+    const singleCookie = await seal(single, [
+      ["skewed", record({ createdAt: now + 60_000 })],
+      ["current", record({ createdAt: now })],
+    ]);
+    expect((await readBack(single, singleCookie, "current"))?.createdAt).toBe(
+      now,
+    );
+  });
+
   it("refuses a maxPending that is not a positive integer", () => {
     for (const maxPending of [0, -1, 1.5, Number.NaN]) {
       expect(

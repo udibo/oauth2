@@ -112,7 +112,8 @@ export interface EncryptedCookieAuthRequestStorageOptions {
    * would fail. Defaults to 3; the oldest is dropped beyond that, and also
    * whenever keeping it would push the sealed cookie past what every browser
    * stores (about 4 KB), since a browser silently drops an oversized cookie
-   * and every pending sign-in in it with it. Must be a positive integer.
+   * and every pending sign-in in it with it. The sign-in being started is
+   * never the one dropped. Must be a positive integer.
    */
   maxPending?: number;
 }
@@ -239,9 +240,17 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
     );
   }
 
-  async #write(c: Context, pending: PendingRequests): Promise<void> {
+  async #write(
+    c: Context,
+    pending: PendingRequests,
+    keep?: string,
+  ): Promise<void> {
     const entries = Object.entries(pending)
-      .sort(([, a], [, b]) => b.createdAt - a.createdAt)
+      .sort(
+        ([stateA, a], [stateB, b]) =>
+          Number(stateB === keep) - Number(stateA === keep) ||
+          b.createdAt - a.createdAt,
+      )
       .slice(0, this.#maxPending);
 
     if (entries.length === 0) {
@@ -279,7 +288,7 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
       set: async (state: string, value: AuthRequestRecord): Promise<void> => {
         const pending = await this.#read(c);
         pending[state] = value;
-        await this.#write(c, pending);
+        await this.#write(c, pending, state);
       },
       delete: async (state: string): Promise<void> => {
         const pending = await this.#read(c);
