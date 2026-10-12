@@ -387,7 +387,9 @@ export interface HonoBffOptions {
    * - {@link EncryptedCookieSessionStore} keeps the session in an encrypted
    *   cookie, so every instance that shares its secret can read it and no
    *   server-side store is needed. It cannot list sessions, so it does not
-   *   support {@link HonoBffOptions.backchannelLogout}.
+   *   support {@link HonoBffOptions.backchannelLogout}, and sign-out cannot
+   *   invalidate a copied cookie: it stays valid until its `maxAgeMs`. Use a
+   *   shared {@link SessionStore} when you need revocation.
    * - A {@link SessionStore} over a database or cache every instance shares,
    *   for server-side revocation and back-channel logout. Check it with
    *   `runSessionStoreContractTests`.
@@ -1039,7 +1041,8 @@ function loginStateCookieOpts(
 
 const MISSING_SESSION_STORE =
   "HonoBff requires options.sessionStore. Pass EncryptedCookieSessionStore " +
-  "to keep sessions in an encrypted cookie any instance can read, a " +
+  "to keep sessions in an encrypted cookie any instance can read (sign-out " +
+  "cannot revoke a copied cookie), a " +
   "SessionStore over a database or cache every instance shares, or " +
   "MemorySessionStore for a single process, tests and local development.";
 

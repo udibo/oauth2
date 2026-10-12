@@ -24,7 +24,9 @@ sections apply only when you host those flows.
       that serves the app: encrypted-cookie stores with a shared secret, or
       stores over shared storage. `MemorySessionStore` and
       `MemoryAuthRequestStorageFactory` appear only in single-process, test and
-      local configurations. See
+      local configurations. If sign-out must revoke a stolen session cookie,
+      use a shared `SessionStore`: `EncryptedCookieSessionStore` keeps a copied
+      cookie valid until its `maxAgeMs`. See
       [choosing the BFF's stores](production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.

@@ -133,7 +133,8 @@ in
   the others (the user appears signed out) and a callback served elsewhere
   fails with `unknown state parameter`. For more than one instance, pass
   `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage` with a
-  secret every instance shares (stateless, in `@udibo/oauth2/hono/bff`), or a
+  secret every instance shares (stateless, in `@udibo/oauth2/hono/bff`; sign-out
+  cannot invalidate a copied session cookie before its `maxAgeMs`), or a
   `SessionStore` and an `AuthRequestStorageFactory` over a database or cache
   every instance shares, verified with `runSessionStoreContractTests` and
   `runAuthRequestStorageContractTests`.
