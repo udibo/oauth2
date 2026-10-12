@@ -14,6 +14,13 @@
 export const DEFAULT_MAX_BODY_BYTES: number = 64 * 1024;
 
 /**
+ * The default cap on a form body searched for an RFC 6750 §2.2
+ * `access_token`: 16 KiB, Node's default limit on a request's whole header
+ * block, so any token a client could send as `Authorization: Bearer` fits.
+ */
+export const DEFAULT_MAX_TOKEN_BODY_BYTES: number = 16 * 1024;
+
+/**
  * Throws a `RangeError` naming `option` unless `maxBodyBytes` is a positive
  * safe integer.
  */
@@ -48,6 +55,23 @@ export async function readBoundedBody(
   const bytes = await readUpTo(body, maxBytes);
   if (!bytes && options.keepReadable) request.body.cancel().catch(() => {});
   return bytes;
+}
+
+/**
+ * Reads at most `maxBytes` of `request`'s body from a clone and returns
+ * `null` once it exceeds `maxBytes`, cancelling only the clone. The original
+ * stays readable either way, holding no more than what the clone pulled, so
+ * the caller's own handling of the body — or of its absence — is unchanged.
+ * A `Content-Length` over the cap returns `null` without reading. Rejects if
+ * the body was already read.
+ */
+export async function peekBoundedBody(
+  request: Request,
+  maxBytes: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!request.body) return new Uint8Array();
+  if (Number(request.headers.get("content-length")) > maxBytes) return null;
+  return await readUpTo(request.clone().body!, maxBytes);
 }
 
 async function readUpTo(

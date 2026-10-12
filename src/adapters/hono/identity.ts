@@ -49,6 +49,11 @@ import {
   isIdentityError,
 } from "../../identity/errors.ts";
 import type { IdentityService, IdentityUser } from "../../identity/service.ts";
+import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_BODY_BYTES,
+  readBoundedBody,
+} from "../../utils/_body.ts";
 
 /** Paths for the routes mounted by {@link honoIdentityRoutes}. */
 export interface HonoIdentityPaths {
@@ -99,6 +104,23 @@ export interface HonoIdentityOptions<User extends IdentityUser> {
    */
   csrf?: HonoIdentityCsrfOptions | false;
   /**
+   * The most bytes a route reads from a request body. Every route reads its
+   * body before anyone is authenticated, so the cap bounds what an anonymous
+   * request can make the server buffer. Bytes are counted as they arrive, so a
+   * chunked body or an understated `Content-Length` cannot get past it. A
+   * larger body is refused with `413` `{ error: "invalid_request" }` before
+   * the service is called.
+   *
+   * When a middleware mounted before these routes has already read the body
+   * (for example with `c.req.parseBody()`), the routes read Hono's parsed copy
+   * and the cap does not apply, so that middleware needs its own limit.
+   *
+   * @default 65536
+   * @throws {RangeError} From {@linkcode honoIdentityRoutes} when it is not a
+   *   positive integer.
+   */
+  maxBodyBytes?: number;
+  /**
    * Called after `signup`/`signin` authenticates a user. Your app owns what
    * happens next — create your session and return a `Response` (e.g. a redirect
    * via `bff.loginContinuation`). **Required to mount the signup/signin routes**;
@@ -118,6 +140,9 @@ function handle(fn: (c: Context) => Response | Promise<Response>): Handler {
     try {
       return await fn(c);
     } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        return c.json({ error: "invalid_request" }, 413);
+      }
       if (!isIdentityError(error)) throw error;
       if (error.retryAfterMs !== undefined) {
         c.header("Retry-After", String(Math.ceil(error.retryAfterMs / 1000)));
@@ -129,11 +154,31 @@ function handle(fn: (c: Context) => Response | Promise<Response>): Handler {
 
 const STRING_FIELDS = new Set(["password", "identifier", "email", "token"]);
 
-async function readBody(c: Context): Promise<Record<string, unknown>> {
+class BodyTooLargeError extends Error {}
+
+async function boundedBody(
+  c: Context,
+  maxBytes: number,
+): Promise<Pick<Request, "json" | "formData">> {
+  if (c.req.raw.bodyUsed) return c.req;
+  const bytes = await readBoundedBody(c.req.raw, maxBytes).catch(
+    () => new Uint8Array(),
+  );
+  if (!bytes) throw new BodyTooLargeError();
+  return new Response(bytes, {
+    headers: { "content-type": c.req.header("content-type") ?? "" },
+  });
+}
+
+async function readBody(
+  c: Context,
+  maxBytes: number,
+): Promise<Record<string, unknown>> {
   const contentType = c.req.header("content-type") ?? "";
+  const source = await boundedBody(c, maxBytes);
   if (contentType.includes("application/json")) {
     try {
-      const body = await c.req.json();
+      const body = await source.json();
       if (typeof body !== "object" || body === null || Array.isArray(body)) {
         return {};
       }
@@ -150,7 +195,7 @@ async function readBody(c: Context): Promise<Record<string, unknown>> {
     }
   }
   try {
-    const form = await c.req.formData();
+    const form = await source.formData();
     const out: Record<string, string> = {};
     for (const [key, value] of form) out[key] = String(value);
     return out;
@@ -216,13 +261,20 @@ function sameOriginGuard(options: HonoIdentityCsrfOptions): MiddlewareHandler {
  * Every mounted route sits behind the same-origin guard described in
  * {@link HonoIdentityOptions.csrf}, which is on unless you pass `csrf: false`.
  *
+ * Every route reads at most {@link HonoIdentityOptions.maxBodyBytes} of its
+ * body and answers a larger one with `413`.
+ *
  * Passwordless, MFA, and social are intentionally not mounted — see the module
  * doc for why and where to hand-wire each.
+ *
+ * @throws {RangeError} If `maxBodyBytes` is not a positive integer.
  */
 export function honoIdentityRoutes<User extends IdentityUser>(
   service: IdentityService<User>,
   options: HonoIdentityOptions<User> = {},
 ): Hono {
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  assertMaxBodyBytes(maxBodyBytes, "maxBodyBytes");
   const app = new Hono();
   const paths: Required<HonoIdentityPaths> = {
     signUp: "/signup",
@@ -241,7 +293,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
     app.post(
       paths.signUp,
       handle(async (c) => {
-        const { password, ...profile } = await readBody(c);
+        const { password, ...profile } = await readBody(c, maxBodyBytes);
         if (typeof password !== "string" || !password) {
           return c.json({ error: "invalid_request" }, 400);
         }
@@ -253,7 +305,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
     app.post(
       paths.signIn,
       handle(async (c) => {
-        const body = await readBody(c);
+        const body = await readBody(c, maxBodyBytes);
         const user = await service.signIn({
           identifier: String(body.identifier ?? ""),
           password: String(body.password ?? ""),
@@ -267,7 +319,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
   app.post(
     paths.requestPasswordReset,
     handle(async (c) => {
-      const body = await readBody(c);
+      const body = await readBody(c, maxBodyBytes);
       await service.requestPasswordReset(String(body.email ?? ""));
       return c.json({ ok: true });
     }),
@@ -276,7 +328,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
   app.post(
     paths.resetPassword,
     handle(async (c) => {
-      const body = await readBody(c);
+      const body = await readBody(c, maxBodyBytes);
       const result = await service.resetPassword({
         token: String(body.token ?? ""),
         password: String(body.password ?? ""),
@@ -290,7 +342,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
   app.post(
     paths.verifyEmail,
     handle(async (c) => {
-      const body = await readBody(c);
+      const body = await readBody(c, maxBodyBytes);
       const result = await service.verifyEmail(String(body.token ?? ""));
       if (result.status === "success") {
         return c.json({ ok: true, userId: result.userId });

@@ -22,8 +22,9 @@ credentials, request bodies, or raw callback URLs.
 The package caps the bodies it reads before authenticating the caller. Each read
 counts bytes as they arrive and stops at the cap, whatever the `Content-Length`
 header claims, and a body with no `Content-Length` (chunked) is counted the same
-way. Both caps default to 64 KiB, far above the largest legitimate field, a JWT
-of a few KiB.
+way. The caps default to 64 KiB, far above the largest legitimate field, a JWT
+of a few KiB, except the resource server's token search, which defaults to
+16 KiB.
 
 - **`AuthorizationServer`** caps the token, revocation, introspection, device
   authorization and end-session endpoints with `maxBodyBytes`. An oversized body
@@ -37,13 +38,26 @@ of a few KiB.
   a middleware mounted before the receiver has already read the body (for
   example with `c.req.parseBody()`), the receiver reads Hono's parsed copy and
   the cap does not apply, so that middleware needs its own limit.
+- **`ResourceServer`** (and so `protect()`, `authenticate()` and an
+  `AuthorizationServer`'s userinfo endpoint) looks for an RFC 6750 §2.2
+  `access_token` in a form-encoded `POST` body when the request carries no
+  bearer `Authorization` header. It reads at most `maxTokenBodyBytes` (16 KiB,
+  Node's default limit on a request's whole header block) from a copy of the
+  body. A larger body is not searched: the request counts as carrying no token,
+  so `protect()` answers `401`, and the rest of the body is left unread for the
+  route. Send the token in the `Authorization` header from any client whose form
+  bodies are larger.
+- **`honoIdentityRoutes`** caps the sign-up, sign-in, password-reset and
+  email-verification bodies with `maxBodyBytes`. An oversized body gets `413`
+  with `error: "invalid_request"` before the identity service is called. As with
+  the back-channel receiver, a middleware that already read the body leaves the
+  routes Hono's parsed copy, uncapped.
 
-Other body reads are not capped by the package. When a request carries no bearer
-`Authorization` header, `ResourceServer` reads a form-encoded `POST` body in
-full to look for an `access_token` parameter, and `honoIdentityRoutes` reads
-JSON and form bodies for sign-in, registration and the other identity flows. Put
-a request-size limit in front of those routes, in your framework (for example
-Hono's `bodyLimit` middleware) or your reverse proxy.
+The caps bound what the package reads, not what your own routes read. A route
+behind `protect()` that parses its body still needs a request-size limit, in
+your framework (for example Hono's `bodyLimit` middleware) or your reverse
+proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
+refused before any authentication work.
 
 ## Deliberate deviations (stricter than spec)
 

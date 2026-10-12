@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
 import type { DeliveryMessage } from "../../identity/delivery.ts";
@@ -28,6 +28,7 @@ function build(
   withAuthHook = true,
   passwordPolicy?: PasswordPolicy,
   csrf?: HonoIdentityCsrfOptions | false,
+  maxBodyBytes?: number,
 ) {
   const byId = new Map<string, TestUser>();
   const emailToId = new Map<string, string>();
@@ -89,6 +90,7 @@ function build(
         ? (c, user, action) => c.json({ action, userId: user.id })
         : undefined,
       csrf,
+      maxBodyBytes,
     }),
   );
   return { app, service, sent, profiles, verifiedCalls };
@@ -317,7 +319,7 @@ describe("honoIdentityRoutes", () => {
   });
 
   it("rejects an array password by its coerced length, before it reaches the hash", async () => {
-    const { app } = build(true, {});
+    const { app } = build(true, {}, undefined, 2 * 1024 * 1024);
     const res = await postJson(app, "/auth/signup", {
       password: Array.from({ length: 10 }, () => "a".repeat(100_000)),
       email: "arr@b.co",
@@ -489,5 +491,150 @@ describe("honoIdentityRoutes cross-site protection", () => {
     });
     expect(res.status).toStrictEqual(404);
     await res.body?.cancel();
+  });
+});
+
+const DEFAULT_LIMIT = 64 * 1024;
+const CHUNK_BYTES = 16 * 1024;
+
+/** A chunked stream of `body` that counts the bytes its reader pulls. */
+function countingStream(body: string) {
+  const bytes = new TextEncoder().encode(body);
+  const state = { pulled: 0 };
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (state.pulled >= bytes.byteLength) return controller.close();
+        const chunk = bytes.subarray(state.pulled, state.pulled + CHUNK_BYTES);
+        state.pulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, state };
+}
+
+/** A sign-up JSON body of exactly `bytes` bytes, padded in a profile field. */
+function paddedSignUp(bytes: number): string {
+  const head = '{"password":"hunter2hunter2","email":"pad@b.co","bio":"';
+  const tail = '"}';
+  return head + "a".repeat(bytes - head.length - tail.length) + tail;
+}
+
+describe("honoIdentityRoutes body limit", () => {
+  const routes = [
+    "/auth/signup",
+    "/auth/signin",
+    "/auth/password/reset-request",
+    "/auth/password/reset",
+    "/auth/email/verify",
+  ];
+
+  for (const route of routes) {
+    it(`stops reading an anonymous ${route} body at the limit and answers 413 without calling the service`, async () => {
+      const { app, profiles, sent } = build();
+      const { stream, state } = countingStream(
+        `email=a%40b.co&password=hunter2hunter2&pad=${"a".repeat(1024 * 1024)}`,
+      );
+      const res = await app.request(`http://localhost${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: stream,
+        duplex: "half",
+      } as RequestInit);
+
+      expect(res.status).toStrictEqual(413);
+      expect(await res.json()).toStrictEqual({ error: "invalid_request" });
+      assert(
+        state.pulled <= DEFAULT_LIMIT + CHUNK_BYTES,
+        `read ${state.pulled} bytes past a ${DEFAULT_LIMIT}-byte limit`,
+      );
+      expect(profiles).toStrictEqual([]);
+      expect(sent).toStrictEqual([]);
+    });
+  }
+
+  it("refuses a declared Content-Length over the limit without reading the body", async () => {
+    const { app, profiles } = build();
+    const { stream, state } = countingStream(paddedSignUp(DEFAULT_LIMIT * 4));
+    const res = await app.request("http://localhost/auth/signup", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(DEFAULT_LIMIT * 4),
+      },
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+
+    expect(res.status).toStrictEqual(413);
+    expect(state.pulled).toStrictEqual(0);
+    expect(profiles).toStrictEqual([]);
+  });
+
+  it("signs up with a body of exactly the default 64 KiB limit", async () => {
+    const { app, profiles } = build();
+    const res = await app.request("http://localhost/auth/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: paddedSignUp(DEFAULT_LIMIT),
+    });
+
+    expect(res.status).toStrictEqual(200);
+    await res.body?.cancel();
+    expect(profiles).toHaveLength(1);
+  });
+
+  it("refuses a body one byte over a configured maxBodyBytes", async () => {
+    const { app, profiles } = build(true, undefined, undefined, 1024);
+    const atLimit = await app.request("http://localhost/auth/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: paddedSignUp(1024),
+    });
+    expect(atLimit.status).toStrictEqual(200);
+    await atLimit.body?.cancel();
+
+    const over = await app.request("http://localhost/auth/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: paddedSignUp(1025),
+    });
+    expect(over.status).toStrictEqual(413);
+    await over.body?.cancel();
+    expect(profiles).toHaveLength(1);
+  });
+
+  it("reads Hono's parsed copy when a middleware already consumed the body", async () => {
+    const { service } = build();
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      await c.req.json();
+      await next();
+    });
+    app.route(
+      "/auth",
+      honoIdentityRoutes(service, {
+        onAuthenticated: (c, user, action) =>
+          c.json({ action, userId: user.id }),
+      }),
+    );
+
+    const res = await postJson(app, "/auth/signup", {
+      password: "hunter2hunter2",
+      email: "parsed@b.co",
+    });
+    expect(res.status).toStrictEqual(200);
+    expect((await res.json()).action).toStrictEqual("signUp");
+  });
+
+  it("rejects a maxBodyBytes that is not a positive integer", () => {
+    const { service } = build();
+    for (const maxBodyBytes of [0, -1, 1.5, Number.NaN]) {
+      expect(() => honoIdentityRoutes(service, { maxBodyBytes })).toThrow(
+        RangeError,
+      );
+    }
   });
 });

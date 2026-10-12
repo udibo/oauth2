@@ -35,9 +35,10 @@ sections apply only when you host those flows.
 - [ ] The app handles invalid tokens separately from issuer outages.
 - [ ] Any proxy has a fixed trusted target; trusted-forwarded-header policy
       matches deployment.
-- [ ] Routes the package does not cap, including resource-server APIs that
-      accept form-encoded bodies and `honoIdentityRoutes`, have a request-size
-      limit in the framework or reverse proxy.
+- [ ] Every route that reads its own body has a request-size limit in the
+      framework or reverse proxy, mounted ahead of `protect()`. The package
+      caps only its own reads: `maxTokenBodyBytes` for the form-body
+      `access_token` search and `maxBodyBytes` for `honoIdentityRoutes`.
 
 ## If your app hosts an authorization server
 

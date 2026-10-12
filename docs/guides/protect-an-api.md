@@ -329,6 +329,26 @@ success, stores the authenticated context on the Hono context; `getContext(c)`
 reads it back, typed via `HonoResourceServerVariables`. Passing a scope to
 `protect("write")` additionally requires that scope.
 
+When a `POST` carries no `Authorization` header and is form-encoded,
+`protect()` also looks for an `access_token` field in the body (RFC 6750 §2.2).
+It reads at most `maxTokenBodyBytes` of the body for that, 16 KiB by default,
+and treats a larger body as carrying no token. That bound covers only the
+token search. Mount your own body limit, such as Hono's `bodyLimit`, ahead of
+`protect()` on any route that reads its body, so an anonymous oversized body
+is refused before authentication:
+
+```ts
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
+
+declare const app: Hono;
+declare const resourceServer: HonoResourceServer<{ id: string }, { id: string }>;
+
+app.use("/api/*", bodyLimit({ maxSize: 64 * 1024 }));
+app.use("/api/*", resourceServer.protect());
+```
+
 ## Layering scopes under one authenticated mount
 
 When routes under a single mount need different scopes, authenticate once with a

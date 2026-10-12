@@ -739,7 +739,8 @@ export class AuthorizationServer<
    *
    * @throws {Error} If any grant's map key does not equal its `grantType`.
    * @throws {Error} If `requireOidc` is set without `signingKeys`.
-   * @throws {RangeError} If `maxBodyBytes` is not a positive integer.
+   * @throws {RangeError} If `maxBodyBytes` or `maxTokenBodyBytes` is not a
+   *   positive integer.
    */
   constructor(options: AuthorizationServerOptions<Client, User, S>) {
     super({
@@ -747,6 +748,7 @@ export class AuthorizationServer<
       Scope: options.Scope,
       realm: options.realm,
       clockSkewSeconds: options.clockSkewSeconds,
+      maxTokenBodyBytes: options.maxTokenBodyBytes,
       errorFormat: options.errorFormat,
       throwOnError: options.throwOnError,
     });
