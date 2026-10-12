@@ -1,3 +1,9 @@
+## [0.15.1](https://github.com/udibo/oauth2/compare/0.15.0...0.15.1) (2026-10-12)
+
+### Bug Fixes
+
+* rebuild the request attachToken hands on from its parts ([#89](https://github.com/udibo/oauth2/issues/89)) ([f44d48c](https://github.com/udibo/oauth2/commit/f44d48c10f0ee1a3d71a8077a26f9676b285405c))
+
 ## [0.15.0](https://github.com/udibo/oauth2/compare/0.14.1...0.15.0) (2026-10-10)
 
 ### Features
