@@ -254,7 +254,7 @@ describe("MemoryLockoutStore", () => {
 
   it("reclaims expired records at capacity before evicting live ones", async () => {
     const store = new MemoryLockoutStore({ ttlMs: hour, maxEntries: 3 });
-    await store.increment("expired", now);
+    for (let i = 0; i < 3; i++) await store.increment("expired", now);
     await store.increment("live-a", now + hour - 1);
     await store.increment("live-b", now + hour - 1);
 
@@ -296,6 +296,37 @@ describe("MemoryLockoutStore", () => {
 
     expect((await lockout.status("locked", now + 1)).locked).toBe(true);
     expect(await store.get("busy", now + 1)).toStrictEqual(undefined);
+  });
+
+  it("evicts the longest-idle record among those with equal failures", async () => {
+    const store = new MemoryLockoutStore({ maxEntries: 2 });
+    await store.increment("idle", now);
+    await store.increment("recent", now + 10);
+
+    await store.increment("new", now + 20);
+
+    expect(await store.get("idle", now + 20)).toStrictEqual(undefined);
+    expect(await store.get("recent", now + 20)).toStrictEqual({ failures: 1 });
+  });
+
+  it("evicts the lock that ends soonest once only locked records remain", async () => {
+    const store = new MemoryLockoutStore({ maxEntries: 2 });
+    const lockout = new AccountLockout({
+      maxAttempts: 1,
+      lockDurationMs: hour,
+      store,
+    });
+    await lockout.recordFailure("ends-first", now);
+    await lockout.recordFailure("ends-last", now + 10);
+
+    await store.increment("new", now + 20);
+
+    expect((await lockout.status("ends-first", now + 20)).locked).toBe(false);
+    expect(await lockout.status("ends-last", now + 20)).toStrictEqual({
+      locked: true,
+      failures: 1,
+      lockedUntil: now + 10 + hour,
+    });
   });
 
   it("keeps a lock through a flood of failures against other accounts", async () => {
