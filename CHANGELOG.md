@@ -1,3 +1,107 @@
+## [0.19.0](https://github.com/udibo/oauth2/compare/0.18.0...0.19.0) (2026-10-13)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** `errorFormat` now governs only protected-resource
+refusals (`protect()`, `handleAuthError`, `createErrorResponse` and
+UserInfo). An authorization server's OAuth endpoints always answer
+errors as RFC 6749 §5.2 JSON (`{ error, error_description, error_uri }`
+as `application/json`), even with `errorFormat: "problem-details"`. A
+client that parsed problem details (`status`, `title`, `detail`) from
+those endpoints reads `error` and `error_description` instead.
+`toOAuth2Error` no longer copies an error's `type` into
+`extensions.error_uri`, so a problem-details body carries the URI in
+`type` alone; read `type` there. The RFC 6749 format still emits
+`error_uri` from `type`. Servers that used the default `"oauth2"` format
+see no change.
+
+## Changes
+
+- `src/server/_error-response.ts` (internal): the RFC 6749 serializer
+that was `ResourceServer`'s private `#createOAuth2ErrorResponse`, plus
+the header copy. Both servers now share it.
+- `ResourceServer.createErrorResponse` produces the same output as
+before.
+- `AuthorizationServer`: the ten endpoint error sites go through a
+private `#handleEndpointError`. It normalizes the error, runs the
+endpoint's prepare callback (`Cache-Control: no-store`, `Pragma:
+no-cache`, and `WWW-Authenticate: Basic realm=…` on a client-auth 401),
+honours `throwOnError`, and serializes in the RFC format. UserInfo still
+uses `handleAuthError`.
+- `errorFormat` JSDoc, the provider guide (new _Error responses_
+section), protect-an-api and known limitations now describe the narrower
+scope. `llms-full.txt` is regenerated.
+- They also correct the description of the problem-details body for
+protected-resource refusals. The old JSDoc said
+`detail`/`error_description` and `type`/`error_uri` carry the same
+values. The body holds `status`, `title`, `detail`, `type` when set,
+`error` and extensions such as `requiredScope`. The `WWW-Authenticate`
+challenge carries `error` and `error_description`.
+- `toOAuth2Error` keeps mirroring `extensions.error_uri` into `type`,
+but no longer mirrors `type` into `extensions.error_uri`. Its JSDoc is
+updated. Two existing `resource-server.test.ts` cases pinned that
+mirror: one asserted the error was mutated, one asserted `error_uri` in
+a problem body. I changed both deliberately to the new contract and
+renamed them for the rule they now pin.
+- `protocol-parameters.test.ts`: the "keeps problem details … on
+malformed forms" cases asserted the old contract. They now assert the
+RFC format with the no-store headers under `errorFormat:
+"problem-details"`.
+
+## Testing
+
+- `src/server/endpoint-error-format.test.ts` runs on the core and Hono
+transports. Every endpoint error is tested under both `errorFormat`
+values, for `application/json;charset=UTF-8`, status, `error`,
+`error_description`, no problem members, and the expected headers. The
+response is also asserted identical across the two values.
+- It includes a metadata error (resolve throws), a JWKS key-provider
+failure, and wrong-`Basic` cases on token and revocation that assert
+`WWW-Authenticate: Basic realm="Service"`.
+  - Neither 500 leaks its internal message.
+- The UserInfo and `handleAuthError` cases assert
+`application/problem+json` under `problem-details` and RFC JSON under
+`oauth2`.
+- Red on `main`: all 24 problem-details endpoint cases failed with
+`expected 'application/problem+json' to be
+'application/json;charset=UTF-8'`. All 24 "identical under either
+errorFormat" cases failed too. The 32 oauth2-format and bearer cases
+passed.
+- Seeded mutations, each restored afterwards:
+- Metadata site back to `handleError`: only the 4 metadata cases failed.
+- JWKS provider-failure site back to `handleError`: only the 4
+JWKS-failure cases failed.
+- Token or revocation prepare removed: that endpoint's 8 cases failed on
+`no-store`.
+- Basic challenge header renamed: the 8 wrong-`Basic` cases failed on
+`WWW-Authenticate`.
+- Protected-resource refusal bodies are pinned per format. Under
+problem-details, `invalid_token`, `insufficient_scope` (plus
+`requiredScope`) and missing-credentials refusals carry exactly
+`status`, `title`, `detail` and `error`. Under oauth2 they carry exactly
+`error` and `error_description`. `error_description` and `error_uri`
+appear only when set as extensions. The challenge carries
+`error_description` under both formats. A refusal with `type` set keeps
+the URI in `type` alone, with no `error_uri` and no mutation. That case
+was red before the `toOAuth2Error` change, with `"error_uri" in body`
+true. A typed endpoint error still answers `{ error, error_description,
+error_uri }`, with `error_uri` taken from `type`. Making the
+problem-details path copy the message into `error_description` turned
+the three member-set cases red.
+- `pnpm check` passed. `pnpm test` passed: 132 files, 3338 tests.
+
+## Related Issues
+
+None.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+* **server:** answer OAuth endpoint errors in the RFC 6749 format ([#102](https://github.com/udibo/oauth2/issues/102)) ([c1e8bd5](https://github.com/udibo/oauth2/commit/c1e8bd5240a9e513c22fc453c867274271b61465))
+
 ## [0.18.0](https://github.com/udibo/oauth2/compare/0.17.1...0.18.0) (2026-10-13)
 
 ### ⚠ BREAKING CHANGES
