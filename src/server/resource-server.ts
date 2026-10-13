@@ -25,6 +25,7 @@ import {
   type RequireConditions,
 } from "../models/authorization.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
+import { copyErrorHeaders, oauth2ErrorResponse } from "./_error-response.ts";
 import { assertClockSkewSeconds } from "./_clock-skew.ts";
 import {
   assertMaxBodyBytes,
@@ -129,12 +130,24 @@ export interface ResourceServerOptions<
    */
   maxTokenBodyBytes?: number;
   /**
-   * Format for error responses.
-   * - `"oauth2"` (default): Standard OAuth2 error format with `error`,
-   *   `error_description`, and `error_uri` fields.
-   * - `"problem-details"`: RFC 9457 Problem Details format with OAuth2
-   *   extensions. `type` and `error_uri` carry the same URI; `detail` and
-   *   `error_description` carry the same message.
+   * Format for protected-resource refusals: the responses from `protect()`,
+   * {@linkcode ResourceServer.handleAuthError} and
+   * {@linkcode ResourceServer.createErrorResponse}, including an
+   * authorization server's own protected resources such as UserInfo.
+   * - `"oauth2"` (default): `{ error, error_description?, error_uri? }` as
+   *   `application/json`.
+   * - `"problem-details"`: RFC 9457 Problem Details as
+   *   `application/problem+json`: `status`, `title`, `detail` (the message),
+   *   `type` when set, the OAuth2 `error` code and any other extension members
+   *   such as `requiredScope`. `error_description` and `error_uri` appear only
+   *   when the error sets them as extensions.
+   *
+   * Either way, a 401 or 403 from `protect()` or `handleAuthError` carries the
+   * `error` code and `error_description` in its `WWW-Authenticate` challenge.
+   *
+   * An authorization server's OAuth endpoints (token, revocation,
+   * introspection, device authorization, authorize, end-session, metadata and
+   * JWKS) ignore it and always answer in the RFC 6749 §5.2 format.
    */
   errorFormat?: "oauth2" | "problem-details";
   /**
@@ -221,7 +234,7 @@ export class ResourceServer<
   Scope: ScopeConstructor<S>;
   /** Protection space named in `WWW-Authenticate` challenges. */
   realm: string;
-  /** Body format used for error responses: OAuth2 or RFC 9457 problem details. */
+  /** Body format of protected-resource refusals: OAuth2 or RFC 9457 problem details. See {@linkcode ResourceServerOptions.errorFormat}. */
   errorFormat: "oauth2" | "problem-details";
   /** When true, handler boundaries rethrow {@linkcode OAuth2Error} instead of returning a response. */
   throwOnError: boolean;
@@ -339,37 +352,10 @@ export class ResourceServer<
    */
   createErrorResponse(error: unknown): Response {
     const oauth2Error = toOAuth2Error(error);
-
-    const response =
-      this.errorFormat === "problem-details"
-        ? oauth2Error.getResponse()
-        : this.#createOAuth2ErrorResponse(oauth2Error);
-
-    for (const [key, value] of oauth2Error.headers) {
-      if (key.toLowerCase() === "content-type") continue;
-      response.headers.set(key, value);
+    if (this.errorFormat !== "problem-details") {
+      return oauth2ErrorResponse(oauth2Error);
     }
-
-    return response;
-  }
-
-  #createOAuth2ErrorResponse(oauth2Error: OAuth2Error): Response {
-    const body: Record<string, string> = {
-      error: oauth2Error.extensions.error ?? "server_error",
-    };
-    const description =
-      oauth2Error.extensions.error_description ?? oauth2Error.exposedMessage;
-    if (description) {
-      body.error_description = description;
-    }
-    const errorUri = oauth2Error.extensions.error_uri ?? oauth2Error.type;
-    if (errorUri) {
-      body.error_uri = errorUri;
-    }
-    return new Response(JSON.stringify(body), {
-      status: oauth2Error.status,
-      headers: { "Content-Type": "application/json;charset=UTF-8" },
-    });
+    return copyErrorHeaders(oauth2Error, oauth2Error.getResponse());
   }
 
   /**

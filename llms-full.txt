@@ -970,14 +970,32 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+## Error responses
+
+The OAuth endpoints answer every error in the RFC 6749 §5.2 format:
+`{ error, error_description, error_uri }` as `application/json`, with
+`error_description` and `error_uri` present when the error has them. That
+covers token, revocation, introspection, device authorization, end-session,
+metadata, OIDC metadata and JWKS, and the authorize endpoint when it cannot
+redirect. Revocation and introspection (RFC 7009, RFC 7662) and device
+authorization (RFC 8628) take their error format from RFC 6749 §5.2. The
+client-authenticated endpoints also send `Cache-Control: no-store` and
+`Pragma: no-cache`, and a `WWW-Authenticate: Basic` challenge on a `401` when
+the client authenticated with an `Authorization` header.
+
+`errorFormat` does not change these responses. It governs only refusals from
+the server's protected resources: `protect()`, `handleAuthError` and the
+UserInfo endpoint. With `errorFormat: "problem-details"`, those answer RFC 9457
+problem details as `application/problem+json`, as a resource server does.
+
 ## Form parameter cardinality
 
 The token, revocation, introspection and device-authorization handlers reject
 repeated recognized singleton form parameters with `400 invalid_request`, even
 when the values are identical. The check runs before `resolve`, client
-authentication, grant execution or token lookup. Error responses keep
-`Cache-Control: no-store` and `Pragma: no-cache`, including when
-`errorFormat: "problem-details"` is configured.
+authentication, grant execution or token lookup. The refusal is in the RFC 6749
+format with `Cache-Control: no-store` and `Pragma: no-cache`, whatever
+`errorFormat` is set to.
 
 | Endpoint / grant             | Singleton form parameters               |
 | ---------------------------- | --------------------------------------- |
@@ -1408,7 +1426,8 @@ because browser-chosen values could weaken the server's requirements.
   introspection field subset, no dynamic client registration, no provider-side
   logout-token emission, and the other honest walls.
 - [Protect an API](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md#what-failures-look-like-on-the-wire)
-  covers error-format configuration (`errorFormat: "problem-details"`), and
+  covers the error format of protected-resource refusals
+  (`errorFormat: "problem-details"`), and
   [testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md) covers `createMemoryAuthorizationServer`.
 
 ---
@@ -2774,7 +2793,13 @@ anything else and the client sees a bare challenge, which it will read as
 Response bodies default to the RFC 6749 JSON shape (`error`,
 `error_description`, `error_uri`). Pass `errorFormat: "problem-details"` to the
 constructor to emit RFC 9457 Problem Details (`application/problem+json`)
-instead — the same fields, with `type`/`detail` carrying the URI and message.
+instead: `status`, `title`, `detail` carrying the message, `type` carrying the
+URI when set, the OAuth2 `error` code and any other extension members such as
+`requiredScope`. The body does not repeat the message as `error_description`; a
+client reads `error` and `error_description` from the `WWW-Authenticate`
+challenge, which both formats send. On an authorization server the option covers its
+protected resources (`protect()` and UserInfo); its OAuth endpoints always
+answer in the RFC 6749 format.
 Errors thrown from your own services (any `OAuth2Error` subclass, which are all
 `HttpError` instances) are converted through the same path, and only an error's
 `exposedMessage` reaches the wire, so internal diagnostic detail stays in your
@@ -6383,6 +6408,16 @@ should not be enabled for new deployments.
   also ignores `fetchTimeoutMs`. Transport failures and timeouts both map to
   `temporarily_unavailable` rather than `invalid_token`, so they are correctly
   reported as "issuer is down", not "your token is bad".
+- **`errorFormat` covers protected-resource refusals only.** With
+  `errorFormat: "problem-details"`, `protect()`, `handleAuthError`,
+  `createErrorResponse` and an authorization server's UserInfo endpoint answer
+  RFC 9457 problem details as `application/problem+json`. RFC 6750 §3 defines
+  the challenge but no error body. The problem body carries `error`, with the
+  message in `detail` and not repeated as `error_description`; the
+  `WWW-Authenticate` challenge carries both `error` and `error_description`.
+  An authorization server's OAuth endpoints
+  ignore the option and always answer in the RFC 6749 §5.2 format as
+  `application/json`.
 
 ## Not implemented (adjacent specs)
 

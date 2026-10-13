@@ -203,7 +203,7 @@ describe("ResourceServer", () => {
       expect(response.headers.get("X-Custom")).toBe("value");
     });
 
-    it("should populate error_uri from error.type when only type is set", async () => {
+    it("emits error_uri from error.type in the oauth2 format without copying it into the error", async () => {
       const { server } = createTestServer();
       const error = new AccessDeniedError("denied", {
         type: "https://errors.example/access-denied",
@@ -213,9 +213,7 @@ describe("ResourceServer", () => {
 
       const body = await response.json();
       expect(body.error_uri).toBe("https://errors.example/access-denied");
-      expect(error.extensions.error_uri).toBe(
-        "https://errors.example/access-denied",
-      );
+      expect(error.extensions.error_uri).toBe(undefined);
     });
 
     it("should populate type from error_uri when only error_uri is set", async () => {
@@ -329,7 +327,7 @@ describe("ResourceServer", () => {
       );
     });
 
-    it("should include oauth2 extensions in Problem Details body", async () => {
+    it("includes the oauth2 error code and keeps the URI in type alone in a Problem Details body", async () => {
       const { server } = createProblemDetailsServer();
       const error = new AccessDeniedError("denied", {
         type: "https://errors.example/access-denied",
@@ -341,7 +339,7 @@ describe("ResourceServer", () => {
       expect(body.error).toBe("access_denied");
       expect(body.detail).toBe("denied");
       expect(body.type).toBe("https://errors.example/access-denied");
-      expect(body.error_uri).toBe("https://errors.example/access-denied");
+      expect("error_uri" in body).toBe(false);
     });
   });
 

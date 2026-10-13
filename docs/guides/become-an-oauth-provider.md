@@ -360,14 +360,32 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+## Error responses
+
+The OAuth endpoints answer every error in the RFC 6749 §5.2 format:
+`{ error, error_description, error_uri }` as `application/json`, with
+`error_description` and `error_uri` present when the error has them. That
+covers token, revocation, introspection, device authorization, end-session,
+metadata, OIDC metadata and JWKS, and the authorize endpoint when it cannot
+redirect. Revocation and introspection (RFC 7009, RFC 7662) and device
+authorization (RFC 8628) take their error format from RFC 6749 §5.2. The
+client-authenticated endpoints also send `Cache-Control: no-store` and
+`Pragma: no-cache`, and a `WWW-Authenticate: Basic` challenge on a `401` when
+the client authenticated with an `Authorization` header.
+
+`errorFormat` does not change these responses. It governs only refusals from
+the server's protected resources: `protect()`, `handleAuthError` and the
+UserInfo endpoint. With `errorFormat: "problem-details"`, those answer RFC 9457
+problem details as `application/problem+json`, as a resource server does.
+
 ## Form parameter cardinality
 
 The token, revocation, introspection and device-authorization handlers reject
 repeated recognized singleton form parameters with `400 invalid_request`, even
 when the values are identical. The check runs before `resolve`, client
-authentication, grant execution or token lookup. Error responses keep
-`Cache-Control: no-store` and `Pragma: no-cache`, including when
-`errorFormat: "problem-details"` is configured.
+authentication, grant execution or token lookup. The refusal is in the RFC 6749
+format with `Cache-Control: no-store` and `Pragma: no-cache`, whatever
+`errorFormat` is set to.
 
 | Endpoint / grant             | Singleton form parameters               |
 | ---------------------------- | --------------------------------------- |
@@ -798,5 +816,6 @@ because browser-chosen values could weaken the server's requirements.
   introspection field subset, no dynamic client registration, no provider-side
   logout-token emission, and the other honest walls.
 - [Protect an API](./protect-an-api.md#what-failures-look-like-on-the-wire)
-  covers error-format configuration (`errorFormat: "problem-details"`), and
+  covers the error format of protected-resource refusals
+  (`errorFormat: "problem-details"`), and
   [testing](testing.md) covers `createMemoryAuthorizationServer`.
