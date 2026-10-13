@@ -15,6 +15,7 @@ import {
 } from "./identity/token-flow.ts";
 import { DirectClient } from "./client/direct-client.ts";
 import {
+  MemoryAuthRequestStorage,
   MemoryRefreshTokenStorage,
   MemoryTokenStorage,
 } from "./client/storage.ts";
@@ -107,6 +108,7 @@ it("release: a fresh login clears the previous grant's refresh token", async () 
   const refreshTokenStorage = new MemoryRefreshTokenStorage();
   await refreshTokenStorage.set("alice-refresh");
   const client = new DirectClient({
+    authRequestStorage: new MemoryAuthRequestStorage(),
     clientId: "app",
     redirectUri: "https://app.test/callback",
     endpoints: {
@@ -412,6 +414,7 @@ for (const fails of [false, true]) {
         authorization: "https://server.test/authorize",
         token: "https://server.test/token",
       },
+      authRequestStorage: new MemoryAuthRequestStorage(),
       refreshTokenStorage,
       tokenStorage,
       fetch: (_url, init) => {
@@ -473,6 +476,7 @@ it("release: refresh waits for an asynchronous login save to finish", async () =
   const refreshTokenStorage = new PausedRefreshStorage();
   const requests: string[] = [];
   const client = new DirectClient({
+    authRequestStorage: new MemoryAuthRequestStorage(),
     clientId: "app",
     redirectUri: "https://app.test/callback",
     endpoints: {
@@ -540,6 +544,7 @@ it("release: refresh queued behind login remains single-flight", async () => {
   const refreshTokenStorage = new PausedRefreshStorage();
   const requests: string[] = [];
   const client = new DirectClient({
+    authRequestStorage: new MemoryAuthRequestStorage(),
     clientId: "app",
     redirectUri: "https://app.test/callback",
     endpoints: {

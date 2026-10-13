@@ -21,8 +21,16 @@ import {
   type TokenFlowStore,
   TokenPurpose,
 } from "./token-flow.ts";
-import { AccountLockout, type AccountLockoutLike } from "./lockout.ts";
-import { RateLimiter, type RateLimiterLike } from "./rate-limit.ts";
+import {
+  AccountLockout,
+  type AccountLockoutLike,
+  MemoryLockoutStore,
+} from "./lockout.ts";
+import {
+  MemoryRateLimitStore,
+  RateLimiter,
+  type RateLimiterLike,
+} from "./rate-limit.ts";
 import { IdentityError } from "./errors.ts";
 import {
   type IdentityRateLimiters,
@@ -167,7 +175,11 @@ function makeEventService(options?: {
     },
     rateLimiter:
       options?.limit !== undefined
-        ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
+        ? new RateLimiter({
+            limit: options.limit,
+            windowMs: 60_000,
+            store: new MemoryRateLimitStore(),
+          })
         : undefined,
     onEvent:
       options?.onEvent ??
@@ -734,7 +746,11 @@ describe("IdentityService", () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 3, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 3,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await service.signUp({
       password: "hunter2hunter2",
@@ -762,7 +778,11 @@ describe("IdentityService", () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     expect(
       await service.signIn({ identifier: "ghost@b.co", password: "x" }),
@@ -781,7 +801,11 @@ describe("IdentityService", () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await service.signUp({
       password: "hunter2hunter2",
@@ -816,7 +840,11 @@ describe("IdentityService", () => {
           sent.push(msg);
         },
       },
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await service.signUp({
       password: "hunter2hunter2",
@@ -856,7 +884,11 @@ describe("IdentityService", () => {
           sent.push(msg);
         },
       },
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const alice = await service.signUp({
       password: "hunter2hunter2",
@@ -894,7 +926,11 @@ describe("IdentityService", () => {
           sent.push(msg);
         },
       },
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
 
     await service.requestPasswordReset("ghost@b.co");
@@ -918,7 +954,11 @@ describe("IdentityService", () => {
           sent.push(msg);
         },
       },
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     const alice = await service.signUp({
       password: "hunter2hunter2",
@@ -946,7 +986,11 @@ describe("IdentityService", () => {
           sent.push(msg);
         },
       },
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       protectionMode: "log-only",
       onEvent: (event) => {
         events.push(event);
@@ -1248,7 +1292,11 @@ describe("IdentityService lockout", () => {
     const service = serviceWithoutSignInFloor({
       users: store,
       tokens: new TokenFlowService(new MemoryTokenFlowStore()),
-      lockout: new AccountLockout({ maxAttempts: 3, lockDurationMs: 60_000 }),
+      lockout: new AccountLockout({
+        maxAttempts: 3,
+        lockDurationMs: 60_000,
+        store: new MemoryLockoutStore(),
+      }),
       protectionMode: options?.protectionMode,
       delivery: options?.delivery,
       baseUrl: "https://app.example",
@@ -1341,7 +1389,11 @@ describe("IdentityService lockout", () => {
     const events: IdentityEvent[] = [];
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       protectionMode: "log-only",
       onEvent: (event) => {
         events.push(event);
@@ -1408,7 +1460,11 @@ describe("IdentityService lockout", () => {
     const service = serviceWithoutSignInFloor({
       users: store,
       tokens: new TokenFlowService(new MemoryTokenFlowStore()),
-      lockout: new AccountLockout({ maxAttempts: 3, lockDurationMs: 60_000 }),
+      lockout: new AccountLockout({
+        maxAttempts: 3,
+        lockDurationMs: 60_000,
+        store: new MemoryLockoutStore(),
+      }),
       delivery: {
         sendPasswordReset: (msg) => {
           resetMessage = msg;
@@ -1450,7 +1506,11 @@ describe("IdentityService lockout", () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await service.signUp({
       password: "hunter2hunter2",
@@ -1477,7 +1537,11 @@ describe("IdentityService lockout", () => {
     const { store } = makeStore();
     const service = serviceWithoutSignInFloor({
       users: store,
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await service.signUp({
       password: "hunter2hunter2",
@@ -2472,7 +2536,11 @@ describe("IdentityService passwordless", () => {
       baseUrl: "https://app.example",
       rateLimiter:
         options?.limit !== undefined
-          ? new RateLimiter({ limit: options.limit, windowMs: 60_000 })
+          ? new RateLimiter({
+              limit: options.limit,
+              windowMs: 60_000,
+              store: new MemoryRateLimitStore(),
+            })
           : undefined,
       protectionMode: options?.protectionMode,
       onEvent: (event) => {
@@ -3392,9 +3460,17 @@ describe("IdentityService per-flow rate limiters", () => {
 
   it("throttles an email-sending flow while sign-in stays allowed", async () => {
     const { service, signUp } = makeLimitedService({
-      rateLimiter: new RateLimiter({ limit: 10, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 10,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       rateLimiters: {
-        passwordReset: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+        passwordReset: new RateLimiter({
+          limit: 1,
+          windowMs: 60_000,
+          store: new MemoryRateLimitStore(),
+        }),
       },
     });
     await signUp();

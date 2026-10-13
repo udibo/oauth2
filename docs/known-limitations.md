@@ -70,6 +70,31 @@ signed out, and a sign-in whose callback reaches another instance fails. See
 [choosing the BFF's stores](guides/production-deployment.md#choosing-the-bffs-stores)
 for which store fits which deployment.
 
+## Rate limit and lockout storage across instances
+
+`RateLimiter` and `AccountLockout` require a `store` and have no default;
+constructing either without one throws a `TypeError` naming the option.
+`MemoryRateLimitStore` and `MemoryLockoutStore` must be chosen explicitly and
+serve one process only: behind a load balancer each instance keeps its own
+counters, so a client gets the rate limit once per instance, an attacker gets
+`maxAttempts` password guesses per instance, and a lock on one instance does not
+stop sign-in on another. Pass a `RateLimitStore` and a `LockoutStore` over
+Redis or a database every instance shares, with an atomic `increment`.
+
+## DirectClient storage outside a browser
+
+In a browser document `DirectClient` keeps pending sign-ins in
+`SessionStorageAuthRequestStorage` and the refresh token in memory. Outside a
+browser it has no default for either. `login` and `exchangeAuthorizationCode`
+throw a `TypeError` unless the client or the call has an `authRequestStorage`,
+and `handleAuthorizationCallback`, `startDeviceAuthorization` and
+`pollDeviceToken` throw one unless the client has a `refreshTokenStorage`. Each
+check runs before any request and before a pending sign-in is claimed. A
+client that only runs client credentials needs neither; it never stores a
+refresh token, and drops one a non-conforming server returns. Pass
+`MemoryAuthRequestStorage` and `MemoryRefreshTokenStorage` explicitly for a
+single process, tests and local development.
+
 ## Pending sign-in limits
 
 Anyone can start a sign-in. `HonoBff`'s `/auth/login` stores the pending
@@ -81,9 +106,9 @@ so the package bounds what each start can cost:
   `defaultReturnTo` instead. Change the cap with `HonoBffOptions.maxReturnToLength`
   (or `safeReturnTo`'s `maxLength` and `loginContinuation`'s
   `maxReturnToLength`); `Infinity` removes it.
-- **`MemoryAuthRequestStorage` holds at most 1000 records.** This is the client's
-  default outside a browser, and what `MemoryAuthRequestStorageFactory` gives
-  the BFF. It keeps pending sign-ins in one process, so a callback served by
+- **`MemoryAuthRequestStorage` holds at most 1000 records.** This is what
+  `MemoryAuthRequestStorageFactory` gives the BFF, and the client's fallback in
+  a browser document without `sessionStorage`. It keeps pending sign-ins in one process, so a callback served by
   another instance fails with an unknown `state`; use it only for a single
   process, tests and local development. A write beyond the cap evicts the oldest-written record,
   so memory stays bounded however many starts arrive. Raise or lower it with
@@ -296,6 +321,15 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   impossibility. Bounding memory and resisting eviction are in genuine tension
   in a single process; this is a dev / single-process store, and production
   backs the limiter with Redis or a database where neither compromise is forced.
+- `MemoryLockoutStore` is bounded the same way: it forgets an account's failures
+  `ttlMs` (24 hours) after the last one, never while the account's lock is
+  active, and holds at most `maxEntries` (10,000) records. At the cap it drops
+  expired records first, then evicts unlocked records before locked ones, the
+  fewest failures first. Lockout keys are account ids, so displacing an active
+  lock takes failures against more than 10,000 other accounts that each end
+  locked. The TTL also means a slow guesser who waits a day between failures
+  never reaches the threshold in this store; a store over your database keeps
+  the count until a successful sign-in clears it.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

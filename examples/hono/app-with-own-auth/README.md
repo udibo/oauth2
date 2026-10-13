@@ -154,7 +154,10 @@ on a free port.
   Enqueue the send instead of awaiting your mail provider in-request: the
   forgot-password response body is enumeration-safe, but an awaited send would
   make response _timing_ reveal which emails have accounts. Add MFA, lockout,
-  and captcha as needed.
+  and captcha as needed. `RateLimiter` and `AccountLockout` require a `store`:
+  give them a `RateLimitStore` and a `LockoutStore` that every instance
+  shares, or `MemoryRateLimitStore` and `MemoryLockoutStore` for a single
+  process only.
 - **Wire OpenTelemetry / your tracing system** through the auth server's request
   handlers and the BFF's middleware so you can correlate sign-ins to sessions to
   API calls.

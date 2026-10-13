@@ -15,11 +15,13 @@
  * care — the React adapter's `<OAuth2Provider>`, a shared UI helper — should
  * accept.
  *
- * A {@link DirectClient} keeps its token bundle and refresh token in memory
- * by default, so they are lost on reload; a browser app that must survive one
- * passes {@link IndexedDBRefreshTokenStorage}. The pending auth request
- * defaults to {@link SessionStorageAuthRequestStorage} in a browser document
- * and to memory everywhere else.
+ * In a browser document a {@link DirectClient} keeps its token bundle and
+ * refresh token in memory by default, so they are lost on reload; a browser
+ * app that must survive one passes {@link IndexedDBRefreshTokenStorage}. The
+ * pending auth request defaults to {@link SessionStorageAuthRequestStorage}
+ * there. Outside a browser, a sign-in or device flow requires
+ * `authRequestStorage` and `refreshTokenStorage` and throws a `TypeError`
+ * without them; client credentials need neither.
  *
  * @module
  */

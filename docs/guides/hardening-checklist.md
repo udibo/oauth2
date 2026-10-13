@@ -30,6 +30,12 @@ sections apply only when you host those flows.
       [choosing the BFF's stores](production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.
+- [ ] A server-side `DirectClient` that signs users in or runs the device flow
+      has an `authRequestStorage` (on the client or passed per call) and a
+      `refreshTokenStorage` that every instance can read and that outlives a
+      restart. `MemoryAuthRequestStorage` and `MemoryRefreshTokenStorage`
+      appear only in single-process, test and local configurations. See
+      [DirectClient storage outside a browser](../known-limitations.md#directclient-storage-outside-a-browser).
 - [ ] Pending sign-ins are bounded. A multi-instance or internet-facing BFF
       uses `EncryptedCookieAuthRequestStorage`, or shared storage with its own
       cap. The login route has a rate limit, and `maxReturnToLength` (default
@@ -79,6 +85,11 @@ sections apply only when you host those flows.
       comparison writes nothing, and the sign-in proceeds only if the password
       re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
+- [ ] `RateLimiter` and `AccountLockout` use a `RateLimitStore` and a
+      `LockoutStore` that every instance shares, with an atomic `increment`.
+      `MemoryRateLimitStore` and `MemoryLockoutStore` appear only in
+      single-process, test and local configurations. See
+      [rate limit and lockout storage](../known-limitations.md#rate-limit-and-lockout-storage-across-instances).
 - [ ] Email requests and OTP/MFA attempts are throttled; concurrent resend
       policy is explicit.
 - [ ] OTP consumption and recovery-code consumption permit one successful

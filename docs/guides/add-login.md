@@ -24,7 +24,7 @@ your app through a small interface you implement:
 | `RevocableSessionService`         | over your session store | revocation on password reset  |
 | `ListableSessionService`          | same store (optional)   | "where you're signed in" list |
 | `DeliveryHooks`                   | your mailer             | emailed action links          |
-| `RateLimitStore` / `LockoutStore` | Redis or DB (optional)  | shared-state protection       |
+| `RateLimitStore` / `LockoutStore` | Redis or DB             | shared-state protection       |
 | `IdentityEventHook`               | your audit log          | observability                 |
 
 There is no adapter package per database and no migration the library imposes.
@@ -559,21 +559,50 @@ Two distinct protections, both consulted by `signIn`:
   unknown identifier gets — lockout must not become an oracle for "this account
   exists and the password was close".
 
-```ts
-import { AccountLockout, RateLimiter } from "@udibo/oauth2/identity";
+Both require a `store`; neither has a default, because a limit or a lock only
+holds if every instance that serves sign-in reads the same counters
+([the multi-instance rule](production-deployment.md#the-multi-instance-rule)).
+Implement the small `RateLimitStore` / `LockoutStore` interfaces over Redis or
+your database (lockout columns on the users table also give admins
+visibility). Both `increment` contracts require atomicity — a read-modify-write
+lets concurrent attempts lose counts, undershooting the lockout threshold or
+slipping a burst past the limiter.
 
-const rateLimiter = new RateLimiter();
-const lockout = new AccountLockout();
+```ts
+import {
+  AccountLockout,
+  type LockoutStore,
+  RateLimiter,
+  type RateLimitStore,
+} from "@udibo/oauth2/identity";
+
+declare const rateLimitStore: RateLimitStore;
+declare const lockoutStore: LockoutStore;
+
+const rateLimiter = new RateLimiter({ store: rateLimitStore });
+const lockout = new AccountLockout({ store: lockoutStore });
 ```
 
-Both default to in-memory stores, which are per-process — one instance of
-[the multi-instance rule](production-deployment.md#the-multi-instance-rule).
-Running more than one instance, back them with shared state by implementing the
-small `RateLimitStore` / `LockoutStore` interfaces over Redis or your database
-(lockout columns on the users table also give admins visibility). Both
-`increment` contracts require atomicity — a read-modify-write lets concurrent
-attempts lose counts, undershooting the lockout threshold or slipping a burst
-past the limiter.
+For a single process, tests and local development, pass the in-memory stores
+explicitly. They are bounded, so they cannot grow without limit, but each
+instance keeps its own: behind a load balancer every instance grants its own
+attempts and a lock on one does not stop sign-in on another.
+
+```ts
+import {
+  AccountLockout,
+  MemoryLockoutStore,
+  MemoryRateLimitStore,
+  RateLimiter,
+} from "@udibo/oauth2/identity";
+
+const rateLimiter = new RateLimiter({ store: new MemoryRateLimitStore() });
+const lockout = new AccountLockout({ store: new MemoryLockoutStore() });
+```
+
+`MemoryRateLimitStore` holds at most 10,000 buckets. `MemoryLockoutStore` holds
+at most 10,000 records (`maxEntries`) and forgets an account's failures 24
+hours after the last one (`ttlMs`), never while its lock is active.
 
 If you want a different _algorithm_ rather than different storage, the
 `rateLimiter` and `lockout` options are typed against structural interfaces —

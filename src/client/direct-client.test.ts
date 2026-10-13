@@ -217,6 +217,8 @@ describe("DirectClient", () => {
   describe("authorization code + PKCE", () => {
     it("uses an explicit redirectUri override verbatim", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: "https://app.example/configured/cb",
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -231,6 +233,8 @@ describe("DirectClient", () => {
 
     it("performs a full auth-code round trip and persists the token bundle", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -265,6 +269,8 @@ describe("DirectClient", () => {
 
     it("is idempotent on duplicate callbacks for the same code (strict-mode guard)", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -303,6 +309,8 @@ describe("DirectClient", () => {
   describe("refresh flow", () => {
     it("deduplicates concurrent refreshes and rotates the refresh token", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -477,6 +485,8 @@ describe("DirectClient", () => {
       };
 
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testClient.id,
         clientSecret: CLIENT_SECRET,
         endpoints: { token: TOKEN_URL },
@@ -515,6 +525,8 @@ describe("DirectClient", () => {
   describe("device authorization", () => {
     it("starts a device authorization request", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         endpoints: { token: TOKEN_URL, deviceAuthorization: DEVICE_URL },
         fetch: fixture.fetchImpl,
@@ -527,6 +539,8 @@ describe("DirectClient", () => {
 
     it("authenticates a confidential client at the device endpoint (RFC 8628 §3.1)", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testClient.id,
         clientSecret: CLIENT_SECRET,
         endpoints: { token: TOKEN_URL, deviceAuthorization: DEVICE_URL },
@@ -546,6 +560,8 @@ describe("DirectClient", () => {
           headers: { "content-type": "application/json" },
         });
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         endpoints: { token: TOKEN_URL },
         fetch: (input, init) => {
@@ -590,6 +606,8 @@ describe("DirectClient", () => {
       using time = new FakeTime();
       const controller = new AbortController();
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         endpoints: { token: TOKEN_URL },
         fetch: () =>
@@ -635,8 +653,12 @@ describe("DirectClient", () => {
   });
 
   describe("exchangeAuthorizationCode (configured auth-request TTL)", () => {
-    it("keeps a pending login past 10 minutes in the default memory store when authRequestTtlMs allows it", async () => {
+    it("keeps a pending login past 10 minutes in a document's memory fallback when authRequestTtlMs allows it", async () => {
       using time = new FakeTime();
+      using _document = { [Symbol.dispose]: defineGlobal("document", {}) };
+      using _noSessionStorage = {
+        [Symbol.dispose]: defineGlobal("sessionStorage", undefined),
+      };
       const client = new DirectClient({
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
@@ -781,6 +803,8 @@ describe("DirectClient", () => {
   describe("wrapped fetch", () => {
     it("attaches Authorization: Bearer and refreshes on 401 invalid_token", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -868,6 +892,8 @@ describe("DirectClient", () => {
     it("leaves an Authorization header set on a Request input alone", async () => {
       let sent: Headers | undefined;
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -897,6 +923,8 @@ describe("DirectClient", () => {
     it("replays a Request-shaped POST body on the retry after refreshing", async () => {
       const bodies: string[] = [];
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -940,6 +968,8 @@ describe("DirectClient", () => {
     it("rejects when the retry itself fails rather than reporting the stale 401", async () => {
       let apiCalls = 0;
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -1027,6 +1057,8 @@ describe("DirectClient", () => {
 
     it("renewSession rotates the token and reports the fresh session", async () => {
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
@@ -1302,27 +1334,243 @@ describe("DirectClient", () => {
       expect(result.returnTo).toBe("/dashboard");
     });
 
-    it("keeps a pending authorization in memory outside a browser document", async () => {
+    it("refreshes in a browser without a refreshTokenStorage", async () => {
+      const { storage } = fakeSessionStorage();
+      using _browser = simulateBrowser(storage);
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+      });
+
+      const begin = await client.login();
+      const { tokens } = await client.handleAuthorizationCallback(
+        await performAuthorizeRedirect(fixture.authServer, begin.url),
+      );
+
+      const refreshed = await client.refresh();
+      expect(refreshed).not.toBe(tokens.accessToken);
+    });
+  });
+
+  describe("storage outside a browser", () => {
+    const MISSING_AUTH_REQUEST_STORAGE = new TypeError(
+      "DirectClient requires options.authRequestStorage outside a browser " +
+        "to start or complete a sign-in. Pass an AuthRequestStorage over " +
+        "storage every instance shares, pass one to login() and " +
+        "exchangeAuthorizationCode() for each call, or pass " +
+        "MemoryAuthRequestStorage for a single process, tests and local " +
+        "development.",
+    );
+    const MISSING_REFRESH_TOKEN_STORAGE = new TypeError(
+      "DirectClient requires options.refreshTokenStorage outside a browser " +
+        "to keep the refresh token a sign-in returns. Pass a " +
+        "RefreshTokenStorage over storage that outlives the process, such " +
+        "as a database or the operating system's keychain, or " +
+        "MemoryRefreshTokenStorage for a single process, tests and local " +
+        "development. Client-credentials use needs neither.",
+    );
+
+    function countingFetch(): {
+      fetch: typeof globalThis.fetch;
+      urls: string[];
+    } {
+      const urls: string[] = [];
+      return {
+        urls,
+        fetch: (input, init) => {
+          urls.push(urlOf(input));
+          return fixture.fetchImpl(input, init);
+        },
+      };
+    }
+
+    it("refuses to start a sign-in without authRequestStorage, before any request", async () => {
+      const { fetch, urls } = countingFetch();
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        issuer: ISSUER,
+        fetch,
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
+      });
+
+      await expect(client.login()).rejects.toThrow(
+        MISSING_AUTH_REQUEST_STORAGE,
+      );
+      expect(urls).toStrictEqual([]);
+    });
+
+    it("ignores a sessionStorage global when there is no document", async () => {
       const { storage, entries } = fakeSessionStorage();
-      const restore = defineGlobal("sessionStorage", storage);
-      try {
-        const client = new DirectClient({
-          clientId: testPublicClient.id,
-          redirectUri: REDIRECT_URI,
-          endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
-          fetch: fixture.fetchImpl,
-        });
+      using _restore = {
+        [Symbol.dispose]: defineGlobal("sessionStorage", storage),
+      };
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+      });
 
-        const begin = await client.login({ returnTo: "/dashboard" });
-        expect(entries.size).toBe(0);
+      await expect(client.login()).rejects.toThrow(
+        MISSING_AUTH_REQUEST_STORAGE,
+      );
+      expect(entries.size).toBe(0);
+    });
 
-        const result = await client.handleAuthorizationCallback(
-          await performAuthorizeRedirect(fixture.authServer, begin.url),
-        );
-        expect(result.returnTo).toBe("/dashboard");
-      } finally {
-        restore();
-      }
+    it("refuses to exchange a code without authRequestStorage", async () => {
+      const { fetch, urls } = countingFetch();
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch,
+      });
+
+      await expect(
+        client.exchangeAuthorizationCode("code", "state"),
+      ).rejects.toThrow(MISSING_AUTH_REQUEST_STORAGE);
+      expect(urls).toStrictEqual([]);
+    });
+
+    it("signs in with per-call authRequestStorage and no client storage", async () => {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+      });
+      const perRequest = new MemoryAuthRequestStorage();
+
+      const begin = await client.login({
+        returnTo: "/home",
+        authRequestStorage: perRequest,
+      });
+      const callback = new URL(
+        await performAuthorizeRedirect(fixture.authServer, begin.url),
+      );
+      const result = await client.exchangeAuthorizationCode(
+        callback.searchParams.get("code")!,
+        begin.state,
+        { authRequestStorage: perRequest },
+      );
+
+      expect(result.returnTo).toBe("/home");
+      expect(typeof result.refreshToken).toBe("string");
+    });
+
+    it("refuses to complete a sign-in without refreshTokenStorage, leaving the pending request unclaimed", async () => {
+      const authRequestStorage = new MemoryAuthRequestStorage();
+      const starter = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+        authRequestStorage,
+      });
+      const begin = await starter.login();
+      const callback = await performAuthorizeRedirect(
+        fixture.authServer,
+        begin.url,
+      );
+      const { fetch, urls } = countingFetch();
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch,
+        authRequestStorage,
+      });
+
+      await expect(
+        client.handleAuthorizationCallback(callback),
+      ).rejects.toThrow(MISSING_REFRESH_TOKEN_STORAGE);
+      expect(urls).toStrictEqual([]);
+      expect(authRequestStorage.get(begin.state)).not.toBe(null);
+    });
+
+    it("refuses a device authorization without refreshTokenStorage, before any request", async () => {
+      const { fetch, urls } = countingFetch();
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        endpoints: { token: TOKEN_URL, deviceAuthorization: DEVICE_URL },
+        fetch,
+      });
+
+      await expect(client.startDeviceAuthorization()).rejects.toThrow(
+        MISSING_REFRESH_TOKEN_STORAGE,
+      );
+      await expect(client.pollDeviceToken("device-code")).rejects.toThrow(
+        MISSING_REFRESH_TOKEN_STORAGE,
+      );
+      expect(urls).toStrictEqual([]);
+    });
+
+    it("completes a sign-in and refreshes with explicit storage", async () => {
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
+      });
+
+      const begin = await client.login({ returnTo: "/dashboard" });
+      const result = await client.handleAuthorizationCallback(
+        await performAuthorizeRedirect(fixture.authServer, begin.url),
+      );
+
+      expect(result.returnTo).toBe("/dashboard");
+      expect(await client.refresh()).not.toBe(result.tokens.accessToken);
+    });
+
+    it("runs client credentials with neither storage", async () => {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        endpoints: { token: TOKEN_URL, revocation: REVOKE_URL },
+        fetch: fixture.fetchImpl,
+      });
+
+      const tokens = await client.getClientCredentialsToken({ scope: "read" });
+
+      expect(await client.getAccessToken()).toBe(tokens.accessToken);
+      expect((await client.getSession()).isAuthenticated).toBe(true);
+      expect((await client.renewSession()).isAuthenticated).toBe(true);
+      await expect(client.refresh()).rejects.toThrow(
+        new InvalidGrantError("no refresh token available"),
+      );
+      expect(await client.logout()).toStrictEqual({});
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+    });
+
+    it("drops a refresh token a client-credentials response carries when there is no storage", async () => {
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        endpoints: { token: TOKEN_URL },
+        fetch: () =>
+          Promise.resolve(
+            Response.json({
+              access_token: "machine-token",
+              token_type: "Bearer",
+              expires_in: 3600,
+              refresh_token: "unexpected",
+            }),
+          ),
+      });
+
+      const tokens = await client.getClientCredentialsToken();
+
+      expect(tokens.accessToken).toBe("machine-token");
+      await expect(client.refresh()).rejects.toThrow(
+        new InvalidGrantError("no refresh token available"),
+      );
     });
   });
 
@@ -1472,6 +1720,8 @@ describe("DirectClient", () => {
       };
 
       const client = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
         clientId: testPublicClient.id,
         redirectUri: REDIRECT_URI,
         issuer: ISSUER,

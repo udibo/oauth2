@@ -4,6 +4,10 @@ import { rejection, thrown } from "../_test_assert.ts";
 import type { AuthorizationServerMetadata } from "../models/responses.ts";
 import { DirectClient } from "./direct-client.ts";
 import {
+  MemoryAuthRequestStorage,
+  MemoryRefreshTokenStorage,
+} from "./storage.ts";
+import {
   DEFAULT_DISCOVERY_TTL_MS,
   type DiscoveryCache,
   MemoryDiscoveryCache,
@@ -394,6 +398,8 @@ describe("DirectClient discovery cache", () => {
       return Promise.resolve(new Response("Not Found", { status: 404 }));
     };
     const client = new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
       clientId: "web-app",
       issuer: ISSUER,
       redirectUri: "https://app.example/callback",
@@ -419,6 +425,8 @@ describe("DirectClient discovery cache", () => {
     );
     const { fetch: fetchImpl, calls } = discoveryFetch(ISSUER);
     const client = new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
       clientId: "web-app",
       issuer: ISSUER,
       redirectUri: "https://app.example/callback",

@@ -190,6 +190,9 @@ The demo shortcuts to replace before shipping:
   it, since the development fallback is public in the template source.
 - Wire a real mailer into `server/oauth2/identity.ts`, and add rate limiting on
   the identity endpoints (`IdentityService` accepts a `rateLimiter`).
+  `RateLimiter` and `AccountLockout` require a `store`: give them a
+  `RateLimitStore` and a `LockoutStore` that every instance shares, or the
+  memory stores for a single process only.
 - Serve over HTTPS (cookies become `Secure` automatically via `ORIGIN`).
 - Decide how long a sign-in lasts. `sessionMaxAgeMs` in
   `server/oauth2/server.ts` is the single place that says so: it stamps the

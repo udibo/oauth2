@@ -1,7 +1,11 @@
 import { assert, describe, expect, it } from "vitest";
 import { FakeTime } from "../_test_fake-time.ts";
 import { rejection } from "../_test_assert.ts";
-import { RateLimiter, type RateLimiterLike } from "./rate-limit.ts";
+import {
+  MemoryRateLimitStore,
+  RateLimiter,
+  type RateLimiterLike,
+} from "./rate-limit.ts";
 import { IdentityError } from "./errors.ts";
 import {
   EmailOtpService,
@@ -315,7 +319,11 @@ describe("EmailOtpService", () => {
 
   it("throttles requests per (purpose, email) and throws rate_limited", async () => {
     const { delivered, request } = makeService({
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await request("a@b.co");
     await request("a@b.co");
@@ -331,7 +339,11 @@ describe("EmailOtpService", () => {
 
   it("log-only mode never blocks a throttled request", async () => {
     const { delivered, request } = makeService({
-      rateLimiter: new RateLimiter({ limit: 1, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
       protectionMode: "log-only",
     });
     await request("a@b.co");
@@ -396,7 +408,11 @@ describe("EmailOtpService", () => {
 
   it("shares one throttle window across casing variants of an email", async () => {
     const { delivered, request } = makeService({
-      rateLimiter: new RateLimiter({ limit: 2, windowMs: 60_000 }),
+      rateLimiter: new RateLimiter({
+        limit: 2,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
     });
     await request("Foo@b.co");
     await request("foo@b.co");
