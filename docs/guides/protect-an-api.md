@@ -500,7 +500,13 @@ anything else and the client sees a bare challenge, which it will read as
 Response bodies default to the RFC 6749 JSON shape (`error`,
 `error_description`, `error_uri`). Pass `errorFormat: "problem-details"` to the
 constructor to emit RFC 9457 Problem Details (`application/problem+json`)
-instead — the same fields, with `type`/`detail` carrying the URI and message.
+instead: `status`, `title`, `detail` carrying the message, `type` carrying the
+URI when set, the OAuth2 `error` code and any other extension members such as
+`requiredScope`. The body does not repeat the message as `error_description`; a
+client reads `error` and `error_description` from the `WWW-Authenticate`
+challenge, which both formats send. On an authorization server the option covers its
+protected resources (`protect()` and UserInfo); its OAuth endpoints always
+answer in the RFC 6749 format.
 Errors thrown from your own services (any `OAuth2Error` subclass, which are all
 `HttpError` instances) are converted through the same path, and only an error's
 `exposedMessage` reaches the wire, so internal diagnostic detail stays in your

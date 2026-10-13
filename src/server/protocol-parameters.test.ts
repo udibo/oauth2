@@ -200,10 +200,7 @@ function fieldsFor(
   return fields;
 }
 
-async function assertRefusal(
-  response: Response,
-  errorFormat: "oauth2" | "problem-details" = "oauth2",
-): Promise<void> {
+async function assertRefusal(response: Response): Promise<void> {
   expect(response.status).toBe(400);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(response.headers.get("pragma")).toBe("no-cache");
@@ -211,13 +208,11 @@ async function assertRefusal(
   const body = await response.json();
   expect(body.error).toBe("invalid_request");
   expect(response.headers.get("content-type")).toBe(
-    errorFormat === "oauth2"
-      ? "application/json;charset=UTF-8"
-      : "application/problem+json",
+    "application/json;charset=UTF-8",
   );
   expect(JSON.stringify(body).includes("fixture-secret")).toBe(false);
   expect(JSON.stringify(body).includes("conflicting-value")).toBe(false);
-  if (errorFormat === "problem-details") expect(body.status).toBe(400);
+  expect(body.status).toBe(undefined);
 }
 
 const cases: {
@@ -320,16 +315,13 @@ describe("singleton protocol form parameters", () => {
         expect(response.status).toBe(200);
         await response.arrayBuffer();
       });
-      it(`${transport} keeps problem details and cache headers on malformed ${endpoint} forms`, async () => {
+      it(`${transport} keeps the RFC 6749 format and cache headers on malformed ${endpoint} forms under errorFormat problem-details`, async () => {
         using fixture = await createFixture(transport, {
           errorFormat: "problem-details",
         });
         const fields = fieldsFor(endpoint);
         fields.append("client_id", "fixture-client");
-        await assertRefusal(
-          await fixture.send(endpoint, fields),
-          "problem-details",
-        );
+        await assertRefusal(await fixture.send(endpoint, fields));
         fixture.assertNoWork();
       });
     }

@@ -42,6 +42,7 @@ import {
   isOAuth2Error,
   OAuth2Error,
   ServerError,
+  toOAuth2Error,
   UnauthorizedClientError,
   UnsupportedGrantTypeError,
   UnsupportedResponseTypeError,
@@ -69,6 +70,7 @@ import {
   verifyJwt,
 } from "./signing-keys.ts";
 import { validateCodeChallenge } from "../utils/pkce.ts";
+import { oauth2ErrorResponse } from "./_error-response.ts";
 import {
   assertMaxBodyBytes,
   DEFAULT_MAX_BODY_BYTES,
@@ -784,6 +786,16 @@ export class AuthorizationServer<
     this.#canIntrospectToken = options.canIntrospectToken;
   }
 
+  #handleEndpointError(
+    error: unknown,
+    prepare?: (error: OAuth2Error) => void,
+  ): Response {
+    const oauth2Error = toOAuth2Error(error);
+    prepare?.(oauth2Error);
+    if (this.throwOnError) throw oauth2Error;
+    return oauth2ErrorResponse(oauth2Error);
+  }
+
   /**
    * Whether this instance will actually serve the OIDC surface: `true` once
    * `signingKeys` is set, which is what gates `id_token` issuance and the
@@ -1062,7 +1074,10 @@ export class AuthorizationServer<
 
       return await this.createTokenResponse(token, context, grant);
     } catch (error) {
-      return this.handleError(error, this.prepareClientAuthError(request));
+      return this.#handleEndpointError(
+        error,
+        this.prepareClientAuthError(request),
+      );
     }
   }
 
@@ -1121,7 +1136,7 @@ export class AuthorizationServer<
    */
   async handleOidcMetadataRequest(request: Request): Promise<Response> {
     if (!this.signingKeys) {
-      return this.handleError(
+      return this.#handleEndpointError(
         new OAuth2Error(404, "OIDC issuance is not enabled", {
           extensions: { error: "not_found" },
         }),
@@ -1136,7 +1151,7 @@ export class AuthorizationServer<
    */
   async handleJwksRequest(_request: Request): Promise<Response> {
     if (!this.signingKeys) {
-      return this.handleError(
+      return this.#handleEndpointError(
         new OAuth2Error(404, "OIDC issuance is not enabled", {
           extensions: { error: "not_found" },
         }),
@@ -1152,7 +1167,7 @@ export class AuthorizationServer<
         },
       });
     } catch (error) {
-      return this.handleError(error);
+      return this.#handleEndpointError(error);
     }
   }
 
@@ -1270,7 +1285,7 @@ export class AuthorizationServer<
       headers.set("Location", target);
       return new Response(null, { status: 302, headers });
     } catch (error) {
-      return this.handleError(error);
+      return this.#handleEndpointError(error);
     }
   }
 
@@ -1491,7 +1506,7 @@ export class AuthorizationServer<
 
   #authorizeErrorResponse(error: unknown, redirectUrl: URL | null): Response {
     if (!redirectUrl || !(error instanceof Error) || !isOAuth2Error(error)) {
-      return this.handleError(error);
+      return this.#handleEndpointError(error);
     }
 
     const { searchParams } = redirectUrl;
@@ -1721,7 +1736,10 @@ export class AuthorizationServer<
 
       return new Response(null, { status: 200 });
     } catch (error) {
-      return this.handleError(error, this.prepareClientAuthError(request));
+      return this.#handleEndpointError(
+        error,
+        this.prepareClientAuthError(request),
+      );
     }
   }
 
@@ -1884,7 +1902,10 @@ export class AuthorizationServer<
         },
       });
     } catch (error) {
-      return this.handleError(error, this.prepareClientAuthError(request));
+      return this.#handleEndpointError(
+        error,
+        this.prepareClientAuthError(request),
+      );
     }
   }
 
@@ -2004,7 +2025,7 @@ export class AuthorizationServer<
         },
       });
     } catch (error) {
-      return this.handleError(error);
+      return this.#handleEndpointError(error);
     }
   }
 
@@ -2076,7 +2097,10 @@ export class AuthorizationServer<
         },
       });
     } catch (error) {
-      return this.handleError(error, this.prepareClientAuthError(request));
+      return this.#handleEndpointError(
+        error,
+        this.prepareClientAuthError(request),
+      );
     }
   }
 }

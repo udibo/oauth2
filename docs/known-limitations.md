@@ -243,6 +243,16 @@ should not be enabled for new deployments.
   also ignores `fetchTimeoutMs`. Transport failures and timeouts both map to
   `temporarily_unavailable` rather than `invalid_token`, so they are correctly
   reported as "issuer is down", not "your token is bad".
+- **`errorFormat` covers protected-resource refusals only.** With
+  `errorFormat: "problem-details"`, `protect()`, `handleAuthError`,
+  `createErrorResponse` and an authorization server's UserInfo endpoint answer
+  RFC 9457 problem details as `application/problem+json`. RFC 6750 §3 defines
+  the challenge but no error body. The problem body carries `error`, with the
+  message in `detail` and not repeated as `error_description`; the
+  `WWW-Authenticate` challenge carries both `error` and `error_description`.
+  An authorization server's OAuth endpoints
+  ignore the option and always answer in the RFC 6749 §5.2 format as
+  `application/json`.
 
 ## Not implemented (adjacent specs)
 

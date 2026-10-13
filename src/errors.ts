@@ -97,20 +97,18 @@ export function isOAuth2Error(value: unknown): value is OAuth2Error {
  * anything else is wrapped in a {@link ServerError} with the original error
  * attached as `cause`.
  *
- * Either way, `type` and `extensions.error_uri` are synced so that if one is
- * set the other is too — **mutating an OAuth2Error input in place**. This lets
- * both the standard OAuth2 error format (which emits `error_uri`) and the
- * RFC 9457 Problem Details format (which emits `type`) carry the same URI
- * without the handler having to set both fields.
+ * An error that sets `extensions.error_uri` but no `type` gets `type` set to
+ * the same URI — **mutating an OAuth2Error input in place** — so the RFC 9457
+ * Problem Details format, which emits `type`, carries it. `type` is never
+ * copied into `extensions.error_uri`, so a problem-details body does not repeat
+ * it; the RFC 6749 error format emits `error_uri` from either field.
  */
 export function toOAuth2Error(error: unknown): OAuth2Error {
   const oauth2Error = isOAuth2Error(error)
     ? error
     : new ServerError("unexpected error", { cause: error });
 
-  if (oauth2Error.type && !oauth2Error.extensions.error_uri) {
-    oauth2Error.extensions.error_uri = oauth2Error.type;
-  } else if (oauth2Error.extensions.error_uri && !oauth2Error.type) {
+  if (oauth2Error.extensions.error_uri && !oauth2Error.type) {
     oauth2Error.type = oauth2Error.extensions.error_uri;
   }
 
