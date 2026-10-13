@@ -1,3 +1,24 @@
+## [0.18.0](https://github.com/udibo/oauth2/compare/0.17.1...0.18.0) (2026-10-13)
+
+### ⚠ BREAKING CHANGES
+
+* `AccountLockout` and `RateLimiter` require `store`.
+Pass a `LockoutStore` and a `RateLimitStore` every instance shares, or
+`new MemoryLockoutStore()` and `new MemoryRateLimitStore()` for the old
+single-process behavior. `MemoryLockoutStore` now forgets an account's
+failures 24 hours after the last one (`ttlMs`) and holds at most 10,000
+records (`maxEntries`). Outside a browser, a `DirectClient` that signs
+users in or runs the device flow requires `authRequestStorage` (on the
+client or per call) and `refreshTokenStorage`; pass `new
+MemoryAuthRequestStorage()` and `new MemoryRefreshTokenStorage()` for
+the old single-process behavior. Client-credentials use needs neither.
+Web and service workers have no `document`, so they count as outside a
+browser and must pass these stores too.
+
+### Features
+
+* require the lockout, rate-limit and server-side client stores ([#101](https://github.com/udibo/oauth2/issues/101)) ([6494148](https://github.com/udibo/oauth2/commit/6494148a1e8960fa020ffe2e360def15ad868072)), closes [#94](https://github.com/udibo/oauth2/issues/94) [#94](https://github.com/udibo/oauth2/issues/94) [#95](https://github.com/udibo/oauth2/issues/95) [#96](https://github.com/udibo/oauth2/issues/96) [#96](https://github.com/udibo/oauth2/issues/96) [#99](https://github.com/udibo/oauth2/issues/99) [#97](https://github.com/udibo/oauth2/issues/97) [#94](https://github.com/udibo/oauth2/issues/94) [#95](https://github.com/udibo/oauth2/issues/95) [#96](https://github.com/udibo/oauth2/issues/96)
+
 ## [0.17.1](https://github.com/udibo/oauth2/compare/0.17.0...0.17.1) (2026-10-13)
 
 ### Bug Fixes
