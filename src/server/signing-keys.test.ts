@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { assert, describe, expect, it } from "vitest";
 import { decodeBase64Url } from "../utils/_encoding.ts";
 import { BasicScope } from "../models/scope.ts";
@@ -81,6 +82,33 @@ describe("signing keys", () => {
     expect(imported.kid).toStrictEqual(key.kid);
     const jwt = await signJwt(imported, { sub: "user-2" });
     expect((await verifyJwt(jwt, key.publicJwk))?.sub).toStrictEqual("user-2");
+  });
+
+  it("gives a kid-less JWK its RFC 7638 thumbprint as the kid, the same on every import", async () => {
+    const { kid: _kid, ...jwk } = await exportSigningKeyJwk(
+      await generateSigningKey(),
+    );
+    const expected = createHash("sha256")
+      .update(`{"crv":"${jwk.crv}","kty":"EC","x":"${jwk.x}","y":"${jwk.y}"}`)
+      .digest("base64url");
+
+    const first = await importSigningKeyJwk(jwk);
+    const second = await importSigningKeyJwk(structuredClone(jwk));
+
+    expect(first.kid).toBe(expected);
+    expect(second.kid).toBe(expected);
+    expect(first.publicJwk.kid).toBe(expected);
+    const jwt = await signJwt(first, { sub: "user-3" });
+    expect(kidHeaderOf(jwt)).toBe(expected);
+  });
+
+  it("keeps the kid a JWK already sets", async () => {
+    const jwk = await exportSigningKeyJwk(await generateSigningKey());
+
+    const imported = await importSigningKeyJwk({ ...jwk, kid: "2026-10-key" });
+
+    expect(imported.kid).toBe("2026-10-key");
+    expect(imported.publicJwk.kid).toBe("2026-10-key");
   });
 
   it("publishes only public material in the JWKS", async () => {

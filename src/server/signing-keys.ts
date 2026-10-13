@@ -15,6 +15,7 @@
 import { base64urlDecode, base64urlEncode } from "../utils/crypto.ts";
 import type { AuthenticationContext } from "../models/authentication.ts";
 import { snapshotAuthenticationContext } from "../utils/authentication-context.ts";
+import { jwkThumbprint } from "../utils/_jwk-thumbprint.ts";
 
 /** A ready-to-use signing key: private half signs, public JWK is published. */
 export interface SigningKey {
@@ -186,8 +187,9 @@ export async function exportSigningKeyJwk(
 
 /**
  * Import a signing key previously exported with {@link exportSigningKeyJwk}.
- * A JWK without a `kid` is given a random one, so every instance importing it
- * would publish and stamp a different `kid` — persist the exported `kid`.
+ * A JWK that sets a `kid` keeps it. One without a `kid` gets its RFC 7638 JWK
+ * thumbprint (base64url SHA-256 of the public key), so every instance
+ * importing the same key publishes and stamps the same `kid`.
  */
 export async function importSigningKeyJwk(
   jwk: JsonWebKey & { kid?: string },
@@ -199,7 +201,7 @@ export async function importSigningKeyJwk(
     true,
     ["sign"],
   );
-  const kid = jwk.kid ?? crypto.randomUUID();
+  const kid = jwk.kid ?? (await jwkThumbprint(jwk));
   return {
     kid,
     alg: "ES256",
