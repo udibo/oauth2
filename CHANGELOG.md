@@ -1,3 +1,9 @@
+## [0.17.1](https://github.com/udibo/oauth2/compare/0.17.0...0.17.1) (2026-10-13)
+
+### Bug Fixes
+
+* use the RFC 7638 thumbprint as the kid of a kid-less signing key ([#100](https://github.com/udibo/oauth2/issues/100)) ([f5b5f88](https://github.com/udibo/oauth2/commit/f5b5f88c7a27a3404879900b04988f63d98e9668)), closes [#99](https://github.com/udibo/oauth2/issues/99) [#98](https://github.com/udibo/oauth2/issues/98)
+
 ## [0.17.0](https://github.com/udibo/oauth2/compare/0.16.0...0.17.0) (2026-10-12)
 
 ### ⚠ BREAKING CHANGES
