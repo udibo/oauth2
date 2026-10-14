@@ -11,7 +11,6 @@ import {
 } from "../../_test_timeouts.ts";
 import { encodeBase64 } from "../../utils/_encoding.ts";
 import { base64urlEncode } from "../../utils/crypto.ts";
-import { PROVIDER_REQUEST_TIMEOUT_MS } from "./_shared.ts";
 import { appleProvider } from "./apple.ts";
 import { ExternalAuthError } from "./errors.ts";
 import { githubProvider } from "./github.ts";
@@ -162,7 +161,7 @@ async function profileAtDeadline(
   );
   expect(read.signal?.aborted).toBe(true);
   expect(read.signal?.reason).toMatchObject({ name: "TimeoutError" });
-  expect(read.deadlineMs).toBe(PROVIDER_REQUEST_TIMEOUT_MS);
+  expect(read.deadlineMs).toBe(10_000);
   return outcome;
 }
 
