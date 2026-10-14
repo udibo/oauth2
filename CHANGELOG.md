@@ -1,3 +1,10 @@
+## [0.22.0](https://github.com/udibo/oauth2/compare/0.21.3...0.22.0) (2026-10-14)
+
+### Features
+
+* **server:** add an opt-in replay grace to the refresh token grant ([#111](https://github.com/udibo/oauth2/issues/111)) ([e474207](https://github.com/udibo/oauth2/commit/e474207e3e7f90c1593996b6102c0c270c5617d7)), closes [#97](https://github.com/udibo/oauth2/issues/97) [#105](https://github.com/udibo/oauth2/issues/105)
+* **bff:** answer a pre-refresh cookie with the session that replaced it ([#110](https://github.com/udibo/oauth2/issues/110)) ([6f6e730](https://github.com/udibo/oauth2/commit/6f6e7301936d0ccb478996a5c84e82dd37e1c414)), closes [#105](https://github.com/udibo/oauth2/issues/105) [#109](https://github.com/udibo/oauth2/issues/109) [#97](https://github.com/udibo/oauth2/issues/97) [#105](https://github.com/udibo/oauth2/issues/105)
+
 ## [0.21.3](https://github.com/udibo/oauth2/compare/0.21.2...0.21.3) (2026-10-14)
 
 ### Bug Fixes
