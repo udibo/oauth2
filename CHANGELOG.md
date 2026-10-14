@@ -1,3 +1,22 @@
+## [0.23.0](https://github.com/udibo/oauth2/compare/0.22.0...0.23.0) (2026-10-14)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** /revoke given a refresh token that rotation already
+replaced now revokes its whole rotation family, including the live
+successor and its access tokens, when the token service stamps rotatedAt
+in revokeRotated and implements getRevokedRefreshToken and revokeFamily
+(as MemoryTokenService does). A client that revokes its previous refresh
+token after a successful refresh now ends the session it just renewed:
+revoke only the current token, at sign-out. A token service that does
+not stamp rotatedAt keeps the earlier behavior, and also loses
+replayGraceSeconds.
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Features
+
+* **server:** revoke the family of a rotated-out refresh token ([#116](https://github.com/udibo/oauth2/issues/116)) ([a49582d](https://github.com/udibo/oauth2/commit/a49582df6aef2146a85812032805b05d899030b5)), closes [#115](https://github.com/udibo/oauth2/issues/115)
+
 ## [0.22.0](https://github.com/udibo/oauth2/compare/0.21.3...0.22.0) (2026-10-14)
 
 ### Features
