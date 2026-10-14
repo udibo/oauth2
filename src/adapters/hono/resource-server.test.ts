@@ -402,6 +402,37 @@ describe("HonoResourceServer require middleware", () => {
     return app;
   }
 
+  it("keeps the headers earlier middleware set on its 401 and 403 answers", async () => {
+    const app = new Hono<{ Variables: Vars }>();
+    app.use("/api/*", async (c, next) => {
+      c.header("set-cookie", "session=; Max-Age=0", { append: true });
+      c.header("x-request-id", "req-1");
+      await next();
+    });
+    app.use("/api/*", server.protect());
+    app.get("/api/guarded", server.require({ role: "owner" }), (c) =>
+      c.text("ok"),
+    );
+    app.get("/api/scoped", server.requireScope("admin"), (c) => c.text("ok"));
+
+    for (const [path, authorization, status] of [
+      ["/api/guarded", undefined, 401],
+      ["/api/guarded", "Bearer claimed", 403],
+      ["/api/scoped", "Bearer claimed", 403],
+    ] as const) {
+      const res = await app.request(path, {
+        headers: authorization ? { Authorization: authorization } : {},
+      });
+      expect(res.status, path).toBe(status);
+      await res.body?.cancel();
+      expect(res.headers.getSetCookie(), path).toStrictEqual([
+        "session=; Max-Age=0",
+      ]);
+      expect(res.headers.get("x-request-id"), path).toBe("req-1");
+      expect(res.headers.get("www-authenticate"), path).toMatch(/^Bearer/);
+    }
+  });
+
   it("passes when every condition holds", async () => {
     const app = appRequiring({
       scope: "posts:write",

@@ -36,6 +36,15 @@ export interface HonoResourceServerVariables<
 }
 
 /**
+ * Answers with `response` while keeping the headers earlier middleware set on
+ * `c`, such as the `Set-Cookie` a BFF sets when a refresh rotates or ends the
+ * session. A middleware returning a bare `Response` would drop them.
+ */
+export function respondInContext(c: Context, response: Response): Response {
+  return c.newResponse(response.body, response);
+}
+
+/**
  * Builds a Hono middleware that authenticates bearer tokens, stores the
  * authenticated context at {@link OAUTH2_CONTEXT_KEY}, and on failure returns
  * the server's auth error response.
@@ -54,7 +63,7 @@ export function createProtectMiddleware<
       c.set(OAUTH2_CONTEXT_KEY, ctx);
       await next();
     } catch (error) {
-      return server.handleAuthError(error);
+      return respondInContext(c, server.handleAuthError(error));
     }
   };
 }
@@ -81,7 +90,7 @@ export function createRequireScopeMiddleware<
     try {
       server.assertScope(scope, requiredScope);
     } catch (error) {
-      return server.handleAuthError(error);
+      return respondInContext(c, server.handleAuthError(error));
     }
     await next();
   };
@@ -107,7 +116,7 @@ export function createRequireMiddleware<
     try {
       server.assertAuthorized(context, conditions);
     } catch (error) {
-      return server.handleAuthError(error);
+      return respondInContext(c, server.handleAuthError(error));
     }
     await next();
   };

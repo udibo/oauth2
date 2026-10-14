@@ -80,7 +80,7 @@ import { timingSafeMatchIndex } from "../../../utils/_timing-safe.ts";
 import { sha256Hash } from "../../../server/utils/hash.ts";
 import type { HonoAuthorizationServer } from "../authorization-server.ts";
 import type { HonoResourceServer } from "../resource-server.ts";
-import { OAUTH2_CONTEXT_KEY } from "../_common.ts";
+import { OAUTH2_CONTEXT_KEY, respondInContext } from "../_common.ts";
 import {
   DEFAULT_MAX_RETURN_TO_LENGTH,
   loginContinuation as computeLoginContinuation,
@@ -2129,7 +2129,7 @@ export class HonoBff {
         c.set(OAUTH2_CONTEXT_KEY, ctx);
         await next();
       } catch (error) {
-        return resourceServer.handleAuthError(error);
+        return respondInContext(c, resourceServer.handleAuthError(error));
       }
     };
   }
