@@ -5,8 +5,15 @@
  * @module
  */
 
-import { defaultFetch } from "../../utils/_default-fetch.ts";
-import { describeError, readProviderText } from "./_shared.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../../utils/_default-fetch.ts";
+import {
+  describeError,
+  PROVIDER_REQUEST_TIMEOUT_MS,
+  readProviderText,
+} from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import { ExternalAuthError } from "./errors.ts";
 import type {
@@ -105,6 +112,9 @@ export function githubProvider(
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/vnd.github+json",
         },
+        signal: packageDeadlineSignal(
+          AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+        ),
       });
     } catch (error) {
       throw new ExternalAuthError(

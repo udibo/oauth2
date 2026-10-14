@@ -50,6 +50,15 @@ export function describeError(error: unknown): string {
 }
 
 /**
+ * Deadline, in milliseconds, on each request a connector sends to a provider —
+ * the token exchange and the profile, UserInfo and key-set reads. Send it as
+ * `signal: packageDeadlineSignal(AbortSignal.timeout(...))` on the `fetch`
+ * init: that one signal covers the connect, the headers and the whole body, so
+ * the body read after it needs no deadline of its own.
+ */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
  * Response bytes a connector reads from a provider endpoint — token, profile,
  * UserInfo, or key set — before refusing the response.
  */
