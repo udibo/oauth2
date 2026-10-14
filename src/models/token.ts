@@ -77,10 +77,10 @@ export interface RefreshToken<
    */
   familyCreatedAt?: Date;
   /**
-   * When the refresh grant rotated this token out. A token service that
-   * supports `RefreshTokenGrantOptions.replayGraceSeconds` sets it in
-   * `revokeRotated` and returns it from `getRevokedRefreshToken`. A token
-   * revoked any other way has none.
+   * When the refresh grant rotated this token out. A token service sets it in
+   * `revokeRotated` and returns it from `getRevokedRefreshToken`; the refresh
+   * grant's `replayGraceSeconds` and the revocation endpoint's family
+   * revocation both need it. A token revoked any other way has none.
    */
   rotatedAt?: Date;
 }

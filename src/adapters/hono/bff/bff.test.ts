@@ -4661,6 +4661,100 @@ describe("HonoBff", () => {
       await expectSignedOutWithout(app, stale, fresh);
     });
 
+    for (const { store, lateResponseSetsCookie } of [
+      { store: "EncryptedCookieSessionStore", lateResponseSetsCookie: true },
+      { store: "MemorySessionStore", lateResponseSetsCookie: false },
+    ]) {
+      it(`ends the successor at the authorization server when sign-out runs during a refresh (${store})`, async () => {
+        const authServerFetch = localAuthServerFetch(fixture.authServer);
+        let hold: Promise<void> | undefined;
+        let release = (): void => {};
+        let successor: { access_token: string; refresh_token: string } = {
+          access_token: "",
+          refresh_token: "",
+        };
+        let exchanged = (): void => {};
+        const exchangeAnswered = new Promise<void>((resolve) => {
+          exchanged = resolve;
+        });
+        const client = new DirectClient({
+          clientId: testClient.id,
+          clientSecret: CLIENT_SECRET,
+          redirectUri: REDIRECT_URI,
+          endpoints: {
+            authorization: AUTHORIZE_URL,
+            token: TOKEN_URL,
+            revocation: REVOKE_URL,
+          },
+          fetch: async (input, init) => {
+            const request = new Request(input, init);
+            const form = await request.clone().formData();
+            const response = await authServerFetch(request);
+            if (form.get("grant_type") === "refresh_token" && hold) {
+              successor = await response.clone().json();
+              exchanged();
+              await hold;
+            }
+            return response;
+          },
+        });
+        const app = cookieStoreApp({
+          client,
+          ...(store === "MemorySessionStore"
+            ? { sessionStore: new MemorySessionStore() }
+            : {}),
+        });
+        const stale = await loginCookie(app);
+        hold = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+
+        const inFlight = app.request("/raw/me", {
+          headers: { cookie: stale },
+        });
+        await exchangeAnswered;
+        const logout = await app.request("/auth/logout", {
+          method: "POST",
+          headers: { cookie: stale },
+        });
+        await logout.body?.cancel();
+        release();
+        const first = await inFlight;
+        await first.body?.cancel();
+        hold = undefined;
+
+        expect(successor.refresh_token).not.toBe("");
+        expect(
+          await fixture.tokenService.getRefreshToken(successor.refresh_token),
+          "the refresh token the in-flight refresh received must be dead at " +
+            "the authorization server once sign-out answers",
+        ).toBe(undefined);
+        expect(
+          await fixture.tokenService.getToken(successor.access_token),
+        ).toBe(undefined);
+        const replacement = cookieValue(first, "oauth2_session");
+        if (!lateResponseSetsCookie) {
+          expect(replacement).toBe(undefined);
+          return;
+        }
+        assert(replacement !== undefined);
+        const revived = await app.request("/api/me", {
+          headers: { cookie: `oauth2_session=${replacement}` },
+        });
+        expect(
+          revived.status,
+          "a cookie the refresh's late response puts back must not sign " +
+            "the browser in again",
+        ).toBe(401);
+        await revived.body?.cancel();
+        expect(
+          reuse,
+          "the revived cookie's refresh presents a revoked token, which the " +
+            "authorization server cannot tell from a replay",
+        ).toHaveBeenCalledTimes(1);
+      });
+    }
+
     it("does not hand back the previous session after a sign-in replaces it", async () => {
       const app = cookieStoreApp();
       const { stale, fresh } = await refreshedOnce(app);

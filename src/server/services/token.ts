@@ -186,9 +186,11 @@ export interface TokenServiceInterface<
    * cannot terminate the very session it renews. When absent, the refresh
    * grant falls back to {@linkcode revoke}.
    *
-   * To support the refresh grant's `replayGraceSeconds`, stamp the revoked
-   * record with {@linkcode RefreshToken.rotatedAt} here and return it from
-   * {@linkcode getRevokedRefreshToken}.
+   * Stamp the revoked record with {@linkcode RefreshToken.rotatedAt} here and
+   * return it, with its `familyId`, from {@linkcode getRevokedRefreshToken}.
+   * The refresh grant's `replayGraceSeconds` reads it, and the revocation
+   * endpoint revokes the family of a token presented after rotation replaced
+   * it, so a sign-out racing a refresh still ends the successor.
    */
   revokeRotated?(token: RefreshToken<Client, User, Scope>): Promise<boolean>;
 
@@ -218,7 +220,9 @@ export interface TokenServiceInterface<
   /**
    * Revokes every token belonging to a rotation family — called by the
    * refresh grant when a rotated-out member is replayed, so a stolen token
-   * can't keep a session alive. Returns true if anything was revoked.
+   * can't keep a session alive, and by the revocation endpoint when it is
+   * given a token whose tombstone carries {@linkcode RefreshToken.rotatedAt}.
+   * Returns true if anything was revoked.
    */
   revokeFamily?(familyId: string): Promise<boolean>;
 

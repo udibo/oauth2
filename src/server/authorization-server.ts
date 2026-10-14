@@ -1701,6 +1701,18 @@ export class AuthorizationServer<
    * end another application's live sessions at will. A token belonging to a
    * different client is left alone.
    *
+   * **A refresh token that rotation already replaced revokes its family.** When
+   * the token is no longer live but the token service's
+   * `getRevokedRefreshToken` returns it with {@linkcode RefreshToken.rotatedAt}
+   * and a `familyId`, and it was issued to the authenticated client, the
+   * server calls `revokeFamily`, so the successor rotation issued dies with
+   * it (RFC 7009 §2.1 allows revoking related tokens). A sign-out that races
+   * the client's own refresh therefore still ends the session. A token
+   * revoked other than by rotation, a token with no family, and a service
+   * without `getRevokedRefreshToken` and `revokeFamily` revoke nothing more.
+   * The refresh grant's `replayGraceSeconds` does not apply here, and
+   * `onTokenReuse` does not fire.
+   *
    * Always returns 200 OK, even if the token was invalid, already revoked, or
    * issued to another client: RFC 7009 Section 2.2 requires that answer so the
    * endpoint cannot be used as an oracle for whether a token value is live or
@@ -1733,10 +1745,9 @@ export class AuthorizationServer<
 
       const { tokenService } = context.services;
       const resolved = await this.#resolveToken(tokenService, token, hint);
-      if (
-        resolved &&
-        resolved.token.client.id.toString() === client.id.toString()
-      ) {
+      if (!resolved) {
+        await this.#revokeRotatedOutFamily(tokenService, token, client);
+      } else if (resolved.token.client.id.toString() === client.id.toString()) {
         await tokenService.revoke(token, resolved.tokenType);
       }
 
@@ -1746,6 +1757,24 @@ export class AuthorizationServer<
         error,
         this.prepareClientAuthError(request),
       );
+    }
+  }
+
+  async #revokeRotatedOutFamily(
+    tokenService: TokenServiceInterface<Client, User, S>,
+    value: string,
+    client: Client,
+  ): Promise<void> {
+    if (!tokenService.getRevokedRefreshToken || !tokenService.revokeFamily) {
+      return;
+    }
+    const rotatedOut = await tokenService.getRevokedRefreshToken(value);
+    if (
+      rotatedOut?.rotatedAt &&
+      rotatedOut.familyId &&
+      rotatedOut.client.id.toString() === client.id.toString()
+    ) {
+      await tokenService.revokeFamily(rotatedOut.familyId);
     }
   }
 

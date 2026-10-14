@@ -68,7 +68,8 @@ sections apply only when you host those flows.
 - [ ] Registered callbacks and allowed grants are restricted to the app's actual
       clients.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
-- [ ] Replay-family revocation cannot be undone by a concurrent token save.
+- [ ] Family revocation, from a replay or from revoking a rotated-out token,
+      cannot be undone by a concurrent token save.
 - [ ] Client-credentials tokens represent the client or its service account, not
       its human owner.
 - [ ] Consent and scope policy match the clients you allow.

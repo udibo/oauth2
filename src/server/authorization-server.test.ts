@@ -1271,6 +1271,231 @@ describe("AuthorizationServer", () => {
 
       expect(response.status).toBe(200);
     });
+
+    describe("a refresh token that rotation already replaced", () => {
+      const otherClient: TestClient = {
+        id: "client-2",
+        confidential: true,
+        grants: ["refresh_token"],
+      };
+
+      async function rotatingServer(
+        options: { replayGraceSeconds?: number; tombstones?: boolean } = {},
+      ) {
+        const services = createTestServices();
+        const { tokenService } = services;
+        if (options.tombstones === false) {
+          Object.assign(tokenService, {
+            getRevokedRefreshToken: undefined,
+            revokeFamily: undefined,
+          });
+        }
+        await setupTestData(services);
+        await services.clientService.add(otherClient, "other-secret");
+        const reuseEvents: string[] = [];
+        const rotating = new AuthorizationServer({
+          resolve: () => ({
+            services: { clientService: services.clientService, tokenService },
+            issuer: "https://auth.example.com",
+          }),
+          grants: {
+            refresh_token: new RefreshTokenGrant({
+              resolve: () => ({
+                clientService: services.clientService,
+                tokenService,
+              }),
+              replayGraceSeconds: options.replayGraceSeconds,
+              onTokenReuse: (event) => {
+                reuseEvents.push(event.familyId);
+              },
+            }),
+          },
+        });
+        return { server: rotating, tokenService, reuseEvents };
+      }
+
+      async function issueFamily(
+        tokenService: MemoryTokenService<TestClient, TestUser>,
+        client: TestClient = testClient,
+        familyId: string = crypto.randomUUID(),
+      ) {
+        const original = {
+          accessToken: crypto.randomUUID(),
+          accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+          refreshToken: crypto.randomUUID(),
+          refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+          familyId,
+          client,
+          user: testUser,
+        };
+        await tokenService.save(original);
+        return original;
+      }
+
+      async function refresh(
+        rotating: AuthorizationServer<TestClient, TestUser, BasicScope>,
+        refreshToken: string,
+        credentials: [string, string] = ["client-1", "secret"],
+      ): Promise<Response> {
+        return await rotating.handleTokenRequest(
+          tokenRequest(
+            { grant_type: "refresh_token", refresh_token: refreshToken },
+            basicAuthHeader(...credentials),
+          ),
+        );
+      }
+
+      async function rotate(
+        rotating: AuthorizationServer<TestClient, TestUser, BasicScope>,
+        refreshToken: string,
+        credentials?: [string, string],
+      ): Promise<{ access_token: string; refresh_token: string }> {
+        const response = await refresh(rotating, refreshToken, credentials);
+        expect(response.status).toBe(200);
+        return await response.json();
+      }
+
+      async function revoke(
+        rotating: AuthorizationServer<TestClient, TestUser, BasicScope>,
+        fields: Record<string, string>,
+        credentials: [string, string] = ["client-1", "secret"],
+      ): Promise<Response> {
+        return await rotating.handleRevocationRequest(
+          formRequest(
+            "http://localhost/revoke",
+            fields,
+            basicAuthHeader(...credentials),
+          ),
+        );
+      }
+
+      for (const hint of [undefined, "refresh_token", "access_token"]) {
+        it(`revokes the live successor when given hint ${hint ?? "(none)"}`, async () => {
+          const { server: rotating, tokenService } = await rotatingServer();
+          const original = await issueFamily(tokenService);
+          const successor = await rotate(rotating, original.refreshToken);
+
+          const response = await revoke(rotating, {
+            token: original.refreshToken,
+            ...(hint ? { token_type_hint: hint } : {}),
+          });
+
+          expect(response.status).toBe(200);
+          expect(await response.text()).toBe("");
+          expect(
+            await tokenService.getRefreshToken(successor.refresh_token),
+            "a sign-out that presents the rotated-out token must still end " +
+              "the session its successor carries",
+          ).toBe(undefined);
+          expect(await tokenService.getToken(successor.access_token)).toBe(
+            undefined,
+          );
+          const refused = await refresh(rotating, successor.refresh_token);
+          expect(refused.status).toBe(400);
+          expect((await refused.json()).error).toBe("invalid_grant");
+        });
+      }
+
+      it("revokes every generation after the presented one", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const original = await issueFamily(tokenService);
+        const second = await rotate(rotating, original.refreshToken);
+        const third = await rotate(rotating, second.refresh_token);
+
+        await revoke(rotating, { token: original.refreshToken });
+
+        expect(await tokenService.getRefreshToken(third.refresh_token)).toBe(
+          undefined,
+        );
+      });
+
+      it("revokes the family inside the refresh grant's replay grace", async () => {
+        const {
+          server: rotating,
+          tokenService,
+          reuseEvents,
+        } = await rotatingServer({ replayGraceSeconds: 30 });
+        const original = await issueFamily(tokenService);
+        const successor = await rotate(rotating, original.refreshToken);
+
+        await revoke(rotating, { token: original.refreshToken });
+
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "the grace excuses a straggling refresh, never a sign-out",
+        ).toBe(undefined);
+        expect(
+          reuseEvents,
+          "a sign-out is not a replay, so it raises no token-reuse event",
+        ).toStrictEqual([]);
+      });
+
+      it("leaves the family of a token rotated for another client alone", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const original = await issueFamily(tokenService, otherClient);
+        const successor = await rotate(rotating, original.refreshToken, [
+          "client-2",
+          "other-secret",
+        ]);
+
+        const response = await revoke(rotating, {
+          token: original.refreshToken,
+          token_type_hint: "refresh_token",
+        });
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("");
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "a client that saw another client's old refresh token must not " +
+            "be able to end that client's session",
+        ).not.toBe(undefined);
+        const next = await refresh(rotating, successor.refresh_token, [
+          "client-2",
+          "other-secret",
+        ]);
+        expect(next.status).toBe(200);
+      });
+
+      it("does not cascade from a token revoked other than by rotation", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const revoked = await issueFamily(tokenService);
+        const sibling = await issueFamily(
+          tokenService,
+          testClient,
+          revoked.familyId,
+        );
+        await tokenService.revoke(revoked.refreshToken, "refresh_token");
+
+        const response = await revoke(rotating, {
+          token: revoked.refreshToken,
+          token_type_hint: "refresh_token",
+        });
+
+        expect(response.status).toBe(200);
+        expect(
+          await tokenService.getRefreshToken(sibling.refreshToken),
+          "only a token rotation replaced has a successor to end",
+        ).not.toBe(undefined);
+      });
+
+      it("answers 200 and revokes nothing with a token service that keeps no tombstones", async () => {
+        const { server: rotating, tokenService } = await rotatingServer({
+          tombstones: false,
+        });
+        const original = await issueFamily(tokenService);
+        const successor = await rotate(rotating, original.refreshToken);
+
+        const response = await revoke(rotating, {
+          token: original.refreshToken,
+        });
+
+        expect(response.status).toBe(200);
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+        ).not.toBe(undefined);
+      });
+    });
   });
 
   describe("getMetadata", () => {

@@ -484,14 +484,32 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   that window. Shorten it with `rotatedCookieGrace: { ttlMs }`, or turn it off
   with `rotatedCookieGrace: false` and accept that stragglers sign the user
   out.
-- **A sign-out during a refresh can be undone by that refresh's own response
-  with `EncryptedCookieSessionStore`.** Sign-out, a replacing sign-in, or a
-  refused refresh ends the grace for the whole chain, including a refresh
-  still in flight, so no later straggler gets that session back. The request
-  that ran the refresh still answers with the new cookie it sealed. If that
-  response reaches the browser after the sign-out's, the browser stores the
-  cookie again and is signed in. A stateful store does not have this problem,
-  because sign-out destroys the record the cookie names.
+- **A sign-out during a refresh revokes the old refresh token, and only the
+  authorization server can reach its successor.** The sign-out request carries
+  the session from before the refresh, so the BFF revokes the token the
+  refresh is rotating out. `AuthorizationServer` answers that by revoking the
+  token's rotation family, which ends the successor too, on any session store
+  and any instance. That needs a token service whose `revokeRotated` stamps
+  `rotatedAt` and that implements `getRevokedRefreshToken` and `revokeFamily`,
+  as `MemoryTokenService` does; see
+  [revocation](guides/become-an-oauth-provider.md#revocation-and-introspection).
+  Another authorization server may revoke only the token it was given, and
+  then the successor stays live until it expires. A revocation that reaches
+  the authorization server between the refresh grant's claim of the old token
+  and its save of the successor also misses it, unless the token store keeps
+  the family's revocation so that save cannot restore it.
+- **With `EncryptedCookieSessionStore`, a refresh's own response can put a
+  signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
+  refresh ends the grace for the whole chain, including a refresh still in
+  flight, so no later straggler gets that session back. The request that ran
+  the refresh still answers with the new cookie it sealed. If that response
+  reaches the browser after the sign-out's, the browser stores the cookie
+  again. Where the authorization server revoked the successor's family, as
+  above, the next refresh fails, `onTokenReuse` reports it as a replay, and
+  the browser is signed out, though an
+  access token a resource server validates offline stays usable until it
+  expires. Otherwise the browser is signed in again. A stateful store does not
+  have this problem, because sign-out destroys the record the cookie names.
 - **A token refresh in flight on a replaced session can clear the new cookie.**
   When a request on the earlier cookie starts a refresh just before a new
   sign-in in the same browser replaces that session, the refresh then fails as
