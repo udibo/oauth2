@@ -144,9 +144,9 @@ export interface RefreshLockStore {
  * The fence a {@link RefreshLockStore} passes to the refresh it runs: an
  * `update` and a `destroy` of the locked session that take effect only while
  * this call still holds the lock. The lease is current from when the call
- * acquires the lock until it releases it, or until the lock expires or
- * another call takes it, whichever comes first; it is never current again
- * after that.
+ * acquires the lock until the call releases the lock or another call takes
+ * it; a store may also end it when the lock expires. Once another call has
+ * taken the lock, the lease is never current again.
  */
 export interface RefreshLease {
   /**
@@ -255,14 +255,16 @@ export interface MemorySessionStoreOptions {
    *
    * Defaults to no expiry, which is right for one process: a holder cannot
    * die without the store dying with it. Set it in tests that model an
-   * instance losing its lock mid-refresh. Must be a positive number.
+   * instance losing its lock mid-refresh. Must be a positive number no
+   * larger than 2147483647 (2^31 − 1, the longest timer delay).
    */
   refreshLeaseMs?: number;
   /**
    * How long `withRefreshLock` waits for a lock another call holds, in
    * milliseconds, before it rejects. `HonoBff` then answers `502` and keeps
    * the session. Defaults to waiting until the lock is released or expires.
-   * Must be a positive number.
+   * Must be a positive number no larger than 2147483647 (2^31 − 1, the
+   * longest timer delay).
    */
   refreshLockWaitMs?: number;
 }
@@ -271,11 +273,14 @@ interface MemoryLease {
   expiresAt: number;
 }
 
-function positiveMs(name: string, value: number | undefined): number {
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+function timerMs(name: string, value: number | undefined): number {
   if (value === undefined) return Infinity;
-  if (!(value > 0)) {
+  if (!(value > 0 && value <= MAX_TIMER_MS)) {
     throw new RangeError(
-      `${name} must be a positive number of milliseconds, got ${value}.`,
+      `${name} must be a positive number of milliseconds no larger than ` +
+        `${MAX_TIMER_MS}, got ${value}. Leave it unset for no limit.`,
     );
   }
   return value;
@@ -297,14 +302,11 @@ export class MemorySessionStore
 
   /**
    * @throws {RangeError} When `refreshLeaseMs` or `refreshLockWaitMs` is not
-   * a positive number.
+   * a positive number of at most 2^31 − 1 milliseconds.
    */
   constructor(options: MemorySessionStoreOptions = {}) {
-    this.#leaseMs = positiveMs("refreshLeaseMs", options.refreshLeaseMs);
-    this.#lockWaitMs = positiveMs(
-      "refreshLockWaitMs",
-      options.refreshLockWaitMs,
-    );
+    this.#leaseMs = timerMs("refreshLeaseMs", options.refreshLeaseMs);
+    this.#lockWaitMs = timerMs("refreshLockWaitMs", options.refreshLockWaitMs);
   }
 
   /** Stores the session under a fresh random id and returns it as the cookie value. */

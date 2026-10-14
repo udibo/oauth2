@@ -47,6 +47,7 @@ import { HonoBff, type HonoBffOptions } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
   MemorySessionStore,
+  type RefreshLease,
   type RefreshLockStore,
   type SessionData,
   type SessionStore,
@@ -4209,6 +4210,111 @@ describe("HonoBff", () => {
       expect(res.headers.get("www-authenticate")).toMatch(/^Bearer/);
       expect(res.headers.get("content-type")).toContain("json");
       await res.body?.cancel();
+    });
+  });
+
+  describe("a refused refresh whose fenced destroy loses a race", () => {
+    /**
+     * A store whose lease refuses every destroy, after `race` has changed the
+     * session the way a peer or a sign-out would between the BFF's re-read
+     * and its destroy.
+     */
+    class RacedLeaseStore extends MemorySessionStore {
+      race: (cookieValue: string) => Promise<unknown> = () => Promise.resolve();
+
+      override withRefreshLock<T>(
+        cookieValue: string,
+        refresh: (lease: RefreshLease) => Promise<T>,
+      ): Promise<T> {
+        return super.withRefreshLock(cookieValue, (lease) =>
+          refresh({
+            update: (data) => lease.update(data),
+            destroy: async () => {
+              await this.race(cookieValue);
+              return false;
+            },
+          }),
+        );
+      }
+    }
+
+    function echoApp(bff: HonoBff): Hono {
+      const app = new Hono();
+      app.use("/api/*", bff.attachToken());
+      app.get("/api/token", (c) =>
+        c.json({ authorization: c.req.header("Authorization") ?? null }),
+      );
+      return app;
+    }
+
+    async function refusedSession(bff: HonoBff): Promise<string> {
+      return await createTestSession(bff, {
+        refreshToken: "refresh-the-server-never-issued",
+        tokens: { accessTokenExpiresAt: Date.now() + 5_000 },
+      });
+    }
+
+    function sessionCookieCleared(res: Response): boolean {
+      return res.headers
+        .getSetCookie()
+        .some(
+          (cookie) =>
+            cookie.startsWith("oauth2_session=;") &&
+            cookie.includes("Max-Age=0"),
+        );
+    }
+
+    it("signs out when the session ended before the refused destroy", async () => {
+      const store = new RacedLeaseStore();
+      const bff = makeBff({ sessionStore: store, refreshSkewSeconds: 60 });
+      const cookie = await refusedSession(bff);
+      store.race = (value) => store.destroy(value);
+
+      const res = await echoApp(bff).request("/api/token", {
+        headers: { cookie },
+      });
+
+      expect(
+        res.status,
+        "a session that no longer exists has no new holder to protect, so " +
+          "the refresh ends signed out rather than answering 502",
+      ).toBe(200);
+      expect((await res.json()).authorization).toBe(null);
+      expect(sessionCookieCleared(res)).toStrictEqual(true);
+    });
+
+    it("uses the tokens a peer stored before the refused destroy", async () => {
+      const store = new RacedLeaseStore();
+      const bff = makeBff({ sessionStore: store, refreshSkewSeconds: 60 });
+      const cookie = await refusedSession(bff);
+      store.race = async (value) => {
+        const session = await store.read(value);
+        assert(session !== null);
+        await store.update(value, {
+          ...session,
+          tokens: {
+            ...session.tokens,
+            accessToken: "peer-access-token",
+            accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+          },
+          refreshToken: "peer-refresh-token",
+        });
+      };
+
+      const res = await echoApp(bff).request("/api/token", {
+        headers: { cookie },
+      });
+
+      expect(res.status).toBe(200);
+      expect(
+        (await res.json()).authorization,
+        "a peer stored fresh tokens while this refresh was refused, so the " +
+          "request must carry them instead of failing",
+      ).toBe("Bearer peer-access-token");
+      expect(sessionCookieCleared(res)).toStrictEqual(false);
+      expect((await store.read(cookie.split("=")[1]))?.refreshToken).toBe(
+        "peer-refresh-token",
+      );
     });
   });
 

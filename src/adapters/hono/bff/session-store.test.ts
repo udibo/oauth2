@@ -246,8 +246,8 @@ describe("MemorySessionStore refresh lease", () => {
     return lease;
   }
 
-  it("refuses a lease setting that is not a positive number of milliseconds", () => {
-    for (const bad of [0, -1, Number.NaN]) {
+  it("refuses a lease setting that is not a positive number of milliseconds a timer can hold", () => {
+    for (const bad of [0, -1, Number.NaN, Infinity, 2 ** 31, 1e10]) {
       thrown(
         () => new MemorySessionStore({ refreshLeaseMs: bad }),
         RangeError,
@@ -259,6 +259,25 @@ describe("MemorySessionStore refresh lease", () => {
         "refreshLockWaitMs",
       );
     }
+  });
+
+  it("renews a lease at the longest setting on its own schedule, not every millisecond", async () => {
+    using time = new FakeTime();
+    const leaseMs = 2 ** 31 - 1;
+    const store = new MemorySessionStore({
+      refreshLeaseMs: leaseMs,
+      refreshLockWaitMs: leaseMs,
+    });
+    const value = await store.create(makeSessionData());
+    const release = Promise.withResolvers<void>();
+    using setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const holder = store.withRefreshLock(value, () => release.promise);
+    await time.tickAsync(0);
+
+    const delays = setIntervalSpy.mock.calls.map(([, delay]) => delay);
+    expect(delays).toStrictEqual([leaseMs / 3]);
+    release.resolve();
+    await holder;
   });
 
   it("loses a lease that lapsed: another call takes the lock, and the lapsed lease can neither write nor destroy", async () => {
