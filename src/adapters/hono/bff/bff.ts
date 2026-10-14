@@ -730,8 +730,9 @@ export interface HonoBffOptions {
    * such a request with the new session and its cookie, spending nothing.
    *
    * Defaults to `{ ttlMs: 10_000, maxEntries: 1000 }`. Pass `false` to turn it
-   * off. Beyond `maxEntries` the oldest entry is dropped. Signing out, or a
-   * sign-in replacing the session, forgets it on this instance.
+   * off. Beyond `maxEntries` the oldest entry is dropped. A session that ends
+   * on this instance (sign-out, a sign-in replacing it, a refused refresh)
+   * forgets its whole chain, including a refresh still in flight.
    *
    * The cost is that a stolen pre-refresh cookie replayed to the same
    * instance within `ttlMs` receives the new session, where without the grace

@@ -6659,8 +6659,9 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   with that response, and a request the browser sent before then still carries
   the old one. `HonoBff`'s `rotatedCookieGrace`, on by default, covers the
   instance that ran the refresh: for 10 seconds it answers the old cookie with
-  the new session and its cookie, for up to 1000 replaced cookies, and
-  forgets a session on sign-out. A request with the old cookie that reaches
+  the new session and its cookie, for up to 1000 replaced cookies. It forgets
+  a session's chain when the session ends on that instance: sign-out, a
+  sign-in replacing it, or a refresh the authorization server refuses. A request with the old cookie that reaches
   another instance, or arrives after the grace, presents the rotated-out
   refresh token: reuse detection revokes the family, `onTokenReuse` fires, and
   both cookies stop working. An authorization server that does not rotate
@@ -6675,6 +6676,14 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   that window. Shorten it with `rotatedCookieGrace: { ttlMs }`, or turn it off
   with `rotatedCookieGrace: false` and accept that stragglers sign the user
   out.
+- **A sign-out during a refresh can be undone by that refresh's own response
+  with `EncryptedCookieSessionStore`.** Sign-out, a replacing sign-in, or a
+  refused refresh ends the grace for the whole chain, including a refresh
+  still in flight, so no later straggler gets that session back. The request
+  that ran the refresh still answers with the new cookie it sealed. If that
+  response reaches the browser after the sign-out's, the browser stores the
+  cookie again and is signed in. A stateful store does not have this problem,
+  because sign-out destroys the record the cookie names.
 - **A token refresh in flight on a replaced session can clear the new cookie.**
   When a request on the earlier cookie starts a refresh just before a new
   sign-in in the same browser replaces that session, the refresh then fails as

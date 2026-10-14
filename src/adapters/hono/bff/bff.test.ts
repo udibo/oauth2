@@ -4673,6 +4673,25 @@ describe("HonoBff", () => {
       await expectSignedOutWithout(app, stale, fresh);
     });
 
+    it("does not hand back a session the authorization server refused to refresh", async () => {
+      const app = cookieStoreApp();
+      const { stale, fresh } = await refreshedOnce(app);
+      const successor = await new EncryptedCookieSessionStore({
+        secret: SECRET,
+      }).read(fresh.slice("oauth2_session=".length));
+      assert(successor?.refreshToken !== undefined);
+      await fixture.tokenService.revoke(
+        successor.refreshToken,
+        "refresh_token",
+      );
+      const refused = await app.request("/raw/me", {
+        headers: { cookie: fresh },
+      });
+      expect(await refused.json()).toStrictEqual({ authorized: false });
+
+      await expectSignedOutWithout(app, stale, fresh);
+    });
+
     it("refuses a grace window that is not a positive number of milliseconds", () => {
       for (const ttlMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
         expect(() => cookieStoreApp({ rotatedCookieGrace: { ttlMs } })).toThrow(
