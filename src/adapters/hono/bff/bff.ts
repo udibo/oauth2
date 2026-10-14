@@ -99,6 +99,7 @@ import {
   supportsBackchannelLogout,
   supportsRefreshLock,
 } from "./session-store.ts";
+import { RotatedCookies } from "./_rotated-cookies.ts";
 import {
   buildDownstreamHeaders,
   buildUpstreamHeaders,
@@ -393,7 +394,8 @@ export interface HonoBffOptions {
    *   shared {@link SessionStore} when you need revocation. Against an
    *   authorization server that rotates refresh tokens, a request still
    *   carrying the cookie from before a refresh replays the old token and
-   *   trips reuse detection.
+   *   trips reuse detection, unless it reaches the instance that ran the
+   *   refresh within {@link HonoBffOptions.rotatedCookieGrace}.
    * - A {@link SessionStore} over a database or cache every instance shares,
    *   for server-side revocation and back-channel logout. Implement
    *   `RefreshLockStore` (`withRefreshLock`) on it so instances refresh a
@@ -715,6 +717,31 @@ export interface HonoBffOptions {
    */
   refreshSkewSeconds?: number;
   /**
+   * How this instance answers a request that still carries the session cookie
+   * a refresh replaced. Applies when a refresh hands the browser a new cookie
+   * value, as {@link EncryptedCookieSessionStore} does on every refresh.
+   *
+   * A browser that sent several requests before the refresh's response arrived
+   * still sends the old cookie on the others. Against an authorization server
+   * that rotates refresh tokens, a request that arrives after the refresh has
+   * finished would present the rotated-out token: reuse detection revokes the
+   * family and the user is signed out. With this grace, the instance that ran
+   * the refresh remembers which cookie replaced which for `ttlMs` and answers
+   * such a request with the new session and its cookie, spending nothing.
+   *
+   * Defaults to `{ ttlMs: 10_000, maxEntries: 1000 }`. Pass `false` to turn it
+   * off. Beyond `maxEntries` the oldest entry is dropped. A session that ends
+   * on this instance (sign-out, a sign-in replacing it, a refused refresh)
+   * forgets its whole chain, including a refresh still in flight.
+   *
+   * The cost is that a stolen pre-refresh cookie replayed to the same
+   * instance within `ttlMs` receives the new session, where without the grace
+   * it would trip reuse detection. Only the instance that ran the refresh
+   * remembers, so a request on another instance still replays the token. See
+   * the session limitations in `docs/known-limitations.md`.
+   */
+  rotatedCookieGrace?: { ttlMs?: number; maxEntries?: number } | false;
+  /**
    * Optional resource server. When provided, {@link HonoBff.protect}
    * becomes available — a single middleware that composes
    * {@link HonoBff.attachToken} with `resourceServer.protect(scope)`.
@@ -763,6 +790,29 @@ type RefreshOutcome =
   | { status: "refreshed"; entry: SessionEntry }
   | { status: "revoked" }
   | { status: "unavailable" };
+
+const DEFAULT_ROTATED_COOKIE_GRACE_MS = 10_000;
+const DEFAULT_ROTATED_COOKIE_MAX_ENTRIES = 1000;
+const MAX_ROTATED_COOKIE_HOPS = 4;
+
+function rotatedCookies(
+  grace: HonoBffOptions["rotatedCookieGrace"],
+): RotatedCookies | undefined {
+  if (grace === false) return undefined;
+  const ttlMs = grace?.ttlMs ?? DEFAULT_ROTATED_COOKIE_GRACE_MS;
+  const maxEntries = grace?.maxEntries ?? DEFAULT_ROTATED_COOKIE_MAX_ENTRIES;
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new RangeError(
+      `rotatedCookieGrace.ttlMs must be a positive number of milliseconds, got ${ttlMs}`,
+    );
+  }
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new RangeError(
+      `rotatedCookieGrace.maxEntries must be a positive integer, got ${maxEntries}`,
+    );
+  }
+  return new RotatedCookies(ttlMs, maxEntries);
+}
 
 function refreshedSince(seen: SessionData, current: SessionData): boolean {
   return (
@@ -1104,6 +1154,7 @@ export class HonoBff {
   readonly #extraAuthorizeParams: ResolvedExtraAuthorizeParams;
   readonly #maxReturnToLength: number;
   readonly #refreshes = new Map<string, Promise<RefreshOutcome>>();
+  readonly #rotatedCookies: RotatedCookies | undefined;
 
   /**
    * Defaults are applied for session mode (`"own"`), cookie name, and CSRF.
@@ -1212,6 +1263,8 @@ export class HonoBff {
       }
     }
 
+    this.#rotatedCookies = rotatedCookies(options.rotatedCookieGrace);
+
     if (options.backchannelLogout?.maxBodyBytes !== undefined) {
       assertMaxBodyBytes(
         options.backchannelLogout.maxBodyBytes,
@@ -1290,7 +1343,7 @@ export class HonoBff {
     const data = await this.#store.read(cookieValue);
     if (!data) return null;
     if (!this.#isBeyondSessionMaxAge(data)) return data;
-    await this.#store.destroy(cookieValue);
+    await this.#destroySession(cookieValue);
     deleteCookie(c, this.#cookieName, this.#cookieOptions());
     return null;
   }
@@ -1601,7 +1654,7 @@ export class HonoBff {
         };
         const inbound = getCookie(c, this.#cookieName);
         const existing = this.#sessionMode === "shared" ? inbound : undefined;
-        if (inbound && !existing) await this.#store.destroy(inbound);
+        if (inbound && !existing) await this.#destroySession(inbound);
         const cookieValue = existing
           ? await this.#store.update(existing, data)
           : await this.#store.create(data);
@@ -1645,7 +1698,7 @@ export class HonoBff {
             // best-effort
           }
         }
-        await this.#store.destroy(cookieValue);
+        await this.#destroySession(cookieValue);
         deleteCookie(c, this.#cookieName, this.#cookieOptions());
       }
 
@@ -1915,11 +1968,51 @@ export class HonoBff {
   #sharedRefresh(entry: SessionEntry): Promise<RefreshOutcome> {
     const inFlight = this.#refreshes.get(entry.cookieValue);
     if (inFlight) return inFlight;
-    const pending = this.#lockedRefresh(entry).finally(() => {
+    const pending = this.#refreshUnlessReplaced(entry).finally(() => {
       this.#refreshes.delete(entry.cookieValue);
     });
     this.#refreshes.set(entry.cookieValue, pending);
     return pending;
+  }
+
+  async #refreshUnlessReplaced(entry: SessionEntry): Promise<RefreshOutcome> {
+    const memo = this.#rotatedCookies;
+    if (!memo) return await this.#lockedRefresh(entry);
+    let latest = entry.cookieValue;
+    for (let hop = 0; hop < MAX_ROTATED_COOKIE_HOPS; hop++) {
+      const next = await memo.successor(latest);
+      if (next === undefined) break;
+      latest = next;
+    }
+    if (latest !== entry.cookieValue) {
+      try {
+        const data = await this.#store.read(latest);
+        return data
+          ? { status: "refreshed", entry: { cookieValue: latest, data } }
+          : { status: "revoked" };
+      } catch {
+        return { status: "unavailable" };
+      }
+    }
+    const pending = await memo.start(entry.cookieValue);
+    let successor: string | undefined;
+    try {
+      const outcome = await this.#lockedRefresh(entry);
+      if (
+        outcome.status === "refreshed" &&
+        outcome.entry.cookieValue !== entry.cookieValue
+      ) {
+        successor = outcome.entry.cookieValue;
+      }
+      return outcome;
+    } finally {
+      await memo.finish(pending, successor);
+    }
+  }
+
+  async #destroySession(cookieValue: string): Promise<void> {
+    await this.#rotatedCookies?.forget(cookieValue);
+    await this.#store.destroy(cookieValue);
   }
 
   async #lockedRefresh(entry: SessionEntry): Promise<RefreshOutcome> {
@@ -1970,7 +2063,7 @@ export class HonoBff {
       if (current && current.refreshToken !== data.refreshToken) {
         return { status: "refreshed", entry: { cookieValue, data: current } };
       }
-      await this.#store.destroy(cookieValue);
+      await this.#destroySession(cookieValue);
       return { status: "revoked" };
     }
   }
