@@ -1,3 +1,57 @@
+## [0.20.0](https://github.com/udibo/oauth2/compare/0.19.0...0.20.0) (2026-10-14)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** `realm` must be printable ASCII. A realm with any other
+character, including Latin-1 letters such as `"Café"` that the header
+used to carry, now makes the `ResourceServer` / `AuthorizationServer`
+constructor (and the `realm` setter) throw a `TypeError`. Pass an ASCII
+form of the name instead. `realm` is now an accessor, so a subclass that
+redeclares it as a field must use an accessor too.
+
+## Verification
+
+- New tests in `src/server/resource-server.test.ts`,
+`src/adapters/hono/resource-server.test.ts` and
+`src/server/endpoint-error-format.test.ts`, run against `main` first: 26
+failed. Hono `protect()` with a reader message outside Latin-1 answered
+`500` (expected `401`); core `handleAuthError` threw `TypeError: Cannot
+convert argument to a ByteString … value of 321`; non-ASCII realms
+constructed without error; the `Basic` challenge came out as `Basic
+realm="Acme "Prod" \ API"`.
+- With the fix those pass; each asserts `401`, the exact challenge, and
+the full message in the oauth2 and problem-details bodies.
+- Review follow-up tests, red at the previous head (6 failed):
+`handleAuthError(new InvalidTokenError("db row 42 for tenant acme-secret
+missing", { expose: false }))` put that text in the header while the
+body was generic; `{ exposedMessage: "token rejected" }` and an
+`error_description` extension were ignored by the header; `files:wrïte
+files:read` advertised `scope="files:read"`. All pass now.
+- Seeded mutation: dropping the `u` flag from the description pattern
+(an emoji becomes `??`) fails 3 tests.
+- `pnpm check` and `pnpm test` (132 files, 3375 tests) pass on Node 26.
+
+## Risk
+
+**Door:** one-way once released (published package, breaking for
+non-ASCII realms). The change touches only how the challenge header is
+built and what `realm` accepts; bodies, status codes and error codes are
+unchanged. The header now discloses no more than the body does.
+
+## Tradeoffs
+
+- Sanitizing the realm too, instead of rejecting it, was rejected: a
+silently rewritten realm is a configuration surprise, and a startup
+error points at the line to fix.
+- Latin-1 (obs-text) realms were not kept: RFC 9110 treats obs-text as
+opaque and clients decode it inconsistently.
+
+## Closes
+
+### Bug Fixes
+
+* **server:** keep WWW-Authenticate challenges in the header charset ([#103](https://github.com/udibo/oauth2/issues/103)) ([b2de5cf](https://github.com/udibo/oauth2/commit/b2de5cfa06fb38208391cf60b138f743b3fda045)), closes [#54](https://github.com/udibo/oauth2/issues/54)
+
 ## [0.19.0](https://github.com/udibo/oauth2/compare/0.18.0...0.19.0) (2026-10-13)
 
 ### ⚠ BREAKING CHANGES
