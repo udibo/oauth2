@@ -197,6 +197,13 @@ runSessionStoreContractTests({
 });
 
 runSessionStoreContractTests({
+  describeName:
+    "MemorySessionStore with an expiring refresh lease satisfies SessionStore contract",
+  makeStore: () =>
+    new MemorySessionStore({ refreshLeaseMs: 1000, refreshLockWaitMs: 5000 }),
+});
+
+runSessionStoreContractTests({
   describeName: "EncryptedCookieSessionStore satisfies SessionStore contract",
   makeStore: () =>
     new EncryptedCookieSessionStore({

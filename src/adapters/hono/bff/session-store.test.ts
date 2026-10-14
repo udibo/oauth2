@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { FakeTime } from "../../../_test_fake-time.ts";
-import { thrown } from "../../../_test_assert.ts";
+import { rejection, thrown } from "../../../_test_assert.ts";
+import { InvalidGrantError } from "../../../errors.ts";
 import { deriveAesKey, sealJson } from "../../../utils/crypto.ts";
 import {
   DEFAULT_SESSION_MAX_AGE_MS,
   EncryptedCookieSessionStore,
   MemorySessionStore,
+  type RefreshLease,
   type SessionData,
   sessionStoreMaxAgeMs,
 } from "./session-store.ts";
@@ -233,5 +235,139 @@ describe("MemorySessionStore", () => {
     await store.destroy(a);
     expect(await store.read(a)).toBe(null);
     expect((await store.read(b))?.tokens.accessToken).toBe("b");
+  });
+});
+
+describe("MemorySessionStore refresh lease", () => {
+  const LEASE_MS = 300;
+
+  function leaseOf(lease: RefreshLease | undefined): RefreshLease {
+    assert(lease !== undefined, "MemorySessionStore must pass a lease");
+    return lease;
+  }
+
+  it("refuses a lease setting that is not a positive number of milliseconds a timer can hold", () => {
+    for (const bad of [0, -1, Number.NaN, Infinity, 2 ** 31, 1e10]) {
+      thrown(
+        () => new MemorySessionStore({ refreshLeaseMs: bad }),
+        RangeError,
+        "refreshLeaseMs",
+      );
+      thrown(
+        () => new MemorySessionStore({ refreshLockWaitMs: bad }),
+        RangeError,
+        "refreshLockWaitMs",
+      );
+    }
+  });
+
+  it("renews a lease at the longest setting on its own schedule, not every millisecond", async () => {
+    using time = new FakeTime();
+    const leaseMs = 2 ** 31 - 1;
+    const store = new MemorySessionStore({
+      refreshLeaseMs: leaseMs,
+      refreshLockWaitMs: leaseMs,
+    });
+    const value = await store.create(makeSessionData());
+    const release = Promise.withResolvers<void>();
+    using setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const holder = store.withRefreshLock(value, () => release.promise);
+    await time.tickAsync(0);
+
+    const delays = setIntervalSpy.mock.calls.map(([, delay]) => delay);
+    expect(delays).toStrictEqual([leaseMs / 3]);
+    release.resolve();
+    await holder;
+  });
+
+  it("loses a lease that lapsed: another call takes the lock, and the lapsed lease can neither write nor destroy", async () => {
+    using time = new FakeTime();
+    const store = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+    const value = await store.create(makeSessionData({ refreshToken: "r1" }));
+    const stalled = Promise.withResolvers<void>();
+    const holding = Promise.withResolvers<void>();
+
+    const lapsed = store.withRefreshLock(value, async (given) => {
+      const lease = leaseOf(given);
+      holding.resolve();
+      await stalled.promise;
+      return {
+        write: await rejection(
+          lease.update(makeSessionData({ refreshToken: "lapsed" })),
+        ),
+        destroyed: await lease.destroy("r2"),
+      };
+    });
+    await time.settle(holding.promise);
+    const takeover = store.withRefreshLock(value, (given) =>
+      leaseOf(given).update(makeSessionData({ refreshToken: "r2" })),
+    );
+    vi.setSystemTime(time.now + 3 * LEASE_MS);
+
+    expect(await time.settle(takeover)).toBe(value);
+    stalled.resolve();
+    const outcome = await time.settle(lapsed);
+
+    expect(
+      outcome.write,
+      "a holder whose lease lapsed overwrote the refresh of the call that took it",
+    ).toBeInstanceOf(InvalidGrantError);
+    expect(
+      outcome.destroyed,
+      "a holder whose lease lapsed ended the session the next holder refreshed",
+    ).toBe(false);
+    expect((await store.read(value))?.refreshToken).toBe("r2");
+    expect(vi.getTimerCount(), "a settled lease left a timer running").toBe(0);
+  });
+
+  it("renews a running refresh's lease, so a waiter gives up instead of taking it", async () => {
+    using time = new FakeTime();
+    const store = new MemorySessionStore({
+      refreshLeaseMs: LEASE_MS,
+      refreshLockWaitMs: 2 * LEASE_MS,
+    });
+    const value = await store.create(makeSessionData({ refreshToken: "r1" }));
+    const exchange = Promise.withResolvers<void>();
+    const holding = Promise.withResolvers<void>();
+    const holder = store.withRefreshLock(value, async (given) => {
+      holding.resolve();
+      await exchange.promise;
+      return await leaseOf(given).update(
+        makeSessionData({ refreshToken: "r2" }),
+      );
+    });
+    await time.settle(holding.promise);
+
+    const waiter = store
+      .withRefreshLock(value, () => Promise.resolve("the waiter took the lock"))
+      .catch((error: unknown) => error);
+    const waited = await time.settle(waiter);
+    await time.tickAsync(5 * LEASE_MS);
+    exchange.resolve();
+
+    expect(
+      waited,
+      "the waiter took the lock from a holder whose refresh was still running",
+    ).toBeInstanceOf(Error);
+    expect(await time.settle(holder)).toBe(value);
+    expect((await store.read(value))?.refreshToken).toBe("r2");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("hands the lock to a waiting call as soon as the holder releases it", async () => {
+    using time = new FakeTime();
+    const store = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+    const value = await store.create(makeSessionData());
+    const release = Promise.withResolvers<void>();
+    const holder = store.withRefreshLock(value, () => release.promise);
+    const waiter = store.withRefreshLock(value, () =>
+      Promise.resolve(time.now),
+    );
+    await time.tickAsync(LEASE_MS / 2);
+    const releasedAt = time.now;
+    release.resolve();
+
+    await holder;
+    expect(await waiter).toBe(releasedAt);
   });
 });

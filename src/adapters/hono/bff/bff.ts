@@ -97,6 +97,7 @@ import {
   type SessionStore,
   sessionStoreMaxAgeMs,
   supportsBackchannelLogout,
+  type RefreshLease,
   supportsRefreshLock,
 } from "./session-store.ts";
 import { RotatedCookies } from "./_rotated-cookies.ts";
@@ -399,7 +400,9 @@ export interface HonoBffOptions {
    * - A {@link SessionStore} over a database or cache every instance shares,
    *   for server-side revocation and back-channel logout. Implement
    *   `RefreshLockStore` (`withRefreshLock`) on it so instances refresh a
-   *   session one at a time, and check it with `runSessionStoreContractTests`.
+   *   session one at a time, pass each refresh a `RefreshLease` so a holder
+   *   whose lock expired cannot overwrite or end the session, and check it
+   *   with `runSessionStoreContractTests`.
    * - {@link MemorySessionStore} for a single process, tests and local
    *   development. A session it holds is unknown to every other instance, so
    *   behind a load balancer the user appears signed out.
@@ -2022,7 +2025,7 @@ export class HonoBff {
     try {
       return await store.withRefreshLock(
         cookieValue,
-        async (): Promise<RefreshOutcome> => {
+        async (lease?: RefreshLease): Promise<RefreshOutcome> => {
           const current = await store.read(cookieValue);
           if (!current) return { status: "revoked" };
           if (refreshedSince(entry.data, current)) {
@@ -2031,7 +2034,10 @@ export class HonoBff {
               entry: { cookieValue, data: current },
             };
           }
-          return await this.#exchangeRefresh({ cookieValue, data: current });
+          return await this.#exchangeRefresh(
+            { cookieValue, data: current },
+            lease,
+          );
         },
       );
     } catch {
@@ -2039,20 +2045,26 @@ export class HonoBff {
     }
   }
 
-  async #exchangeRefresh(entry: SessionEntry): Promise<RefreshOutcome> {
+  async #exchangeRefresh(
+    entry: SessionEntry,
+    lease?: RefreshLease,
+  ): Promise<RefreshOutcome> {
     const { cookieValue, data } = entry;
-    if (!data.refreshToken) return { status: "unavailable" };
+    const refreshToken = data.refreshToken;
+    if (!refreshToken) return { status: "unavailable" };
     try {
-      const result = await this.#client.exchangeRefreshToken(data.refreshToken);
+      const result = await this.#client.exchangeRefreshToken(refreshToken);
       const refreshed: SessionData = {
         tokens: result.tokens,
-        refreshToken: result.refreshToken ?? data.refreshToken,
+        refreshToken: result.refreshToken ?? refreshToken,
         user: data.user,
         sid: data.sid,
         createdAt: data.createdAt,
         updatedAt: Date.now(),
       };
-      const newCookieValue = await this.#store.update(cookieValue, refreshed);
+      const newCookieValue = lease
+        ? await lease.update(refreshed)
+        : await this.#store.update(cookieValue, refreshed);
       return {
         status: "refreshed",
         entry: { cookieValue: newCookieValue, data: refreshed },
@@ -2060,12 +2072,31 @@ export class HonoBff {
     } catch (error) {
       if (!isRevokedGrant(error)) return { status: "unavailable" };
       const current = await this.#store.read(cookieValue);
-      if (current && current.refreshToken !== data.refreshToken) {
+      if (current && current.refreshToken !== refreshToken) {
         return { status: "refreshed", entry: { cookieValue, data: current } };
       }
-      await this.#destroySession(cookieValue);
+      if (!lease) {
+        await this.#destroySession(cookieValue);
+        return { status: "revoked" };
+      }
+      if (current && !(await lease.destroy(refreshToken))) {
+        return await this.#afterRefusedDestroy(cookieValue, refreshToken);
+      }
+      await this.#rotatedCookies?.forget(cookieValue);
       return { status: "revoked" };
     }
+  }
+
+  async #afterRefusedDestroy(
+    cookieValue: string,
+    refreshToken: string,
+  ): Promise<RefreshOutcome> {
+    const current = await this.#store.read(cookieValue);
+    if (!current) return { status: "revoked" };
+    if (current.refreshToken !== refreshToken) {
+      return { status: "refreshed", entry: { cookieValue, data: current } };
+    }
+    return { status: "unavailable" };
   }
 
   /**

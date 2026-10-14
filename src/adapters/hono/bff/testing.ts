@@ -23,7 +23,9 @@ import type { AbstractScope } from "../../../models/scope.ts";
 import type { TokenServiceInterface } from "../../../server/services/token.ts";
 import type { TokenBundle, UserInfoClaims } from "../../../client/mod.ts";
 import type { HonoBff } from "./bff.ts";
+import { InvalidGrantError } from "../../../errors.ts";
 import {
+  type RefreshLease,
   type RefreshLockStore,
   type SessionData,
   type SessionStore,
@@ -299,6 +301,24 @@ async function settlesWithin<T>(
   }
 }
 
+function required(lease: RefreshLease | undefined): RefreshLease {
+  assert(
+    lease !== undefined,
+    "withRefreshLock passed a lease to one refresh and none to another",
+  );
+  return lease;
+}
+
+async function rejection(promise: Promise<unknown>): Promise<unknown> {
+  const fulfilled = Symbol("fulfilled");
+  const outcome = await promise.then(
+    () => fulfilled,
+    (error: unknown) => error,
+  );
+  assert(outcome !== fulfilled, "expected the lease to refuse");
+  return outcome;
+}
+
 /**
  * Contract test suite for {@link SessionStore} implementations. Registers
  * `describe`/`it` blocks from Vitest, so call it at a test
@@ -307,8 +327,12 @@ async function settlesWithin<T>(
  * requires — test that yourself.
  *
  * A store that implements `withRefreshLock` ({@link RefreshLockStore}) also
- * runs the lock checks; they are skipped for a store without it. They use one
- * store object, so they prove the lock's behavior, not that separate
+ * runs the lock checks; they are skipped for a store without it. The lease
+ * checks ({@link RefreshLease}) are skipped for a store whose
+ * `withRefreshLock` passes no lease. They prove that a lease stops acting once
+ * its call releases the lock or another call holds it, not that it stops
+ * when the lock expires: expire a lease in a test of your own for that. They
+ * use one store object, so they prove the lock's behavior, not that separate
  * instances share it: point two store objects at one backend in a test of
  * your own for that.
  */
@@ -560,6 +584,139 @@ export function runSessionStoreContractTests(
             "refresh again",
         ),
       ).toBe("next");
+    });
+
+    async function leaseOf(
+      locking: SessionStore & RefreshLockStore,
+      value: string,
+      skip: (condition: boolean, note: string) => void,
+    ): Promise<RefreshLease> {
+      const lease = await locking.withRefreshLock(value, (given) =>
+        Promise.resolve(given),
+      );
+      skip(
+        lease === undefined,
+        "withRefreshLock passes the refresh no lease, so a holder that lost " +
+          "the lock can still write and destroy the session",
+      );
+      return required(lease);
+    }
+
+    function refreshedSession(): SessionData {
+      return {
+        ...sampleSession(),
+        tokens: { ...sampleSession().tokens, accessToken: "access-2" },
+        refreshToken: "refresh-2",
+      };
+    }
+
+    it("withRefreshLock passes a lease that writes the session while the lock is held", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      await leaseOf(locking, value, skip);
+
+      const next = await settlesWithin(
+        locking.withRefreshLock(value, (lease) =>
+          required(lease).update(refreshedSession()),
+        ),
+        "a lease's update blocked on the lock its own call holds",
+      );
+      const fetched = await locking.read(next);
+      expect(fetched?.refreshToken).toBe("refresh-2");
+    });
+
+    it("withRefreshLock's lease refuses to write or destroy once its call has settled", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const former = await leaseOf(locking, value, skip);
+
+      const error = await rejection(former.update(refreshedSession()));
+      expect(
+        error,
+        "a holder whose lock was released wrote the session, so a holder " +
+          "that stalled past its lock would overwrite the next holder's refresh",
+      ).toBeInstanceOf(InvalidGrantError);
+      expect(
+        await former.destroy("refresh-1"),
+        "a holder whose lock was released destroyed the session",
+      ).toBe(false);
+      expect((await locking.read(value))?.refreshToken).toBe("refresh-1");
+    });
+
+    it("withRefreshLock's lease cannot act while a later call holds the lock", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const former = await leaseOf(locking, value, skip);
+      const holding = Promise.withResolvers<RefreshLease>();
+      const releaseHolder = Promise.withResolvers<void>();
+      const holder = locking.withRefreshLock(value, async (given) => {
+        const lease = required(given);
+        holding.resolve(lease);
+        await releaseHolder.promise;
+        return await lease.update(refreshedSession());
+      });
+      await settlesWithin(
+        holding.promise,
+        "the second call never took the lock",
+      );
+
+      const refusedWrite = await rejection(former.update(sampleSession()));
+      const refusedDestroy = await former.destroy("refresh-1");
+      releaseHolder.resolve();
+      await holder;
+
+      expect(refusedWrite).toBeInstanceOf(InvalidGrantError);
+      expect(refusedDestroy).toBe(false);
+      expect(
+        (await locking.read(value))?.refreshToken,
+        "the current holder's write must stand",
+      ).toBe("refresh-2");
+    });
+
+    it("withRefreshLock's lease destroys the session only while it stores the given refresh token", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      await leaseOf(locking, value, skip);
+
+      const results = await locking.withRefreshLock(value, async (given) => {
+        const lease = required(given);
+        return [
+          await lease.destroy("refresh-0"),
+          (await locking.read(value)) !== null,
+          await lease.destroy("refresh-1"),
+        ];
+      });
+
+      expect(
+        results,
+        "a destroy for a refresh token the session no longer stores would end " +
+          "a session a peer has just refreshed",
+      ).toStrictEqual([false, true, true]);
+      expect(await locking.read(value)).toBe(null);
+    });
+
+    it("withRefreshLock's lease never restores a destroyed session", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      await leaseOf(locking, value, skip);
+
+      const error = await locking.withRefreshLock(value, async (lease) => {
+        await locking.destroy(value);
+        return await rejection(required(lease).update(refreshedSession()));
+      });
+
+      expect(error).toBeInstanceOf(InvalidGrantError);
+      expect(await locking.read(value)).toBe(null);
     });
 
     if (makeBoundedStore) {

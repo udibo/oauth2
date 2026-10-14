@@ -49,6 +49,8 @@ export {
   EncryptedCookieSessionStore,
   type EncryptedCookieSessionStoreOptions,
   MemorySessionStore,
+  type MemorySessionStoreOptions,
+  type RefreshLease,
   type RefreshLockStore,
   type SessionData,
   type SessionStore,
