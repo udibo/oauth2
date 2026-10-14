@@ -101,18 +101,28 @@ export interface RefreshLockStore {
    * `cookieValue`, on any instance, is running, and settles with its result.
    * Calls for other sessions must not wait on each other.
    *
+   * - The lock is keyed by the cookie value, so it holds only for a store
+   *   whose `update` returns the cookie value it was given. A store that
+   *   issues a new value on update cannot implement it.
    * - The lock must not block this store's own `read`, `update` or `destroy`:
-   *   `refresh` reads and writes the session it locks.
+   *   `refresh` reads, writes and can destroy the session it locks.
    * - Release it when `refresh` settles, including when it throws.
-   * - Let it expire if its holder dies, but only after longer than a token
-   *   request can take; `DirectClient` gives up on one after 10 seconds.
+   * - The lock covers the whole refresh: the token request and the store's
+   *   own reads and writes. With `DirectClient` a refresh can take about 30
+   *   seconds when its discovery cache is cold, since discovery tries two
+   *   well-known paths and every request has a 10-second deadline. If the
+   *   lock expires when its holder dies, expire it only after that plus the
+   *   store's own I/O, or renew the lease while it is held. A lock that
+   *   expires mid-refresh lets a second instance spend the same token.
    * - Reject when the lock cannot be acquired within a bound you choose.
    *   `HonoBff` then answers `502` `temporarily_unavailable` and keeps the
    *   session.
    *
    * A Postgres store can hold `pg_advisory_xact_lock` on a hash of the session
-   * key in a transaction around `refresh`, with a `lock_timeout`; a Redis
-   * store can take a key with `SET NX PX` and wait for it with a deadline.
+   * key in a transaction around `refresh`, with a `lock_timeout`. A Redis
+   * store can take a key with `SET NX PX` and wait for it with a deadline. Key
+   * the lock by the same digest the store keys its records by, never the raw
+   * cookie value, and include the tenant in a tenant-scoped store.
    */
   withRefreshLock<T>(
     cookieValue: string,

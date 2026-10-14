@@ -137,7 +137,7 @@ one process. Pick each one by where your requests can land:
 | Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
 | ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
-| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`                          | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, and still replays a pre-refresh cookie that arrives after the refresh | `EncryptedCookieAuthRequestStorage`                                   |
 | Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
 Give the encrypted-cookie stores a secret every instance shares, so any of them
