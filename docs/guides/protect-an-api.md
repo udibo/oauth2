@@ -117,6 +117,8 @@ const tokenReader = new IntrospectionTokenReader<Client, User>({
 
 An aborted call surfaces as `TemporarilyUnavailableError` (503), which is the
 honest answer — the issuer is down, the caller's token is not necessarily bad.
+The reader reads at most `maxResponseBytes` (default 64 KiB) of the response and
+throws `ServerError` for a larger one.
 On Deno, a call that misses `fetchTimeoutMs` on the default `fetch` also stops
 later calls to that issuer from reusing the pooled HTTP/2 connection it stalled
 on, so one stuck connection cannot keep the reader unavailable; see
@@ -258,8 +260,9 @@ than the pooled HTTP/2 connection it stalled on; see
 
 **Errors.** An unreachable or 5xx JWKS endpoint throws
 `TemporarilyUnavailableError` when nothing is cached (a down issuer must not
-read as a bad token); a 4xx, a non-JWKS body, or metadata without a `jwks_uri`
-throws `ServerError`, because those are your misconfiguration rather than a
+read as a bad token); a 4xx, a non-JWKS body, a discovery document or JWKS
+larger than `maxResponseBytes` (default 256 KiB), or metadata without a
+`jwks_uri` throws `ServerError`, because those are your misconfiguration rather than a
 verdict on the caller's token.
 
 **The trade-off versus introspection:** local validation cannot see revocation —

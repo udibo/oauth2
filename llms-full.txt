@@ -2410,6 +2410,8 @@ const tokenReader = new IntrospectionTokenReader<Client, User>({
 
 An aborted call surfaces as `TemporarilyUnavailableError` (503), which is the
 honest answer — the issuer is down, the caller's token is not necessarily bad.
+The reader reads at most `maxResponseBytes` (default 64 KiB) of the response and
+throws `ServerError` for a larger one.
 On Deno, a call that misses `fetchTimeoutMs` on the default `fetch` also stops
 later calls to that issuer from reusing the pooled HTTP/2 connection it stalled
 on, so one stuck connection cannot keep the reader unavailable; see
@@ -2551,8 +2553,9 @@ than the pooled HTTP/2 connection it stalled on; see
 
 **Errors.** An unreachable or 5xx JWKS endpoint throws
 `TemporarilyUnavailableError` when nothing is cached (a down issuer must not
-read as a bad token); a 4xx, a non-JWKS body, or metadata without a `jwks_uri`
-throws `ServerError`, because those are your misconfiguration rather than a
+read as a bad token); a 4xx, a non-JWKS body, a discovery document or JWKS
+larger than `maxResponseBytes` (default 256 KiB), or metadata without a
+`jwks_uri` throws `ServerError`, because those are your misconfiguration rather than a
 verdict on the caller's token.
 
 **The trade-off versus introspection:** local validation cannot see revocation —
@@ -6234,6 +6237,32 @@ behind `protect()` that parses its body still needs a request-size limit, in
 your framework (for example Hono's `bodyLimit` middleware) or your reverse
 proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
 refused before any authentication work.
+
+The `udibo-oauth2 idp dev` server caps its sign-in, consent and admin bodies at
+64 KiB and answers a larger one with `413`.
+
+## Response size limits
+
+The package also caps every response it reads from a server it calls. As with
+request bodies, each read counts bytes as they arrive and cancels the response
+at the cap. A `Content-Length` over the cap is refused before any of the body is
+read, and a chunked response with no `Content-Length` is cut off at the cap.
+
+- **`JwksTokenReader`** caps the discovery document and the JWKS with
+  `maxResponseBytes`, default 256 KiB. A larger response fails the key refresh
+  with `ServerError`, as a malformed one does. A body that stops arriving before
+  `fetchTimeoutMs` gives `TemporarilyUnavailableError`.
+- **`IntrospectionTokenReader`** caps the introspection response with
+  `maxResponseBytes`, default 64 KiB, and fails the same way.
+- **`breachedPasswordValidator`** caps the range response with
+  `maxResponseBytes`, default 1 MiB. A larger response counts as the range API
+  being unavailable, so `failOpen` decides whether the password is allowed.
+- **`DirectClient`, `BffClient` and `checkPermissions`** cap every
+  authorization-server response at 64 KiB. **The external connectors** cap token, profile, UserInfo and Apple
+  JWKS responses at 64 KiB, and an oversized error body is left out of the error
+  message. These caps are fixed. An oversized OIDC UserInfo response is
+  discarded like any other UserInfo failure, so the profile comes from the
+  id_token claims alone.
 
 ## BFF storage across instances
 

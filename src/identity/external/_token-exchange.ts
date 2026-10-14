@@ -10,11 +10,15 @@
  */
 
 import { packageDeadlineSignal } from "../../utils/_default-fetch.ts";
-import { describeError, sanitizeProviderText } from "./_shared.ts";
+import {
+  describeError,
+  MAX_PROVIDER_RESPONSE_BYTES,
+  sanitizeProviderText,
+} from "./_shared.ts";
 import { ExternalAuthError } from "./errors.ts";
 
 /** Response bytes accepted from a token endpoint before the exchange is refused. */
-export const MAX_TOKEN_RESPONSE_BYTES: number = 64 * 1024;
+export const MAX_TOKEN_RESPONSE_BYTES: number = MAX_PROVIDER_RESPONSE_BYTES;
 
 /** Wall-clock budget for the exchange, covering the connect and the body read. */
 export const TOKEN_EXCHANGE_TIMEOUT_MS = 10_000;

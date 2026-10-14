@@ -1,4 +1,6 @@
 import { assert, describe, expect, it, vi } from "vitest";
+import { thrown } from "../_test_assert.ts";
+import { type Reply, serveReplies } from "../_test_response-server.ts";
 import type { IdentityEvent } from "./events.ts";
 import { breachedPasswordValidator, sha1Hex } from "./hibp.ts";
 
@@ -210,5 +212,100 @@ describe("breachedPasswordValidator onEvent", () => {
 
     expect(await validate("whatever-password")).toStrictEqual(undefined);
     expect(error.mock.calls.length).toStrictEqual(1);
+  });
+});
+
+describe("breachedPasswordValidator response size limit", () => {
+  const PASSWORD = "correct horse battery staple";
+  const DEFAULT_LIMIT = 1024 * 1024;
+
+  async function rangeEndingInMatch(bytes: number): Promise<string> {
+    const line = `\r\n${(await sha1Hex(PASSWORD)).slice(5)}:3`;
+    return `${"0".repeat(bytes - line.length)}${line}`;
+  }
+
+  async function check(
+    reply: Reply,
+    options: { maxResponseBytes?: number } = {},
+  ): Promise<{ result: string | undefined; events: IdentityEvent[] }> {
+    await using server = await serveReplies(() => reply);
+    const collector = eventCollector();
+    const validate = breachedPasswordValidator({
+      baseUrl: `${server.origin}/range/`,
+      failOpen: false,
+      timeoutMs: 2_000,
+      onEvent: collector.onEvent,
+      ...options,
+    });
+    const result = await validate(PASSWORD);
+    if (reply.transfer === "endless") await server.abandoned;
+    return { result, events: collector.events };
+  }
+
+  it("reads a range response of exactly the default 1 MiB cap", async () => {
+    const { result, events } = await check({
+      contentType: "text/plain",
+      body: await rangeEndingInMatch(DEFAULT_LIMIT),
+      transfer: "chunked",
+    });
+
+    expect(result).toContain("appeared in a data breach");
+    expect(events).toStrictEqual([]);
+  });
+
+  for (const transfer of ["length", "chunked"] as const) {
+    it(`treats a range response over the cap as unavailable (${transfer})`, async () => {
+      const { result, events } = await check({
+        contentType: "text/plain",
+        body: await rangeEndingInMatch(DEFAULT_LIMIT + 1),
+        transfer,
+      });
+
+      expect(result).toContain("couldn't be checked");
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "password_policy.check_unavailable",
+        error: `range API response exceeded ${DEFAULT_LIMIT} bytes`,
+      });
+    });
+  }
+
+  it("stops reading an endless range response at the cap and cancels it", async () => {
+    const { result, events } = await check({
+      contentType: "text/plain",
+      body: "0",
+      transfer: "endless",
+    });
+
+    expect(result).toContain("couldn't be checked");
+    expect(events[0]).toMatchObject({
+      error: `range API response exceeded ${DEFAULT_LIMIT} bytes`,
+    });
+  });
+
+  it("uses maxResponseBytes in place of the default", async () => {
+    const body = await rangeEndingInMatch(2048);
+    const reply: Reply = {
+      contentType: "text/plain",
+      body,
+      transfer: "chunked",
+    };
+
+    expect((await check(reply, { maxResponseBytes: 2047 })).result).toContain(
+      "couldn't be checked",
+    );
+    expect((await check(reply, { maxResponseBytes: 2048 })).result).toContain(
+      "appeared in a data breach",
+    );
+  });
+
+  it("rejects a maxResponseBytes that is not a positive integer", () => {
+    for (const maxResponseBytes of [0, -1, 1.5, Number.NaN, Infinity]) {
+      thrown(
+        () => breachedPasswordValidator({ maxResponseBytes }),
+        RangeError,
+        "maxResponseBytes must be a positive integer",
+      );
+    }
   });
 });

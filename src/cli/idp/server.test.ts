@@ -823,3 +823,113 @@ describe("dev identity provider consent prompt", () => {
     });
   });
 });
+
+describe("dev identity provider request body limit", () => {
+  const LIMIT = 64 * 1024;
+
+  function sized(prefix: string, bytes: number): string {
+    return `${prefix}${"x".repeat(bytes - prefix.length)}`;
+  }
+
+  function bodyInit(text: string, transfer: "length" | "chunked"): RequestInit {
+    if (transfer === "length") return { body: text };
+    const bytes = new TextEncoder().encode(text);
+    return {
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (let offset = 0; offset < bytes.byteLength; offset += 1024) {
+            controller.enqueue(bytes.subarray(offset, offset + 1024));
+          }
+          controller.close();
+        },
+      }),
+      duplex: "half",
+    } as RequestInit;
+  }
+
+  async function sessionCookie(idp: DevIdentityProvider): Promise<string> {
+    const response = await fetch(
+      `${idp.url}/__admin/session`,
+      adminInit(idp, { username: USERNAME }),
+    );
+    expect(response.status).toStrictEqual(200);
+    const { cookie, sessionId } = (await response.json()) as {
+      cookie: string;
+      sessionId: string;
+    };
+    return `${cookie}=${sessionId}`;
+  }
+
+  for (const transfer of ["length", "chunked"] as const) {
+    it(`answers 413 to a sign-in form over 64 KiB (${transfer})`, async () => {
+      await withIdp({}, async (idp) => {
+        const response = await fetch(`${idp.url}/login`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          ...bodyInit(
+            sized(`return_to=%2F&username=${USERNAME}&password=`, LIMIT + 1),
+            transfer,
+          ),
+        });
+
+        expect(response.status).toStrictEqual(413);
+        expect(await response.json()).toStrictEqual({
+          error: `request body exceeds ${LIMIT} bytes`,
+        });
+      });
+    });
+
+    it(`answers 413 to a consent form over 64 KiB (${transfer})`, async () => {
+      await withIdp({ config: { consent: "prompt" } }, async (idp) => {
+        const response = await fetch(`${idp.url}/consent`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: await sessionCookie(idp),
+          },
+          redirect: "manual",
+          ...bodyInit(
+            sized("decision=approve&return_to=%2Fauthorize&pad=", LIMIT + 1),
+            transfer,
+          ),
+        });
+
+        expect(response.status).toStrictEqual(413);
+      });
+    });
+
+    it(`answers 413 to an admin JSON body over 64 KiB (${transfer})`, async () => {
+      await withIdp({}, async (idp) => {
+        const response = await fetch(`${idp.url}/__admin/session`, {
+          method: "POST",
+          headers: {
+            [ADMIN_TOKEN_HEADER]: idp.adminToken,
+            "content-type": "application/json",
+          },
+          ...bodyInit(
+            `${sized(`{"username":"${USERNAME}","pad":"`, LIMIT - 1)}"}`,
+            transfer,
+          ),
+        });
+
+        expect(response.status).toStrictEqual(413);
+      });
+    });
+  }
+
+  it("signs in with a form of exactly 64 KiB", async () => {
+    await withIdp({}, async (idp) => {
+      const response = await fetch(`${idp.url}/login`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        redirect: "manual",
+        body: sized(
+          `return_to=%2F&username=${encodeURIComponent(USERNAME)}&password=${PASSWORD}&pad=`,
+          LIMIT,
+        ),
+      });
+
+      expect(response.status).toStrictEqual(303);
+    });
+  });
+});

@@ -42,6 +42,7 @@ import {
   generateCodeVerifier,
   generateState,
 } from "../../utils/pkce.ts";
+import { DEFAULT_MAX_BODY_BYTES, readBoundedBody } from "../../utils/_body.ts";
 import { timingSafeEqualString } from "../../utils/crypto.ts";
 import { safeReturnTo } from "../../utils/url.ts";
 import {
@@ -345,12 +346,30 @@ function handleConsentFor(
   };
 }
 
+class BodyTooLargeError extends Error {}
+
+async function readBody(request: Request): Promise<Uint8Array<ArrayBuffer>> {
+  const bytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
+  if (!bytes) {
+    throw new BodyTooLargeError(
+      `request body exceeds ${DEFAULT_MAX_BODY_BYTES} bytes`,
+    );
+  }
+  return bytes;
+}
+
+async function readFormBody(request: Request): Promise<FormData> {
+  return await new Response(await readBody(request), {
+    headers: { "content-type": request.headers.get("content-type") ?? "" },
+  }).formData();
+}
+
 async function handleLoginSubmission(
   state: DevIdpState,
   config: DevIdpConfig,
   request: Request,
 ): Promise<Response> {
-  const form = await request.formData();
+  const form = await readFormBody(request);
   const returnTo = safeReturnTo(formValue(form, "return_to"));
   const quickSignIn = formValue(form, "as");
 
@@ -390,7 +409,7 @@ async function handleConsentSubmission(
   const user = await currentUser(state, request);
   if (!user) return redirect("/login");
 
-  const form = await request.formData();
+  const form = await readFormBody(request);
   const returnTo = safeReturnTo(formValue(form, "return_to"));
   const target = new URL(returnTo, request.url);
   const clientId = target.searchParams.get("client_id");
@@ -454,7 +473,7 @@ function handleLogout(
 async function readJsonBody(
   request: Request,
 ): Promise<Record<string, unknown>> {
-  const text = await request.text();
+  const text = new TextDecoder().decode(await readBody(request));
   if (text.trim().length === 0) return {};
   const parsed: unknown = JSON.parse(text);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -765,7 +784,7 @@ export async function startDevIdentityProvider(
       }
     } catch (error) {
       return jsonError(
-        400,
+        error instanceof BodyTooLargeError ? 413 : 400,
         error instanceof Error ? error.message : String(error),
       );
     }

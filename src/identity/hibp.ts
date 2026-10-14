@@ -18,6 +18,7 @@
  * @module
  */
 
+import { assertMaxBodyBytes, readBoundedBody } from "../utils/_body.ts";
 import { encodeHex } from "../utils/_encoding.ts";
 import {
   defaultFetch,
@@ -39,6 +40,14 @@ export interface BreachedPasswordOptions {
   failOpen?: boolean;
   /** Abort the range request after this many ms. Defaults to 3000. */
   timeoutMs?: number;
+  /**
+   * Largest range response, in bytes, the check reads. Defaults to 1048576
+   * (1 MiB), about ten times a padded range. The read counts bytes as they
+   * arrive and cancels the response at the cap, whether or not it has a
+   * `Content-Length`; a larger response counts as the range API being
+   * unavailable, so `failOpen` decides the outcome.
+   */
+  maxResponseBytes?: number;
   /** Fetch implementation — inject for tests. Defaults to `globalThis.fetch`. */
   fetch?: typeof fetch;
   /** Range API base URL. Defaults to `https://api.pwnedpasswords.com/range/`. */
@@ -59,6 +68,7 @@ export interface BreachedPasswordOptions {
 }
 
 const DEFAULT_BASE_URL = "https://api.pwnedpasswords.com/range/";
+const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 const VALIDATOR_NAME = "breached_password";
 const BREACHED_MESSAGE =
   "This password has appeared in a data breach; choose a different one.";
@@ -78,6 +88,8 @@ export async function sha1Hex(input: string): Promise<string> {
  * Build a {@link PasswordPolicy} validator that rejects passwords found in the
  * HIBP breach corpus.
  *
+ * @throws {RangeError} If `maxResponseBytes` is not a positive integer.
+ *
  * @example
  * ```ts
  * const policy: PasswordPolicy = {
@@ -92,6 +104,9 @@ export function breachedPasswordValidator(
   const threshold = options.threshold ?? 1;
   const failOpen = options.failOpen ?? true;
   const timeoutMs = options.timeoutMs ?? 3000;
+  const maxResponseBytes =
+    options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  assertMaxBodyBytes(maxResponseBytes, "maxResponseBytes");
   const fetchImpl = options.fetch ?? defaultFetch;
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
   const onEvent = options.onEvent;
@@ -110,7 +125,13 @@ export function breachedPasswordValidator(
         await response.body?.cancel();
         throw new Error(`range API responded ${response.status}`);
       }
-      const body = await response.text();
+      const bytes = await readBoundedBody(response, maxResponseBytes);
+      if (!bytes) {
+        throw new Error(
+          `range API response exceeded ${maxResponseBytes} bytes`,
+        );
+      }
+      const body = new TextDecoder().decode(bytes);
 
       for (const line of body.split("\n")) {
         const [lineSuffix, countText] = line.trim().split(":");
