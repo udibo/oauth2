@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import { serve } from "../../../_test_server.ts";
 import { thrown } from "../../../_test_assert.ts";
+import { delay } from "../../../utils/_delay.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -4426,6 +4427,201 @@ describe("HonoBff", () => {
       expect(res.headers.get("set-cookie")).toBe(null);
       expect(refreshExchanges).toBe(0);
       expect(await shared.read(cookie.split("=")[1])).not.toBe(null);
+    });
+  });
+
+  describe("a request carrying the cookie from before a refresh", () => {
+    let reuse: Mock<(event: TokenReuseEvent<TestClient, TestUser>) => void>;
+    let refreshExchanges: number;
+    const SECRET = "0123456789abcdef0123456789abcdef";
+
+    beforeEach(async () => {
+      reuse = vi.fn();
+      fixture = await buildFixture({ onTokenReuse: reuse });
+      fixture.tokenService.accessTokenLifetime = 1;
+      refreshExchanges = 0;
+    });
+
+    /** One instance over a cookie store, counting refresh exchanges. */
+    function cookieStoreApp(extra: Partial<HonoBffOptions> = {}): Hono {
+      const authServerFetch = localAuthServerFetch(fixture.authServer);
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: {
+          authorization: AUTHORIZE_URL,
+          token: TOKEN_URL,
+          revocation: REVOKE_URL,
+        },
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          const form = await request.clone().formData();
+          if (form.get("grant_type") === "refresh_token") refreshExchanges++;
+          return await authServerFetch(request);
+        },
+      });
+      const bff = new HonoBff({
+        client,
+        sessionStore: new EncryptedCookieSessionStore({ secret: SECRET }),
+        authRequestStorage: new MemoryAuthRequestStorageFactory(),
+        defaultReturnTo: "/home",
+        cookie: { secure: false },
+        csrf: false,
+        refreshSkewSeconds: 60,
+        ...extra,
+      });
+      const resourceServer = new HonoResourceServer({
+        resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+      });
+      const app = new Hono();
+      app.route("/auth", bff.routes());
+      app.use("/api/*", bff.attachToken(), resourceServer.protect());
+      app.get("/api/me", (c) =>
+        c.json({ user: resourceServer.getContext(c).user?.id }),
+      );
+      app.use("/raw/*", bff.attachToken());
+      app.get("/raw/me", (c) =>
+        c.json({ authorized: c.req.header("authorization") !== undefined }),
+      );
+      return app;
+    }
+
+    async function expectSignedOutWithout(
+      app: Hono,
+      cookie: string,
+      ended: string,
+    ): Promise<void> {
+      const res = await app.request("/raw/me", { headers: { cookie } });
+      expect(await res.json()).toStrictEqual({ authorized: false });
+      expect(
+        res.headers.getSetCookie().join("\n"),
+        "a request sent before sign-out must not put the signed-out " +
+          "session's cookie back in the browser",
+      ).not.toContain(ended);
+    }
+
+    /** Signs in, then refreshes once with the cookie the sign-in set. */
+    async function refreshedOnce(
+      app: Hono,
+    ): Promise<{ stale: string; fresh: string }> {
+      const stale = await loginCookie(app);
+      const first = await app.request("/api/me", {
+        headers: { cookie: stale },
+      });
+      expect(first.status).toBe(200);
+      await first.body?.cancel();
+      const rotated = cookieValue(first, "oauth2_session");
+      assert(rotated !== undefined, "the refresh must rotate the cookie");
+      return { stale, fresh: `oauth2_session=${rotated}` };
+    }
+
+    it("answers it with the session the refresh produced instead of replaying the old refresh token", async () => {
+      const app = cookieStoreApp();
+      const { stale, fresh } = await refreshedOnce(app);
+
+      const straggler = await app.request("/api/me", {
+        headers: { cookie: stale },
+      });
+
+      expect(straggler.status).toBe(200);
+      expect(await straggler.json()).toStrictEqual({ user: testUser.id });
+      expect(
+        `oauth2_session=${cookieValue(straggler, "oauth2_session")}`,
+        "the straggler's response hands the browser the successor cookie",
+      ).toBe(fresh);
+      expect(refreshExchanges).toBe(1);
+      expect(reuse).not.toHaveBeenCalled();
+
+      const after = await app.request("/api/me", {
+        headers: { cookie: fresh },
+      });
+      expect(after.status, "the successor session must still work").toBe(200);
+      await after.body?.cancel();
+    });
+
+    it("replays the old refresh token once the grace window has passed", async () => {
+      const app = cookieStoreApp({ rotatedCookieGrace: { ttlMs: 50 } });
+      const { stale } = await refreshedOnce(app);
+      await delay(100);
+
+      const straggler = await app.request("/api/me", {
+        headers: { cookie: stale },
+      });
+
+      expect(straggler.status).toBe(401);
+      await straggler.body?.cancel();
+      expect(reuse).toHaveBeenCalledTimes(1);
+    });
+
+    it("replays the old refresh token when the grace is turned off", async () => {
+      const app = cookieStoreApp({ rotatedCookieGrace: false });
+      const { stale } = await refreshedOnce(app);
+
+      const straggler = await app.request("/api/me", {
+        headers: { cookie: stale },
+      });
+
+      expect(straggler.status).toBe(401);
+      await straggler.body?.cancel();
+      expect(reuse).toHaveBeenCalledTimes(1);
+    });
+
+    it("remembers at most maxEntries replaced cookies, dropping the oldest", async () => {
+      const app = cookieStoreApp({ rotatedCookieGrace: { maxEntries: 1 } });
+      const older = await refreshedOnce(app);
+      const newer = await refreshedOnce(app);
+
+      const newerStraggler = await app.request("/api/me", {
+        headers: { cookie: newer.stale },
+      });
+      expect(newerStraggler.status).toBe(200);
+      await newerStraggler.body?.cancel();
+      expect(reuse).not.toHaveBeenCalled();
+
+      const olderStraggler = await app.request("/api/me", {
+        headers: { cookie: older.stale },
+      });
+      expect(olderStraggler.status).toBe(401);
+      await olderStraggler.body?.cancel();
+      expect(reuse).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not hand back a session that signed out", async () => {
+      const app = cookieStoreApp();
+      const { stale, fresh } = await refreshedOnce(app);
+      const logout = await app.request("/auth/logout", {
+        method: "POST",
+        headers: { cookie: fresh },
+      });
+      await logout.body?.cancel();
+
+      await expectSignedOutWithout(app, stale, fresh);
+    });
+
+    it("ends the grace when sign-out carries the pre-refresh cookie", async () => {
+      const app = cookieStoreApp();
+      const { stale, fresh } = await refreshedOnce(app);
+      const logout = await app.request("/auth/logout", {
+        method: "POST",
+        headers: { cookie: stale },
+      });
+      await logout.body?.cancel();
+
+      await expectSignedOutWithout(app, stale, fresh);
+    });
+
+    it("refuses a grace window that is not a positive number of milliseconds", () => {
+      for (const ttlMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(() => cookieStoreApp({ rotatedCookieGrace: { ttlMs } })).toThrow(
+          RangeError,
+        );
+      }
+      for (const maxEntries of [0, 1.5, -1]) {
+        expect(() =>
+          cookieStoreApp({ rotatedCookieGrace: { maxEntries } }),
+        ).toThrow(RangeError);
+      }
     });
   });
 });

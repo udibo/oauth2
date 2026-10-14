@@ -137,7 +137,7 @@ one process. Pick each one by where your requests can land:
 | Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
 | ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
-| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, and still replays a pre-refresh cookie that arrives after the refresh | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, since only the instance that ran a refresh answers a pre-refresh cookie with the new session | `EncryptedCookieAuthRequestStorage`                                   |
 | Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
 Give the encrypted-cookie stores a secret every instance shares, so any of them
@@ -164,7 +164,8 @@ requests for one session that reach different instances near access-token
 expiry each spend the refresh token, and against an authorization server that
 rotates refresh tokens the user is signed out. `EncryptedCookieSessionStore`
 cannot hold such a lock, so with a rotating authorization server a request
-still carrying the cookie from before a refresh replays the old token. See
+still carrying the cookie from before a refresh replays the old token, unless
+it reaches the instance that ran the refresh within `rotatedCookieGrace`. See
 [session limitations](../known-limitations.md#sessions-udibooauth2honobff) for
 both cases. `runSessionStoreContractTests` checks the lock when a store
 implements it.

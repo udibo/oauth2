@@ -5306,7 +5306,7 @@ one process. Pick each one by where your requests can land:
 | Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
 | ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
-| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, and still replays a pre-refresh cookie that arrives after the refresh | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, since only the instance that ran a refresh answers a pre-refresh cookie with the new session | `EncryptedCookieAuthRequestStorage`                                   |
 | Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
 Give the encrypted-cookie stores a secret every instance shares, so any of them
@@ -5333,7 +5333,8 @@ requests for one session that reach different instances near access-token
 expiry each spend the refresh token, and against an authorization server that
 rotates refresh tokens the user is signed out. `EncryptedCookieSessionStore`
 cannot hold such a lock, so with a rotating authorization server a request
-still carrying the cookie from before a refresh replays the old token. See
+still carrying the cookie from before a refresh replays the old token, unless
+it reaches the instance that ran the refresh within `rotatedCookieGrace`. See
 [session limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#sessions-udibooauth2honobff) for
 both cases. `runSessionStoreContractTests` checks the lock when a store
 implements it.
@@ -6652,16 +6653,28 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `withRefreshLock` on any store more than one instance shares, and check it
   with `runSessionStoreContractTests`.
 - **With `EncryptedCookieSessionStore`, a request carrying the cookie from
-  before a refresh replays the old refresh token.** The session lives in the
-  browser's cookie, so the server has nothing to lock or re-read. A refresh
-  seals the rotated token into a new cookie that reaches the browser with that
-  response, and a request the browser sent before then still carries the old
-  one. When that request reaches another instance, or the same instance after
-  the first refresh has finished, it presents the rotated-out refresh token:
-  reuse detection revokes the family, `onTokenReuse` fires, and both cookies
-  stop working. An authorization server that does not rotate refresh tokens is
-  unaffected. Where it rotates them, prefer a shared stateful store that
-  implements `withRefreshLock`.
+  before a refresh can replay the old refresh token.** The session lives in
+  the browser's cookie, so the server has nothing to lock or re-read. A
+  refresh seals the rotated token into a new cookie that reaches the browser
+  with that response, and a request the browser sent before then still carries
+  the old one. `HonoBff`'s `rotatedCookieGrace`, on by default, covers the
+  instance that ran the refresh: for 10 seconds it answers the old cookie with
+  the new session and its cookie, for up to 1000 replaced cookies, and
+  forgets a session on sign-out. A request with the old cookie that reaches
+  another instance, or arrives after the grace, presents the rotated-out
+  refresh token: reuse detection revokes the family, `onTokenReuse` fires, and
+  both cookies stop working. An authorization server that does not rotate
+  refresh tokens is unaffected. Where it rotates them, route each browser to
+  one instance, or prefer a shared stateful store that implements
+  `withRefreshLock`.
+- **`rotatedCookieGrace` trades some of reuse detection's signal for
+  fewer false sign-outs.** Within the grace, a stolen copy of the pre-refresh
+  cookie replayed to the instance that ran the refresh receives the new
+  session instead of tripping reuse detection. A cookie store cannot revoke a
+  copied cookie anyway, but the grace hides the replay from `onTokenReuse` for
+  that window. Shorten it with `rotatedCookieGrace: { ttlMs }`, or turn it off
+  with `rotatedCookieGrace: false` and accept that stragglers sign the user
+  out.
 - **A token refresh in flight on a replaced session can clear the new cookie.**
   When a request on the earlier cookie starts a refresh just before a new
   sign-in in the same browser replaces that session, the refresh then fails as
