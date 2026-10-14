@@ -226,7 +226,7 @@ describe("breachedPasswordValidator response size limit", () => {
 
   async function check(
     reply: Reply,
-    options: { maxResponseBytes?: number } = {},
+    options: { maxResponseBytes?: number; timeoutMs?: number } = {},
   ): Promise<{ result: string | undefined; events: IdentityEvent[] }> {
     await using server = await serveReplies(() => reply);
     const collector = eventCollector();
@@ -271,11 +271,10 @@ describe("breachedPasswordValidator response size limit", () => {
   }
 
   it("stops reading an endless range response at the cap and cancels it", async () => {
-    const { result, events } = await check({
-      contentType: "text/plain",
-      body: "0",
-      transfer: "endless",
-    });
+    const { result, events } = await check(
+      { contentType: "text/plain", body: "0", transfer: "endless" },
+      { timeoutMs: 120_000 },
+    );
 
     expect(result).toContain("couldn't be checked");
     expect(events[0]).toMatchObject({

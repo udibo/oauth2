@@ -64,10 +64,12 @@ The `udibo-oauth2 idp dev` server caps its sign-in, consent and admin bodies at
 
 ## Response size limits
 
-The package also caps every response it reads from a server it calls. As with
-request bodies, each read counts bytes as they arrive and cancels the response
-at the cap. A `Content-Length` over the cap is refused before any of the body is
-read, and a chunked response with no `Content-Length` is cut off at the cap.
+The package also caps every response its runtime code reads from a server it
+calls; the `@udibo/oauth2/testing` suites, which run only in your tests, do not.
+As with request bodies, each read counts bytes as they arrive and cancels the
+response at the cap. A `Content-Length` over the cap is refused before any of
+the body is read, and a chunked response with no `Content-Length` is cut off at
+the cap.
 
 - **`JwksTokenReader`** caps the discovery document and the JWKS with
   `maxResponseBytes`, default 256 KiB. A larger response fails the key refresh
