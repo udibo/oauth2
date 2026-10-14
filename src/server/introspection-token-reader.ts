@@ -18,6 +18,11 @@ import type { IntrospectionResponse, Token } from "../models/token.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
 import { encodeBasicAuth } from "../utils/basic-auth.ts";
 import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_RESPONSE_BYTES,
+} from "../utils/_body.ts";
+import { readResponseJson } from "./_response-json.ts";
+import {
   defaultFetch,
   packageDeadlineSignal,
 } from "../utils/_default-fetch.ts";
@@ -81,6 +86,13 @@ export interface IntrospectionTokenReaderOptions<
    * {@linkcode fetch} that doesn't honour `AbortSignal`.
    */
   fetchTimeoutMs?: number;
+  /**
+   * Largest introspection response, in bytes, the reader accepts. Defaults to
+   * 65536 (64 KiB). The read counts bytes as they arrive and cancels the
+   * response at the cap, whether or not it has a `Content-Length`; a larger
+   * response throws {@linkcode ServerError}.
+   */
+  maxResponseBytes?: number;
   /**
    * `fetch` implementation used to call the introspection endpoint. Defaults
    * to the global `fetch`. Inject it to route through a custom client (mTLS,
@@ -147,11 +159,15 @@ export class IntrospectionTokenReader<
     data: IntrospectionResponse,
   ) => User | undefined | Promise<User | undefined>;
   private fetchTimeoutMs: number;
+  private maxResponseBytes: number;
   private customFetch?: typeof fetch;
 
   /**
-   * `Scope` defaults to {@linkcode BasicScope}, `fetchTimeoutMs` to 5000, and
-   * `fetch` to the global `fetch` when omitted from `options`.
+   * `Scope` defaults to {@linkcode BasicScope}, `fetchTimeoutMs` to 5000,
+   * `maxResponseBytes` to 65536, and `fetch` to the global `fetch` when
+   * omitted from `options`.
+   *
+   * @throws {RangeError} If `maxResponseBytes` is not a positive integer.
    */
   constructor(options: IntrospectionTokenReaderOptions<Client, User, S>) {
     this.introspectionEndpoint = options.introspectionEndpoint;
@@ -162,6 +178,9 @@ export class IntrospectionTokenReader<
     this.getClient = options.getClient;
     this.getUser = options.getUser;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? 5_000;
+    this.maxResponseBytes =
+      options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    assertMaxBodyBytes(this.maxResponseBytes, "maxResponseBytes");
     this.customFetch = options.fetch;
   }
 
@@ -181,9 +200,10 @@ export class IntrospectionTokenReader<
    *   a genuinely invalid token (which is `undefined` → `invalid_token`), not
    *   collapsed into it.
    * @throws {ServerError} If the endpoint returns any other non-2xx status
-   *   (e.g. the reader's own introspection credentials are rejected) or a body
-   *   that is not JSON — a misconfiguration, not a verdict on the caller's
-   *   token.
+   *   (e.g. the reader's own introspection credentials are rejected), a body
+   *   that is not JSON, or one larger than
+   *   {@linkcode IntrospectionTokenReaderOptions.maxResponseBytes} — a
+   *   misconfiguration, not a verdict on the caller's token.
    *
    * An active response is only accepted when its `token_type` names a bearer
    * token. RFC 7662 answers for refresh tokens too, and a refresh token's
@@ -257,18 +277,11 @@ export class IntrospectionTokenReader<
             );
       }
 
-      try {
-        return (await response.json()) as IntrospectionResponse;
-      } catch (cause) {
-        throw controller.signal.aborted
-          ? new TemporarilyUnavailableError(
-              "token introspection request failed",
-              { cause },
-            )
-          : new ServerError("token introspection response was not JSON", {
-              cause,
-            });
-      }
+      return (await readResponseJson(
+        response,
+        this.maxResponseBytes,
+        "token introspection",
+      )) as IntrospectionResponse;
     } finally {
       clearTimeout(deadline);
     }

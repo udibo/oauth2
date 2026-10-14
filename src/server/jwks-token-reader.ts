@@ -18,6 +18,10 @@ import type { ClientInterface } from "../models/client.ts";
 import type { AbstractScope, ScopeConstructor } from "../models/scope.ts";
 import { BasicScope } from "../models/scope.ts";
 import type { Token } from "../models/token.ts";
+import {
+  assertMaxBodyBytes,
+  DEFAULT_MAX_KEY_SET_BYTES,
+} from "../utils/_body.ts";
 import { toArrayBuffer } from "../utils/_buffer.ts";
 import { base64urlDecode } from "../utils/crypto.ts";
 import {
@@ -26,6 +30,7 @@ import {
 } from "../utils/_default-fetch.ts";
 import type { TokenReaderInterface } from "./services/token.ts";
 import { assertClockSkewSeconds } from "./_clock-skew.ts";
+import { readResponseJson } from "./_response-json.ts";
 
 /**
  * Claims of a validated JWT access token, as defined by RFC 9068 §2.2.
@@ -161,6 +166,14 @@ export interface JwksTokenReaderOptions<
    * {@linkcode fetch} that doesn't honour `AbortSignal`.
    */
   fetchTimeoutMs?: number;
+  /**
+   * Largest discovery document or JWKS, in bytes, the reader accepts.
+   * Defaults to 262144 (256 KiB). The read counts bytes as they arrive and
+   * cancels the response at the cap, whether or not it has a
+   * `Content-Length`; a larger response fails the refresh with a
+   * {@linkcode ServerError}, as a malformed one does.
+   */
+  maxResponseBytes?: number;
   /** Optional scope constructor for parsing scope strings. Defaults to BasicScope. */
   Scope?: ScopeConstructor<S>;
   /**
@@ -416,6 +429,7 @@ export class JwksTokenReader<
   readonly #cacheMaxAgeMs: number;
   readonly #minFetchIntervalMs: number;
   readonly #fetchTimeoutMs: number;
+  readonly #maxResponseBytes: number;
   readonly #metadataUrls: string[];
   readonly #Scope: ScopeConstructor<S>;
   readonly #getClient: (
@@ -436,14 +450,15 @@ export class JwksTokenReader<
    * Defaults: every Web Crypto asymmetric algorithm accepted, `at+jwt`
    * required as `typ`, `client_id` as the required client-id claim, 30
    * seconds of clock skew, a 10-minute cache with a 30-second minimum
-   * between fetches, a 5-second request deadline, {@linkcode BasicScope},
-   * and the global `fetch`.
+   * between fetches, a 5-second request deadline, a 256 KiB response cap,
+   * {@linkcode BasicScope}, and the global `fetch`.
    *
    * @throws {TypeError} If `issuer` is not an absolute URL, `audience` is
    *   empty, or `algorithms` names an algorithm this package cannot verify
    *   (a silently ignored entry would read as a policy that isn't enforced).
    * @throws {RangeError} If `clockSkewSeconds` is negative, non-finite, or
-   *   overflows when converted to milliseconds.
+   *   overflows when converted to milliseconds, or `maxResponseBytes` is not
+   *   a positive integer.
    */
   constructor(options: JwksTokenReaderOptions<Client, User, S>) {
     this.#issuer = options.issuer;
@@ -467,6 +482,9 @@ export class JwksTokenReader<
     this.#cacheMaxAgeMs = options.cacheMaxAgeMs ?? 600_000;
     this.#minFetchIntervalMs = options.minFetchIntervalMs ?? 30_000;
     this.#fetchTimeoutMs = options.fetchTimeoutMs ?? 5_000;
+    this.#maxResponseBytes =
+      options.maxResponseBytes ?? DEFAULT_MAX_KEY_SET_BYTES;
+    assertMaxBodyBytes(this.#maxResponseBytes, "maxResponseBytes");
     this.#Scope =
       options.Scope ?? (BasicScope as unknown as ScopeConstructor<S>);
     this.#getClient = options.getClient;
@@ -495,8 +513,10 @@ export class JwksTokenReader<
    *   invalid token, not collapsed into it. Once keys are cached, a failed
    *   refresh is absorbed and the cached keys keep serving.
    * @throws {ServerError} If, with no keys cached, the JWKS endpoint returns
-   *   a 4xx or a body that is not a JWKS, or discovery reports no `jwks_uri`
-   *   — a misconfiguration, not a verdict on the caller's token.
+   *   a 4xx or a body that is not a JWKS, either document exceeds
+   *   {@linkcode JwksTokenReaderOptions.maxResponseBytes}, or discovery
+   *   reports no `jwks_uri` — a misconfiguration, not a verdict on the
+   *   caller's token.
    */
   async getToken(
     accessToken: string,
@@ -747,11 +767,7 @@ export class JwksTokenReader<
               `${label} request failed (HTTP ${response.status})`,
             );
       }
-      try {
-        return await response.json();
-      } catch (cause) {
-        throw new ServerError(`${label} response was not JSON`, { cause });
-      }
+      return await readResponseJson(response, this.#maxResponseBytes, label);
     } finally {
       clearTimeout(deadline);
     }

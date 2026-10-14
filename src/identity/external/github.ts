@@ -6,7 +6,7 @@
  */
 
 import { defaultFetch } from "../../utils/_default-fetch.ts";
-import { describeError } from "./_shared.ts";
+import { describeError, readProviderText } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import { ExternalAuthError } from "./errors.ts";
 import type {
@@ -118,8 +118,9 @@ export function githubProvider(
       await res.body?.cancel();
       return null;
     }
+    const text = await readProviderText(res, id, url);
     try {
-      return await res.json();
+      return JSON.parse(text);
     } catch (error) {
       throw new ExternalAuthError(
         id,

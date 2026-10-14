@@ -10,6 +10,7 @@
  */
 
 import { isOAuth2Error } from "../../errors.ts";
+import { readBoundedBody } from "../../utils/_body.ts";
 import { timingSafeEqualString } from "../../utils/crypto.ts";
 import {
   PROVIDER_TEXT_MAX_LENGTH,
@@ -49,13 +50,57 @@ export function describeError(error: unknown): string {
 }
 
 /**
+ * Response bytes a connector reads from a provider endpoint — token, profile,
+ * UserInfo, or key set — before refusing the response.
+ */
+export const MAX_PROVIDER_RESPONSE_BYTES: number = 64 * 1024;
+
+/**
+ * Reads `res`'s body as text, stopping and cancelling it past
+ * {@link MAX_PROVIDER_RESPONSE_BYTES}. `source` names the endpoint in the
+ * error message, e.g. `"the Acme profile endpoint"`.
+ *
+ * @throws {ExternalAuthError} `provider_error` when the body is larger than
+ *   the cap or stops arriving.
+ */
+export async function readProviderText(
+  res: Response,
+  provider: string,
+  source: string,
+): Promise<string> {
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await readBoundedBody(res, MAX_PROVIDER_RESPONSE_BYTES);
+  } catch (error) {
+    throw new ExternalAuthError(
+      provider,
+      "provider_error",
+      `${source} response could not be read (${describeError(error)}).`,
+      { cause: error },
+    );
+  }
+  if (!bytes) {
+    throw new ExternalAuthError(
+      provider,
+      "provider_error",
+      `${source} response exceeded ${MAX_PROVIDER_RESPONSE_BYTES} bytes — ` +
+        `refusing to parse a response this large.`,
+    );
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
  * Reads a failed response's body into a bounded, single-line `": <text>"`
- * suffix to append to an error message, or `""` when the body is empty or
- * unreadable. Consumes the body, so the caller must not read it again.
+ * suffix to append to an error message, or `""` when the body is empty,
+ * unreadable, or larger than {@link MAX_PROVIDER_RESPONSE_BYTES}. Consumes
+ * the body, so the caller must not read it again.
  */
 export async function readErrorBody(res: Response): Promise<string> {
   try {
-    const snippet = sanitizeProviderText(await res.text());
+    const bytes = await readBoundedBody(res, MAX_PROVIDER_RESPONSE_BYTES);
+    if (!bytes) return "";
+    const snippet = sanitizeProviderText(new TextDecoder().decode(bytes));
     return snippet ? `: ${snippet}` : "";
   } catch {
     return "";

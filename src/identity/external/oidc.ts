@@ -17,6 +17,7 @@ import {
   assertIdTokenClaims,
   type AzpPolicy,
   describeError,
+  readProviderText,
   stripTrailingSlash,
 } from "./_shared.ts";
 import { ExternalAuthError } from "./errors.ts";
@@ -256,7 +257,9 @@ export function oidcProvider(options: OidcProviderOptions): ExternalProvider {
         await res.body?.cancel();
         return null;
       }
-      const info = (await res.json()) as Record<string, unknown>;
+      const info = JSON.parse(
+        await readProviderText(res, id, "the UserInfo endpoint"),
+      ) as Record<string, unknown>;
       return info.sub === idTokenSub ? info : null;
     } catch {
       return null;

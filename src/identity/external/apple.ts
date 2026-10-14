@@ -19,7 +19,11 @@
 import { toArrayBuffer } from "../../utils/_buffer.ts";
 import { base64urlDecode } from "../../utils/crypto.ts";
 import { defaultFetch } from "../../utils/_default-fetch.ts";
-import { assertIdTokenClaims, describeError } from "./_shared.ts";
+import {
+  assertIdTokenClaims,
+  describeError,
+  readProviderText,
+} from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import {
   type AppleClientSecretFactory,
@@ -171,9 +175,10 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
         `Apple's JWKS endpoint responded with HTTP ${res.status}.`,
       );
     }
+    const text = await readProviderText(res, id, "Apple's JWKS endpoint");
     let doc: { keys?: unknown };
     try {
-      doc = (await res.json()) as { keys?: unknown };
+      doc = JSON.parse(text) as { keys?: unknown };
     } catch (error) {
       throw new ExternalAuthError(
         id,

@@ -10,7 +10,7 @@
 
 import { defaultFetch } from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
-import { describeError, readErrorBody } from "./_shared.ts";
+import { describeError, readErrorBody, readProviderText } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import { ExternalAuthError } from "./errors.ts";
 import type {
@@ -199,8 +199,13 @@ export function oauth2Provider(
           `identity scope is requested.`,
       );
     }
+    const text = await readProviderText(
+      res,
+      id,
+      `the ${options.displayName} profile endpoint`,
+    );
     try {
-      return (await res.json()) as Record<string, unknown>;
+      return JSON.parse(text) as Record<string, unknown>;
     } catch (error) {
       throw new ExternalAuthError(
         id,

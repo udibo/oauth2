@@ -59,6 +59,34 @@ your framework (for example Hono's `bodyLimit` middleware) or your reverse
 proxy. Mount that limit ahead of `protect()` so an anonymous oversized body is
 refused before any authentication work.
 
+The `udibo-oauth2 idp dev` server caps its sign-in, consent and admin bodies at
+64 KiB and answers a larger one with `413`.
+
+## Response size limits
+
+The package also caps every response its runtime code reads from a server it
+calls; the `@udibo/oauth2/testing` suites, which run only in your tests, do not.
+As with request bodies, each read counts bytes as they arrive and cancels the
+response at the cap. A `Content-Length` over the cap is refused before any of
+the body is read, and a chunked response with no `Content-Length` is cut off at
+the cap.
+
+- **`JwksTokenReader`** caps the discovery document and the JWKS with
+  `maxResponseBytes`, default 256 KiB. A larger response fails the key refresh
+  with `ServerError`, as a malformed one does. A body that stops arriving before
+  `fetchTimeoutMs` gives `TemporarilyUnavailableError`.
+- **`IntrospectionTokenReader`** caps the introspection response with
+  `maxResponseBytes`, default 64 KiB, and fails the same way.
+- **`breachedPasswordValidator`** caps the range response with
+  `maxResponseBytes`, default 1 MiB. A larger response counts as the range API
+  being unavailable, so `failOpen` decides whether the password is allowed.
+- **`DirectClient`, `BffClient` and `checkPermissions`** cap every
+  authorization-server response at 64 KiB. **The external connectors** cap token, profile, UserInfo and Apple
+  JWKS responses at 64 KiB, and an oversized error body is left out of the error
+  message. These caps are fixed. An oversized OIDC UserInfo response is
+  discarded like any other UserInfo failure, so the profile comes from the
+  id_token claims alone.
+
 ## BFF storage across instances
 
 `HonoBff` requires `sessionStore` and `authRequestStorage` and has no default
