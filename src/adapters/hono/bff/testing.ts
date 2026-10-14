@@ -501,6 +501,48 @@ export function runSessionStoreContractTests(
       expect(fetched?.refreshToken).toBe("refresh-2");
     });
 
+    it("withRefreshLock lets the refresh destroy the session it locks", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+
+      await settlesWithin(
+        locking.withRefreshLock(value, () => locking.destroy(value)),
+        "destroy blocked inside withRefreshLock: HonoBff destroys the " +
+          "session it locks when the authorization server refuses the " +
+          "refresh, so it would deadlock",
+      );
+    });
+
+    it("withRefreshLock runs a refresh that was waiting when the holder threw", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const failure = new Error("token endpoint unreachable");
+      const releaseFirst = Promise.withResolvers<void>();
+
+      const first = locking.withRefreshLock(value, async () => {
+        await releaseFirst.promise;
+        throw failure;
+      });
+      const waiting = locking.withRefreshLock(value, () =>
+        Promise.resolve("waiting"),
+      );
+      releaseFirst.resolve();
+
+      await expect(first).rejects.toBe(failure);
+      expect(
+        await settlesWithin(
+          waiting.catch((error: unknown) => error),
+          "a refresh queued behind one that threw never ran, so every " +
+            "request waiting on that session hangs",
+        ),
+        "a refresh queued behind one that threw must run, not inherit its error",
+      ).toBe("waiting");
+    });
+
     it("withRefreshLock releases the lock when the refresh throws", async ({
       skip,
     }) => {
