@@ -494,10 +494,11 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   as `MemoryTokenService` does; see
   [revocation](guides/become-an-oauth-provider.md#revocation-and-introspection).
   Another authorization server may revoke only the token it was given, and
-  then the successor stays live until it expires. A revocation that reaches
+  then the successor stays live until it expires. A revocation can also reach
   the authorization server between the refresh grant's claim of the old token
-  and its save of the successor also misses it, unless the token store keeps
-  the family's revocation so that save cannot restore it.
+  and its save of the successor. `MemoryTokenService` keeps a revoked family
+  revoked, so that save stores the successor already revoked. A custom token
+  store misses the successor in that gap unless it does the same.
 - **With `EncryptedCookieSessionStore`, a refresh's own response can put a
   signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
   refresh ends the grace for the whole chain, including a refresh still in

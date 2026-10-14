@@ -1224,14 +1224,22 @@ to another client leaves that client's family alone. A token service without
 not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
 and the successor stays live until it expires. `replayGraceSeconds` excuses a
 straggling refresh only, never a revocation, and this path does not call
-`onTokenReuse`, since a sign-out is not a replay. `runTokenServiceContractTests`
+`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
+token ends the family without firing `onTokenReuse`, so any audit trail for it
+comes from your store's `revokeFamily`. `runTokenServiceContractTests`
 checks that a service implementing `revokeRotated` returns the family and client
 from a rotated-out token.
 
+Return the tombstone from `getRevokedRefreshToken` unconditionally. Apply a
+replay grace through `replayGraceSeconds`, never by hiding recently rotated
+tombstones in the store: a hidden tombstone also hides the family from a
+sign-out that races the refresh.
+
 The refresh grant saves the successor after it claims the presented token, as
 two storage calls. A revocation that lands between them finds no live successor
-to revoke, unless your store keeps the family's revocation so the later save
-cannot restore it, as reuse detection already needs.
+to revoke. To close that gap, `revokeFamily` must record the revoked family and
+`save` must store any later member of it already revoked. `MemoryTokenService`
+does; a custom store needs the same, and reuse detection relies on it too.
 
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns
@@ -5606,7 +5614,10 @@ sections apply only when you host those flows.
       clients.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
 - [ ] Family revocation, from a replay or from revoking a rotated-out token,
-      cannot be undone by a concurrent token save.
+      cannot be undone by a concurrent token save: `revokeFamily` records the
+      family and `save` stores any later member of it already revoked.
+- [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
+      from `replayGraceSeconds`, not from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not
       its human owner.
 - [ ] Consent and scope policy match the clients you allow.
@@ -6775,10 +6786,11 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   as `MemoryTokenService` does; see
   [revocation](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#revocation-and-introspection).
   Another authorization server may revoke only the token it was given, and
-  then the successor stays live until it expires. A revocation that reaches
+  then the successor stays live until it expires. A revocation can also reach
   the authorization server between the refresh grant's claim of the old token
-  and its save of the successor also misses it, unless the token store keeps
-  the family's revocation so that save cannot restore it.
+  and its save of the successor. `MemoryTokenService` keeps a revoked family
+  revoked, so that save stores the successor already revoked. A custom token
+  store misses the successor in that gap unless it does the same.
 - **With `EncryptedCookieSessionStore`, a refresh's own response can put a
   signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
   refresh ends the grace for the whole chain, including a refresh still in

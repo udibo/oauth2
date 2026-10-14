@@ -614,14 +614,22 @@ to another client leaves that client's family alone. A token service without
 not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
 and the successor stays live until it expires. `replayGraceSeconds` excuses a
 straggling refresh only, never a revocation, and this path does not call
-`onTokenReuse`, since a sign-out is not a replay. `runTokenServiceContractTests`
+`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
+token ends the family without firing `onTokenReuse`, so any audit trail for it
+comes from your store's `revokeFamily`. `runTokenServiceContractTests`
 checks that a service implementing `revokeRotated` returns the family and client
 from a rotated-out token.
 
+Return the tombstone from `getRevokedRefreshToken` unconditionally. Apply a
+replay grace through `replayGraceSeconds`, never by hiding recently rotated
+tombstones in the store: a hidden tombstone also hides the family from a
+sign-out that races the refresh.
+
 The refresh grant saves the successor after it claims the presented token, as
 two storage calls. A revocation that lands between them finds no live successor
-to revoke, unless your store keeps the family's revocation so the later save
-cannot restore it, as reuse detection already needs.
+to revoke. To close that gap, `revokeFamily` must record the revoked family and
+`save` must store any later member of it already revoked. `MemoryTokenService`
+does; a custom store needs the same, and reuse detection relies on it too.
 
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns

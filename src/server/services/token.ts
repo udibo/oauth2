@@ -207,11 +207,17 @@ export interface TokenServiceInterface<
   revokeCode(code: string): Promise<boolean>;
 
   /**
-   * Looks up a refresh token that has already been revoked/rotated out —
-   * the signal the refresh grant's reuse detection needs. Implement this
-   * (with {@linkcode revokeFamily}) by keeping revoked refresh-token records
-   * findable instead of deleting them; when absent, reuse detection is
-   * silently disabled.
+   * Looks up a refresh token that has already been revoked/rotated out. The
+   * refresh grant's reuse detection reads it, and so does the revocation
+   * endpoint, to revoke the family of a token rotation replaced. Implement
+   * this (with {@linkcode revokeFamily}) by keeping revoked refresh-token
+   * records findable instead of deleting them; when absent, reuse detection
+   * is silently disabled and `/revoke` cannot reach a successor.
+   *
+   * Return the tombstone unconditionally. Apply any replay grace through
+   * `RefreshTokenGrantOptions.replayGraceSeconds`, never by hiding recent
+   * tombstones here: a hidden tombstone also hides the family from a sign-out
+   * racing the refresh, which then leaves the successor live.
    */
   getRevokedRefreshToken?(
     refreshToken: string,
@@ -223,6 +229,13 @@ export interface TokenServiceInterface<
    * can't keep a session alive, and by the revocation endpoint when it is
    * given a token whose tombstone carries {@linkcode RefreshToken.rotatedAt}.
    * Returns true if anything was revoked.
+   *
+   * `/revoke` ends the family without firing `onTokenReuse`, so any audit
+   * trail for that case has to come from this method.
+   *
+   * Keep the family revoked: a successor that a concurrent rotation saves
+   * after this call must be stored already revoked, as
+   * `MemoryTokenService` does.
    */
   revokeFamily?(familyId: string): Promise<boolean>;
 
