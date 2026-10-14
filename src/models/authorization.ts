@@ -50,7 +50,7 @@ export interface RequireConditions {
   scope?: string | string[];
   /** Permission(s) the subject must hold ({@link Authorization.can}). */
   permission?: string | string[];
-  /** Tenant-wide role(s) the subject must hold ({@link Authorization.hasRole}). */
+  /** Issuer-wide role(s) the subject must hold ({@link Authorization.hasRole}). */
   role?: string | string[];
   /**
    * Role(s) the subject must hold in the active organization
@@ -83,9 +83,9 @@ export interface AuthorizationFailure {
 export interface AuthorizationInit {
   /** The scope granted to the client, when known. */
   scope?: AbstractScope | null;
-  /** Tenant-wide role slugs the subject holds. */
+  /** Issuer-wide role slugs the subject holds, outside any organization. */
   roles?: Iterable<string>;
-  /** Permissions the subject holds (tenant-level plus the active organization's). */
+  /** Permissions the subject holds (issuer-wide plus the active organization's). */
   permissions?: Iterable<string>;
   /** The active organization context, when the credential carries one. */
   organization?: OrganizationContext | null;
@@ -117,7 +117,7 @@ export interface AuthorizationInit {
 export class Authorization {
   /** The scope granted to the client, or `null` when unknown. */
   readonly scope: AbstractScope | null;
-  /** Tenant-wide role slugs the subject holds. */
+  /** Issuer-wide role slugs the subject holds, outside any organization. */
   readonly roles: ReadonlySet<string>;
   /** Permissions the subject holds in the credential's scope of issue. */
   readonly permissions: ReadonlySet<string>;
@@ -149,7 +149,7 @@ export class Authorization {
     return this.permissions.has(permission);
   }
 
-  /** Whether the subject holds the tenant-wide role `role`. */
+  /** Whether the subject holds the issuer-wide role `role`. */
   hasRole(role: string): boolean {
     return this.roles.has(role);
   }

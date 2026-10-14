@@ -185,7 +185,7 @@ export interface LoginOptions extends BaseLoginOptions {
    * Override the origin (scheme + host) of the authorize endpoint and the
    * `redirect_uri` for THIS call, keeping their configured paths. Lets one
    * build-once client serve multiple deployment origins (preview URLs,
-   * multi-tenant subdomains) — e.g. the Hono BFF passes the trusted request
+   * per-application subdomains) — e.g. the Hono BFF passes the trusted request
    * origin so sign-in works on whichever host the request arrived at. The
    * callback returns to the same origin, so the matching `exchange` call is
    * given the same origin.
@@ -195,7 +195,7 @@ export interface LoginOptions extends BaseLoginOptions {
    * Store the pending authorization request here instead of in the client's
    * configured `authRequestStorage`, for THIS call. Lets a server bind the
    * record to the request it belongs to — a per-request cookie store, or a
-   * per-tenant table — rather than sharing one process-wide store. The
+   * per-application table — rather than sharing one process-wide store. The
    * matching `exchangeAuthorizationCode` call MUST be given a storage that
    * can read the record back.
    */

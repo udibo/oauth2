@@ -51,7 +51,7 @@ type CacheEntry = DiscoveryCacheEntry;
  * collapse concurrent misses into one `load` call — a get/set pair cannot.
  *
  * Metadata is issuer-scoped and public: it carries no client id, secret, or
- * tenant data, so one cache may serve many tenants pointed at the same issuer.
+ * user data, so one cache may serve many clients pointed at the same issuer.
  * Do share a cache across clients that reach an issuer the same way; do not
  * share one between a stubbed transport and live traffic.
  *
@@ -101,8 +101,8 @@ export interface MemoryDiscoveryCacheOptions {
   /**
    * Maximum number of issuers held. Defaults to
    * {@link DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES}. Expired entries are dropped
-   * first, then the least recently used, so a multi-tenant server with an
-   * unbounded issuer list cannot grow without limit.
+   * first, then the least recently used, so a server that reaches an
+   * unbounded list of issuers cannot grow without limit.
    */
   maxEntries?: number;
 }

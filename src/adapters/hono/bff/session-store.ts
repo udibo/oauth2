@@ -121,8 +121,8 @@ export interface RefreshLockStore {
    * A Postgres store can hold `pg_advisory_xact_lock` on a hash of the session
    * key in a transaction around `refresh`, with a `lock_timeout`. A Redis
    * store can take a key with `SET NX PX` and wait for it with a deadline. Key
-   * the lock by the same digest the store keys its records by, never the raw
-   * cookie value, and include the tenant in a tenant-scoped store.
+   * the lock by the same key the store keys its records by — the digest, never
+   * the raw cookie value, plus any prefix or scope the store adds to it.
    */
   withRefreshLock<T>(
     cookieValue: string,

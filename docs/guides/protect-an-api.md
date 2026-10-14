@@ -435,7 +435,7 @@ declare const resourceServer: HonoResourceServer<ClientInterface, unknown>;
 
 const { authorization } = resourceServer.getContext(c);
 authorization.can("posts:write"); // permission — the recommended check
-authorization.hasRole("editor"); // tenant-wide role
+authorization.hasRole("editor"); // issuer-wide role
 authorization.hasOrgRole("admin"); // role in the active organization
 authorization.inOrganization("acme"); // active-organization match (id or slug)
 authorization.hasScope("posts:read"); // client delegation

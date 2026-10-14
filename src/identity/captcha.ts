@@ -126,8 +126,8 @@ export interface VerifyCaptchaOptions {
    * What to do when the provider throws (an outage). `true` (the default)
    * fails open — the request passes with `degraded: true` — so a provider
    * outage falls back to your rate-limit/lockout floor instead of blocking
-   * every user. `false` fails closed for a tenant that would rather refuse than
-   * degrade.
+   * every user. `false` fails closed for a deployment that would rather refuse
+   * than degrade.
    */
   failOpen?: boolean;
 }

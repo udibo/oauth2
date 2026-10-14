@@ -756,7 +756,7 @@ export interface HonoBffOptions {
   /**
    * Resolves the per-request origin (scheme + host) used to build the
    * browser-facing authorize URL and `redirect_uri`. Lets ONE build-once BFF
-   * serve every deployment host (preview URLs, multi-tenant subdomains): the
+   * serve every deployment host (preview URLs, per-application subdomains): the
    * configured client's authorize/redirect paths are retargeted at this
    * origin per request. Return only allowlisted/trusted origins (never a raw
    * forged `Host`). When omitted, the client's configured origin is used.

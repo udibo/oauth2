@@ -11,7 +11,7 @@
  * interface MyClient extends ClientInterface {
  *   name: string;
  *   confidential: boolean;
- *   tenantId: string;
+ *   logoUri: string;
  * }
  * ```
  */

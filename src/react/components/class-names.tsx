@@ -66,12 +66,12 @@ function slotKey(classNames: AuthFormClassNames): string {
  *
  * @example Theme a custom field to match the form around it
  * ```tsx
- * function TenantField(props: { fieldProps: AuthFieldProps }) {
+ * function InviteCodeField(props: { fieldProps: AuthFieldProps }) {
  *   const classNames = useAuthFormClassNames();
  *   return (
  *     <div className={classNames.field}>
  *       <label className={classNames.label} htmlFor={props.fieldProps.id}>
- *         Tenant
+ *         Invite code
  *       </label>
  *       <input {...props.fieldProps} className={classNames.input} />
  *     </div>
