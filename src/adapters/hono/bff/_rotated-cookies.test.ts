@@ -48,4 +48,15 @@ describe("RotatedCookies", () => {
       expect(await memo.successor("other0"), ended).toBe("other1");
     }
   });
+
+  it("does not remember a replacement whose chain was forgotten while it was pending", async () => {
+    const memo = new RotatedCookies(10_000, 10);
+    await memo.remember("c0", "c1");
+    const pending = await memo.start("c1");
+
+    await memo.forget("c0");
+    await memo.finish(pending, "c2");
+
+    expect(await memo.successor("c1")).toBe(undefined);
+  });
 });

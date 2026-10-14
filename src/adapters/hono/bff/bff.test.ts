@@ -4611,6 +4611,68 @@ describe("HonoBff", () => {
       await expectSignedOutWithout(app, stale, fresh);
     });
 
+    it("does not hand back a session whose sign-out ran while its refresh was in flight", async () => {
+      const authServerFetch = localAuthServerFetch(fixture.authServer);
+      let hold: Promise<void> | undefined;
+      let release = (): void => {};
+      let exchanged = (): void => {};
+      const exchangeAnswered = new Promise<void>((resolve) => {
+        exchanged = resolve;
+      });
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: {
+          authorization: AUTHORIZE_URL,
+          token: TOKEN_URL,
+          revocation: REVOKE_URL,
+        },
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          const form = await request.clone().formData();
+          const response = await authServerFetch(request);
+          if (form.get("grant_type") === "refresh_token" && hold) {
+            exchanged();
+            await hold;
+          }
+          return response;
+        },
+      });
+      const app = cookieStoreApp({ client });
+      const stale = await loginCookie(app);
+      hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const inFlight = app.request("/raw/me", { headers: { cookie: stale } });
+      await exchangeAnswered;
+      const logout = await app.request("/auth/logout", {
+        method: "POST",
+        headers: { cookie: stale },
+      });
+      await logout.body?.cancel();
+      release();
+      const first = await inFlight;
+      await first.body?.cancel();
+      const fresh = `oauth2_session=${cookieValue(first, "oauth2_session")}`;
+      hold = undefined;
+
+      await expectSignedOutWithout(app, stale, fresh);
+    });
+
+    it("does not hand back the previous session after a sign-in replaces it", async () => {
+      const app = cookieStoreApp();
+      const { stale, fresh } = await refreshedOnce(app);
+      const signIn = await completeLogin(app, "/auth/login", {
+        headers: { cookie: fresh },
+      });
+      await signIn.body?.cancel();
+      expect(cookieValue(signIn, "oauth2_session")).not.toBe(undefined);
+
+      await expectSignedOutWithout(app, stale, fresh);
+    });
+
     it("refuses a grace window that is not a positive number of milliseconds", () => {
       for (const ttlMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
         expect(() => cookieStoreApp({ rotatedCookieGrace: { ttlMs } })).toThrow(

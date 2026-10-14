@@ -1993,14 +1993,20 @@ export class HonoBff {
         return { status: "unavailable" };
       }
     }
-    const outcome = await this.#lockedRefresh(entry);
-    if (
-      outcome.status === "refreshed" &&
-      outcome.entry.cookieValue !== entry.cookieValue
-    ) {
-      await memo.remember(entry.cookieValue, outcome.entry.cookieValue);
+    const pending = await memo.start(entry.cookieValue);
+    let successor: string | undefined;
+    try {
+      const outcome = await this.#lockedRefresh(entry);
+      if (
+        outcome.status === "refreshed" &&
+        outcome.entry.cookieValue !== entry.cookieValue
+      ) {
+        successor = outcome.entry.cookieValue;
+      }
+      return outcome;
+    } finally {
+      await memo.finish(pending, successor);
     }
-    return outcome;
   }
 
   async #destroySession(cookieValue: string): Promise<void> {
