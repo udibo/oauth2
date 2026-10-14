@@ -8,9 +8,17 @@
  * @module
  */
 
-import { defaultFetch } from "../../utils/_default-fetch.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
-import { describeError, readErrorBody, readProviderText } from "./_shared.ts";
+import {
+  describeError,
+  PROVIDER_REQUEST_TIMEOUT_MS,
+  readErrorBody,
+  readProviderText,
+} from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
 import { ExternalAuthError } from "./errors.ts";
 import type {
@@ -179,6 +187,9 @@ export function oauth2Provider(
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
         },
+        signal: packageDeadlineSignal(
+          AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+        ),
       });
     } catch (error) {
       throw new ExternalAuthError(

@@ -18,10 +18,14 @@
 
 import { toArrayBuffer } from "../../utils/_buffer.ts";
 import { base64urlDecode } from "../../utils/crypto.ts";
-import { defaultFetch } from "../../utils/_default-fetch.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../../utils/_default-fetch.ts";
 import {
   assertIdTokenClaims,
   describeError,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   readProviderText,
 } from "./_shared.ts";
 import { runTokenExchange } from "./_token-exchange.ts";
@@ -158,6 +162,9 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
     try {
       res = await fetchImpl(APPLE_JWKS_URL, {
         headers: { Accept: "application/json" },
+        signal: packageDeadlineSignal(
+          AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+        ),
       });
     } catch (error) {
       throw new ExternalAuthError(

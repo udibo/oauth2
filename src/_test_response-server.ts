@@ -13,15 +13,18 @@ import type { AddressInfo } from "node:net";
  * only `body` and then hangs; `"endless"` writes `body` and then 16 KiB of
  * JSON whitespace every millisecond, chunked, until the client goes away —
  * paced so a reader that never stops buffers megabytes, not gigabytes,
- * before its deadline.
+ * before its deadline. `"stall"` sends the headers at once, then `body`
+ * (chunked, so an empty one stalls before the first body byte), then nothing
+ * more; `"silent"` never answers at all.
  */
 export type Reply =
   | {
       status?: number;
       contentType?: string;
       body: string;
-      transfer: "length" | "chunked" | "endless";
+      transfer: "length" | "chunked" | "endless" | "stall";
     }
+  | { transfer: "silent" }
   | {
       status?: number;
       contentType?: string;
@@ -65,6 +68,7 @@ export async function serveReplies(
       response.on("close", () => {
         if (!response.writableFinished) markAbandoned();
       });
+      if (reply.transfer === "silent") return;
       const headers: Record<string, string> = {
         "content-type": reply.contentType ?? "application/json",
       };
@@ -84,6 +88,10 @@ export async function serveReplies(
           response.write(bytes.subarray(offset, offset + CHUNK_BYTES));
         }
         response.end();
+      } else if (reply.transfer === "stall") {
+        response.writeHead(status, headers);
+        response.flushHeaders();
+        if (reply.body) response.write(reply.body);
       } else {
         response.writeHead(status, headers);
         response.write(reply.body);

@@ -13,15 +13,13 @@ import { packageDeadlineSignal } from "../../utils/_default-fetch.ts";
 import {
   describeError,
   MAX_PROVIDER_RESPONSE_BYTES,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   sanitizeProviderText,
 } from "./_shared.ts";
 import { ExternalAuthError } from "./errors.ts";
 
 /** Response bytes accepted from a token endpoint before the exchange is refused. */
 export const MAX_TOKEN_RESPONSE_BYTES: number = MAX_PROVIDER_RESPONSE_BYTES;
-
-/** Wall-clock budget for the exchange, covering the connect and the body read. */
-export const TOKEN_EXCHANGE_TIMEOUT_MS = 10_000;
 
 /** Input for {@link runTokenExchange}. */
 export interface TokenExchangeInput {
@@ -50,7 +48,7 @@ export interface TokenExchangeInput {
   httpErrorHint: string;
   /** Guidance appended for the OAuth2 error code the provider reported. */
   tokenErrorHint: (code: string | undefined) => string;
-  /** Exchange deadline. Defaults to {@link TOKEN_EXCHANGE_TIMEOUT_MS}. */
+  /** Exchange deadline. Defaults to {@link PROVIDER_REQUEST_TIMEOUT_MS}. */
   timeoutMs?: number;
 }
 
@@ -86,7 +84,7 @@ export async function runTokenExchange(
       body: input.body,
       redirect: "manual",
       signal: packageDeadlineSignal(
-        AbortSignal.timeout(input.timeoutMs ?? TOKEN_EXCHANGE_TIMEOUT_MS),
+        AbortSignal.timeout(input.timeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS),
       ),
     });
   } catch (error) {

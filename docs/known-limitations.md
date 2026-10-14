@@ -87,6 +87,19 @@ the cap.
   discarded like any other UserInfo failure, so the profile comes from the
   id_token claims alone.
 
+A cap bounds how much a response can send, not how long it can take. **The
+external connectors** also give each request they send a fixed 10-second
+deadline: the token exchange, the profile and GitHub API reads, OIDC UserInfo,
+and Apple's JWKS. The deadline covers the connection, the response headers and
+the whole body, including an error body read for the message. A provider that
+stops sending at any point fails the sign-in with `ExternalAuthError`
+`provider_error` once it passes, and the connection is closed. An OIDC UserInfo
+request that misses it is a UserInfo failure like any other, so the profile
+comes from the id_token claims alone. The OIDC connector's discovery and token
+requests go through `DirectClient`, which bounds each one at 10 seconds as well.
+An injected `fetch` must pass the request's `signal` through, or none of these
+deadlines reaches the transport.
+
 ## BFF storage across instances
 
 `HonoBff` requires `sessionStore` and `authRequestStorage` and has no default
@@ -510,17 +523,18 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `JwksTokenReader`'s JWKS and discovery fetches and `IntrospectionTokenReader`
   (`fetchTimeoutMs`); `checkPermissions`; `DirectClient`'s discovery, token,
   revocation and userinfo calls and `BffClient`'s session probe;
-  `breachedPasswordValidator`; and the external connectors' token exchange, plus
-  the OIDC connector's discovery. Nothing else triggers the switch: not a
+  `breachedPasswordValidator`; and every request the external connectors send:
+  the token exchange, the profile, UserInfo and GitHub API reads, Apple's JWKS,
+  and the OIDC connector's discovery. Nothing else triggers the switch: not a
   request aborted for any other reason, not a deadline a caller sets on its own
   signal (`DirectClient.fetch(url, { signal })`), and not the calls that carry
-  no package deadline — `DirectClient.fetch` and `BffClient.fetch`, the BFF
-  proxy, the connectors' userinfo requests, and Apple's JWKS. Those still take a
-  connection of their own to an origin that has already switched, and their
-  responses are the global `fetch`'s, unaltered. The switch trades connection
-  reuse to that origin, for the life of the process, for not depending on a
-  pooled connection that may be stalled. Plain `http` (which Deno sends over
-  HTTP/1.1, where an abort already discards the connection) keeps the shared
-  pool, and other runtimes use their global `fetch` unchanged. An injected
-  `fetch` manages its own connections and gets none of this; one that pins an
-  HTTP/2 client of its own should replace that client after a timeout.
+  no package deadline — `DirectClient.fetch` and `BffClient.fetch`, and the BFF
+  proxy. Those still take a connection of their own to an origin that has
+  already switched, and their responses are the global `fetch`'s, unaltered.
+  The switch trades connection reuse to that origin, for the life of the
+  process, for not depending on a pooled connection that may be stalled. Plain
+  `http` (which Deno sends over HTTP/1.1, where an abort already discards the
+  connection) keeps the shared pool, and other runtimes use their global
+  `fetch` unchanged. An injected `fetch` manages its own connections and gets
+  none of this; one that pins an HTTP/2 client of its own should replace that
+  client after a timeout.

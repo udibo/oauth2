@@ -11,12 +11,16 @@ import { MemoryAuthRequestStorage } from "../../client/storage.ts";
 import { isOAuth2Error } from "../../errors.ts";
 import type { AuthorizationServerMetadata } from "../../models/responses.ts";
 import type { TokenResponse } from "../../models/token.ts";
-import { defaultFetch } from "../../utils/_default-fetch.ts";
+import {
+  defaultFetch,
+  packageDeadlineSignal,
+} from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import {
   assertIdTokenClaims,
   type AzpPolicy,
   describeError,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   readProviderText,
   stripTrailingSlash,
 } from "./_shared.ts";
@@ -252,6 +256,9 @@ export function oidcProvider(options: OidcProviderOptions): ExternalProvider {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
         },
+        signal: packageDeadlineSignal(
+          AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
+        ),
       });
       if (!res.ok) {
         await res.body?.cancel();
