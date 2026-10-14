@@ -68,7 +68,9 @@ export interface TokenServiceContractOptions<
    * and {@linkcode TokenServiceInterface.revokeFamily}. The suite then
    * registers an ignored case naming what is not covered — a replayed
    * rotated-out refresh token cannot be detected, so a stolen token keeps
-   * working alongside the victim's — instead of passing in silence. Defaults to
+   * working alongside the victim's, and revoking a rotated-out token at the
+   * revocation endpoint leaves its successor live — instead of passing in
+   * silence. Defaults to
    * `true`, so a service that meant to implement the pair and does not fails
    * loudly rather than losing reuse detection quietly.
    */
@@ -494,6 +496,47 @@ export function runTokenServiceContractTests<
           );
         });
 
+        it("finds a rotated-out token's family, so revoking it ends the live successor", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.revokeRotated !== "function",
+            "the service does not implement revokeRotated",
+          );
+          const rotatedOut = await saveFamilyMember(FAMILY);
+          expect(await tokenService.revokeRotated!(rotatedOut)).toBe(true);
+          const successor = await saveFamilyMember(FAMILY);
+          const unrelated = await saveFamilyMember(OTHER_FAMILY);
+
+          const tombstone = await tokenService.getRevokedRefreshToken!(
+            rotatedOut.refreshToken,
+          );
+          assert(
+            tombstone?.familyId === FAMILY && tombstone.rotatedAt,
+            "the revocation endpoint finds the family to end from the " +
+              "rotated-out token's record; without its familyId and " +
+              "rotatedAt, a sign-out racing a refresh leaves the successor live",
+          );
+          expect(
+            tombstone.client.id.toString(),
+            "the endpoint revokes the family only for the client the token " +
+              "was issued to",
+          ).toBe(client.id.toString());
+          expect(await tokenService.revokeFamily!(tombstone.familyId)).toBe(
+            true,
+          );
+          expect(
+            await tokenService.getRefreshToken(successor.refreshToken),
+          ).toBe(undefined);
+          expect(await tokenService.getToken(successor.accessToken)).toBe(
+            undefined,
+          );
+          assert(
+            (await tokenService.getRefreshToken(unrelated.refreshToken)) !==
+              undefined,
+          );
+        });
+
         it("leaves rotatedAt unset on a token revoked other than by rotation", async () => {
           const token = await saveFamilyMember(FAMILY);
           await tokenService.revoke(token.refreshToken, "refresh_token");
@@ -546,7 +589,7 @@ export function runTokenServiceContractTests<
         });
       });
     } else {
-      it.skip("refresh-token reuse detection is not implemented — a replayed rotated-out token cannot be detected (refreshTokenReuseDetection: false)", () => {});
+      it.skip("refresh-token reuse detection is not implemented — a replayed rotated-out token cannot be detected, and revoking one does not end its successor (refreshTokenReuseDetection: false)", () => {});
     }
   });
 }

@@ -596,6 +596,41 @@ must not become an oracle for whether a token exists or who owns it — which al
 means **a caller cannot tell a successful revocation from a refused one.**
 Revocation uses the resolved token kind, not the hint.
 
+**Revoking a refresh token that rotation already replaced revokes its whole
+family.** A sign-out can present a token the client's own refresh rotated a
+moment earlier: a backend-for-frontend's logout request still carries the
+session from before a refresh that is in flight. That token is no longer live,
+so revoking it alone would leave the successor working. When the presented
+token is not live, the endpoint asks `getRevokedRefreshToken` for it. If the
+record carries `rotatedAt` and a `familyId`, and was issued to the
+authenticated client, the endpoint calls `revokeFamily`, and the successor and
+its access tokens die with it. RFC 7009 §2.1 allows a server to revoke related
+tokens this way, and the answer is the same `200` either way.
+
+Three cases revoke nothing more. A token revoked other than by rotation has no
+`rotatedAt`, so presenting it again does not cascade. A rotated-out token issued
+to another client leaves that client's family alone. A token service without
+`getRevokedRefreshToken` and `revokeFamily`, or one whose `revokeRotated` does
+not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
+and the successor stays live until it expires. `replayGraceSeconds` excuses a
+straggling refresh only, never a revocation, and this path does not call
+`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
+token ends the family without firing `onTokenReuse`, so any audit trail for it
+comes from your store's `revokeFamily`. `runTokenServiceContractTests`
+checks that a service implementing `revokeRotated` returns the family and client
+from a rotated-out token.
+
+Return the tombstone from `getRevokedRefreshToken` unconditionally. Apply a
+replay grace through `replayGraceSeconds`, never by hiding recently rotated
+tombstones in the store: a hidden tombstone also hides the family from a
+sign-out that races the refresh.
+
+The refresh grant saves the successor after it claims the presented token, as
+two storage calls. A revocation that lands between them finds no live successor
+to revoke. To close that gap, `revokeFamily` must record the revoked family and
+`save` must store any later member of it already revoked. `MemoryTokenService`
+does; a custom store needs the same, and reuse detection relies on it too.
+
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns
 `undefined` for tokens that exist will silently no-op every refresh-token

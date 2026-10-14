@@ -1206,6 +1206,41 @@ must not become an oracle for whether a token exists or who owns it — which al
 means **a caller cannot tell a successful revocation from a refused one.**
 Revocation uses the resolved token kind, not the hint.
 
+**Revoking a refresh token that rotation already replaced revokes its whole
+family.** A sign-out can present a token the client's own refresh rotated a
+moment earlier: a backend-for-frontend's logout request still carries the
+session from before a refresh that is in flight. That token is no longer live,
+so revoking it alone would leave the successor working. When the presented
+token is not live, the endpoint asks `getRevokedRefreshToken` for it. If the
+record carries `rotatedAt` and a `familyId`, and was issued to the
+authenticated client, the endpoint calls `revokeFamily`, and the successor and
+its access tokens die with it. RFC 7009 §2.1 allows a server to revoke related
+tokens this way, and the answer is the same `200` either way.
+
+Three cases revoke nothing more. A token revoked other than by rotation has no
+`rotatedAt`, so presenting it again does not cascade. A rotated-out token issued
+to another client leaves that client's family alone. A token service without
+`getRevokedRefreshToken` and `revokeFamily`, or one whose `revokeRotated` does
+not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
+and the successor stays live until it expires. `replayGraceSeconds` excuses a
+straggling refresh only, never a revocation, and this path does not call
+`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
+token ends the family without firing `onTokenReuse`, so any audit trail for it
+comes from your store's `revokeFamily`. `runTokenServiceContractTests`
+checks that a service implementing `revokeRotated` returns the family and client
+from a rotated-out token.
+
+Return the tombstone from `getRevokedRefreshToken` unconditionally. Apply a
+replay grace through `replayGraceSeconds`, never by hiding recently rotated
+tombstones in the store: a hidden tombstone also hides the family from a
+sign-out that races the refresh.
+
+The refresh grant saves the successor after it claims the presented token, as
+two storage calls. A revocation that lands between them finds no live successor
+to revoke. To close that gap, `revokeFamily` must record the revoked family and
+`save` must store any later member of it already revoked. `MemoryTokenService`
+does; a custom store needs the same, and reuse detection relies on it too.
+
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns
 `undefined` for tokens that exist will silently no-op every refresh-token
@@ -5578,7 +5613,11 @@ sections apply only when you host those flows.
 - [ ] Registered callbacks and allowed grants are restricted to the app's actual
       clients.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
-- [ ] Replay-family revocation cannot be undone by a concurrent token save.
+- [ ] Family revocation, from a replay or from revoking a rotated-out token,
+      cannot be undone by a concurrent token save: `revokeFamily` records the
+      family and `save` stores any later member of it already revoked.
+- [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
+      from `replayGraceSeconds`, not from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not
       its human owner.
 - [ ] Consent and scope policy match the clients you allow.
@@ -6090,7 +6129,7 @@ validated, a redirect to the client with `error=…`).
 | challenge-method            | `ChallengeMethods` (`challengeMethods`)                              | PKCE verification during the code→token exchange                                           | no (defaults to `S256`)                                | blocks          | Converted to a token-endpoint error response                                                                                         |
 | client-store                | `ClientServiceInterface` (`clientService`)                           | Client lookup/auth on every token/revoke/introspect/device call                            | yes                                                    | blocks          | `undefined` → `invalid_client`; other throws converted to an error response                                                          |
 | token-store                 | `TokenServiceInterface` (`tokenService`)                             | Token issuance, refresh, revoke, introspect                                                | yes                                                    | blocks          | Converted to a token-endpoint error response                                                                                         |
-| token-reuse                 | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed, after the family is revoked; not inside `replayGraceSeconds` | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
+| token-reuse                 | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed to the token endpoint, after the family is revoked; not inside `replayGraceSeconds`, nor when `/revoke` revokes a rotated-out token's family | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
 | refresh-cap                 | `refreshTokenFamilyExpiresAt` (`TokenServiceInterface`)              | Refresh-token issuance and rotation                                                        | no (absent → uncapped)                                 | blocks          | A past cap → `invalid_grant`; other throws → token-endpoint error response                                                           |
 | accepted-scope              | `acceptedScope` (`TokenServiceInterface`)                            | Scope narrowing during issuance                                                            | yes (on the interface)                                 | blocks          | `false` → `invalid_scope`; other throws converted                                                                                    |
 | authorization-code-store    | `AuthorizationCodeServiceInterface` (`authorizationCodeService`)     | Authorize (mint code) and code→token exchange                                              | with the code grant                                    | blocks          | Missing/expired → `invalid_grant`; other throws converted                                                                            |
@@ -6737,14 +6776,33 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   that window. Shorten it with `rotatedCookieGrace: { ttlMs }`, or turn it off
   with `rotatedCookieGrace: false` and accept that stragglers sign the user
   out.
-- **A sign-out during a refresh can be undone by that refresh's own response
-  with `EncryptedCookieSessionStore`.** Sign-out, a replacing sign-in, or a
-  refused refresh ends the grace for the whole chain, including a refresh
-  still in flight, so no later straggler gets that session back. The request
-  that ran the refresh still answers with the new cookie it sealed. If that
-  response reaches the browser after the sign-out's, the browser stores the
-  cookie again and is signed in. A stateful store does not have this problem,
-  because sign-out destroys the record the cookie names.
+- **A sign-out during a refresh revokes the old refresh token, and only the
+  authorization server can reach its successor.** The sign-out request carries
+  the session from before the refresh, so the BFF revokes the token the
+  refresh is rotating out. `AuthorizationServer` answers that by revoking the
+  token's rotation family, which ends the successor too, on any session store
+  and any instance. That needs a token service whose `revokeRotated` stamps
+  `rotatedAt` and that implements `getRevokedRefreshToken` and `revokeFamily`,
+  as `MemoryTokenService` does; see
+  [revocation](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#revocation-and-introspection).
+  Another authorization server may revoke only the token it was given, and
+  then the successor stays live until it expires. A revocation can also reach
+  the authorization server between the refresh grant's claim of the old token
+  and its save of the successor. `MemoryTokenService` keeps a revoked family
+  revoked, so that save stores the successor already revoked. A custom token
+  store misses the successor in that gap unless it does the same.
+- **With `EncryptedCookieSessionStore`, a refresh's own response can put a
+  signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
+  refresh ends the grace for the whole chain, including a refresh still in
+  flight, so no later straggler gets that session back. The request that ran
+  the refresh still answers with the new cookie it sealed. If that response
+  reaches the browser after the sign-out's, the browser stores the cookie
+  again. Where the authorization server revoked the successor's family, as
+  above, the next refresh fails, `onTokenReuse` reports it as a replay, and
+  the browser is signed out, though an
+  access token a resource server validates offline stays usable until it
+  expires. Otherwise the browser is signed in again. A stateful store does not
+  have this problem, because sign-out destroys the record the cookie names.
 - **A token refresh in flight on a replaced session can clear the new cookie.**
   When a request on the earlier cookie starts a refresh just before a new
   sign-in in the same browser replaces that session, the refresh then fails as
