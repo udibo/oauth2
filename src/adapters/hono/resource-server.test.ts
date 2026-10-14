@@ -1,6 +1,7 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
+import { InvalidTokenError } from "../../errors.ts";
 import { BasicScope } from "../../models/scope.ts";
 import {
   MemoryClientService,
@@ -169,6 +170,51 @@ describe("HonoResourceServer", () => {
       const body = await res.json();
       expect(body.handled).toBe(true);
       expect(body.error).toBe("access_denied");
+    });
+  });
+
+  describe("challenge character set", () => {
+    it("refuses a realm outside printable ASCII when the server is built, not on every request", () => {
+      expect(() => createTestServer({ realm: "Łódź Projects" })).toThrow(
+        TypeError,
+      );
+    });
+
+    it("answers 401 with an escaped realm challenge for a printable ASCII realm with quotes", async () => {
+      const { server: quoted } = createTestServer({
+        realm: 'Acme "Prod" \\ API',
+      });
+      const app = new Hono();
+      app.use("/api/*", quoted.protect());
+      app.get("/api/me", (c) => c.text("reached"));
+
+      const res = await app.request("/api/me");
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Acme \\"Prod\\" \\\\ API"',
+      );
+    });
+
+    it("answers 401 with a valid challenge and the full message in the body when a token reader's message is outside the character set", async () => {
+      const message = 'key "kid-1" from Łódź\\keys expired 🔑';
+      using _getToken = vi
+        .spyOn(tokenService, "getToken")
+        .mockRejectedValue(new InvalidTokenError(message));
+      const app = new Hono();
+      app.use("/api/*", server.protect());
+      app.get("/api/me", (c) => c.text("reached"));
+
+      const res = await app.request("/api/me", {
+        headers: { Authorization: "Bearer any" },
+      });
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="key \'kid-1\' from ??d??keys expired ?"',
+      );
+      const body = await res.json();
+      expect(body.error_description).toBe(message);
     });
   });
 

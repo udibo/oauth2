@@ -71,6 +71,7 @@ import {
 } from "./signing-keys.ts";
 import { validateCodeChallenge } from "../utils/pkce.ts";
 import { oauth2ErrorResponse } from "./_error-response.ts";
+import { quoteRealm } from "./_challenge.ts";
 import {
   assertMaxBodyBytes,
   DEFAULT_MAX_BODY_BYTES,
@@ -743,6 +744,8 @@ export class AuthorizationServer<
    * @throws {Error} If `requireOidc` is set without `signingKeys`.
    * @throws {RangeError} If `maxBodyBytes` or `maxTokenBodyBytes` is not a
    *   positive integer.
+   * @throws {TypeError} If `realm` contains a character outside printable
+   *   ASCII.
    */
   constructor(options: AuthorizationServerOptions<Client, User, S>) {
     super({
@@ -911,7 +914,10 @@ export class AuthorizationServer<
     return (error) => {
       this.addCacheHeaders(error);
       if (error.status === 401 && request.headers.get("authorization")) {
-        error.headers.set("WWW-Authenticate", `Basic realm="${this.realm}"`);
+        error.headers.set(
+          "WWW-Authenticate",
+          `Basic realm=${quoteRealm(this.realm)}`,
+        );
       }
     };
   }

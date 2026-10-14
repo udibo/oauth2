@@ -28,6 +28,12 @@ import type { TokenReaderInterface } from "./services/token.ts";
 import { copyErrorHeaders, oauth2ErrorResponse } from "./_error-response.ts";
 import { assertClockSkewSeconds } from "./_clock-skew.ts";
 import {
+  assertRealm,
+  quoteRealm,
+  toChallengeDescription,
+  toChallengeScope,
+} from "./_challenge.ts";
+import {
   assertMaxBodyBytes,
   DEFAULT_MAX_TOKEN_BODY_BYTES,
   peekBoundedBody,
@@ -90,7 +96,14 @@ export interface ResourceServerOptions<
     | Promise<ResourceServerContext<Client, User, S>>;
   /** Scope constructor used to parse and compare scopes. Defaults to {@linkcode BasicScope}. */
   Scope?: ScopeConstructor<S>;
-  /** Protection space named in `WWW-Authenticate` challenges. Defaults to `"Service"`. */
+  /**
+   * Protection space named in `WWW-Authenticate` challenges. Defaults to
+   * `"Service"`. Must be printable ASCII (U+0020 to U+007E); a product name
+   * with other characters needs an ASCII form here.
+   *
+   * @throws {TypeError} From the constructor when it contains any other
+   *   character.
+   */
   realm?: string;
   /**
    * Leeway in seconds applied to the access token's expiry, to absorb clock
@@ -232,8 +245,6 @@ export class ResourceServer<
 > {
   /** Scope constructor used to parse and compare scopes. */
   Scope: ScopeConstructor<S>;
-  /** Protection space named in `WWW-Authenticate` challenges. */
-  realm: string;
   /** Body format of protected-resource refusals: OAuth2 or RFC 9457 problem details. See {@linkcode ResourceServerOptions.errorFormat}. */
   errorFormat: "oauth2" | "problem-details";
   /** When true, handler boundaries rethrow {@linkcode OAuth2Error} instead of returning a response. */
@@ -247,6 +258,24 @@ export class ResourceServer<
 
   #clockSkewSeconds = 0;
   #maxTokenBodyBytes: number;
+  #realm = "Service";
+
+  /** Protection space named in `WWW-Authenticate` challenges. */
+  get realm(): string {
+    return this.#realm;
+  }
+
+  /**
+   * Sets the protection space, preserving the previous value if validation
+   * fails.
+   *
+   * @throws {TypeError} If the value contains a character outside printable
+   *   ASCII (U+0020 to U+007E).
+   */
+  set realm(value: string) {
+    assertRealm(value);
+    this.#realm = value;
+  }
 
   /**
    * Leeway in seconds applied to the access token's expiry. Defaults to `0`.
@@ -274,6 +303,8 @@ export class ResourceServer<
    * @throws {RangeError} If `clockSkewSeconds` is negative, non-finite, or
    *   overflows when converted to milliseconds, or if `maxTokenBodyBytes` is
    *   not a positive integer.
+   * @throws {TypeError} If `realm` contains a character outside printable
+   *   ASCII.
    */
   constructor(options: ResourceServerOptions<Client, User, S>) {
     this.Scope =
@@ -306,33 +337,34 @@ export class ResourceServer<
    * {@linkcode InsufficientScopeError} is the one that tells it "your token is
    * fine, it just lacks scope" rather than sending it off to refresh.
    *
+   * The result is always printable ASCII, so it never makes `Headers` throw.
+   * `error_description` is narrowed to the RFC 6750 character set: control
+   * characters are dropped, `"` becomes `'`, and any other character outside
+   * the set becomes `?`. The response body still carries the full message.
+   * Scope tokens outside the RFC 6750 set are left out of `scope`.
+   *
    * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3
    */
   buildWwwAuthenticate(error?: OAuth2Error, requiredScope?: string): string {
-    const quote = (value: string): string =>
-      value
-        // oxlint-disable-next-line no-control-regex
-        .replace(/[\x00-\x1f\x7f]/g, "")
-        .replace(/\\/g, "\\\\")
-        .replace(/"/g, '\\"');
-    const parts: string[] = [`realm="${quote(this.realm)}"`];
+    const parts: string[] = [`realm=${quoteRealm(this.realm)}`];
 
     const code = error?.extensions.error;
     if (error && code && CHALLENGE_ERROR_CODES.has(code)) {
-      parts.push(`error="${quote(code)}"`);
-      if (error.message) {
-        parts.push(`error_description="${quote(error.message)}"`);
+      parts.push(`error="${code}"`);
+      const description = toChallengeDescription(error.message);
+      if (description) {
+        parts.push(`error_description="${description}"`);
       }
     }
 
-    if (requiredScope) {
-      parts.push(`scope="${quote(requiredScope)}"`);
-    } else if (error instanceof InsufficientScopeError) {
-      const scope = (error.extensions as { requiredScope?: string })
-        .requiredScope;
-      if (scope) {
-        parts.push(`scope="${quote(scope)}"`);
-      }
+    const scope =
+      requiredScope ||
+      (error instanceof InsufficientScopeError
+        ? (error.extensions as { requiredScope?: string }).requiredScope
+        : undefined);
+    const challengeScope = scope ? toChallengeScope(scope) : undefined;
+    if (challengeScope) {
+      parts.push(`scope="${challengeScope}"`);
     }
 
     return `Bearer ${parts.join(", ")}`;

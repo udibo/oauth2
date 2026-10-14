@@ -497,6 +497,13 @@ not", and `InvalidTokenError` (401) when you mean "this token is no good". Throw
 anything else and the client sees a bare challenge, which it will read as
 "credentials missing" and answer by starting a fresh sign-in.
 
+A header carries only a narrow character set, so the challenge stays inside it.
+`realm` must be printable ASCII; the constructor throws a `TypeError` for
+anything else, so pass an ASCII form of a product name such as `"Lodz
+Projects"` rather than `"Łódź Projects"`. `error_description` keeps to the RFC
+6750 §3 set: `"` becomes `'` and any other character outside it becomes `?`.
+The response body still carries the full message.
+
 Response bodies default to the RFC 6749 JSON shape (`error`,
 `error_description`, `error_uri`). Pass `errorFormat: "problem-details"` to the
 constructor to emit RFC 9457 Problem Details (`application/problem+json`)
