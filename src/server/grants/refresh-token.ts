@@ -81,7 +81,11 @@ export interface RefreshTokenGrantOptions<
    *
    * The cost is that a stolen refresh token replayed within the window after
    * the legitimate client rotated it goes unflagged: the family is not
-   * revoked and no reuse event is raised. Keep the window to seconds.
+   * revoked and no reuse event is raised. It cuts the other way too: when a
+   * thief rotates a stolen live token first, the legitimate client's replay
+   * within the window is refused without revoking the family, so the thief
+   * keeps the session and the user is the one signed out. Keep the window to
+   * seconds.
    *
    * Needs a token service that sets {@linkcode RefreshToken.rotatedAt} in
    * `revokeRotated` and implements `hasLiveRefreshToken`; with any other

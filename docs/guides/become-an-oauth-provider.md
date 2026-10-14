@@ -564,7 +564,11 @@ family keeps that token and `onTokenReuse` does not fire. Any other replay
 revokes the family and raises the event as before.
 
 The cost is real: a stolen refresh token replayed within the window after the
-legitimate client rotated it goes unflagged. Keep the window to seconds, and
+legitimate client rotated it goes unflagged. It cuts the other way too: when a
+thief rotates a stolen live token first, the legitimate client's replay within
+the window is refused without revoking the family, so the thief keeps the
+session, the user is the one signed out, and `onTokenReuse` does not fire.
+Keep the window to seconds, and
 prefer fixing the race at the client, for example with `HonoBff`'s
 `RefreshLockStore` on a shared session store.
 

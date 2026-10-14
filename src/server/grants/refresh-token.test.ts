@@ -771,6 +771,33 @@ describe("RefreshTokenGrant", () => {
       );
     });
 
+    it("keeps the family of a thief who rotated first when the client replays inside the window", async () => {
+      const { grant, tokenService, client, rotated, reuseEvents } =
+        await graceGrant(30);
+      const stolen = rotated.refreshToken;
+      const thiefToken = await exchangeToken(
+        grant,
+        refreshRequest(stolen),
+        client,
+      );
+
+      await rejection(
+        () => exchangeToken(grant, refreshRequest(stolen), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([]);
+      const thiefNext = await exchangeToken(
+        grant,
+        refreshRequest(thiefToken.refreshToken),
+        client,
+      );
+      expect(thiefNext.familyId).toBe(rotated.familyId);
+      expect(
+        await tokenService.getRefreshToken(thiefNext.refreshToken),
+      ).not.toBe(undefined);
+    });
+
     it("refuses a grace that is not a non-negative number of seconds", () => {
       for (const replayGraceSeconds of [-1, Number.NaN, Infinity]) {
         expect(
