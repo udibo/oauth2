@@ -4081,6 +4081,115 @@ describe("HonoBff", () => {
     });
   });
 
+  describe("auth errors keep the session cookie a refresh set", () => {
+    function refusedRefreshBff(): HonoBff {
+      return makeBff({
+        resourceServer: new HonoResourceServer({
+          resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+        }),
+        refreshSkewSeconds: 60,
+      });
+    }
+
+    async function deadSession(bff: HonoBff): Promise<string> {
+      return await createTestSession(bff, {
+        refreshToken: "refresh-the-server-never-issued",
+        tokens: { accessTokenExpiresAt: Date.now() + 5_000 },
+      });
+    }
+
+    function sessionCookieCleared(res: Response): boolean {
+      return res.headers
+        .getSetCookie()
+        .some(
+          (cookie) =>
+            cookie.startsWith("oauth2_session=;") &&
+            cookie.includes("Max-Age=0"),
+        );
+    }
+
+    it("clears the session cookie on protect()'s 401", async () => {
+      const bff = refusedRefreshBff();
+      const cookie = await deadSession(bff);
+      const app = new Hono();
+      app.use("/api/*", bff.protect());
+      app.get("/api/me", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/api/me", { headers: { cookie } });
+
+      expect(res.status).toBe(401);
+      await res.body?.cancel();
+      expect(
+        sessionCookieCleared(res),
+        "a browser keeps a cookie nobody told it to drop, and sends the dead " +
+          "refresh token again on every request",
+      ).toStrictEqual(true);
+    });
+
+    it("clears the session cookie when attachToken() hands off to a resource server's 401", async () => {
+      const bff = refusedRefreshBff();
+      const cookie = await deadSession(bff);
+      const resourceServer = new HonoResourceServer({
+        resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+      });
+      const app = new Hono();
+      app.use("/api/*", bff.attachToken(), resourceServer.protect());
+      app.get("/api/me", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/api/me", { headers: { cookie } });
+
+      expect(res.status).toBe(401);
+      await res.body?.cancel();
+      expect(sessionCookieCleared(res)).toStrictEqual(true);
+    });
+
+    it("keeps a refreshed cookie on a scope check's 403", async () => {
+      fixture.tokenService.accessTokenLifetime = 1;
+      const resourceServer = new HonoResourceServer({
+        resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+      });
+      const bff = makeBff({
+        resourceServer,
+        refreshSkewSeconds: 60,
+        sessionStore: new EncryptedCookieSessionStore({
+          secret: "0123456789abcdef0123456789abcdef",
+        }),
+      });
+      const app = makeApp(bff);
+      app.use("/api/*", bff.protect());
+      app.get("/api/admin", bff.requireScope("admin"), (c) =>
+        c.json({ ok: true }),
+      );
+      const cookie = await loginCookie(app);
+
+      const res = await app.request("/api/admin", { headers: { cookie } });
+
+      expect(res.status).toBe(403);
+      await res.body?.cancel();
+      const rotated = cookieValue(res, "oauth2_session");
+      expect(
+        rotated !== undefined && `oauth2_session=${rotated}` !== cookie,
+        "the browser must receive the cookie sealing the rotated refresh " +
+          "token, or its next request replays the old one",
+      ).toStrictEqual(true);
+    });
+
+    it("keeps the challenge on the 401 it clears the cookie on", async () => {
+      const bff = refusedRefreshBff();
+      const cookie = await deadSession(bff);
+      const app = new Hono();
+      app.use("/api/*", bff.protect());
+      app.get("/api/me", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/api/me", { headers: { cookie } });
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get("www-authenticate")).toMatch(/^Bearer/);
+      expect(res.headers.get("content-type")).toContain("json");
+      await res.body?.cancel();
+    });
+  });
+
   describe("session store swap", () => {
     it("is usable as a drop-in for MemorySessionStore", async () => {
       const encrypted = new EncryptedCookieSessionStore({
