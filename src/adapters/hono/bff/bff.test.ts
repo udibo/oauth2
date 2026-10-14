@@ -1,10 +1,21 @@
-import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from "vitest";
 import { serve } from "../../../_test_server.ts";
 import { thrown } from "../../../_test_assert.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
-import { RefreshTokenGrant } from "../../../server/grants/refresh-token.ts";
+import {
+  RefreshTokenGrant,
+  type TokenReuseEvent,
+} from "../../../server/grants/refresh-token.ts";
 import {
   AuthorizationServer,
   localAuthServerFetch,
@@ -34,7 +45,9 @@ import { HonoBff, type HonoBffOptions } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
   MemorySessionStore,
+  type RefreshLockStore,
   type SessionData,
+  type SessionStore,
 } from "./session-store.ts";
 import {
   createAuthenticatedTestSession,
@@ -87,7 +100,11 @@ const testClient: TestClient = {
 };
 const CLIENT_SECRET = "shh";
 
-async function buildFixture() {
+async function buildFixture(
+  options: {
+    onTokenReuse?: (event: TokenReuseEvent<TestClient, TestUser>) => void;
+  } = {},
+) {
   const userService = new MemoryUserService();
   const clientService = new MemoryClientService(userService);
   const tokenService = new MemoryTokenService({ clientService, userService });
@@ -118,6 +135,7 @@ async function buildFixture() {
       }),
       refresh_token: new RefreshTokenGrant({
         resolve: () => ({ clientService, tokenService }),
+        onTokenReuse: options.onTokenReuse,
       }),
     },
   });
@@ -4094,6 +4112,211 @@ describe("HonoBff", () => {
       });
       const body = await probe.json();
       expect(body.isAuthenticated).toBe(true);
+    });
+  });
+
+  describe("refresh across instances sharing a session store", () => {
+    let reuse: Mock<(event: TokenReuseEvent<TestClient, TestUser>) => void>;
+    let refreshExchanges: number;
+
+    beforeEach(async () => {
+      reuse = vi.fn();
+      fixture = await buildFixture({ onTokenReuse: reuse });
+      fixture.tokenService.accessTokenLifetime = 1;
+      refreshExchanges = 0;
+    });
+
+    /**
+     * One instance's handle on the store every instance shares: it records
+     * when this instance first read the session, and can hold that first
+     * read's answer to model an instance that read just before a peer
+     * refreshed.
+     */
+    class InstanceStore implements SessionStore, RefreshLockStore {
+      readonly firstRead = Promise.withResolvers<void>();
+      holdFirstRead: Promise<unknown> = Promise.resolve();
+      readonly #shared: MemorySessionStore;
+      #reads = 0;
+
+      constructor(shared: MemorySessionStore) {
+        this.#shared = shared;
+      }
+
+      create(data: SessionData): Promise<string> {
+        return this.#shared.create(data);
+      }
+
+      async read(cookieValue: string): Promise<SessionData | null> {
+        const data = await this.#shared.read(cookieValue);
+        if (this.#reads++ === 0) {
+          this.firstRead.resolve();
+          await this.holdFirstRead;
+        }
+        return data;
+      }
+
+      update(cookieValue: string, data: SessionData): Promise<string> {
+        return this.#shared.update(cookieValue, data);
+      }
+
+      destroy(cookieValue: string): Promise<void> {
+        return this.#shared.destroy(cookieValue);
+      }
+
+      withRefreshLock<T>(
+        cookieValue: string,
+        refresh: () => Promise<T>,
+      ): Promise<T> {
+        return this.#shared.withRefreshLock(cookieValue, refresh);
+      }
+    }
+
+    /**
+     * One BFF instance as a separate process would build it: its own client
+     * and BFF over its handle on the shared store. `beforeRefreshExchange`
+     * runs before each refresh-token request leaves for the server.
+     */
+    function instance(
+      sessionStore: SessionStore,
+      beforeRefreshExchange: () => Promise<unknown> = () => Promise.resolve(),
+    ): Hono {
+      const authServerFetch = localAuthServerFetch(fixture.authServer);
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          const form = await request.clone().formData();
+          if (form.get("grant_type") === "refresh_token") {
+            refreshExchanges++;
+            await beforeRefreshExchange();
+          }
+          return await authServerFetch(request);
+        },
+      });
+      const bff = new HonoBff({
+        client,
+        sessionStore,
+        authRequestStorage: new MemoryAuthRequestStorageFactory(),
+        defaultReturnTo: "/home",
+        cookie: { secure: false },
+        csrf: false,
+        refreshSkewSeconds: 60,
+      });
+      const resourceServer = new HonoResourceServer({
+        resolve: () => ({ services: { tokenService: fixture.tokenService } }),
+      });
+      const app = new Hono();
+      app.route("/auth", bff.routes());
+      app.use("/api/*", bff.attachToken(), resourceServer.protect());
+      app.get("/api/me", (c) =>
+        c.json({ user: resourceServer.getContext(c).user?.id }),
+      );
+      return app;
+    }
+
+    async function expectSignedIn(response: Response): Promise<void> {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toStrictEqual({ user: testUser.id });
+    }
+
+    async function expectFamilyAlive(
+      shared: MemorySessionStore,
+      cookie: string,
+    ): Promise<void> {
+      const session = await shared.read(cookie.split("=")[1]);
+      assert(session !== null, "the session must survive the race");
+      assert(session.refreshToken !== undefined);
+      expect(
+        await fixture.tokenService.getRefreshToken(session.refreshToken),
+        "the stored refresh token must still be live at the server",
+      ).not.toBe(undefined);
+    }
+
+    it("spends the refresh token once when two instances refresh one session at the same time", async () => {
+      const shared = new MemorySessionStore();
+      const storeA = new InstanceStore(shared);
+      const storeB = new InstanceStore(shared);
+      const a = instance(storeA, () => storeB.firstRead.promise);
+      const b = instance(storeB, () => storeA.firstRead.promise);
+      const cookie = await loginCookie(a);
+
+      const [resA, resB] = await Promise.all([
+        a.request("/api/me", { headers: { cookie } }),
+        b.request("/api/me", { headers: { cookie } }),
+      ]);
+
+      await expectSignedIn(resA);
+      await expectSignedIn(resB);
+      expect(resA.headers.get("set-cookie")).toBe(null);
+      expect(resB.headers.get("set-cookie")).toBe(null);
+      expect(refreshExchanges).toBe(1);
+      expect(reuse).not.toHaveBeenCalled();
+      await expectFamilyAlive(shared, cookie);
+    });
+
+    it("uses a peer's rotation instead of replaying the old refresh token when the session was read just before it", async () => {
+      const shared = new MemorySessionStore();
+      const storeB = new InstanceStore(shared);
+      const peerDone = Promise.withResolvers<void>();
+      storeB.holdFirstRead = peerDone.promise;
+      const a = instance(new InstanceStore(shared));
+      const b = instance(storeB);
+      const cookie = await loginCookie(a);
+
+      const pendingB = b.request("/api/me", { headers: { cookie } });
+      await storeB.firstRead.promise;
+      await expectSignedIn(await a.request("/api/me", { headers: { cookie } }));
+      peerDone.resolve();
+
+      await expectSignedIn(await pendingB);
+      expect(refreshExchanges).toBe(1);
+      expect(reuse).not.toHaveBeenCalled();
+      await expectFamilyAlive(shared, cookie);
+    });
+
+    it("signs out without spending the refresh token when the session ended while the request waited", async () => {
+      const shared = new MemorySessionStore();
+      const storeB = new InstanceStore(shared);
+      const loggedOut = Promise.withResolvers<void>();
+      storeB.holdFirstRead = loggedOut.promise;
+      const a = instance(new InstanceStore(shared));
+      const b = instance(storeB);
+      const cookie = await loginCookie(a);
+
+      const pendingB = b.request("/api/me", { headers: { cookie } });
+      await storeB.firstRead.promise;
+      const logout = await a.request("/auth/logout", {
+        method: "POST",
+        headers: { cookie },
+      });
+      await logout.body?.cancel();
+      loggedOut.resolve();
+
+      const resB = await pendingB;
+      expect(resB.status).toBe(401);
+      await resB.body?.cancel();
+      expect(refreshExchanges).toBe(0);
+    });
+
+    it("answers 502 and keeps the session when the store cannot take the refresh lock", async () => {
+      const shared = new MemorySessionStore();
+      const store = new InstanceStore(shared);
+      vi.spyOn(store, "withRefreshLock").mockRejectedValue(
+        new Error("lock_timeout"),
+      );
+      const app = instance(store);
+      const cookie = await loginCookie(app);
+
+      const res = await app.request("/api/me", { headers: { cookie } });
+
+      expect(res.status).toBe(502);
+      expect((await res.json()).error).toBe("temporarily_unavailable");
+      expect(res.headers.get("set-cookie")).toBe(null);
+      expect(refreshExchanges).toBe(0);
+      expect(await shared.read(cookie.split("=")[1])).not.toBe(null);
     });
   });
 });

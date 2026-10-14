@@ -81,6 +81,55 @@ export function supportsBackchannelLogout(
 }
 
 /**
+ * Optional {@link SessionStore} capability: one token refresh at a time per
+ * session, across every instance that shares the store. A store opts in by
+ * implementing this method (it is duck-typed at runtime).
+ *
+ * Without it, `HonoBff` shares a refresh only between requests on the same
+ * instance. Two instances that refresh one session at once both present its
+ * refresh token: against an authorization server that rotates refresh tokens,
+ * the loser's exchange fails, or trips reuse detection and revokes the whole
+ * rotation family, and the user is signed out. With it, the BFF re-reads the
+ * session while it holds the lock and uses a peer's fresh tokens instead of
+ * spending the refresh token again. Implement it on any store more than one
+ * instance shares. {@link EncryptedCookieSessionStore} cannot: its sessions
+ * live in each browser's cookie, with nothing on the server to lock.
+ */
+export interface RefreshLockStore {
+  /**
+   * Runs `refresh` while no other `withRefreshLock` call for the same
+   * `cookieValue`, on any instance, is running, and settles with its result.
+   * Calls for other sessions must not wait on each other.
+   *
+   * - The lock must not block this store's own `read`, `update` or `destroy`:
+   *   `refresh` reads and writes the session it locks.
+   * - Release it when `refresh` settles, including when it throws.
+   * - Let it expire if its holder dies, but only after longer than a token
+   *   request can take; `DirectClient` gives up on one after 10 seconds.
+   * - Reject when the lock cannot be acquired within a bound you choose.
+   *   `HonoBff` then answers `502` `temporarily_unavailable` and keeps the
+   *   session.
+   *
+   * A Postgres store can hold `pg_advisory_xact_lock` on a hash of the session
+   * key in a transaction around `refresh`, with a `lock_timeout`; a Redis
+   * store can take a key with `SET NX PX` and wait for it with a deadline.
+   */
+  withRefreshLock<T>(
+    cookieValue: string,
+    refresh: () => Promise<T>,
+  ): Promise<T>;
+}
+
+/** Whether a store implements the {@link RefreshLockStore} capability. */
+export function supportsRefreshLock(
+  store: SessionStore,
+): store is SessionStore & RefreshLockStore {
+  return (
+    typeof (store as Partial<RefreshLockStore>).withRefreshLock === "function"
+  );
+}
+
+/**
  * Default session lifetime — 14 days — shared by
  * {@link EncryptedCookieSessionStore} and `HonoBff`'s
  * `sessionMaxAgeMs`, so a BFF built with neither configured has a cookie
@@ -150,9 +199,10 @@ export interface SessionStore {
  * persistent store in production.
  */
 export class MemorySessionStore
-  implements SessionStore, BackchannelLogoutStore
+  implements SessionStore, BackchannelLogoutStore, RefreshLockStore
 {
   #sessions = new Map<string, SessionData>();
+  #refreshLocks = new Map<string, Promise<void>>();
 
   /** Stores the session under a fresh random id and returns it as the cookie value. */
   create(data: SessionData): Promise<string> {
@@ -181,6 +231,31 @@ export class MemorySessionStore
   destroy(cookieValue: string): Promise<void> {
     this.#sessions.delete(cookieValue);
     return Promise.resolve();
+  }
+
+  /**
+   * Runs `refresh` once every earlier call for the same session has settled,
+   * so every `HonoBff` sharing this store object refreshes a session once.
+   * Calls for other sessions run alongside.
+   */
+  async withRefreshLock<T>(
+    cookieValue: string,
+    refresh: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#refreshLocks.get(cookieValue) ?? Promise.resolve();
+    const run = previous.then(refresh);
+    const released = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#refreshLocks.set(cookieValue, released);
+    try {
+      return await run;
+    } finally {
+      if (this.#refreshLocks.get(cookieValue) === released) {
+        this.#refreshLocks.delete(cookieValue);
+      }
+    }
   }
 
   /**

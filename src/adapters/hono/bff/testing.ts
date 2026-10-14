@@ -10,7 +10,8 @@
  * The runner-style helper {@link runSessionStoreContractTests} is
  * available for verifying custom {@link SessionStore} implementations
  * (Postgres, Redis, DynamoDB, …) satisfy the create / read / update /
- * destroy contract.
+ * destroy contract, and the refresh lock when the store implements
+ * `RefreshLockStore`.
  *
  * @module
  */
@@ -23,9 +24,11 @@ import type { TokenServiceInterface } from "../../../server/services/token.ts";
 import type { TokenBundle, UserInfoClaims } from "../../../client/mod.ts";
 import type { HonoBff } from "./bff.ts";
 import {
+  type RefreshLockStore,
   type SessionData,
   type SessionStore,
   sessionStoreMaxAgeMs,
+  supportsRefreshLock,
 } from "./session-store.ts";
 
 /** Options for {@link createTestSession}. */
@@ -274,6 +277,27 @@ export interface SessionStoreContractOptions {
 }
 
 const BOUND_MS = 1000;
+const LOCK_WAIT_MS = 2000;
+const LOCK_CONTENTION_MS = 100;
+
+async function settlesWithin<T>(
+  promise: Promise<T>,
+  message: string,
+): Promise<T> {
+  const timer = new AbortController();
+  const { signal } = timer;
+  const timedOut = Symbol("timed out");
+  try {
+    const result = await Promise.race([
+      promise,
+      delay(LOCK_WAIT_MS, { signal }).then(() => timedOut),
+    ]);
+    assert(result !== timedOut, message);
+    return result as T;
+  } finally {
+    timer.abort();
+  }
+}
 
 /**
  * Contract test suite for {@link SessionStore} implementations. Registers
@@ -281,6 +305,12 @@ const BOUND_MS = 1000;
  * module's top level. It does not check that a stateful store's `update`
  * rejects a missing or destroyed session, which {@link SessionStore.update}
  * requires — test that yourself.
+ *
+ * A store that implements `withRefreshLock` ({@link RefreshLockStore}) also
+ * runs the lock checks; they are skipped for a store without it. They use one
+ * store object, so they prove the lock's behavior, not that separate
+ * instances share it: point two store objects at one backend in a test of
+ * your own for that.
  */
 export function runSessionStoreContractTests(
   options: SessionStoreContractOptions,
@@ -373,6 +403,121 @@ export function runSessionStoreContractTests(
           "session does. Supply makeBoundedStore so the contract can prove " +
           "the bound is real.",
       ).toStrictEqual(false);
+    });
+
+    function lockStore(skip: (condition: boolean, note: string) => void) {
+      skip(
+        !supportsRefreshLock(store),
+        "the store does not implement withRefreshLock",
+      );
+      return store as SessionStore & RefreshLockStore;
+    }
+
+    it("withRefreshLock runs one refresh of a session at a time", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const firstStarted = Promise.withResolvers<void>();
+      const releaseFirst = Promise.withResolvers<void>();
+      const order: string[] = [];
+
+      const first = locking.withRefreshLock(value, async () => {
+        order.push("first started");
+        firstStarted.resolve();
+        await releaseFirst.promise;
+        order.push("first settled");
+        return "first";
+      });
+      await settlesWithin(
+        firstStarted.promise,
+        "withRefreshLock never ran a refresh on a session nobody else holds",
+      );
+      const second = locking.withRefreshLock(value, () => {
+        order.push("second started");
+        return Promise.resolve("second");
+      });
+      await delay(LOCK_CONTENTION_MS);
+      expect(
+        order,
+        "a second refresh of one session started while the first still held " +
+          "the lock, so both would spend the same refresh token",
+      ).toStrictEqual(["first started"]);
+
+      releaseFirst.resolve();
+      expect(
+        await settlesWithin(
+          Promise.all([first, second]),
+          "the second refresh never ran after the first released the lock",
+        ),
+      ).toStrictEqual(["first", "second"]);
+      expect(order).toStrictEqual([
+        "first started",
+        "first settled",
+        "second started",
+      ]);
+    });
+
+    it("withRefreshLock does not hold up another session's refresh", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const held = await locking.create(sampleSession());
+      const other = await locking.create(sampleSession());
+      const releaseHeld = Promise.withResolvers<void>();
+      const holding = locking.withRefreshLock(held, () => releaseHeld.promise);
+
+      expect(
+        await settlesWithin(
+          locking.withRefreshLock(other, () => Promise.resolve("other")),
+          "a refresh of one session waited on another session's lock",
+        ),
+      ).toBe("other");
+
+      releaseHeld.resolve();
+      await holding;
+    });
+
+    it("withRefreshLock lets the refresh read and update the session it locks", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const updated: SessionData = {
+        ...sampleSession(),
+        tokens: { ...sampleSession().tokens, accessToken: "access-2" },
+        refreshToken: "refresh-2",
+      };
+
+      const fetched = await settlesWithin(
+        locking.withRefreshLock(value, async () => {
+          const next = await locking.update(value, updated);
+          return await locking.read(next);
+        }),
+        "read or update blocked inside withRefreshLock: HonoBff reads and " +
+          "writes the session while it holds the lock, so it would deadlock",
+      );
+      expect(fetched?.tokens.accessToken).toBe("access-2");
+      expect(fetched?.refreshToken).toBe("refresh-2");
+    });
+
+    it("withRefreshLock releases the lock when the refresh throws", async ({
+      skip,
+    }) => {
+      const locking = lockStore(skip);
+      const value = await locking.create(sampleSession());
+      const failure = new Error("token endpoint unreachable");
+
+      await expect(
+        locking.withRefreshLock(value, () => Promise.reject(failure)),
+      ).rejects.toBe(failure);
+      expect(
+        await settlesWithin(
+          locking.withRefreshLock(value, () => Promise.resolve("next")),
+          "a refresh that threw kept the lock, so the session can never " +
+            "refresh again",
+        ),
+      ).toBe("next");
     });
 
     if (makeBoundedStore) {

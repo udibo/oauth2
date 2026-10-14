@@ -12,8 +12,9 @@
  * the memory pair serves a single process, tests and local development.
  *
  * Need a server-side store (Postgres, Redis, …)? Implement the
- * {@link SessionStore} interface and verify it with
- * `runSessionStoreContractTests` from `@udibo/oauth2/hono/bff/testing`.
+ * {@link SessionStore} interface, plus {@link RefreshLockStore} when several
+ * instances share it, and verify it with `runSessionStoreContractTests` from
+ * `@udibo/oauth2/hono/bff/testing`.
  *
  * @module
  */
@@ -48,6 +49,7 @@ export {
   EncryptedCookieSessionStore,
   type EncryptedCookieSessionStoreOptions,
   MemorySessionStore,
+  type RefreshLockStore,
   type SessionData,
   type SessionStore,
   sessionStoreMaxAgeMs,
