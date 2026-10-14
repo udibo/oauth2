@@ -160,6 +160,51 @@ describe("ResourceServer", () => {
       });
       expect(server.realm).toBe("MyAPI");
     });
+
+    it.each([
+      ["a character outside Latin-1", "Łódź Projects"],
+      ["a trademark sign", "Acme Portal™"],
+      ["a typographic apostrophe", "Kyle’s Notes"],
+      ["an emoji", "Keys 🔑"],
+      ["a Latin-1 letter outside ASCII", "Café"],
+      ["a line break", "Acme\nPortal"],
+      ["a tab", "Acme\tPortal"],
+      ["DEL", "Acme\x7f"],
+    ])("rejects a realm containing %s at construction", (_label, realm) => {
+      const services = createTestServices();
+      thrown(
+        () =>
+          new ResourceServer<TestClient, TestUser>({
+            resolve: () => ({
+              services: { tokenService: services.tokenService },
+            }),
+            realm,
+          }),
+        TypeError,
+        "realm must contain only printable ASCII",
+      );
+    });
+
+    it("rejects reassigning realm to a non-ASCII value and keeps the previous realm", () => {
+      const { server } = createTestServer();
+      thrown(
+        () => {
+          server.realm = "Łódź Projects";
+        },
+        TypeError,
+        "realm must contain only printable ASCII",
+      );
+      expect(server.realm).toBe("Service");
+      expect(server.buildWwwAuthenticate()).toBe('Bearer realm="Service"');
+    });
+
+    it("accepts a reassigned printable ASCII realm", () => {
+      const { server } = createTestServer();
+      server.realm = "Lodz Projects";
+      expect(server.buildWwwAuthenticate()).toBe(
+        'Bearer realm="Lodz Projects"',
+      );
+    });
   });
 
   describe("createErrorResponse", () => {
@@ -411,6 +456,183 @@ describe("ResourceServer", () => {
       expect(result).toBe(
         'Bearer realm="Service", error="insufficient_scope", error_description="insufficient", scope="custom"',
       );
+    });
+
+    it("escapes a quote and a backslash in the realm as quoted-pairs", () => {
+      const services = createTestServices();
+      const server = new ResourceServer<TestClient, TestUser>({
+        resolve: () => ({ services: { tokenService: services.tokenService } }),
+        realm: 'Acme "Prod" \\ API',
+      });
+      expect(server.buildWwwAuthenticate()).toBe(
+        'Bearer realm="Acme \\"Prod\\" \\\\ API"',
+      );
+    });
+
+    it("limits error_description to the RFC 6750 character set, one ? per code point it cannot carry", () => {
+      const { server } = createTestServer();
+      const error = new InvalidTokenError(
+        'key "kid-1" from Łódź\\keys expired 🔑',
+      );
+      expect(server.buildWwwAuthenticate(error)).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="key \'kid-1\' from ??d??keys expired ?"',
+      );
+    });
+
+    it("drops control characters from error_description", () => {
+      const { server } = createTestServer();
+      const error = new InvalidTokenError("line one\r\nline two\t\x00\x7f");
+      expect(server.buildWwwAuthenticate(error)).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="line oneline two"',
+      );
+    });
+
+    it("replaces a lone surrogate in error_description", () => {
+      const { server } = createTestServer();
+      const error = new InvalidTokenError("bad \uD800 token");
+      expect(server.buildWwwAuthenticate(error)).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="bad ? token"',
+      );
+    });
+
+    it("collapses repeated spaces between valid scope tokens", () => {
+      const { server } = createTestServer();
+      expect(server.buildWwwAuthenticate(undefined, "read  write")).toBe(
+        'Bearer realm="Service", scope="read write"',
+      );
+    });
+
+    it.each([
+      ["a token outside Latin-1", "files:wrïte files:read"],
+      ["a quoted token", 'read "admin"'],
+      ["a token with a backslash", "read a\\b"],
+    ])(
+      "omits the whole scope attribute rather than advertise part of a required scope with %s",
+      (_label, scope) => {
+        const { server } = createTestServer();
+        const error = new InsufficientScopeError("insufficient");
+        error.extensions.requiredScope = scope;
+        expect(server.buildWwwAuthenticate(error)).toBe(
+          'Bearer realm="Service", error="insufficient_scope", error_description="insufficient"',
+        );
+        expect(server.buildWwwAuthenticate(undefined, scope)).toBe(
+          'Bearer realm="Service"',
+        );
+      },
+    );
+
+    it("omits the scope attribute when no scope token is valid", () => {
+      const { server } = createTestServer();
+      const error = new InsufficientScopeError("insufficient");
+      error.extensions.requiredScope = "écrire 書く";
+      expect(server.buildWwwAuthenticate(error)).toBe(
+        'Bearer realm="Service", error="insufficient_scope", error_description="insufficient"',
+      );
+    });
+
+    it.each([
+      "Łódź Projects",
+      "Acme Portal™",
+      'quote " and backslash \\',
+      "emoji 🔑 and CJK 書く",
+      "lone \uDC00 surrogate",
+      "Café",
+    ])("emits a challenge Headers accepts as visible ASCII for %j", (text) => {
+      const { server } = createTestServer();
+      const error = new InsufficientScopeError(text);
+      const challenge = server.buildWwwAuthenticate(error, `read ${text}`);
+      expect(challenge).toMatch(/^[\x20-\x7e]*$/);
+      expect(
+        new Headers({ "WWW-Authenticate": challenge }).get("WWW-Authenticate"),
+      ).toBe(challenge);
+    });
+  });
+
+  describe("handleAuthError description exposure", () => {
+    const secret = "db row 42 for tenant acme-secret missing";
+
+    it("keeps an unexposed message out of the challenge as well as the body", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, { expose: false }),
+      );
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error_description).not.toContain("acme-secret");
+      const challenge = response.headers.get("WWW-Authenticate");
+      expect(challenge).not.toContain("acme-secret");
+      expect(challenge).toBe(
+        `Bearer realm="Service", error="invalid_token", error_description="${body.error_description}"`,
+      );
+    });
+
+    it("puts the exposed message in the challenge, not the raw message", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, { exposedMessage: "token rejected" }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="token rejected"',
+      );
+      expect((await response.json()).error_description).toBe("token rejected");
+    });
+
+    it("prefers an explicit error_description extension, as the body does", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, {
+          extensions: {
+            error: "invalid_token",
+            error_description: "signature did not verify",
+          },
+        }),
+      );
+
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="signature did not verify"',
+      );
+      expect((await response.json()).error_description).toBe(
+        "signature did not verify",
+      );
+    });
+  });
+
+  describe("handleAuthError with text outside the challenge character set", () => {
+    const message = 'key "kid-1" from Łódź\\keys expired 🔑';
+    const challenge =
+      'Bearer realm="Service", error="invalid_token", error_description="key \'kid-1\' from ??d??keys expired ?"';
+
+    it("answers 401 with a valid challenge and the full message in an oauth2 body", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(new InvalidTokenError(message));
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe(challenge);
+      const body = await response.json();
+      expect(body.error).toBe("invalid_token");
+      expect(body.error_description).toBe(message);
+    });
+
+    it("answers 401 with a valid challenge and the full message in a problem-details body", async () => {
+      const services = createTestServices();
+      const server = new ResourceServer<TestClient, TestUser>({
+        resolve: () => ({ services: { tokenService: services.tokenService } }),
+        errorFormat: "problem-details",
+      });
+
+      const response = server.handleAuthError(new InvalidTokenError(message));
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe(challenge);
+      const body = await response.json();
+      expect(body.detail).toBe(message);
     });
   });
 

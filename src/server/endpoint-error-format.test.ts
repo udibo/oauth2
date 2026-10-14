@@ -306,6 +306,32 @@ describe("OAuth endpoint error format", () => {
       });
     }
 
+    it(`${transport} escapes a quote and a backslash in the realm of the token endpoint's Basic challenge`, async () => {
+      const { fetch } = await createServer(transport, {
+        realm: 'Acme "Prod" \\ API',
+      });
+
+      const response = await fetch(
+        formRequest(
+          `${ORIGIN}${ENDPOINT_PATHS.token}`,
+          { grant_type: "client_credentials" },
+          basicAuthHeader(CLIENT_ID, "wrong-secret"),
+        ),
+      );
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toBe(
+        'Basic realm="Acme \\"Prod\\" \\\\ API"',
+      );
+      await response.arrayBuffer();
+    });
+
+    it(`${transport} refuses a realm outside printable ASCII when the authorization server is built`, async () => {
+      await expect(
+        createServer(transport, { realm: "Łódź Projects" }),
+      ).rejects.toThrow(TypeError);
+    });
+
     it(`${transport} answers a UserInfo bearer refusal as problem details under errorFormat problem-details`, async () => {
       const { fetch } = await createServer(transport, {
         errorFormat: "problem-details",
