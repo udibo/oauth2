@@ -72,7 +72,7 @@ class RotationAwareTokenService extends MemoryTokenService<
 > {
   rotatedCalls = 0;
   revokeCalls = 0;
-  revokeRotated(
+  override revokeRotated(
     token: RefreshToken<TestClient, TestUser, BasicScope>,
   ): Promise<boolean> {
     this.rotatedCalls++;
@@ -639,6 +639,177 @@ describe("RefreshTokenGrant", () => {
           ),
         InvalidGrantError,
       );
+    });
+  });
+
+  describe("replay grace", () => {
+    async function graceGrant(replayGraceSeconds?: number) {
+      const userService = new MemoryUserService();
+      const clientService = new MemoryClientService(userService);
+      const tokenService = new MemoryTokenService<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({ clientService, userService });
+      await userService.add(testUser, "password");
+      await clientService.add(testClient, "secret", testUser.id);
+      const reuseEvents: string[] = [];
+      const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+        resolve: () => ({ clientService, tokenService }),
+        onTokenReuse: (event) => {
+          reuseEvents.push(event.familyId);
+        },
+        ...(replayGraceSeconds === undefined ? {} : { replayGraceSeconds }),
+      });
+      const client = (await clientService.get("client-1"))!;
+      const original: RefreshToken<TestClient, TestUser, BasicScope> = {
+        accessToken: crypto.randomUUID(),
+        accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+        refreshToken: crypto.randomUUID(),
+        refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+        client,
+        user: testUser,
+        familyId: crypto.randomUUID(),
+      };
+      await tokenService.save(original);
+      const rotated = await exchangeToken(
+        grant,
+        refreshRequest(original.refreshToken),
+        client,
+      );
+      return { grant, tokenService, client, original, rotated, reuseEvents };
+    }
+
+    it("answers invalid_grant without revoking the family for a replay inside the window", async () => {
+      const { grant, tokenService, client, original, rotated, reuseEvents } =
+        await graceGrant(30);
+
+      await rejection(
+        () =>
+          exchangeToken(grant, refreshRequest(original.refreshToken), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([]);
+      expect(
+        await tokenService.getRefreshToken(rotated.refreshToken),
+        "the successor must survive a replay inside the grace",
+      ).not.toBe(undefined);
+      const next = await exchangeToken(
+        grant,
+        refreshRequest(rotated.refreshToken),
+        client,
+      );
+      expect(next.familyId).toBe(original.familyId);
+    });
+
+    it("revokes the family as before once the window has passed", async () => {
+      using time = new FakeTime();
+      const { grant, tokenService, client, original, rotated, reuseEvents } =
+        await graceGrant(30);
+      time.tick(30_001);
+
+      await rejection(
+        () =>
+          exchangeToken(grant, refreshRequest(original.refreshToken), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([original.familyId]);
+      expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+        undefined,
+      );
+    });
+
+    it("treats a replay inside the window as reuse when no successor is live", async () => {
+      const { grant, tokenService, client, original, rotated, reuseEvents } =
+        await graceGrant(30);
+      await tokenService.revoke(rotated);
+
+      await rejection(
+        () =>
+          exchangeToken(grant, refreshRequest(original.refreshToken), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([original.familyId]);
+    });
+
+    it("treats a token revoked other than by rotation as reuse inside the window", async () => {
+      const { grant, tokenService, client, rotated, reuseEvents } =
+        await graceGrant(30);
+      const sibling: RefreshToken<TestClient, TestUser, BasicScope> = {
+        ...rotated,
+        accessToken: crypto.randomUUID(),
+        refreshToken: crypto.randomUUID(),
+      };
+      await tokenService.save(sibling);
+      await tokenService.revoke(sibling);
+
+      await rejection(
+        () =>
+          exchangeToken(grant, refreshRequest(sibling.refreshToken), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([rotated.familyId]);
+    });
+
+    it("is off by default, so a replay right after rotation revokes the family", async () => {
+      const { grant, tokenService, client, original, rotated, reuseEvents } =
+        await graceGrant();
+
+      await rejection(
+        () =>
+          exchangeToken(grant, refreshRequest(original.refreshToken), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([original.familyId]);
+      expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+        undefined,
+      );
+    });
+
+    it("keeps the family of a thief who rotated first when the client replays inside the window", async () => {
+      const { grant, tokenService, client, rotated, reuseEvents } =
+        await graceGrant(30);
+      const stolen = rotated.refreshToken;
+      const thiefToken = await exchangeToken(
+        grant,
+        refreshRequest(stolen),
+        client,
+      );
+
+      await rejection(
+        () => exchangeToken(grant, refreshRequest(stolen), client),
+        InvalidGrantError,
+      );
+
+      expect(reuseEvents).toStrictEqual([]);
+      const thiefNext = await exchangeToken(
+        grant,
+        refreshRequest(thiefToken.refreshToken),
+        client,
+      );
+      expect(thiefNext.familyId).toBe(rotated.familyId);
+      expect(
+        await tokenService.getRefreshToken(thiefNext.refreshToken),
+      ).not.toBe(undefined);
+    });
+
+    it("refuses a grace that is not a non-negative number of seconds", () => {
+      for (const replayGraceSeconds of [-1, Number.NaN, Infinity]) {
+        expect(
+          () =>
+            new RefreshTokenGrant({
+              resolve: () => {
+                throw new Error("unused");
+              },
+              replayGraceSeconds,
+            }),
+        ).toThrow(RangeError);
+      }
     });
   });
 

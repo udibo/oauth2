@@ -76,6 +76,13 @@ export interface RefreshToken<
    * with a fresh anchor, so the family is capped from then on.
    */
   familyCreatedAt?: Date;
+  /**
+   * When the refresh grant rotated this token out. A token service that
+   * supports `RefreshTokenGrantOptions.replayGraceSeconds` sets it in
+   * `revokeRotated` and returns it from `getRevokedRefreshToken`. A token
+   * revoked any other way has none.
+   */
+  rotatedAt?: Date;
 }
 
 /**

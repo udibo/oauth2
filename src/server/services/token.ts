@@ -185,6 +185,10 @@ export interface TokenServiceInterface<
    * the token belongs to, cascading to sibling records — so a routine refresh
    * cannot terminate the very session it renews. When absent, the refresh
    * grant falls back to {@linkcode revoke}.
+   *
+   * To support the refresh grant's `replayGraceSeconds`, stamp the revoked
+   * record with {@linkcode RefreshToken.rotatedAt} here and return it from
+   * {@linkcode getRevokedRefreshToken}.
    */
   revokeRotated?(token: RefreshToken<Client, User, Scope>): Promise<boolean>;
 
@@ -217,6 +221,13 @@ export interface TokenServiceInterface<
    * can't keep a session alive. Returns true if anything was revoked.
    */
   revokeFamily?(familyId: string): Promise<boolean>;
+
+  /**
+   * Whether the rotation family still has a live, unexpired refresh token.
+   * Read by the refresh grant's `replayGraceSeconds`: without it, the grace
+   * never applies and every replay is treated as reuse.
+   */
+  hasLiveRefreshToken?(familyId: string): Promise<boolean>;
 }
 
 /** Options for configuring an abstract token service. */

@@ -518,6 +518,67 @@ disabled and a replayed token simply fails with `invalid_grant` — rotation sti
 happens, but a theft can't be distinguished from a typo. `MemoryTokenService`
 implements both, so the detection path is exercisable in tests.
 
+### Replay grace for clients that race themselves
+
+Reuse detection cannot tell a thief from a client that raced itself. A
+backend-for-frontend whose instances do not coordinate refreshes, or a browser
+request that still carries a session cookie from before a refresh, can present
+a refresh token its own concurrent request just rotated. That revokes the
+family and signs the user out. `replayGraceSeconds` on `RefreshTokenGrant`,
+off by default, gives that straggler a plain `invalid_grant` instead:
+
+```ts
+import {
+  type ClientServiceInterface,
+  RefreshTokenGrant,
+  type TokenReuseEvent,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import type { ClientInterface } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const clientService: ClientServiceInterface<AppClient, AppUser>;
+declare const tokenService: TokenServiceInterface<AppClient, AppUser>;
+declare function onTokenReuse(
+  event: TokenReuseEvent<AppClient, AppUser>,
+): Promise<void>;
+
+const refreshGrant = new RefreshTokenGrant<AppClient, AppUser>({
+  resolve: () => ({ clientService, tokenService }),
+  replayGraceSeconds: 10,
+  onTokenReuse,
+});
+```
+
+The grace applies only when all of these hold: the replayed token was rotated
+out by the grant (not revoked any other way), it was rotated within the last
+`replayGraceSeconds`, and its family still has a live refresh token. Then the
+family keeps that token and `onTokenReuse` does not fire. Any other replay
+revokes the family and raises the event as before.
+
+The cost is real: a stolen refresh token replayed within the window after the
+legitimate client rotated it goes unflagged. It cuts the other way too: when a
+thief rotates a stolen live token first, the legitimate client's replay within
+the window is refused without revoking the family, so the thief keeps the
+session, the user is the one signed out, and `onTokenReuse` does not fire.
+Keep the window to seconds, and
+prefer fixing the race at the client, for example with `HonoBff`'s
+`RefreshLockStore` on a shared session store.
+
+The grace needs two things from your token service. `revokeRotated` stamps the
+revoked record with `rotatedAt`, which `getRevokedRefreshToken` returns, and
+`hasLiveRefreshToken(familyId)` reports whether the family still has a live
+token. `MemoryTokenService` implements both. With a service that lacks either,
+the grace never applies. `runTokenServiceContractTests` checks both when a
+service implements them.
+
 ## Revocation and introspection
 
 Both endpoints require client authentication, both take `token` and an optional
