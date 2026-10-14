@@ -170,6 +170,15 @@ it reaches the instance that ran the refresh within `rotatedCookieGrace`. See
 both cases. `runSessionStoreContractTests` checks the lock when a store
 implements it.
 
+The lock has to expire when its holder dies, so give each `withRefreshLock`
+call a `RefreshLease` and renew it while the refresh runs. `HonoBff` writes and
+destroys the session only through the lease, which keeps a holder that stalled
+past the expiry from overwriting or ending a session another instance has
+since refreshed. Keep the lease on the session record itself, so its
+conditional write is one compare-and-set, and never hold a database
+transaction open across the refresh: the refresh waits on the authorization
+server.
+
 Keep the session lifetime consistent between the store and
 `HonoBff.sessionMaxAgeMs`. A stateful store's update must reject revoked,
 expired, or missing records; a refresh finishing after logout must not insert a

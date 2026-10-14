@@ -460,6 +460,25 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   was not an attack. Either way the user is signed out. Implement
   `withRefreshLock` on any store more than one instance shares, and check it
   with `runSessionStoreContractTests`.
+- **A refresh lock that expires mid-refresh needs a lease to stay safe.** A
+  shared store's lock has to expire when its holder dies, so a holder that
+  stalls past the expiry, through a paused process or starved timers, can
+  resume while another instance holds the lock. When the store passes
+  `refresh` a `RefreshLease`, `HonoBff` writes and destroys the session only
+  through it, and the former holder can do neither. When the authorization
+  server refuses the former holder's token because the new holder already
+  spent it, the BFF re-reads the session: it uses the new holder's tokens if
+  they are stored, and otherwise answers `502` and keeps the session and its
+  cookie. A store whose `withRefreshLock` passes no lease gets no such fence:
+  the former holder's write can overwrite the new holder's tokens, or its
+  sign-out can end the session the new holder just refreshed. Two schedules
+  still cost the session, with or without the lease. A holder that stalls
+  past its lease and then spends the refresh token before the new holder
+  does cannot store what it received, and the new holder's exchange is
+  refused, so the new holder ends the session. A holder that stops after its
+  exchange and before its write leaves the stored refresh token rotated out,
+  so the next refresh is refused, or trips reuse detection against an
+  authorization server with no replay grace.
 - **With `EncryptedCookieSessionStore`, a request carrying the cookie from
   before a refresh can replay the old refresh token.** The session lives in
   the browser's cookie, so the server has nothing to lock or re-read. A

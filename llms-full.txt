@@ -5435,6 +5435,15 @@ it reaches the instance that ran the refresh within `rotatedCookieGrace`. See
 both cases. `runSessionStoreContractTests` checks the lock when a store
 implements it.
 
+The lock has to expire when its holder dies, so give each `withRefreshLock`
+call a `RefreshLease` and renew it while the refresh runs. `HonoBff` writes and
+destroys the session only through the lease, which keeps a holder that stalled
+past the expiry from overwriting or ending a session another instance has
+since refreshed. Keep the lease on the session record itself, so its
+conditional write is one compare-and-set, and never hold a database
+transaction open across the refresh: the refresh waits on the authorization
+server.
+
 Keep the session lifetime consistent between the store and
 `HonoBff.sessionMaxAgeMs`. A stateful store's update must reject revoked,
 expired, or missing records; a refresh finishing after logout must not insert a
@@ -6214,6 +6223,7 @@ seams.
 | session-store            | `SessionStore` (`sessionStore`)               | Callback, refresh, session read, logout           | yes                      | blocks  | In `/auth/callback` → `invalid_grant`; in refresh/logout/session paths → propagates to Hono                      |
 | backchannel-logout-store | `destroyByLogout` (`SessionStore` capability) | `POST /auth/backchannel`                          | with `backchannelLogout` | blocks  | Propagates to Hono (500)                                                                                         |
 | refresh-lock-store       | `withRefreshLock` (`SessionStore` capability) | Each token refresh, once per session per instance | no                       | blocks  | `502` `temporarily_unavailable`, also when a store call inside the lock throws; the session is kept              |
+| refresh-lease | `RefreshLease` (`withRefreshLock` argument) | Storing a refreshed session, or ending it after the authorization server refuses the refresh token | no | blocks | A refused `update` or `destroy` → the session is re-read: gone → signed out; a peer's tokens → used; otherwise `502` and the session is kept. Any other throw → `502`, session kept |
 | resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Failure behavior) |
 | callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Failure behavior)                        |
 | resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"                |
@@ -6751,6 +6761,25 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   was not an attack. Either way the user is signed out. Implement
   `withRefreshLock` on any store more than one instance shares, and check it
   with `runSessionStoreContractTests`.
+- **A refresh lock that expires mid-refresh needs a lease to stay safe.** A
+  shared store's lock has to expire when its holder dies, so a holder that
+  stalls past the expiry, through a paused process or starved timers, can
+  resume while another instance holds the lock. When the store passes
+  `refresh` a `RefreshLease`, `HonoBff` writes and destroys the session only
+  through it, and the former holder can do neither. When the authorization
+  server refuses the former holder's token because the new holder already
+  spent it, the BFF re-reads the session: it uses the new holder's tokens if
+  they are stored, and otherwise answers `502` and keeps the session and its
+  cookie. A store whose `withRefreshLock` passes no lease gets no such fence:
+  the former holder's write can overwrite the new holder's tokens, or its
+  sign-out can end the session the new holder just refreshed. Two schedules
+  still cost the session, with or without the lease. A holder that stalls
+  past its lease and then spends the refresh token before the new holder
+  does cannot store what it received, and the new holder's exchange is
+  refused, so the new holder ends the session. A holder that stops after its
+  exchange and before its write leaves the stored refresh token rotated out,
+  so the next refresh is refused, or trips reuse detection against an
+  authorization server with no replay grace.
 - **With `EncryptedCookieSessionStore`, a request carrying the cookie from
   before a refresh can replay the old refresh token.** The session lives in
   the browser's cookie, so the server has nothing to lock or re-read. A

@@ -112,22 +112,63 @@ export interface RefreshLockStore {
    *   seconds when its discovery cache is cold, since discovery tries two
    *   well-known paths and every request has a 10-second deadline. If the
    *   lock expires when its holder dies, expire it only after that plus the
-   *   store's own I/O, or renew the lease while it is held. A lock that
-   *   expires mid-refresh lets a second instance spend the same token.
+   *   store's own I/O, or renew it while `refresh` runs.
+   * - Pass `refresh` a {@link RefreshLease} for this call. The parameter is
+   *   optional only so stores written before it keep compiling. `HonoBff` writes
+   *   and destroys the session through it, so a holder that lost the lock
+   *   (it stalled past the expiry and another instance took it) can no
+   *   longer overwrite or end the session that instance refreshed. A store
+   *   that calls `refresh()` with no lease still works, but a lock that
+   *   expires mid-refresh then lets the former holder's write or sign-out
+   *   land on top of the new holder's.
    * - Reject when the lock cannot be acquired within a bound you choose.
    *   `HonoBff` then answers `502` `temporarily_unavailable` and keeps the
    *   session.
    *
-   * A Postgres store can hold `pg_advisory_xact_lock` on a hash of the session
-   * key in a transaction around `refresh`, with a `lock_timeout`. A Redis
-   * store can take a key with `SET NX PX` and wait for it with a deadline. Key
-   * the lock by the same key the store keys its records by — the digest, never
+   * Keep the lock beside the session record, so the lease's conditional
+   * write is one atomic compare-and-set on that record: for example a lease
+   * token and a lease expiry on the session row, taken by an update that
+   * matches only when no unexpired lease is set, and checked by the lease's
+   * `update` and `destroy`. Never hold a database transaction open across
+   * `refresh`: it spans a network call to the authorization server. Key the
+   * lock by the same key the store keys its records by — the digest, never
    * the raw cookie value, plus any prefix or scope the store adds to it.
    */
   withRefreshLock<T>(
     cookieValue: string,
-    refresh: () => Promise<T>,
+    refresh: (lease?: RefreshLease) => Promise<T>,
   ): Promise<T>;
+}
+
+/**
+ * The fence a {@link RefreshLockStore} passes to the refresh it runs: an
+ * `update` and a `destroy` of the locked session that take effect only while
+ * this call still holds the lock. The lease is current from when the call
+ * acquires the lock until it releases it, or until the lock expires or
+ * another call takes it, whichever comes first; it is never current again
+ * after that.
+ */
+export interface RefreshLease {
+  /**
+   * Writes the locked session like {@link SessionStore.update}, as one atomic
+   * step that also checks this lease is current. Resolves with the cookie
+   * value to set.
+   *
+   * @throws {InvalidGrantError} When the lease is no longer current, or the
+   * session is missing, expired or revoked. It never creates or restores a
+   * session.
+   */
+  update(data: SessionData): Promise<string>;
+  /**
+   * Destroys the locked session, as one atomic step, only while this lease
+   * is current and the session still stores `refreshToken`. `HonoBff` calls
+   * it after the authorization server refuses that refresh token.
+   *
+   * @returns `true` when it destroyed the session; `false` when it destroyed
+   * nothing, because the lease is no longer current, the session stores a
+   * different refresh token, or the session no longer exists.
+   */
+  destroy(refreshToken: string): Promise<boolean>;
 }
 
 /** Whether a store implements the {@link RefreshLockStore} capability. */
@@ -203,6 +244,43 @@ export interface SessionStore {
   destroy(cookieValue: string): Promise<void>;
 }
 
+/** Options for {@link MemorySessionStore}. */
+export interface MemorySessionStoreOptions {
+  /**
+   * How long a `withRefreshLock` call holds the lock without renewing it, in
+   * milliseconds. The store renews it every third of this while the refresh
+   * runs. A lease that still lapses, because its holder's timers were
+   * starved, is lost at once: another call may take the lock, and the lost
+   * lease's `update` and `destroy` are refused.
+   *
+   * Defaults to no expiry, which is right for one process: a holder cannot
+   * die without the store dying with it. Set it in tests that model an
+   * instance losing its lock mid-refresh. Must be a positive number.
+   */
+  refreshLeaseMs?: number;
+  /**
+   * How long `withRefreshLock` waits for a lock another call holds, in
+   * milliseconds, before it rejects. `HonoBff` then answers `502` and keeps
+   * the session. Defaults to waiting until the lock is released or expires.
+   * Must be a positive number.
+   */
+  refreshLockWaitMs?: number;
+}
+
+interface MemoryLease {
+  expiresAt: number;
+}
+
+function positiveMs(name: string, value: number | undefined): number {
+  if (value === undefined) return Infinity;
+  if (!(value > 0)) {
+    throw new RangeError(
+      `${name} must be a positive number of milliseconds, got ${value}.`,
+    );
+  }
+  return value;
+}
+
 /**
  * In-memory stateful session store. Data is lost when the process
  * restarts. Suitable for single-process development or tests; use a
@@ -212,7 +290,22 @@ export class MemorySessionStore
   implements SessionStore, BackchannelLogoutStore, RefreshLockStore
 {
   #sessions = new Map<string, SessionData>();
-  #refreshLocks = new Map<string, Promise<void>>();
+  #leases = new Map<string, MemoryLease>();
+  #lockWaiters = new Map<string, Set<() => void>>();
+  #leaseMs: number;
+  #lockWaitMs: number;
+
+  /**
+   * @throws {RangeError} When `refreshLeaseMs` or `refreshLockWaitMs` is not
+   * a positive number.
+   */
+  constructor(options: MemorySessionStoreOptions = {}) {
+    this.#leaseMs = positiveMs("refreshLeaseMs", options.refreshLeaseMs);
+    this.#lockWaitMs = positiveMs(
+      "refreshLockWaitMs",
+      options.refreshLockWaitMs,
+    );
+  }
 
   /** Stores the session under a fresh random id and returns it as the cookie value. */
   create(data: SessionData): Promise<string> {
@@ -244,28 +337,113 @@ export class MemorySessionStore
   }
 
   /**
-   * Runs `refresh` once every earlier call for the same session has settled,
-   * so every `HonoBff` sharing this store object refreshes a session once.
-   * Calls for other sessions run alongside.
+   * Runs `refresh` once no other call holds the session's lock, so every
+   * `HonoBff` sharing this store object refreshes a session once. Calls for
+   * other sessions run alongside. `refresh` gets a {@link RefreshLease} that
+   * writes and destroys the session only while this call holds the lock.
+   *
+   * @throws {Error} When the lock stays held past
+   * {@linkcode MemorySessionStoreOptions.refreshLockWaitMs}.
    */
   async withRefreshLock<T>(
     cookieValue: string,
-    refresh: () => Promise<T>,
+    refresh: (lease: RefreshLease) => Promise<T>,
   ): Promise<T> {
-    const previous = this.#refreshLocks.get(cookieValue) ?? Promise.resolve();
-    const run = previous.then(refresh);
-    const released = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.#refreshLocks.set(cookieValue, released);
+    const lease = await this.#acquire(cookieValue);
+    const renewal = Number.isFinite(this.#leaseMs)
+      ? setInterval(() => {
+          if (this.#holds(cookieValue, lease)) {
+            lease.expiresAt = Date.now() + this.#leaseMs;
+          } else {
+            clearInterval(renewal);
+          }
+        }, this.#leaseMs / 3)
+      : undefined;
     try {
-      return await run;
+      return await refresh(this.#fence(cookieValue, lease));
     } finally {
-      if (this.#refreshLocks.get(cookieValue) === released) {
-        this.#refreshLocks.delete(cookieValue);
+      clearInterval(renewal);
+      if (this.#leases.get(cookieValue) === lease) {
+        this.#leases.delete(cookieValue);
       }
+      this.#wakeLockWaiters(cookieValue);
     }
+  }
+
+  async #acquire(cookieValue: string): Promise<MemoryLease> {
+    const deadline = Date.now() + this.#lockWaitMs;
+    for (;;) {
+      const now = Date.now();
+      const held = this.#leases.get(cookieValue);
+      if (!held || held.expiresAt <= now) {
+        const lease = { expiresAt: now + this.#leaseMs };
+        this.#leases.set(cookieValue, lease);
+        return lease;
+      }
+      if (now >= deadline) {
+        throw new Error("timed out waiting for the session's refresh lock");
+      }
+      await this.#lockChange(
+        cookieValue,
+        Math.min(held.expiresAt, deadline) - now,
+      );
+    }
+  }
+
+  #lockChange(cookieValue: string, timeoutMs: number): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const waiters = this.#lockWaiters.get(cookieValue) ?? new Set();
+    this.#lockWaiters.set(cookieValue, waiters);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wake = (): void => {
+      clearTimeout(timer);
+      waiters.delete(wake);
+      if (
+        waiters.size === 0 &&
+        this.#lockWaiters.get(cookieValue) === waiters
+      ) {
+        this.#lockWaiters.delete(cookieValue);
+      }
+      resolve();
+    };
+    waiters.add(wake);
+    if (Number.isFinite(timeoutMs)) timer = setTimeout(wake, timeoutMs);
+    return promise;
+  }
+
+  #wakeLockWaiters(cookieValue: string): void {
+    for (const wake of [...(this.#lockWaiters.get(cookieValue) ?? [])]) {
+      wake();
+    }
+  }
+
+  #holds(cookieValue: string, lease: MemoryLease): boolean {
+    return (
+      this.#leases.get(cookieValue) === lease && lease.expiresAt > Date.now()
+    );
+  }
+
+  #fence(cookieValue: string, lease: MemoryLease): RefreshLease {
+    return {
+      update: (data) =>
+        this.#holds(cookieValue, lease)
+          ? this.update(cookieValue, data)
+          : Promise.reject(
+              new InvalidGrantError("the session's refresh lock was lost"),
+            ),
+      destroy: (refreshToken) => {
+        const session = this.#sessions.get(cookieValue);
+        if (
+          !session ||
+          session.refreshToken !== refreshToken ||
+          !this.#holds(cookieValue, lease)
+        ) {
+          return Promise.resolve(false);
+        }
+        this.#sessions.delete(cookieValue);
+        return Promise.resolve(true);
+      },
+    };
   }
 
   /**

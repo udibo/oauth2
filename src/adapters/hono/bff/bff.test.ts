@@ -10,6 +10,7 @@ import {
 import { serve } from "../../../_test_server.ts";
 import { thrown } from "../../../_test_assert.ts";
 import { delay } from "../../../utils/_delay.ts";
+import { FakeTime } from "../../../_test_fake-time.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -104,6 +105,7 @@ const CLIENT_SECRET = "shh";
 async function buildFixture(
   options: {
     onTokenReuse?: (event: TokenReuseEvent<TestClient, TestUser>) => void;
+    replayGraceSeconds?: number;
   } = {},
 ) {
   const userService = new MemoryUserService();
@@ -137,6 +139,7 @@ async function buildFixture(
       refresh_token: new RefreshTokenGrant({
         resolve: () => ({ clientService, tokenService }),
         onTokenReuse: options.onTokenReuse,
+        replayGraceSeconds: options.replayGraceSeconds,
       }),
     },
   });
@@ -4289,6 +4292,7 @@ describe("HonoBff", () => {
     function instance(
       sessionStore: SessionStore,
       beforeRefreshExchange: () => Promise<unknown> = () => Promise.resolve(),
+      afterRefreshExchange: () => Promise<unknown> = () => Promise.resolve(),
     ): Hono {
       const authServerFetch = localAuthServerFetch(fixture.authServer);
       const client = new DirectClient({
@@ -4299,11 +4303,14 @@ describe("HonoBff", () => {
         fetch: async (input, init) => {
           const request = new Request(input, init);
           const form = await request.clone().formData();
-          if (form.get("grant_type") === "refresh_token") {
-            refreshExchanges++;
-            await beforeRefreshExchange();
+          if (form.get("grant_type") !== "refresh_token") {
+            return await authServerFetch(request);
           }
-          return await authServerFetch(request);
+          refreshExchanges++;
+          await beforeRefreshExchange();
+          const response = await authServerFetch(request);
+          await afterRefreshExchange();
+          return response;
         },
       });
       const bff = new HonoBff({
@@ -4427,6 +4434,206 @@ describe("HonoBff", () => {
       expect(res.headers.get("set-cookie")).toBe(null);
       expect(refreshExchanges).toBe(0);
       expect(await shared.read(cookie.split("=")[1])).not.toBe(null);
+    });
+
+    describe("when a holder loses its refresh lease", () => {
+      const LEASE_MS = 1000;
+
+      beforeEach(async () => {
+        fixture = await buildFixture({
+          onTokenReuse: reuse,
+          replayGraceSeconds: 300,
+        });
+        fixture.tokenService.accessTokenLifetime = 30;
+      });
+
+      function me(app: Hono, cookie: string): Promise<Response> {
+        return Promise.resolve(app.request("/api/me", { headers: { cookie } }));
+      }
+
+      /** A point a request stops at until the test lets it through. */
+      function barrier() {
+        const reached = Promise.withResolvers<void>();
+        const opened = Promise.withResolvers<void>();
+        return {
+          reached: reached.promise,
+          open: () => opened.resolve(),
+          hold: (): Promise<void> => {
+            reached.resolve();
+            return opened.promise;
+          },
+        };
+      }
+
+      function storedRefreshToken(
+        shared: MemorySessionStore,
+        cookie: string,
+      ): Promise<string | undefined> {
+        return shared
+          .read(cookie.split("=")[1])
+          .then((session) => session?.refreshToken);
+      }
+
+      function stall(time: FakeTime): void {
+        vi.setSystemTime(time.now + 3 * LEASE_MS);
+      }
+
+      function sessionCookieCleared(res: Response): boolean {
+        return res.headers
+          .getSetCookie()
+          .some(
+            (cookie) =>
+              cookie.startsWith("oauth2_session=;") &&
+              cookie.includes("Max-Age=0"),
+          );
+      }
+
+      it("lets the instance that took over refresh, and the former holder use its tokens when it resumes", async () => {
+        const shared = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+        const stalled = barrier();
+        const a = instance(shared, stalled.hold);
+        const b = instance(shared);
+        const cookie = await loginCookie(a);
+        using time = new FakeTime();
+
+        const pendingA = me(a, cookie);
+        await time.settle(stalled.reached);
+        stall(time);
+        const resB = await time.settle(me(b, cookie));
+        stalled.open();
+        const resA = await time.settle(pendingA);
+
+        await expectSignedIn(resB);
+        await expectSignedIn(resA);
+        expect(reuse).not.toHaveBeenCalled();
+        await expectFamilyAlive(shared, cookie);
+      });
+
+      it("keeps the session the new holder is refreshing when the former holder resumes and is refused", async () => {
+        const shared = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+        const stalled = barrier();
+        const newHolderExchanged = barrier();
+        const a = instance(shared, stalled.hold);
+        const b = instance(shared, undefined, newHolderExchanged.hold);
+        const cookie = await loginCookie(a);
+        const original = await storedRefreshToken(shared, cookie);
+        using time = new FakeTime();
+
+        const pendingA = me(a, cookie);
+        await time.settle(stalled.reached);
+        stall(time);
+        const pendingB = me(b, cookie);
+        await time.settle(newHolderExchanged.reached);
+        stalled.open();
+        const resA = await time.settle(pendingA);
+        const afterFormerHolder = await storedRefreshToken(shared, cookie);
+        newHolderExchanged.open();
+        const resB = await time.settle(pendingB);
+
+        expect(
+          afterFormerHolder,
+          "the former holder ended the session the new holder was refreshing",
+        ).toBe(original);
+        expect(
+          resA.status,
+          "a refused destroy must answer 502, not sign the browser out",
+        ).toBe(502);
+        await resA.body?.cancel();
+        expect(sessionCookieCleared(resA)).toStrictEqual(false);
+        await expectSignedIn(resB);
+        expect(refreshExchanges).toBe(2);
+        expect(reuse).not.toHaveBeenCalled();
+        await expectFamilyAlive(shared, cookie);
+      });
+
+      it("refuses the write of a holder that stalled past its lease and exchanged first, and the new holder ends the session", async () => {
+        const shared = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+        const stalled = barrier();
+        const newHolderHeld = barrier();
+        const a = instance(shared, stalled.hold);
+        const b = instance(shared, newHolderHeld.hold);
+        const cookie = await loginCookie(a);
+        const original = await storedRefreshToken(shared, cookie);
+        using time = new FakeTime();
+
+        const pendingA = me(a, cookie);
+        await time.settle(stalled.reached);
+        stall(time);
+        const pendingB = me(b, cookie);
+        await time.settle(newHolderHeld.reached);
+        stalled.open();
+        const resA = await time.settle(pendingA);
+        const afterFormerHolder = await storedRefreshToken(shared, cookie);
+        newHolderHeld.open();
+        const resB = await time.settle(pendingB);
+
+        expect(
+          afterFormerHolder,
+          "a holder that lost its lease wrote the tokens it exchanged",
+        ).toBe(original);
+        expect(resA.status).toBe(502);
+        await resA.body?.cancel();
+        expect(sessionCookieCleared(resA)).toStrictEqual(false);
+        expect(resB.status).toBe(401);
+        await resB.body?.cancel();
+        expect(sessionCookieCleared(resB)).toStrictEqual(true);
+        expect(await shared.read(cookie.split("=")[1])).toBe(null);
+        expect(reuse).not.toHaveBeenCalled();
+      });
+
+      it("ends the session when the holder stopped after its exchange and the takeover is refused", async () => {
+        const shared = new MemorySessionStore({ refreshLeaseMs: LEASE_MS });
+        const exchanged = barrier();
+        const a = instance(shared, undefined, exchanged.hold);
+        const b = instance(shared);
+        const cookie = await loginCookie(a);
+        using time = new FakeTime();
+
+        const pendingA = me(a, cookie);
+        await time.settle(exchanged.reached);
+        stall(time);
+        const resB = await time.settle(me(b, cookie));
+        exchanged.open();
+        const resA = await time.settle(pendingA);
+
+        expect(resB.status).toBe(401);
+        await resB.body?.cancel();
+        expect(sessionCookieCleared(resB)).toStrictEqual(true);
+        expect(resA.status).toBe(401);
+        await resA.body?.cancel();
+        expect(await shared.read(cookie.split("=")[1])).toBe(null);
+        expect(reuse).not.toHaveBeenCalled();
+      });
+
+      it("renews a running refresh's lease, so a waiting instance answers 502 instead of spending the token again", async () => {
+        const shared = new MemorySessionStore({
+          refreshLeaseMs: LEASE_MS,
+          refreshLockWaitMs: 2 * LEASE_MS,
+        });
+        const exchange = barrier();
+        const a = instance(shared, exchange.hold);
+        const b = instance(shared);
+        const cookie = await loginCookie(a);
+        using time = new FakeTime();
+
+        const pendingA = me(a, cookie);
+        await time.settle(exchange.reached);
+        const resB = await time.settle(me(b, cookie));
+        await time.tickAsync(3 * LEASE_MS);
+        exchange.open();
+        const resA = await time.settle(pendingA);
+
+        expect(
+          refreshExchanges,
+          "the waiter took the lease from a holder whose exchange was running",
+        ).toBe(1);
+        expect(resB.status).toBe(502);
+        expect((await resB.json()).error).toBe("temporarily_unavailable");
+        expect(resB.headers.get("set-cookie")).toBe(null);
+        await expectSignedIn(resA);
+        expect(reuse).not.toHaveBeenCalled();
+        await expectFamilyAlive(shared, cookie);
+      });
     });
   });
 
