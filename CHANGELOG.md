@@ -1,3 +1,29 @@
+## [0.21.0](https://github.com/udibo/oauth2/compare/0.20.0...0.21.0) (2026-10-14)
+
+### ⚠ BREAKING CHANGES
+
+* `JwksTokenReader` refuses a discovery document or JWKS
+over 256 KiB, `IntrospectionTokenReader` refuses an introspection
+response over 64 KiB, and `breachedPasswordValidator` treats a range
+response over 1 MiB as unavailable. Set `maxResponseBytes` to raise any
+of these caps. The external connectors refuse profile, UserInfo and
+Apple JWKS responses over 64 KiB, and `udibo-oauth2 idp dev` answers 413
+to a body over 64 KiB.
+
+## Tradeoffs
+
+- The connectors get no option. Their token exchange already uses a
+fixed 64 KiB cap, and an option for profile reads alone would be
+inconsistent with it.
+- No separate key-count limit on the JWKS. The byte cap bounds the
+count, and keys are imported lazily.
+
+## Closes
+
+### Bug Fixes
+
+* cap the responses the package reads from servers it calls ([#106](https://github.com/udibo/oauth2/issues/106)) ([7892c47](https://github.com/udibo/oauth2/commit/7892c47d91a420aceb356b433946039ef1af480c)), closes [#90](https://github.com/udibo/oauth2/issues/90) [#52](https://github.com/udibo/oauth2/issues/52)
+
 ## [0.20.0](https://github.com/udibo/oauth2/compare/0.19.0...0.20.0) (2026-10-14)
 
 ### ⚠ BREAKING CHANGES
