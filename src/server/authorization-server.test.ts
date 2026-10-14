@@ -1506,6 +1506,32 @@ describe("AuthorizationServer", () => {
         ).not.toBe(undefined);
       });
 
+      it("keeps the family revoked when /revoke lands between the rotation's claim and its save", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const original = await issueFamily(tokenService);
+        const save = tokenService.save.bind(tokenService);
+        let revokedInGap = false;
+        tokenService.save = (async (token: Parameters<typeof save>[0]) => {
+          if (!revokedInGap && "refreshToken" in token) {
+            revokedInGap = true;
+            await revoke(rotating, { token: original.refreshToken });
+          }
+          return await save(token);
+        }) as typeof tokenService.save;
+
+        const successor = await rotate(rotating, original.refreshToken);
+
+        expect(revokedInGap).toBe(true);
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "a sign-out that lands after the claim must still end the " +
+            "successor the rotation saves next",
+        ).toBe(undefined);
+        expect(await tokenService.getToken(successor.access_token)).toBe(
+          undefined,
+        );
+      });
+
       it("leaves the family of a token rotated for another public client alone", async () => {
         const { server: rotating, tokenService } = await rotatingServer();
         const original = await issueFamily(tokenService, publicClient);

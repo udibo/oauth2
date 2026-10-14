@@ -306,6 +306,7 @@ export class MemoryTokenService<
   #tokensByRefreshHash = new Map<string, StoredToken<S>>();
   #tokensByCodeHash = new Map<string, Set<string>>();
   #revokedByRefreshHash = new Map<string, StoredToken<S>>();
+  #revokedFamilies = new Set<string>();
 
   /**
    * Creates an empty token store.
@@ -503,6 +504,10 @@ export class MemoryTokenService<
       stored.refreshTokenExpiresAt = rt.refreshTokenExpiresAt;
       stored.familyId = rt.familyId;
       stored.familyCreatedAt = rt.familyCreatedAt;
+      if (rt.familyId && this.#revokedFamilies.has(rt.familyId)) {
+        this.#tombstone(stored.refreshTokenHash, stored);
+        return token;
+      }
       this.#tokensByRefreshHash.set(stored.refreshTokenHash, stored);
     }
     this.#tokensByAccessHash.set(accessTokenHash, stored);
@@ -603,10 +608,13 @@ export class MemoryTokenService<
   }
 
   /**
-   * Revokes every live token in a rotation family (reuse detection response).
-   * Resolves `true` when at least one live token was removed.
+   * Revokes every live token in a rotation family (reuse detection response)
+   * and keeps the family revoked, so a successor a concurrent rotation saves
+   * afterwards is stored already revoked. Resolves `true` when at least one
+   * live token was removed.
    */
   revokeFamily(familyId: string): Promise<boolean> {
+    this.#revokedFamilies.add(familyId);
     let revoked = false;
     for (const [hash, stored] of this.#tokensByRefreshHash) {
       if (stored.familyId === familyId) {
