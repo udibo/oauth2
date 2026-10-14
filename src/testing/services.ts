@@ -273,6 +273,7 @@ interface StoredToken<S extends AbstractScope> {
   codeHash?: string;
   familyId?: string;
   familyCreatedAt?: Date;
+  rotatedAt?: Date;
 }
 
 /**
@@ -430,6 +431,7 @@ export class MemoryTokenService<
         refreshTokenExpiresAt: stored.refreshTokenExpiresAt,
         familyId: stored.familyId,
         familyCreatedAt: stored.familyCreatedAt,
+        rotatedAt: stored.rotatedAt,
       } as RefreshToken<C, U, S>;
     }
     return token;
@@ -547,6 +549,36 @@ export class MemoryTokenService<
       this.#tokensByRefreshHash.delete(stored.refreshTokenHash);
     }
     return true;
+  }
+
+  /**
+   * Revokes a refresh token the refresh grant just rotated out, as
+   * {@linkcode revoke} does, and stamps its tombstone with the rotation time
+   * so the grant's `replayGraceSeconds` can apply. Resolves `false` when the
+   * token was already claimed.
+   */
+  async revokeRotated(token: RefreshToken<C, U, S>): Promise<boolean> {
+    const stored = this.#tokensByRefreshHash.get(
+      await sha256Hash(token.refreshToken),
+    );
+    if (!stored) return false;
+    stored.rotatedAt = new Date();
+    return await this.revoke(token);
+  }
+
+  /** Whether the family has a live refresh token that has not expired. */
+  hasLiveRefreshToken(familyId: string): Promise<boolean> {
+    const now = Date.now();
+    for (const stored of this.#tokensByRefreshHash.values()) {
+      if (
+        stored.familyId === familyId &&
+        (!stored.refreshTokenExpiresAt ||
+          stored.refreshTokenExpiresAt.getTime() > now)
+      ) {
+        return Promise.resolve(true);
+      }
+    }
+    return Promise.resolve(false);
   }
 
   #tombstone(refreshTokenHash: string, stored: StoredToken<S>): void {

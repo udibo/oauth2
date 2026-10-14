@@ -469,6 +469,65 @@ export function runTokenServiceContractTests<
         it("returns false when the family has no live tokens", async () => {
           expect(await tokenService.revokeFamily!("never-issued")).toBe(false);
         });
+
+        it("stamps a token revokeRotated revoked with its rotation time", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.revokeRotated !== "function",
+            "the service does not implement revokeRotated",
+          );
+          const token = await saveFamilyMember(FAMILY);
+          const before = Date.now();
+          expect(await tokenService.revokeRotated!(token)).toBe(true);
+          const revoked = await tokenService.getRevokedRefreshToken!(
+            token.refreshToken,
+          );
+          assert(revoked !== undefined);
+          assert(
+            revoked.rotatedAt instanceof Date &&
+              revoked.rotatedAt.getTime() >= before - 1000 &&
+              revoked.rotatedAt.getTime() <= Date.now() + 1000,
+            "without rotatedAt the refresh grant's replayGraceSeconds never " +
+              "applies, so every straggler revokes its family",
+          );
+        });
+
+        it("leaves rotatedAt unset on a token revoked other than by rotation", async () => {
+          const token = await saveFamilyMember(FAMILY);
+          await tokenService.revoke(token.refreshToken, "refresh_token");
+          const revoked = await tokenService.getRevokedRefreshToken!(
+            token.refreshToken,
+          );
+          expect(
+            revoked?.rotatedAt,
+            "a revoked token that looks rotated gets the replay grace a " +
+              "signed-out session must never have",
+          ).toBe(undefined);
+        });
+
+        it("reports whether a family still has a live refresh token", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.hasLiveRefreshToken !== "function",
+            "the service does not implement hasLiveRefreshToken",
+          );
+          const token = await saveFamilyMember(FAMILY);
+          await saveFamilyMember(OTHER_FAMILY);
+          expect(await tokenService.hasLiveRefreshToken!(FAMILY)).toBe(true);
+          await tokenService.revoke(token.refreshToken, "refresh_token");
+          expect(
+            await tokenService.hasLiveRefreshToken!(FAMILY),
+            "a family whose last token was revoked has no successor to protect",
+          ).toBe(false);
+          expect(await tokenService.hasLiveRefreshToken!(OTHER_FAMILY)).toBe(
+            true,
+          );
+          expect(await tokenService.hasLiveRefreshToken!("never-issued")).toBe(
+            false,
+          );
+        });
       });
     } else {
       it.skip("refresh-token reuse detection is not implemented — a replayed rotated-out token cannot be detected (refreshTokenReuseDetection: false)", () => {});

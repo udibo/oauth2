@@ -65,6 +65,29 @@ export interface RefreshTokenGrantOptions<
    * client-facing `invalid_grant` a replayed token always yields.
    */
   onTokenReuse?: (event: TokenReuseEvent<Client, User>) => void | Promise<void>;
+  /**
+   * Seconds after a refresh token is rotated during which presenting it again
+   * is answered with `invalid_grant` but not treated as reuse: the family
+   * keeps its live token and `onTokenReuse` does not fire. Defaults to `0`,
+   * which turns the grace off.
+   *
+   * It covers a client that sends a request with the old refresh token after
+   * its own concurrent request already rotated it, such as a backend-for-
+   * frontend whose instances do not coordinate refreshes, so that one
+   * straggler does not sign the user out. It applies only while the family
+   * still has a live refresh token, and only to a token the grant rotated
+   * out, not to one revoked any other way. Outside the window, or with no
+   * live successor, reuse detection runs as usual.
+   *
+   * The cost is that a stolen refresh token replayed within the window after
+   * the legitimate client rotated it goes unflagged: the family is not
+   * revoked and no reuse event is raised. Keep the window to seconds.
+   *
+   * Needs a token service that sets {@linkcode RefreshToken.rotatedAt} in
+   * `revokeRotated` and implements `hasLiveRefreshToken`; with any other
+   * service the grace never applies.
+   */
+  replayGraceSeconds?: number;
 }
 
 /**
@@ -89,11 +112,19 @@ export class RefreshTokenGrant<
   #onTokenReuse?: (
     event: TokenReuseEvent<Client, User>,
   ) => void | Promise<void>;
+  readonly #replayGraceMs: number;
 
   /** Creates the grant from its {@linkcode RefreshTokenGrantOptions}. */
   constructor(options: RefreshTokenGrantOptions<Client, User, S>) {
     super({ ...options, allowRefreshToken: true });
     this.#onTokenReuse = options.onTokenReuse;
+    const graceSeconds = options.replayGraceSeconds ?? 0;
+    if (!Number.isFinite(graceSeconds) || graceSeconds < 0) {
+      throw new RangeError(
+        `replayGraceSeconds must be a non-negative number of seconds, got ${graceSeconds}`,
+      );
+    }
+    this.#replayGraceMs = graceSeconds * 1000;
   }
 
   /**
@@ -143,7 +174,8 @@ export class RefreshTokenGrant<
           await tokenService.getRevokedRefreshToken(refreshTokenStr);
         if (
           replayed?.familyId &&
-          replayed.client.id.toString() === client.id.toString()
+          replayed.client.id.toString() === client.id.toString() &&
+          !(await this.#withinReplayGrace(tokenService, replayed))
         ) {
           const familyRevoked = await tokenService.revokeFamily(
             replayed.familyId,
@@ -234,6 +266,16 @@ export class RefreshTokenGrant<
       throw new InvalidGrantError("refresh_token was already consumed");
     }
     return await tokenService.save(nextRefreshToken);
+  }
+
+  async #withinReplayGrace(
+    tokenService: RefreshTokenGrantServices<Client, User, S>["tokenService"],
+    replayed: RefreshToken<Client, User, S>,
+  ): Promise<boolean> {
+    const { rotatedAt, familyId } = replayed;
+    if (this.#replayGraceMs === 0 || !rotatedAt || !familyId) return false;
+    if (Date.now() - rotatedAt.getTime() > this.#replayGraceMs) return false;
+    return (await tokenService.hasLiveRefreshToken?.(familyId)) ?? false;
   }
 
   async #notifyTokenReuse(event: TokenReuseEvent<Client, User>): Promise<void> {
