@@ -1,3 +1,9 @@
+## [0.21.3](https://github.com/udibo/oauth2/compare/0.21.2...0.21.3) (2026-10-14)
+
+### Bug Fixes
+
+* **bff:** keep the session Set-Cookie on auth error responses ([#109](https://github.com/udibo/oauth2/issues/109)) ([5ea3693](https://github.com/udibo/oauth2/commit/5ea36934cafddcf38d47c5ce96487bb0d4621ff9)), closes [#108](https://github.com/udibo/oauth2/issues/108)
+
 ## [0.21.2](https://github.com/udibo/oauth2/compare/0.21.1...0.21.2) (2026-10-14)
 
 ### Bug Fixes
