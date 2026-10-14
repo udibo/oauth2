@@ -373,7 +373,6 @@ skip it.
 | Users         | Seeded from a JSON file        | Your identity flows (`@udibo/oauth2/identity`) |
 | Passwords     | Plaintext in a config file     | Hashed, with lockout and rate limiting         |
 | Token minting | Anyone holding the admin token | Only the protocol                              |
-| Tenants       | None                           | Whatever your application models               |
 
 It is also not a self-host path for Udibo's hosted identity service, which adds
 tenants, persistence, and an administrative dashboard. `idp dev` is a

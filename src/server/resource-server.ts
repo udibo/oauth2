@@ -72,7 +72,7 @@ export interface ResourceServerContext<
   User,
   S extends AbstractScope,
 > {
-  /** Tenant-scoped services to use for this request. */
+  /** The services to use for this request. */
   services: ResourceServerServices<Client, User, S>;
 }
 
@@ -83,11 +83,12 @@ export interface ResourceServerOptions<
   S extends AbstractScope,
 > {
   /**
-   * Resolves the per-request context — the (e.g. tenant-scoped) {@link
-   * ResourceServerServices} for THIS request — so a single instance serves
-   * every tenant/origin. This is the only services seam: for a single-tenant
-   * server it is a constant function returning the same services every time
-   * (create the services once, outside `resolve`, and return them here).
+   * Resolves the per-request configuration — the {@link
+   * ResourceServerServices} for THIS request — so one server can serve the
+   * origins or applications a business operates. This is the only services
+   * seam: for a single deployment it is a constant function returning the
+   * same services every time (create the services once, outside `resolve`,
+   * and return them here).
    */
   resolve: (
     request: Request,
@@ -198,10 +199,9 @@ export interface AuthenticatedContext<
  * authentication. Framework-agnostic: it works on web `Request`/`Response`, so
  * an adapter (Hono, etc.) wires {@linkcode authenticate} into its middleware.
  *
- * A single instance serves every tenant/origin; per-request services come from
- * the `resolve` callback in {@linkcode ResourceServerOptions}. For a
- * single-tenant server, `resolve` is a constant function returning the same
- * services every time.
+ * Per-request services come from the `resolve` callback in
+ * {@linkcode ResourceServerOptions}. For a single deployment, `resolve` is a
+ * constant function returning the same services every time.
  *
  * {@linkcode authenticate} throws {@linkcode HttpError} subclasses on failure
  * ({@linkcode AccessDeniedError} when no token is sent,

@@ -9,12 +9,13 @@
  * - Server metadata (RFC 8414)
  * - Device authorization (RFC 8628)
  *
- * **Configuration.** A single instance serves every tenant/origin. The only
- * configuration seam is `resolve(request)`, which returns the services the
- * server's own endpoints need (`{ clientService, tokenService }`) plus the
- * issuer/endpoints. Each grant resolves its own services independently. For a
- * single-tenant server, `resolve` is a constant function (create the services
- * once, outside it, and return them every time).
+ * **Configuration.** The only configuration seam is `resolve(request)`, which
+ * returns the per-request configuration: the services the server's own
+ * endpoints need (`{ clientService, tokenService }`) plus the issuer and
+ * endpoint URLs. Because it runs per request, one server can serve the origins
+ * or applications a business operates. Each grant resolves its own services
+ * independently. For a single deployment, `resolve` is a constant function
+ * (create the services once, outside it, and return them every time).
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749
  * @module
@@ -240,9 +241,11 @@ export interface AuthorizationServerOptions<
   S extends AbstractScope,
 > extends Omit<ResourceServerOptions<Client, User, S>, "resolve"> {
   /**
-   * Resolves the per-request context — the server's own services plus the
-   * issuer/endpoints. This is the only services seam: for a single-tenant
-   * server it is a constant function returning the same context every time.
+   * Resolves the per-request configuration — the server's own services plus
+   * the issuer and endpoint URLs — so one server can serve the origins or
+   * applications a business operates. This is the only services seam: for a
+   * single deployment it is a constant function returning the same context
+   * every time.
    */
   resolve: (
     request: Request,
@@ -678,8 +681,8 @@ function isDeviceAuthorizationGrant<
  * Framework-agnostic: each `handle*Request` method takes a web `Request` and
  * returns a `Response`, so an adapter routes its endpoints to them. Extends
  * {@linkcode ResourceServer}, so the same instance also validates bearer
- * tokens. A single instance serves every tenant/origin via the `resolve`
- * callback in {@linkcode AuthorizationServerOptions}.
+ * tokens. Its issuer, endpoint URLs and services come per request from the
+ * `resolve` callback in {@linkcode AuthorizationServerOptions}.
  *
  * The handlers throw {@linkcode HttpError} subclasses on failure (e.g.
  * {@linkcode InvalidRequestError}, {@linkcode InvalidClientError},
