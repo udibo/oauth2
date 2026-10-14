@@ -367,6 +367,7 @@ export function runTokenServiceContractTests<
 
         async function saveFamilyMember(
           familyId: string,
+          refreshTokenExpiresAt = new Date(Date.now() + 600_000),
         ): Promise<RefreshToken<C, U, S>> {
           const accessToken = await tokenService.generateAccessToken(
             client,
@@ -380,7 +381,7 @@ export function runTokenServiceContractTests<
             accessToken,
             accessTokenExpiresAt: new Date(Date.now() + 60_000),
             refreshToken,
-            refreshTokenExpiresAt: new Date(Date.now() + 600_000),
+            refreshTokenExpiresAt,
             familyId,
             familyCreatedAt: new Date(Date.now() - 60_000),
             client,
@@ -527,6 +528,21 @@ export function runTokenServiceContractTests<
           expect(await tokenService.hasLiveRefreshToken!("never-issued")).toBe(
             false,
           );
+        });
+
+        it("does not count an expired refresh token as live", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.hasLiveRefreshToken !== "function",
+            "the service does not implement hasLiveRefreshToken",
+          );
+          await saveFamilyMember(FAMILY, new Date(Date.now() - 1000));
+          expect(
+            await tokenService.hasLiveRefreshToken!(FAMILY),
+            "an expired successor cannot be used, so a replay of its " +
+              "predecessor must not be excused as a straggler",
+          ).toBe(false);
         });
       });
     } else {
