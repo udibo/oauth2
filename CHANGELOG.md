@@ -1,3 +1,9 @@
+## [0.24.0](https://github.com/udibo/oauth2/compare/0.23.0...0.24.0) (2026-10-14)
+
+### Features
+
+* **bff:** fence refresh writes on the refresh lock's lease ([#120](https://github.com/udibo/oauth2/issues/120)) ([033cdfe](https://github.com/udibo/oauth2/commit/033cdfea0021f420dac3f077c5ee5eda9acb0bb4)), closes [#105](https://github.com/udibo/oauth2/issues/105) [#105](https://github.com/udibo/oauth2/issues/105) [#109](https://github.com/udibo/oauth2/issues/109) [#110](https://github.com/udibo/oauth2/issues/110) [#111](https://github.com/udibo/oauth2/issues/111) [#116](https://github.com/udibo/oauth2/issues/116) [#118](https://github.com/udibo/oauth2/issues/118) [#117](https://github.com/udibo/oauth2/issues/117)
+
 ## [0.23.0](https://github.com/udibo/oauth2/compare/0.22.0...0.23.0) (2026-10-14)
 
 ### ⚠ BREAKING CHANGES
