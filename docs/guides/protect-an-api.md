@@ -500,9 +500,13 @@ anything else and the client sees a bare challenge, which it will read as
 A header carries only a narrow character set, so the challenge stays inside it.
 `realm` must be printable ASCII; the constructor throws a `TypeError` for
 anything else, so pass an ASCII form of a product name such as `"Lodz
-Projects"` rather than `"Łódź Projects"`. `error_description` keeps to the RFC
-6750 §3 set: `"` becomes `'` and any other character outside it becomes `?`.
-The response body still carries the full message.
+Projects"` rather than `"Łódź Projects"`. The challenge's `error_description`
+is the description the oauth2 response body carries (the error's
+`error_description` extension, else its exposed message, so an error built with
+`expose: false` shows only the generic text in both), mapped to the RFC 6750 §3
+set: `"` becomes `'` and any other character outside it becomes `?`. The body
+keeps that description unmapped. A required scope with any token outside the
+set is left out of the challenge rather than named in part.
 
 Response bodies default to the RFC 6749 JSON shape (`error`,
 `error_description`, `error_uri`). Pass `errorFormat: "problem-details"` to the

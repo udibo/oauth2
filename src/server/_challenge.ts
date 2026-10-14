@@ -39,10 +39,11 @@ export function toChallengeDescription(text: string): string {
     .replace(OUTSIDE_DESCRIPTION_SET, "?");
 }
 
-/** The space-separated tokens of `scope` that are RFC 6750 §3 scope-tokens, or `undefined` when none are. */
+/** `scope` with its space-separated tokens rejoined by single spaces, or `undefined` unless every token is an RFC 6750 §3 scope-token. */
 export function toChallengeScope(scope: string): string | undefined {
-  const tokens = scope
-    .split(" ")
-    .filter((token) => SCOPE_TOKEN_ONLY.test(token));
-  return tokens.length > 0 ? tokens.join(" ") : undefined;
+  const tokens = scope.split(" ").filter((token) => token !== "");
+  return tokens.length > 0 &&
+    tokens.every((token) => SCOPE_TOKEN_ONLY.test(token))
+    ? tokens.join(" ")
+    : undefined;
 }

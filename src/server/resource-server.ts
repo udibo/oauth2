@@ -338,10 +338,12 @@ export class ResourceServer<
    * fine, it just lacks scope" rather than sending it off to refresh.
    *
    * The result is always printable ASCII, so it never makes `Headers` throw.
-   * `error_description` is narrowed to the RFC 6750 character set: control
-   * characters are dropped, `"` becomes `'`, and any other character outside
-   * the set becomes `?`. The response body still carries the full message.
-   * Scope tokens outside the RFC 6750 set are left out of `scope`.
+   * `error_description` is the same text the oauth2 response body uses (the
+   * `error_description` extension, else the error's exposed message, so an
+   * unexposed message stays out of both), narrowed to the RFC 6750 character
+   * set: control characters are dropped, `"` becomes `'`, and any other
+   * character outside the set becomes `?`. `scope` is omitted entirely when
+   * any of its tokens falls outside the RFC 6750 set.
    *
    * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3
    */
@@ -351,7 +353,9 @@ export class ResourceServer<
     const code = error?.extensions.error;
     if (error && code && CHALLENGE_ERROR_CODES.has(code)) {
       parts.push(`error="${code}"`);
-      const description = toChallengeDescription(error.message);
+      const description = toChallengeDescription(
+        error.extensions.error_description ?? error.exposedMessage,
+      );
       if (description) {
         parts.push(`error_description="${description}"`);
       }

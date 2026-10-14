@@ -495,12 +495,31 @@ describe("ResourceServer", () => {
       );
     });
 
-    it("keeps only the scope tokens RFC 6750 allows in the scope attribute", () => {
+    it("collapses repeated spaces between valid scope tokens", () => {
       const { server } = createTestServer();
-      expect(
-        server.buildWwwAuthenticate(undefined, 'read wrïte "admin" a\\b  ok'),
-      ).toBe('Bearer realm="Service", scope="read ok"');
+      expect(server.buildWwwAuthenticate(undefined, "read  write")).toBe(
+        'Bearer realm="Service", scope="read write"',
+      );
     });
+
+    it.each([
+      ["a token outside Latin-1", "files:wrïte files:read"],
+      ["a quoted token", 'read "admin"'],
+      ["a token with a backslash", "read a\\b"],
+    ])(
+      "omits the whole scope attribute rather than advertise part of a required scope with %s",
+      (_label, scope) => {
+        const { server } = createTestServer();
+        const error = new InsufficientScopeError("insufficient");
+        error.extensions.requiredScope = scope;
+        expect(server.buildWwwAuthenticate(error)).toBe(
+          'Bearer realm="Service", error="insufficient_scope", error_description="insufficient"',
+        );
+        expect(server.buildWwwAuthenticate(undefined, scope)).toBe(
+          'Bearer realm="Service"',
+        );
+      },
+    );
 
     it("omits the scope attribute when no scope token is valid", () => {
       const { server } = createTestServer();
@@ -526,6 +545,61 @@ describe("ResourceServer", () => {
       expect(
         new Headers({ "WWW-Authenticate": challenge }).get("WWW-Authenticate"),
       ).toBe(challenge);
+    });
+  });
+
+  describe("handleAuthError description exposure", () => {
+    const secret = "db row 42 for tenant acme-secret missing";
+
+    it("keeps an unexposed message out of the challenge as well as the body", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, { expose: false }),
+      );
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error_description).not.toContain("acme-secret");
+      const challenge = response.headers.get("WWW-Authenticate");
+      expect(challenge).not.toContain("acme-secret");
+      expect(challenge).toBe(
+        `Bearer realm="Service", error="invalid_token", error_description="${body.error_description}"`,
+      );
+    });
+
+    it("puts the exposed message in the challenge, not the raw message", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, { exposedMessage: "token rejected" }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="token rejected"',
+      );
+      expect((await response.json()).error_description).toBe("token rejected");
+    });
+
+    it("prefers an explicit error_description extension, as the body does", async () => {
+      const { server } = createTestServer();
+
+      const response = server.handleAuthError(
+        new InvalidTokenError(secret, {
+          extensions: {
+            error: "invalid_token",
+            error_description: "signature did not verify",
+          },
+        }),
+      );
+
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="Service", error="invalid_token", error_description="signature did not verify"',
+      );
+      expect((await response.json()).error_description).toBe(
+        "signature did not verify",
+      );
     });
   });
 
