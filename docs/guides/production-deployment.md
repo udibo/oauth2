@@ -137,8 +137,8 @@ one process. Pick each one by where your requests can land:
 | Deployment                                                    | `sessionStore`                                         | `authRequestStorage`                                                  |
 | ------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | One long-lived process, tests, local development              | `MemorySessionStore`                                   | `MemoryAuthRequestStorageFactory`                                     |
-| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`                          | `EncryptedCookieAuthRequestStorage`                                   |
-| Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
+| Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, and still replays a pre-refresh cookie that arrives after the refresh | `EncryptedCookieAuthRequestStorage`                                   |
+| Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
 Give the encrypted-cookie stores a secret every instance shares, so any of them
 can unseal a cookie another sealed. The memory stores keep their records in the
@@ -157,6 +157,17 @@ alternative with a different contract: a copied cookie remains usable until
 expiry, even after logout clears the original browser's cookie. It also has
 browser cookie-size limits. See
 [session limitations](../known-limitations.md#sessions-udibooauth2honobff).
+
+A shared store should also implement `withRefreshLock` (`RefreshLockStore`), a
+lock that lets one instance at a time refresh a session. Without it, parallel
+requests for one session that reach different instances near access-token
+expiry each spend the refresh token, and against an authorization server that
+rotates refresh tokens the user is signed out. `EncryptedCookieSessionStore`
+cannot hold such a lock, so with a rotating authorization server a request
+still carrying the cookie from before a refresh replays the old token. See
+[session limitations](../known-limitations.md#sessions-udibooauth2honobff) for
+both cases. `runSessionStoreContractTests` checks the lock when a store
+implements it.
 
 Keep the session lifetime consistent between the store and
 `HonoBff.sessionMaxAgeMs`. A stateful store's update must reject revoked,

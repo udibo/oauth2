@@ -97,6 +97,7 @@ import {
   type SessionStore,
   sessionStoreMaxAgeMs,
   supportsBackchannelLogout,
+  supportsRefreshLock,
 } from "./session-store.ts";
 import {
   buildDownstreamHeaders,
@@ -389,10 +390,14 @@ export interface HonoBffOptions {
    *   server-side store is needed. It cannot list sessions, so it does not
    *   support {@link HonoBffOptions.backchannelLogout}, and sign-out cannot
    *   invalidate a copied cookie: it stays valid until its `maxAgeMs`. Use a
-   *   shared {@link SessionStore} when you need revocation.
+   *   shared {@link SessionStore} when you need revocation. Against an
+   *   authorization server that rotates refresh tokens, a request still
+   *   carrying the cookie from before a refresh replays the old token and
+   *   trips reuse detection.
    * - A {@link SessionStore} over a database or cache every instance shares,
-   *   for server-side revocation and back-channel logout. Check it with
-   *   `runSessionStoreContractTests`.
+   *   for server-side revocation and back-channel logout. Implement
+   *   `RefreshLockStore` (`withRefreshLock`) on it so instances refresh a
+   *   session one at a time, and check it with `runSessionStoreContractTests`.
    * - {@link MemorySessionStore} for a single process, tests and local
    *   development. A session it holds is unknown to every other instance, so
    *   behind a load balancer the user appears signed out.
@@ -758,6 +763,13 @@ type RefreshOutcome =
   | { status: "refreshed"; entry: SessionEntry }
   | { status: "revoked" }
   | { status: "unavailable" };
+
+function refreshedSince(seen: SessionData, current: SessionData): boolean {
+  return (
+    current.refreshToken !== seen.refreshToken ||
+    current.tokens.accessToken !== seen.tokens.accessToken
+  );
+}
 
 function isRevokedGrant(error: unknown): boolean {
   if (!isOAuth2Error(error)) return false;
@@ -1903,11 +1915,35 @@ export class HonoBff {
   #sharedRefresh(entry: SessionEntry): Promise<RefreshOutcome> {
     const inFlight = this.#refreshes.get(entry.cookieValue);
     if (inFlight) return inFlight;
-    const pending = this.#exchangeRefresh(entry).finally(() => {
+    const pending = this.#lockedRefresh(entry).finally(() => {
       this.#refreshes.delete(entry.cookieValue);
     });
     this.#refreshes.set(entry.cookieValue, pending);
     return pending;
+  }
+
+  async #lockedRefresh(entry: SessionEntry): Promise<RefreshOutcome> {
+    const store = this.#store;
+    if (!supportsRefreshLock(store)) return await this.#exchangeRefresh(entry);
+    const { cookieValue } = entry;
+    try {
+      return await store.withRefreshLock(
+        cookieValue,
+        async (): Promise<RefreshOutcome> => {
+          const current = await store.read(cookieValue);
+          if (!current) return { status: "revoked" };
+          if (refreshedSince(entry.data, current)) {
+            return {
+              status: "refreshed",
+              entry: { cookieValue, data: current },
+            };
+          }
+          return await this.#exchangeRefresh({ cookieValue, data: current });
+        },
+      );
+    } catch {
+      return { status: "unavailable" };
+    }
   }
 
   async #exchangeRefresh(entry: SessionEntry): Promise<RefreshOutcome> {

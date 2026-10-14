@@ -81,6 +81,65 @@ export function supportsBackchannelLogout(
 }
 
 /**
+ * Optional {@link SessionStore} capability: one token refresh at a time per
+ * session, across every instance that shares the store. A store opts in by
+ * implementing this method (it is duck-typed at runtime).
+ *
+ * Without it, `HonoBff` shares a refresh only between requests on the same
+ * instance. Two instances that refresh one session at once both present its
+ * refresh token: against an authorization server that rotates refresh tokens,
+ * the loser's exchange fails, or trips reuse detection and revokes the whole
+ * rotation family, and the user is signed out. With it, the BFF re-reads the
+ * session while it holds the lock and uses a peer's fresh tokens instead of
+ * spending the refresh token again. Implement it on any store more than one
+ * instance shares. {@link EncryptedCookieSessionStore} cannot: its sessions
+ * live in each browser's cookie, with nothing on the server to lock.
+ */
+export interface RefreshLockStore {
+  /**
+   * Runs `refresh` while no other `withRefreshLock` call for the same
+   * `cookieValue`, on any instance, is running, and settles with its result.
+   * Calls for other sessions must not wait on each other.
+   *
+   * - The lock is keyed by the cookie value, so it holds only for a store
+   *   whose `update` returns the cookie value it was given. A store that
+   *   issues a new value on update cannot implement it.
+   * - The lock must not block this store's own `read`, `update` or `destroy`:
+   *   `refresh` reads, writes and can destroy the session it locks.
+   * - Release it when `refresh` settles, including when it throws.
+   * - The lock covers the whole refresh: the token request and the store's
+   *   own reads and writes. With `DirectClient` a refresh can take about 30
+   *   seconds when its discovery cache is cold, since discovery tries two
+   *   well-known paths and every request has a 10-second deadline. If the
+   *   lock expires when its holder dies, expire it only after that plus the
+   *   store's own I/O, or renew the lease while it is held. A lock that
+   *   expires mid-refresh lets a second instance spend the same token.
+   * - Reject when the lock cannot be acquired within a bound you choose.
+   *   `HonoBff` then answers `502` `temporarily_unavailable` and keeps the
+   *   session.
+   *
+   * A Postgres store can hold `pg_advisory_xact_lock` on a hash of the session
+   * key in a transaction around `refresh`, with a `lock_timeout`. A Redis
+   * store can take a key with `SET NX PX` and wait for it with a deadline. Key
+   * the lock by the same digest the store keys its records by, never the raw
+   * cookie value, and include the tenant in a tenant-scoped store.
+   */
+  withRefreshLock<T>(
+    cookieValue: string,
+    refresh: () => Promise<T>,
+  ): Promise<T>;
+}
+
+/** Whether a store implements the {@link RefreshLockStore} capability. */
+export function supportsRefreshLock(
+  store: SessionStore,
+): store is SessionStore & RefreshLockStore {
+  return (
+    typeof (store as Partial<RefreshLockStore>).withRefreshLock === "function"
+  );
+}
+
+/**
  * Default session lifetime — 14 days — shared by
  * {@link EncryptedCookieSessionStore} and `HonoBff`'s
  * `sessionMaxAgeMs`, so a BFF built with neither configured has a cookie
@@ -150,9 +209,10 @@ export interface SessionStore {
  * persistent store in production.
  */
 export class MemorySessionStore
-  implements SessionStore, BackchannelLogoutStore
+  implements SessionStore, BackchannelLogoutStore, RefreshLockStore
 {
   #sessions = new Map<string, SessionData>();
+  #refreshLocks = new Map<string, Promise<void>>();
 
   /** Stores the session under a fresh random id and returns it as the cookie value. */
   create(data: SessionData): Promise<string> {
@@ -181,6 +241,31 @@ export class MemorySessionStore
   destroy(cookieValue: string): Promise<void> {
     this.#sessions.delete(cookieValue);
     return Promise.resolve();
+  }
+
+  /**
+   * Runs `refresh` once every earlier call for the same session has settled,
+   * so every `HonoBff` sharing this store object refreshes a session once.
+   * Calls for other sessions run alongside.
+   */
+  async withRefreshLock<T>(
+    cookieValue: string,
+    refresh: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#refreshLocks.get(cookieValue) ?? Promise.resolve();
+    const run = previous.then(refresh);
+    const released = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#refreshLocks.set(cookieValue, released);
+    try {
+      return await run;
+    } finally {
+      if (this.#refreshLocks.get(cookieValue) === released) {
+        this.#refreshLocks.delete(cookieValue);
+      }
+    }
   }
 
   /**

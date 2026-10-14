@@ -430,6 +430,34 @@ fetch redirects. A trusted provider configuration is part of that boundary.
     window; `HonoBff`'s `sessionMaxAgeMs` (also 14 days) is the absolute one,
     and the constructor throws if the two are configured to disagree. Genuine
     revocation still requires a DB-backed store.
+- **Refreshing across instances needs a store with a refresh lock.** `HonoBff`
+  shares one token refresh between concurrent requests for a session on the
+  same instance. Across instances it relies on the session store: a store that
+  implements `withRefreshLock` (`RefreshLockStore`) makes the instances refresh
+  a session one at a time, and an instance that waited re-reads the session and
+  uses the tokens its peer stored instead of spending the refresh token again.
+  `MemorySessionStore` implements it for the BFFs that share one store object.
+  A shared `SessionStore` without it leaves a race when parallel requests for
+  one session reach different instances near access-token expiry, as when a
+  single-page app fires several calls after sitting idle. Against an
+  authorization server that rotates refresh tokens, both instances present the
+  same refresh token. The loser's exchange fails and it destroys the session,
+  or it arrives a moment later with a rotated-out token, reuse detection
+  revokes the whole rotation family, and `onTokenReuse` reports a replay that
+  was not an attack. Either way the user is signed out. Implement
+  `withRefreshLock` on any store more than one instance shares, and check it
+  with `runSessionStoreContractTests`.
+- **With `EncryptedCookieSessionStore`, a request carrying the cookie from
+  before a refresh replays the old refresh token.** The session lives in the
+  browser's cookie, so the server has nothing to lock or re-read. A refresh
+  seals the rotated token into a new cookie that reaches the browser with that
+  response, and a request the browser sent before then still carries the old
+  one. When that request reaches another instance, or the same instance after
+  the first refresh has finished, it presents the rotated-out refresh token:
+  reuse detection revokes the family, `onTokenReuse` fires, and both cookies
+  stop working. An authorization server that does not rotate refresh tokens is
+  unaffected. Where it rotates them, prefer a shared stateful store that
+  implements `withRefreshLock`.
 - **A token refresh in flight on a replaced session can clear the new cookie.**
   When a request on the earlier cookie starts a refresh just before a new
   sign-in in the same browser replaces that session, the refresh then fails as
