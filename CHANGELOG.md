@@ -1,3 +1,9 @@
+## [0.21.1](https://github.com/udibo/oauth2/compare/0.21.0...0.21.1) (2026-10-14)
+
+### Bug Fixes
+
+* **bff:** refresh a session once across instances sharing a store ([#105](https://github.com/udibo/oauth2/issues/105)) ([33e90de](https://github.com/udibo/oauth2/commit/33e90de9265c7bdb9b9ae315078dfeb81cb38b8b)), closes [#97](https://github.com/udibo/oauth2/issues/97)
+
 ## [0.21.0](https://github.com/udibo/oauth2/compare/0.20.0...0.21.0) (2026-10-14)
 
 ### ⚠ BREAKING CHANGES
