@@ -1,3 +1,9 @@
+## [0.21.2](https://github.com/udibo/oauth2/compare/0.21.1...0.21.2) (2026-10-14)
+
+### Bug Fixes
+
+* put a deadline on the connectors' provider reads ([#112](https://github.com/udibo/oauth2/issues/112)) ([ccd445e](https://github.com/udibo/oauth2/commit/ccd445e41f2d7a11be8fde2348babafddc96f9d7)), closes [#106](https://github.com/udibo/oauth2/issues/106) [#107](https://github.com/udibo/oauth2/issues/107)
+
 ## [0.21.1](https://github.com/udibo/oauth2/compare/0.21.0...0.21.1) (2026-10-14)
 
 ### Bug Fixes
