@@ -1278,6 +1278,14 @@ describe("AuthorizationServer", () => {
         confidential: true,
         grants: ["refresh_token"],
       };
+      const publicClient: TestClient = {
+        id: "public-1",
+        grants: ["refresh_token"],
+      };
+      const otherPublicClient: TestClient = {
+        id: "public-2",
+        grants: ["refresh_token"],
+      };
 
       async function rotatingServer(
         options: { replayGraceSeconds?: number; tombstones?: boolean } = {},
@@ -1292,6 +1300,8 @@ describe("AuthorizationServer", () => {
         }
         await setupTestData(services);
         await services.clientService.add(otherClient, "other-secret");
+        await services.clientService.add(publicClient);
+        await services.clientService.add(otherPublicClient);
         const reuseEvents: string[] = [];
         const rotating = new AuthorizationServer({
           resolve: () => ({
@@ -1491,6 +1501,72 @@ describe("AuthorizationServer", () => {
         });
 
         expect(response.status).toBe(200);
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+        ).not.toBe(undefined);
+      });
+
+      it("leaves the family of a token rotated for another public client alone", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const original = await issueFamily(tokenService, publicClient);
+        const rotated = await rotating.handleTokenRequest(
+          tokenRequest({
+            grant_type: "refresh_token",
+            refresh_token: original.refreshToken,
+            client_id: publicClient.id,
+          }),
+        );
+        expect(rotated.status).toBe(200);
+        const successor: { refresh_token: string } = await rotated.json();
+
+        const response = await rotating.handleRevocationRequest(
+          formRequest("http://localhost/revoke", {
+            token: original.refreshToken,
+            client_id: otherPublicClient.id,
+          }),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("");
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "a public client names itself without a secret, so the binding to " +
+            "the token's own client is all that keeps another app's session",
+        ).not.toBe(undefined);
+      });
+
+      it("does not cascade from a rotated-out token that has no family", async () => {
+        const { server: rotating, tokenService } = await rotatingServer();
+        const familyless = {
+          accessToken: crypto.randomUUID(),
+          accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+          refreshToken: crypto.randomUUID(),
+          refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+          client: testClient,
+          user: testUser,
+        };
+        const bystander = {
+          ...familyless,
+          accessToken: crypto.randomUUID(),
+          refreshToken: crypto.randomUUID(),
+          client: otherClient,
+        };
+        await tokenService.save(familyless);
+        await tokenService.save(bystander);
+        const successor = await rotate(rotating, familyless.refreshToken);
+        const tombstone = await tokenService.getRevokedRefreshToken(
+          familyless.refreshToken,
+        );
+        expect(tombstone?.rotatedAt).toBeInstanceOf(Date);
+        expect(tombstone?.familyId).toBe(undefined);
+
+        await revoke(rotating, { token: familyless.refreshToken });
+
+        expect(
+          await tokenService.getRefreshToken(bystander.refreshToken),
+          "a tombstone without a family names no family to end; treating " +
+            "the missing id as one ends every family-less token",
+        ).not.toBe(undefined);
         expect(
           await tokenService.getRefreshToken(successor.refresh_token),
         ).not.toBe(undefined);
