@@ -3577,11 +3577,12 @@ sign-up policy.
 A token service that implements `rotate` also runs
 `runTokenRotationContractTests`. It races `rotate` against itself, against
 `revokeFamily`, and through the refresh grant against a replay, and fails a
-rotation partway. A store whose `rotate` awaits between its claim and its
-insert, as a database transaction does, awaits `barriers.afterClaim()` there in
-its test build and sets `rotateAwaitsBarrier`, so the suite can hold a rotation
-at that point. Without the barrier, the suite can only overlap whole calls,
-which proves nothing about a gap inside `rotate`:
+rotation partway. Your store's test build awaits `barriers.afterClaim()` inside
+`rotate`, between its claim and its insert, so the suite can hold a rotation at
+that point; a store that never reaches the barrier fails every held case. Set
+`rotateAwaitsBarrier: false` only when `rotate` never awaits between its claim
+and its insert, as in `MemoryTokenService`. The suite then overlaps whole
+calls, which proves nothing about a gap inside `rotate`:
 
 ```ts
 import type { ClientInterface } from "@udibo/oauth2/server";
@@ -3621,7 +3622,6 @@ runTokenRotationContractTests<AppClient, AppUser>({
   makeServices: freshTokenServices,
   addUser,
   addClient,
-  rotateAwaitsBarrier: true,
 });
 ```
 
@@ -5459,12 +5459,13 @@ use `setCredential`.
 For rotating refresh tokens, implement `rotate` so the claim of the old
 credential and the save of its successor are one atomic step, and serialize it
 with `revokeFamily`, for example with a lock per family taken first in both;
-`runTokenRotationContractTests` checks both. Without `rotate`,
-`revokeRotated` (or the fallback `revoke`) must return `true` only to the caller
-that consumed the old credential. Keep replay tombstones and family revocation
-state if you enable reuse detection. Without `rotate` the library's calls are
-separate storage operations; your adapter must account for competing writes and
-failures. Revoking a family must also prevent a racing save from restoring it.
+`runTokenRotationContractTests`, with your store's barrier wired, checks both.
+Keep replay tombstones if you enable reuse detection. Without `rotate`, the
+library's calls are separate storage operations: `revokeRotated` (or the
+fallback `revoke`) must return `true` only to the caller that consumed the old
+credential, your adapter must account for competing writes and failures, and
+`revokeFamily` must record the revoked family so a racing save cannot restore
+it.
 
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.
@@ -5711,10 +5712,11 @@ sections apply only when you host those flows.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
 - [ ] The token store implements `rotate`, claiming a refresh token and saving
       its successor in one step that `revokeFamily` cannot interleave with, and
-      passes `runTokenRotationContractTests`.
-- [ ] Family revocation, from a replay or from revoking a rotated-out token,
-      cannot be undone by a concurrent token save: `revokeFamily` records the
-      family and `save` stores any later member of it already revoked.
+      passes `runTokenRotationContractTests` with its barrier wired.
+- [ ] Without `rotate`, family revocation, from a replay or from revoking a
+      rotated-out token, cannot be undone by a concurrent token save:
+      `revokeFamily` records the family and `save` stores any later member of
+      it already revoked.
 - [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
       from `replayGraceSeconds`, not from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not

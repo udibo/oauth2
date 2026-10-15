@@ -9,12 +9,13 @@
  * insert fails. Each case asserts the store's end state, the live tokens of
  * the family, not only the value each call resolved.
  *
- * A store whose `rotate` awaits I/O between its claim and its insert, such as
- * one backed by a database transaction, wires {@link TokenRotationBarriers}
- * into `rotate` and sets `rotateAwaitsBarrier`, so the suite can hold a
- * rotation between the two and race the other call against it. A store whose
- * `rotate` never awaits between them, such as `MemoryTokenService`, cannot be
- * held there; the suite runs those schedules as overlapping calls.
+ * The store under test awaits {@link TokenRotationBarriers.afterClaim} inside
+ * `rotate`, between its claim and its insert, so the suite can hold a rotation
+ * there and race the other call against it; a store that never reaches the
+ * barrier fails every held case. Only a store whose `rotate` never awaits
+ * between its claim and its insert, such as `MemoryTokenService`, opts out with
+ * `rotateAwaitsBarrier: false`; the suite then runs those schedules as
+ * overlapping calls.
  *
  * @module
  */
@@ -35,7 +36,7 @@ import { race } from "./_race.ts";
 /**
  * The point inside a store's {@linkcode TokenServiceInterface.rotate} at which
  * {@link runTokenRotationContractTests} holds a rotation. Wire it into a test
- * build of the store and set `rotateAwaitsBarrier`.
+ * build of the store.
  */
 export interface TokenRotationBarriers {
   /**
@@ -69,9 +70,9 @@ export interface TokenRotationContractOptions<
   S extends AbstractScope = BasicScope,
 > {
   /**
-   * Returns fresh services for each case. A store that sets
-   * `rotateAwaitsBarrier` awaits `barriers.afterClaim()` inside `rotate`;
-   * any other store ignores `barriers`.
+   * Returns fresh services for each case, with `rotate` awaiting
+   * `barriers.afterClaim()` between its claim and its insert. A store that
+   * sets `rotateAwaitsBarrier: false` ignores `barriers`.
    */
   makeServices(
     barriers: TokenRotationBarriers,
@@ -91,12 +92,13 @@ export interface TokenRotationContractOptions<
   /** Builds a distinct client fixture for the given sequence number. Defaults to a client granting `authorization_code` and `refresh_token`. */
   makeClient?(seq: number): C;
   /**
-   * Set to `true` when `rotate` awaits `barriers.afterClaim()`. The suite
-   * then holds a rotation between its claim and its insert while it runs a
+   * Whether `rotate` awaits `barriers.afterClaim()`. Defaults to `true`: the
+   * suite holds a rotation between its claim and its insert while it runs a
    * family revocation, a second rotation, a replayed refresh, or a rotation in
-   * another family, and fails the insert there. Defaults to `false`, which
-   * runs those schedules as overlapping calls: a proof only for a store whose
-   * `rotate` does not await between its claim and its insert.
+   * another family, and fails the insert there. Set `false` only when
+   * `rotate` never awaits between its claim and its insert, as in
+   * `MemoryTokenService`; the suite then runs those schedules as overlapping
+   * calls, which cannot reach a gap inside `rotate`.
    */
   rotateAwaitsBarrier?: boolean;
   /**
@@ -160,7 +162,7 @@ export function runTokenRotationContractTests<
 >(options: TokenRotationContractOptions<C, U, S>): void {
   const makeUser = options.makeUser ?? defaultMakeUser<U>;
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
-  const pausable = options.rotateAwaitsBarrier ?? false;
+  const pausable = options.rotateAwaitsBarrier ?? true;
   const blockedAfterMs = options.blockedAfterMs ?? 100;
 
   describe(
@@ -270,7 +272,9 @@ export function runTokenRotationContractTests<
         hold: Pick<Hold, "reached">,
         rotation: Promise<T>,
         unheld = "rotate settled without awaiting barriers.afterClaim; wire " +
-          "the barrier into rotate or leave rotateAwaitsBarrier unset",
+          "the barrier into rotate between its claim and its insert, or, " +
+          "only if rotate never awaits between them, set " +
+          "rotateAwaitsBarrier: false",
       ): Promise<void> {
         const outcome = await Promise.race([
           hold.reached.promise.then(() => "held" as const),
@@ -444,7 +448,7 @@ export function runTokenRotationContractTests<
       it("refuses a second rotation that starts while the first is held after its claim", async ({
         skip,
       }) => {
-        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier unset)");
+        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier: false)");
         const parent = await savedMember(family);
         const first = await member(family);
         const second = await member(family);
@@ -499,7 +503,7 @@ export function runTokenRotationContractTests<
       it("answers a replay that arrives while a rotation is held after its claim with invalid_grant, without revoking the family", async ({
         skip,
       }) => {
-        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier unset)");
+        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier: false)");
         const parent = await savedMember(family);
         const { observed, issued } = observe();
         const reuseEvents: TokenReuseEvent<C, U>[] = [];
@@ -596,7 +600,7 @@ export function runTokenRotationContractTests<
       it("rolls the claim back when the insert fails after it", async ({
         skip,
       }) => {
-        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier unset)");
+        skip(!pausable, "rotate cannot be held (rotateAwaitsBarrier: false)");
         const parent = await savedMember(family);
         const next = await member(family);
 

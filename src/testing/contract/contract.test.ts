@@ -105,6 +105,7 @@ runTokenServiceContractTests<TestClient, TestUser>({
 
 runTokenRotationContractTests<TestClient, TestUser>({
   describeName: "MemoryTokenService satisfies the rotate contract",
+  rotateAwaitsBarrier: false,
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(

@@ -216,7 +216,8 @@ export interface TokenServiceInterface<
    * {@linkcode getRevokedRefreshToken}, and revoke its access token as
    * `revokeRotated` would. Make it linearizable with
    * {@linkcode revokeFamily}, as that method requires.
-   * `runTokenRotationContractTests` checks it under concurrent callers.
+   * `runTokenRotationContractTests` checks it under concurrent callers, with
+   * the store's barrier wired between its claim and its insert.
    */
   rotate?(
     current: RefreshToken<Client, User, Scope>,
@@ -262,9 +263,11 @@ export interface TokenServiceInterface<
    * `/revoke` ends the family without firing `onTokenReuse`, so any audit
    * trail for that case has to come from this method.
    *
-   * Keep the family revoked: a successor that a concurrent rotation saves
-   * after this call must be stored already revoked, as
-   * `MemoryTokenService` does.
+   * Without {@linkcode rotate}, keep the family revoked: a successor that a
+   * concurrent rotation saves after this call must be stored already revoked,
+   * as `MemoryTokenService` does. A store that implements `rotate` meets this
+   * through the linearizability below, since the refresh grant then never
+   * saves a rotation's successor separately.
    *
    * With {@linkcode rotate}, make the two linearizable: once this resolves,
    * the family has no live member and no later `rotate` of a member
