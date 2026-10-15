@@ -25,6 +25,7 @@ import { generateSigningKey, signJwt } from "../../server/signing-keys.ts";
 import { runUserServiceContractTests } from "./user.ts";
 import { runClientServiceContractTests } from "./client.ts";
 import { runTokenServiceContractTests } from "./token.ts";
+import { runTokenRotationContractTests } from "./token-rotation.ts";
 import { runTokenReaderContractTests } from "./token-reader.ts";
 import { runAuthorizationCodeServiceContractTests } from "./authorization-code.ts";
 import { runDeviceAuthorizationServiceContractTests } from "./device-authorization.ts";
@@ -100,6 +101,25 @@ runTokenServiceContractTests<TestClient, TestUser>({
       secret,
       ownerUserId,
     ),
+});
+
+runTokenRotationContractTests<TestClient, TestUser>({
+  describeName: "MemoryTokenService satisfies the rotate contract",
+  makeServices: () => {
+    const userService = new MemoryUserService<TestUser>();
+    const clientService = new MemoryClientService<TestClient, TestUser>(
+      userService,
+    );
+    const tokenService = new MemoryTokenService<TestClient, TestUser>({
+      clientService,
+      userService,
+    });
+    return { userService, clientService, tokenService };
+  },
+  addUser: (svc, user, pw) =>
+    (svc as MemoryUserService<TestUser>).add(user, pw),
+  addClient: (svc, client) =>
+    (svc as MemoryClientService<TestClient, TestUser>).add(client),
 });
 
 runAuthorizationCodeServiceContractTests<TestClient, TestUser>({

@@ -382,6 +382,7 @@ it("release: backchannel logout wins against an in-flight BFF refresh", async ()
 it("release: a rotation-specific claim also permits only one successor", async () => {
   const { grant, tokenService, client, token } = await refreshFixture();
   Object.assign(tokenService, {
+    rotate: undefined,
     revokeRotated: tokenService.revoke.bind(tokenService),
   });
   const results = await Promise.allSettled(

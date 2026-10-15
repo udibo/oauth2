@@ -1506,9 +1506,10 @@ describe("AuthorizationServer", () => {
         ).not.toBe(undefined);
       });
 
-      it("keeps the family revoked when /revoke lands between the rotation's claim and its save", async () => {
+      it("keeps the family revoked when /revoke lands between a two-step rotation's claim and its save", async () => {
         const { server: rotating, tokenService } = await rotatingServer();
         const original = await issueFamily(tokenService);
+        Object.assign(tokenService, { rotate: undefined });
         const save = tokenService.save.bind(tokenService);
         let revokedInGap = false;
         tokenService.save = (async (token: Parameters<typeof save>[0]) => {

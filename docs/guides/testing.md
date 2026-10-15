@@ -276,6 +276,57 @@ These tests cover observed concurrency scenarios; they do not prove every
 possible database interleaving or validate your application's normalization and
 sign-up policy.
 
+A token service that implements `rotate` also runs
+`runTokenRotationContractTests`. It races `rotate` against itself, against
+`revokeFamily`, and through the refresh grant against a replay, and fails a
+rotation partway. A store whose `rotate` awaits between its claim and its
+insert, as a database transaction does, awaits `barriers.afterClaim()` there in
+its test build and sets `rotateAwaitsBarrier`, so the suite can hold a rotation
+at that point. Without the barrier, the suite can only overlap whole calls,
+which proves nothing about a gap inside `rotate`:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import {
+  runTokenRotationContractTests,
+  type TokenRotationBarriers,
+} from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshTokenServices(barriers: TokenRotationBarriers): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runTokenRotationContractTests<AppClient, AppUser>({
+  makeServices: freshTokenServices,
+  addUser,
+  addClient,
+  rotateAwaitsBarrier: true,
+});
+```
+
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
 - Two consumers of one OTP/code/refresh token cannot both succeed.

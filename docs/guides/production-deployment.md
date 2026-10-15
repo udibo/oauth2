@@ -107,12 +107,15 @@ nothing and the password is re-verified against the credential now stored;
 omitting the capability skips automatic upgrades. Explicit password resets still
 use `setCredential`.
 
-For rotating refresh tokens, `revokeRotated` (or the fallback `revoke`) must
-return `true` only to the caller that consumed the old credential. Keep replay
-tombstones and family revocation state if you enable reuse detection. The
-library's calls are separate storage operations; your adapter must account for
-competing writes and failures. Revoking a family must also prevent a racing save
-from restoring it.
+For rotating refresh tokens, implement `rotate` so the claim of the old
+credential and the save of its successor are one atomic step, and serialize it
+with `revokeFamily`, for example with a lock per family taken first in both;
+`runTokenRotationContractTests` checks both. Without `rotate`,
+`revokeRotated` (or the fallback `revoke`) must return `true` only to the caller
+that consumed the old credential. Keep replay tombstones and family revocation
+state if you enable reuse detection. Without `rotate` the library's calls are
+separate storage operations; your adapter must account for competing writes and
+failures. Revoking a family must also prevent a racing save from restoring it.
 
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.

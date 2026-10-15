@@ -195,6 +195,35 @@ export interface TokenServiceInterface<
   revokeRotated?(token: RefreshToken<Client, User, Scope>): Promise<boolean>;
 
   /**
+   * Rotates a refresh token in one atomic step: claims `current` and persists
+   * `next`, its successor in the same family, or does neither. Resolves the
+   * saved successor, or `undefined` with nothing persisted when `current` was
+   * already claimed or revoked, or its family has been revoked. Concurrent
+   * calls for one `current` produce exactly one successor.
+   *
+   * When implemented, the refresh grant calls it instead of
+   * {@linkcode revokeRotated} (or {@linkcode revoke}) followed by
+   * {@linkcode save}. Without it, the grant claims and saves in two calls,
+   * and a request that presents `current` between them finds it revoked with
+   * no live successor: reuse detection revokes the family and fires
+   * `onTokenReuse`, so a benign concurrent refresh signs the person out, and a
+   * store whose `revokeFamily` does not keep the family revoked leaves the
+   * successor live.
+   *
+   * Treat the claim as a rotation, never an end of grant: stamp the
+   * rotated-out record with {@linkcode RefreshToken.rotatedAt} exactly as
+   * {@linkcode revokeRotated} does, keep it findable through
+   * {@linkcode getRevokedRefreshToken}, and revoke its access token as
+   * `revokeRotated` would. Make it linearizable with
+   * {@linkcode revokeFamily}, as that method requires.
+   * `runTokenRotationContractTests` checks it under concurrent callers.
+   */
+  rotate?(
+    current: RefreshToken<Client, User, Scope>,
+    next: RefreshToken<Client, User, Scope>,
+  ): Promise<RefreshToken<Client, User, Scope> | undefined>;
+
+  /**
    * Revokes all tokens issued with the given authorization code.
    * Returns true if any tokens were revoked (indicating code replay).
    *
@@ -236,6 +265,12 @@ export interface TokenServiceInterface<
    * Keep the family revoked: a successor that a concurrent rotation saves
    * after this call must be stored already revoked, as
    * `MemoryTokenService` does.
+   *
+   * With {@linkcode rotate}, make the two linearizable: once this resolves,
+   * the family has no live member and no later `rotate` of a member
+   * succeeds, and a `rotate` that committed before this began has its
+   * successor revoked. A store whose `rotate` can be paused between its claim
+   * and its insert meets this by taking one per-family lock in both methods.
    */
   revokeFamily?(familyId: string): Promise<boolean>;
 
