@@ -12,6 +12,9 @@
  * with `user: undefined` and persists a token whose `user` is unset — a store
  * that requires a user cannot hold a machine token.
  *
+ * When the service implements `rotate`, its single-caller contract is checked
+ * here too; `runTokenRotationContractTests` checks it under concurrent callers.
+ *
  * @module
  */
 
@@ -367,7 +370,7 @@ export function runTokenServiceContractTests<
         const FAMILY = "family-1";
         const OTHER_FAMILY = "family-2";
 
-        async function saveFamilyMember(
+        async function familyMember(
           familyId: string,
           refreshTokenExpiresAt = new Date(Date.now() + 600_000),
         ): Promise<RefreshToken<C, U, S>> {
@@ -379,7 +382,7 @@ export function runTokenServiceContractTests<
             client,
             user,
           ))!;
-          const token: RefreshToken<C, U, S> = {
+          return {
             accessToken,
             accessTokenExpiresAt: new Date(Date.now() + 60_000),
             refreshToken,
@@ -389,6 +392,13 @@ export function runTokenServiceContractTests<
             client,
             user,
           };
+        }
+
+        async function saveFamilyMember(
+          familyId: string,
+          refreshTokenExpiresAt?: Date,
+        ): Promise<RefreshToken<C, U, S>> {
+          const token = await familyMember(familyId, refreshTokenExpiresAt);
           await tokenService.save(token);
           return token;
         }
@@ -494,6 +504,85 @@ export function runTokenServiceContractTests<
             "without rotatedAt the refresh grant's replayGraceSeconds never " +
               "applies, so every straggler revokes its family",
           );
+        });
+
+        it("rotates in one call: the parent is spent and stamped, the successor live", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.rotate !== "function",
+            "the service does not implement rotate",
+          );
+          const parent = await saveFamilyMember(FAMILY);
+          const next = await familyMember(FAMILY);
+          const before = Date.now();
+
+          const rotated = await tokenService.rotate!(parent, next);
+
+          expect(rotated?.refreshToken).toBe(next.refreshToken);
+          expect(
+            (await tokenService.getRefreshToken(next.refreshToken))?.familyId,
+          ).toBe(FAMILY);
+          expect(await tokenService.getToken(next.accessToken)).not.toBe(
+            undefined,
+          );
+          expect(await tokenService.getRefreshToken(parent.refreshToken)).toBe(
+            undefined,
+          );
+          expect(
+            await tokenService.getToken(parent.accessToken),
+            "rotation ends the parent's access token, as revokeRotated does",
+          ).toBe(undefined);
+          const tombstone = await tokenService.getRevokedRefreshToken!(
+            parent.refreshToken,
+          );
+          expect(tombstone?.familyId).toBe(FAMILY);
+          assert(
+            tombstone?.rotatedAt instanceof Date &&
+              tombstone.rotatedAt.getTime() >= before - 1000 &&
+              tombstone.rotatedAt.getTime() <= Date.now() + 1000,
+            "rotate must stamp rotatedAt as revokeRotated does, or the " +
+              "refresh grant's replayGraceSeconds and the revocation " +
+              "endpoint's family revocation stop applying",
+          );
+        });
+
+        it("refuses to rotate a refresh token that is no longer live, persisting nothing", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.rotate !== "function",
+            "the service does not implement rotate",
+          );
+          const parent = await saveFamilyMember(FAMILY);
+          const first = await familyMember(FAMILY);
+          const second = await familyMember(FAMILY);
+          const revokedParent = await saveFamilyMember(FAMILY);
+          const third = await familyMember(FAMILY);
+          await tokenService.revoke(
+            revokedParent.refreshToken,
+            "refresh_token",
+          );
+
+          expect(await tokenService.rotate!(parent, first)).not.toBe(undefined);
+          expect(
+            await tokenService.rotate!(parent, second),
+            "a refresh token is claimed once",
+          ).toBe(undefined);
+          expect(await tokenService.rotate!(revokedParent, third)).toBe(
+            undefined,
+          );
+          for (const refused of [second, third]) {
+            expect(
+              await tokenService.getRefreshToken(refused.refreshToken),
+            ).toBe(undefined);
+            expect(await tokenService.getToken(refused.accessToken)).toBe(
+              undefined,
+            );
+            expect(
+              await tokenService.getRevokedRefreshToken!(refused.refreshToken),
+            ).toBe(undefined);
+          }
         });
 
         it("finds a rotated-out token's family, so revoking it ends the live successor", async ({

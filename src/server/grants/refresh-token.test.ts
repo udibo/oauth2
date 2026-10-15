@@ -92,6 +92,78 @@ class RotationAwareTokenService extends MemoryTokenService<
   }
 }
 
+type TestTokenService = MemoryTokenService<TestClient, TestUser, BasicScope>;
+
+/**
+ * The token service without `rotate`, so the grant claims and saves in two
+ * calls. `beforeSave` runs before each `save` reaches the store.
+ */
+function twoStep(
+  tokenService: TestTokenService,
+  beforeSave?: () => Promise<void>,
+): TestTokenService {
+  return new Proxy(tokenService, {
+    get(target, prop) {
+      if (prop === "rotate") return undefined;
+      if (prop === "save" && beforeSave) {
+        return async (
+          token: RefreshToken<TestClient, TestUser, BasicScope>,
+        ) => {
+          await beforeSave();
+          return await target.save(token);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/**
+ * MemoryTokenService subclass that counts the storage calls a refresh makes,
+ * to pin rotation onto `rotate` when a service implements it.
+ */
+class CountingTokenService extends MemoryTokenService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
+  calls: string[] = [];
+  refuseRotation = false;
+  override rotate(
+    current: RefreshToken<TestClient, TestUser, BasicScope>,
+    next: RefreshToken<TestClient, TestUser, BasicScope>,
+  ): Promise<RefreshToken<TestClient, TestUser, BasicScope> | undefined> {
+    this.calls.push("rotate");
+    return this.refuseRotation
+      ? Promise.resolve(undefined)
+      : super.rotate(current, next);
+  }
+  override revokeRotated(
+    token: RefreshToken<TestClient, TestUser, BasicScope>,
+  ): Promise<boolean> {
+    this.calls.push("revokeRotated");
+    return super.revokeRotated(token);
+  }
+  override save(
+    token: RefreshToken<TestClient, TestUser, BasicScope>,
+  ): Promise<RefreshToken<TestClient, TestUser, BasicScope>>;
+  override save(
+    token: Token<TestClient, TestUser, BasicScope>,
+  ): Promise<Token<TestClient, TestUser, BasicScope>>;
+  override save(
+    token:
+      | Token<TestClient, TestUser, BasicScope>
+      | RefreshToken<TestClient, TestUser, BasicScope>,
+  ): Promise<
+    | Token<TestClient, TestUser, BasicScope>
+    | RefreshToken<TestClient, TestUser, BasicScope>
+  > {
+    this.calls.push("save");
+    return super.save(token as RefreshToken<TestClient, TestUser, BasicScope>);
+  }
+}
+
 describe("RefreshTokenGrant", () => {
   describe("grantType", () => {
     it("should return refresh_token", async () => {
@@ -338,7 +410,7 @@ describe("RefreshTokenGrant", () => {
       expect(oldRefresh).toBe(undefined);
     });
 
-    it("rotates through revokeRotated when implemented, never revoke", async () => {
+    it("without rotate, claims through revokeRotated when implemented, never revoke", async () => {
       const userService = new MemoryUserService();
       const clientService = new MemoryClientService(userService);
       const tokenService = new RotationAwareTokenService({
@@ -348,7 +420,10 @@ describe("RefreshTokenGrant", () => {
       await userService.add(testUser, "password");
       await clientService.add(testClient, "secret", testUser.id);
       const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
-        resolve: () => ({ clientService, tokenService }),
+        resolve: () => ({
+          clientService,
+          tokenService: twoStep(tokenService),
+        }),
       });
       await tokenService.save({
         accessToken: "old-access",
@@ -487,6 +562,131 @@ describe("RefreshTokenGrant", () => {
 
       expect(newToken.refreshToken).toBe("no-expire-refresh");
       expect(newToken.refreshTokenExpiresAt).toBe(undefined);
+    });
+  });
+
+  describe("atomic rotation", () => {
+    async function seed(
+      userService: MemoryUserService<TestUser>,
+      clientService: MemoryClientService<TestClient, TestUser>,
+    ) {
+      await userService.add(testUser, "password");
+      await clientService.add(testClient, "secret", testUser.id);
+      const client = (await clientService.get("client-1"))!;
+      const parent: RefreshToken<TestClient, TestUser, BasicScope> = {
+        accessToken: crypto.randomUUID(),
+        accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+        refreshToken: crypto.randomUUID(),
+        refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+        client,
+        user: testUser,
+        familyId: crypto.randomUUID(),
+      };
+      return { client, parent };
+    }
+
+    async function countingGrant() {
+      const userService = new MemoryUserService<TestUser>();
+      const clientService = new MemoryClientService<TestClient, TestUser>(
+        userService,
+      );
+      const tokenService = new CountingTokenService({
+        clientService,
+        userService,
+      });
+      const { client, parent } = await seed(userService, clientService);
+      await tokenService.save(parent);
+      tokenService.calls = [];
+      const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+        resolve: () => ({ clientService, tokenService }),
+      });
+      return { grant, tokenService, client, parent };
+    }
+
+    it("rotates through rotate when the store implements it, never a claim and a save", async () => {
+      const { grant, tokenService, client, parent } = await countingGrant();
+
+      const rotated = await exchangeToken(
+        grant,
+        refreshRequest(parent.refreshToken),
+        client,
+      );
+
+      expect(tokenService.calls).toStrictEqual(["rotate"]);
+      expect(rotated.familyId).toBe(parent.familyId);
+      expect(
+        (await tokenService.getRefreshToken(rotated.refreshToken))?.familyId,
+      ).toBe(parent.familyId);
+      expect(await tokenService.getRefreshToken(parent.refreshToken)).toBe(
+        undefined,
+      );
+    });
+
+    it("answers invalid_grant when rotate refuses the claim", async () => {
+      const { grant, tokenService, client, parent } = await countingGrant();
+      tokenService.refuseRotation = true;
+
+      await rejection(
+        () => exchangeToken(grant, refreshRequest(parent.refreshToken), client),
+        InvalidGrantError,
+        "refresh_token was already consumed",
+      );
+      expect(tokenService.calls).toStrictEqual(["rotate"]);
+    });
+
+    it("without rotate, a replay between the claim and the save is taken for theft and signs the person out", async () => {
+      const userService = new MemoryUserService<TestUser>();
+      const clientService = new MemoryClientService<TestClient, TestUser>(
+        userService,
+      );
+      const tokenService = new MemoryTokenService<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({ clientService, userService });
+      const { client, parent } = await seed(userService, clientService);
+      await tokenService.save(parent);
+      const claimed = Promise.withResolvers<void>();
+      const resume = Promise.withResolvers<void>();
+      const reuseEvents: string[] = [];
+      const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+        resolve: () => ({
+          clientService,
+          tokenService: twoStep(tokenService, async () => {
+            claimed.resolve();
+            await resume.promise;
+          }),
+        }),
+        onTokenReuse: (event) => {
+          reuseEvents.push(event.familyId);
+        },
+      });
+
+      const refreshing = exchangeToken(
+        grant,
+        refreshRequest(parent.refreshToken),
+        client,
+      );
+      await claimed.promise;
+      await rejection(
+        () => exchangeToken(grant, refreshRequest(parent.refreshToken), client),
+        InvalidGrantError,
+      );
+      resume.resolve();
+      const successor = await refreshing;
+
+      expect(
+        reuseEvents,
+        "the documented two-step gap: a replay there finds no live successor",
+      ).toStrictEqual([parent.familyId]);
+      expect(
+        await tokenService.getRefreshToken(successor.refreshToken),
+        "the store keeps the revoked family revoked, so the refresh that " +
+          "claimed the parent receives a dead successor",
+      ).toBe(undefined);
+      expect(await tokenService.getToken(successor.accessToken)).toBe(
+        undefined,
+      );
     });
   });
 

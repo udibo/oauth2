@@ -68,9 +68,13 @@ sections apply only when you host those flows.
 - [ ] Registered callbacks and allowed grants are restricted to the app's actual
       clients.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
-- [ ] Family revocation, from a replay or from revoking a rotated-out token,
-      cannot be undone by a concurrent token save: `revokeFamily` records the
-      family and `save` stores any later member of it already revoked.
+- [ ] The token store implements `rotate`, claiming a refresh token and saving
+      its successor in one step that `revokeFamily` cannot interleave with, and
+      passes `runTokenRotationContractTests` with its barrier wired.
+- [ ] Without `rotate`, family revocation, from a replay or from revoking a
+      rotated-out token, cannot be undone by a concurrent token save:
+      `revokeFamily` records the family and `save` stores any later member of
+      it already revoked.
 - [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
       from `replayGraceSeconds`, not from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not

@@ -518,6 +518,36 @@ disabled and a replayed token simply fails with `invalid_grant` — rotation sti
 happens, but a theft can't be distinguished from a typo. `MemoryTokenService`
 implements both, so the detection path is exercisable in tests.
 
+### Atomic rotation
+
+Implement the optional `rotate(current, next)` so a refresh claims the presented
+token and saves its successor as one step. It resolves the saved successor, or
+`undefined` with nothing saved when `current` was already claimed or revoked, or
+its family has been revoked; the grant answers `undefined` with `invalid_grant`.
+Stamp the rotated-out record with `rotatedAt` exactly as `revokeRotated` does,
+or `replayGraceSeconds` and the revocation endpoint's family revocation stop
+applying. `MemoryTokenService` implements it.
+
+Without `rotate`, the grant claims the token with `revokeRotated` (or `revoke`)
+and saves the successor in a second call. A refresh that presents the same token
+between those calls, such as a client's own concurrent request, finds it
+revoked with no live successor. Reuse detection takes that for theft: it revokes
+the family and fires `onTokenReuse`. A store that keeps a revoked family
+revoked then stores the successor already revoked, so the client that refreshed
+is signed out; a store that does not leaves that successor live in a family the
+server revoked. With `rotate`, a concurrent refresh either claims the token
+first or loses the claim and gets a plain `invalid_grant`.
+
+When your `rotate` awaits I/O between its claim and its insert, as a database
+transaction does, `revokeFamily` must still be linearizable with it: once
+`revokeFamily` resolves, the family has no live member and no later `rotate` of
+a member succeeds, and a `rotate` that committed before it began has its
+successor revoked. Taking one lock per family, first in both methods, meets
+this: a revocation that would otherwise run while a rotation is between its
+claim and its insert waits, then sees and revokes the successor. Prove it with
+`runTokenRotationContractTests` (see
+[testing](testing.md#persistent-storage-contracts)).
+
 ### Replay grace for clients that race themselves
 
 Reuse detection cannot tell a thief from a client that raced itself. A
@@ -625,11 +655,14 @@ replay grace through `replayGraceSeconds`, never by hiding recently rotated
 tombstones in the store: a hidden tombstone also hides the family from a
 sign-out that races the refresh.
 
-The refresh grant saves the successor after it claims the presented token, as
-two storage calls. A revocation that lands between them finds no live successor
-to revoke. To close that gap, `revokeFamily` must record the revoked family and
-`save` must store any later member of it already revoked. `MemoryTokenService`
-does; a custom store needs the same, and reuse detection relies on it too.
+Without `rotate`, the refresh grant saves the successor after it claims the
+presented token, as two storage calls. A revocation that lands between them
+finds no live successor to revoke. To close that gap, `revokeFamily` must record
+the revoked family and `save` must store any later member of it already revoked.
+`MemoryTokenService` does; a custom store needs the same, and reuse detection
+relies on it too. A store that implements
+[`rotate`](#atomic-rotation) has no such gap, provided `revokeFamily` is
+linearizable with it.
 
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns

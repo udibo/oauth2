@@ -24,6 +24,12 @@
  * also have separate suites. They use app-owned fixture helpers to verify
  * conditional credential writes and immediate, user-scoped session revocation.
  *
+ * `TokenServiceInterface.rotate` has a runner of its own for concurrent
+ * schedules: two rotations of one refresh token, a family revocation racing a
+ * rotation, and a replay racing a refresh. A store that awaits between its
+ * claim and its insert wires `TokenRotationBarriers` into `rotate`, so the
+ * suite can hold a rotation there.
+ *
  * The service runners take a factory plus seed helpers because `add` /
  * `register` methods aren't part of the public service interfaces — the
  * consumer tells the runner how to populate test data.
@@ -43,6 +49,12 @@ export {
   runTokenServiceContractTests,
   type TokenServiceContractOptions,
 } from "./token.ts";
+export {
+  runTokenRotationContractTests,
+  type TokenRotationBarriers,
+  type TokenRotationContractOptions,
+  type TokenRotationContractServices,
+} from "./token-rotation.ts";
 export {
   runTokenReaderContractTests,
   type TokenReaderContractFixture,

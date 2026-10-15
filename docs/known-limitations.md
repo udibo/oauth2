@@ -513,11 +513,24 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   as `MemoryTokenService` does; see
   [revocation](guides/become-an-oauth-provider.md#revocation-and-introspection).
   Another authorization server may revoke only the token it was given, and
-  then the successor stays live until it expires. A revocation can also reach
-  the authorization server between the refresh grant's claim of the old token
-  and its save of the successor. `MemoryTokenService` keeps a revoked family
-  revoked, so that save stores the successor already revoked. A custom token
-  store misses the successor in that gap unless it does the same.
+  then the successor stays live until it expires. With a token service that
+  does not implement `rotate`, a revocation can also reach the authorization
+  server between the refresh grant's claim of the old token and its save of
+  the successor. `MemoryTokenService` keeps a revoked family revoked, so that
+  save stores the successor already revoked. A custom token store misses the
+  successor in that gap unless it does the same.
+- **Without `rotate`, a refresh that races another refresh of the same token
+  can sign the person out.** The refresh grant then claims the presented token
+  and saves its successor in two storage calls. A second request that presents
+  the token between them finds it revoked with no live successor, and reuse
+  detection treats it as theft: the family is revoked and `onTokenReuse`
+  fires. A store that keeps a revoked family revoked, as `MemoryTokenService`
+  does, then saves the first request's successor already revoked, so the
+  person is signed out; a store that does not leaves that successor live in a
+  family the server revoked. A token store
+  that implements `rotate` claims and saves in one step, and the second request
+  gets a plain `invalid_grant` instead. `MemoryTokenService` implements it; see
+  [atomic rotation](guides/become-an-oauth-provider.md#atomic-rotation).
 - **With `EncryptedCookieSessionStore`, a refresh's own response can put a
   signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
   refresh ends the grace for the whole chain, including a refresh still in

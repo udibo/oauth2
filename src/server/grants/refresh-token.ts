@@ -136,10 +136,14 @@ export class RefreshTokenGrant<
    * token (and rotates the refresh token when the token service supports it)
    * from a valid, unexpired refresh token.
    *
-   * Rotation revokes the exchanged token through the token service's
-   * `revokeRotated` when implemented, falling back to `revoke` — so a service
-   * whose `revoke` ends the owning session can keep this bookkeeping step
-   * from signing the person out.
+   * Rotation claims the exchanged token and saves its successor in one call
+   * to the token service's `rotate` when implemented. Otherwise it takes two
+   * calls: it revokes the exchanged token through `revokeRotated` when
+   * implemented, falling back to `revoke` — so a service whose `revoke` ends
+   * the owning session can keep this bookkeeping step from signing the
+   * person out — and then saves the successor. A refresh that presents the
+   * exchanged token between those two calls is treated as reuse
+   * ({@linkcode TokenServiceInterface.rotate} describes the cost).
    *
    * Rotation renews the refresh token's sliding lifetime, bounded by the
    * family's absolute cap when the token service implements
@@ -263,6 +267,13 @@ export class RefreshTokenGrant<
       this.capAtFamilyExpiry(nextRefreshToken, familyExpiresAt);
     }
 
+    if (tokenService.rotate) {
+      const rotated = await tokenService.rotate(currentToken, nextRefreshToken);
+      if (!rotated) {
+        throw new InvalidGrantError("refresh_token was already consumed");
+      }
+      return rotated;
+    }
     const claimed = tokenService.revokeRotated
       ? await tokenService.revokeRotated(currentToken)
       : await tokenService.revoke(currentToken);

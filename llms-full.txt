@@ -1128,6 +1128,36 @@ disabled and a replayed token simply fails with `invalid_grant` — rotation sti
 happens, but a theft can't be distinguished from a typo. `MemoryTokenService`
 implements both, so the detection path is exercisable in tests.
 
+### Atomic rotation
+
+Implement the optional `rotate(current, next)` so a refresh claims the presented
+token and saves its successor as one step. It resolves the saved successor, or
+`undefined` with nothing saved when `current` was already claimed or revoked, or
+its family has been revoked; the grant answers `undefined` with `invalid_grant`.
+Stamp the rotated-out record with `rotatedAt` exactly as `revokeRotated` does,
+or `replayGraceSeconds` and the revocation endpoint's family revocation stop
+applying. `MemoryTokenService` implements it.
+
+Without `rotate`, the grant claims the token with `revokeRotated` (or `revoke`)
+and saves the successor in a second call. A refresh that presents the same token
+between those calls, such as a client's own concurrent request, finds it
+revoked with no live successor. Reuse detection takes that for theft: it revokes
+the family and fires `onTokenReuse`. A store that keeps a revoked family
+revoked then stores the successor already revoked, so the client that refreshed
+is signed out; a store that does not leaves that successor live in a family the
+server revoked. With `rotate`, a concurrent refresh either claims the token
+first or loses the claim and gets a plain `invalid_grant`.
+
+When your `rotate` awaits I/O between its claim and its insert, as a database
+transaction does, `revokeFamily` must still be linearizable with it: once
+`revokeFamily` resolves, the family has no live member and no later `rotate` of
+a member succeeds, and a `rotate` that committed before it began has its
+successor revoked. Taking one lock per family, first in both methods, meets
+this: a revocation that would otherwise run while a rotation is between its
+claim and its insert waits, then sees and revokes the successor. Prove it with
+`runTokenRotationContractTests` (see
+[testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md#persistent-storage-contracts)).
+
 ### Replay grace for clients that race themselves
 
 Reuse detection cannot tell a thief from a client that raced itself. A
@@ -1235,11 +1265,14 @@ replay grace through `replayGraceSeconds`, never by hiding recently rotated
 tombstones in the store: a hidden tombstone also hides the family from a
 sign-out that races the refresh.
 
-The refresh grant saves the successor after it claims the presented token, as
-two storage calls. A revocation that lands between them finds no live successor
-to revoke. To close that gap, `revokeFamily` must record the revoked family and
-`save` must store any later member of it already revoked. `MemoryTokenService`
-does; a custom store needs the same, and reuse detection relies on it too.
+Without `rotate`, the refresh grant saves the successor after it claims the
+presented token, as two storage calls. A revocation that lands between them
+finds no live successor to revoke. To close that gap, `revokeFamily` must record
+the revoked family and `save` must store any later member of it already revoked.
+`MemoryTokenService` does; a custom store needs the same, and reuse detection
+relies on it too. A store that implements
+[`rotate`](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#atomic-rotation) has no such gap, provided `revokeFamily` is
+linearizable with it.
 
 This puts a real requirement on your token service: `getRefreshToken` must
 return live refresh tokens. A service whose `getRefreshToken` returns
@@ -3541,6 +3574,57 @@ These tests cover observed concurrency scenarios; they do not prove every
 possible database interleaving or validate your application's normalization and
 sign-up policy.
 
+A token service that implements `rotate` also runs
+`runTokenRotationContractTests`. It races `rotate` against itself, against
+`revokeFamily`, and through the refresh grant against a replay, and fails a
+rotation partway. Your store's test build awaits `barriers.afterClaim()` inside
+`rotate`, between its claim and its insert, so the suite can hold a rotation at
+that point; a store that never reaches the barrier fails every held case. Set
+`rotateAwaitsBarrier: false` only when `rotate` never awaits between its claim
+and its insert, as in `MemoryTokenService`. The suite then overlaps whole
+calls, which proves nothing about a gap inside `rotate`:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import {
+  runTokenRotationContractTests,
+  type TokenRotationBarriers,
+} from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshTokenServices(barriers: TokenRotationBarriers): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runTokenRotationContractTests<AppClient, AppUser>({
+  makeServices: freshTokenServices,
+  addUser,
+  addClient,
+});
+```
+
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
 - Two consumers of one OTP/code/refresh token cannot both succeed.
@@ -5372,12 +5456,16 @@ nothing and the password is re-verified against the credential now stored;
 omitting the capability skips automatic upgrades. Explicit password resets still
 use `setCredential`.
 
-For rotating refresh tokens, `revokeRotated` (or the fallback `revoke`) must
-return `true` only to the caller that consumed the old credential. Keep replay
-tombstones and family revocation state if you enable reuse detection. The
-library's calls are separate storage operations; your adapter must account for
-competing writes and failures. Revoking a family must also prevent a racing save
-from restoring it.
+For rotating refresh tokens, implement `rotate` so the claim of the old
+credential and the save of its successor are one atomic step, and serialize it
+with `revokeFamily`, for example with a lock per family taken first in both;
+`runTokenRotationContractTests`, with your store's barrier wired, checks both.
+Keep replay tombstones if you enable reuse detection. Without `rotate`, the
+library's calls are separate storage operations: `revokeRotated` (or the
+fallback `revoke`) must return `true` only to the caller that consumed the old
+credential, your adapter must account for competing writes and failures, and
+`revokeFamily` must record the revoked family so a racing save cannot restore
+it.
 
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.
@@ -5622,9 +5710,13 @@ sections apply only when you host those flows.
 - [ ] Registered callbacks and allowed grants are restricted to the app's actual
       clients.
 - [ ] Codes and refresh-token rotation claims are consumed atomically.
-- [ ] Family revocation, from a replay or from revoking a rotated-out token,
-      cannot be undone by a concurrent token save: `revokeFamily` records the
-      family and `save` stores any later member of it already revoked.
+- [ ] The token store implements `rotate`, claiming a refresh token and saving
+      its successor in one step that `revokeFamily` cannot interleave with, and
+      passes `runTokenRotationContractTests` with its barrier wired.
+- [ ] Without `rotate`, family revocation, from a replay or from revoking a
+      rotated-out token, cannot be undone by a concurrent token save:
+      `revokeFamily` records the family and `save` stores any later member of
+      it already revoked.
 - [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
       from `replayGraceSeconds`, not from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not
@@ -6814,11 +6906,24 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   as `MemoryTokenService` does; see
   [revocation](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#revocation-and-introspection).
   Another authorization server may revoke only the token it was given, and
-  then the successor stays live until it expires. A revocation can also reach
-  the authorization server between the refresh grant's claim of the old token
-  and its save of the successor. `MemoryTokenService` keeps a revoked family
-  revoked, so that save stores the successor already revoked. A custom token
-  store misses the successor in that gap unless it does the same.
+  then the successor stays live until it expires. With a token service that
+  does not implement `rotate`, a revocation can also reach the authorization
+  server between the refresh grant's claim of the old token and its save of
+  the successor. `MemoryTokenService` keeps a revoked family revoked, so that
+  save stores the successor already revoked. A custom token store misses the
+  successor in that gap unless it does the same.
+- **Without `rotate`, a refresh that races another refresh of the same token
+  can sign the person out.** The refresh grant then claims the presented token
+  and saves its successor in two storage calls. A second request that presents
+  the token between them finds it revoked with no live successor, and reuse
+  detection treats it as theft: the family is revoked and `onTokenReuse`
+  fires. A store that keeps a revoked family revoked, as `MemoryTokenService`
+  does, then saves the first request's successor already revoked, so the
+  person is signed out; a store that does not leaves that successor live in a
+  family the server revoked. A token store
+  that implements `rotate` claims and saves in one step, and the second request
+  gets a plain `invalid_grant` instead. `MemoryTokenService` implements it; see
+  [atomic rotation](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#atomic-rotation).
 - **With `EncryptedCookieSessionStore`, a refresh's own response can put a
   signed-out cookie back.** Sign-out, a replacing sign-in, or a refused
   refresh ends the grace for the whole chain, including a refresh still in

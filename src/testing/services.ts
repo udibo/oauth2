@@ -478,9 +478,15 @@ export class MemoryTokenService<
   async save(
     token: Token<C, U, S> | RefreshToken<C, U, S>,
   ): Promise<Token<C, U, S> | RefreshToken<C, U, S>> {
-    const accessTokenHash = await sha256Hash(token.accessToken);
+    this.#store(await this.#prepare(token));
+    return token;
+  }
+
+  async #prepare(
+    token: Token<C, U, S> | RefreshToken<C, U, S>,
+  ): Promise<StoredToken<S>> {
     const stored: StoredToken<S> = {
-      accessTokenHash,
+      accessTokenHash: await sha256Hash(token.accessToken),
       accessTokenExpiresAt: token.accessTokenExpiresAt,
       clientId: token.client.id,
       userId: token.user?.id,
@@ -489,29 +495,34 @@ export class MemoryTokenService<
         token.authenticationContext,
       ),
     };
-    if (token.code) {
-      stored.codeHash = await sha256Hash(token.code);
-      let bucket = this.#tokensByCodeHash.get(stored.codeHash);
-      if (!bucket) {
-        bucket = new Set();
-        this.#tokensByCodeHash.set(stored.codeHash, bucket);
-      }
-      bucket.add(accessTokenHash);
-    }
+    if (token.code) stored.codeHash = await sha256Hash(token.code);
     if ("refreshToken" in token) {
       const rt = token as RefreshToken<C, U, S>;
       stored.refreshTokenHash = await sha256Hash(rt.refreshToken);
       stored.refreshTokenExpiresAt = rt.refreshTokenExpiresAt;
       stored.familyId = rt.familyId;
       stored.familyCreatedAt = rt.familyCreatedAt;
-      if (rt.familyId && this.#revokedFamilies.has(rt.familyId)) {
+    }
+    return stored;
+  }
+
+  #store(stored: StoredToken<S>): void {
+    if (stored.codeHash) {
+      let bucket = this.#tokensByCodeHash.get(stored.codeHash);
+      if (!bucket) {
+        bucket = new Set();
+        this.#tokensByCodeHash.set(stored.codeHash, bucket);
+      }
+      bucket.add(stored.accessTokenHash);
+    }
+    if (stored.refreshTokenHash) {
+      if (stored.familyId && this.#revokedFamilies.has(stored.familyId)) {
         this.#tombstone(stored.refreshTokenHash, stored);
-        return token;
+        return;
       }
       this.#tokensByRefreshHash.set(stored.refreshTokenHash, stored);
     }
-    this.#tokensByAccessHash.set(accessTokenHash, stored);
-    return token;
+    this.#tokensByAccessHash.set(stored.accessTokenHash, stored);
   }
 
   /**
@@ -569,6 +580,35 @@ export class MemoryTokenService<
     if (!stored) return false;
     stored.rotatedAt = new Date();
     return await this.revoke(token);
+  }
+
+  /**
+   * Claims `current` and saves `next` in one step, stamping the rotated-out
+   * tombstone with `rotatedAt` as {@linkcode revokeRotated} does. Resolves
+   * `undefined`, saving nothing, when `current` is no longer live or either
+   * token's family has been revoked.
+   */
+  async rotate(
+    current: RefreshToken<C, U, S>,
+    next: RefreshToken<C, U, S>,
+  ): Promise<RefreshToken<C, U, S> | undefined> {
+    const currentHash = await sha256Hash(current.refreshToken);
+    const successor = await this.#prepare(next);
+    const stored = this.#tokensByRefreshHash.get(currentHash);
+    if (
+      !stored ||
+      [stored.familyId, successor.familyId].some(
+        (familyId) => familyId && this.#revokedFamilies.has(familyId),
+      )
+    ) {
+      return undefined;
+    }
+    stored.rotatedAt = new Date();
+    this.#tokensByAccessHash.delete(stored.accessTokenHash);
+    this.#tokensByRefreshHash.delete(currentHash);
+    this.#tombstone(currentHash, stored);
+    this.#store(successor);
+    return next;
   }
 
   /** Whether the family has a live refresh token that has not expired. */
