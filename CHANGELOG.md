@@ -1,3 +1,9 @@
+## [0.25.0](https://github.com/udibo/oauth2/compare/0.24.0...0.25.0) (2026-10-15)
+
+### Features
+
+* **server:** add an atomic rotate capability to the token store ([#123](https://github.com/udibo/oauth2/issues/123)) ([34224ef](https://github.com/udibo/oauth2/commit/34224efe9e0fb79eb359998b857d3dc51f38a5aa)), closes [#119](https://github.com/udibo/oauth2/issues/119) [#119](https://github.com/udibo/oauth2/issues/119) [#104](https://github.com/udibo/oauth2/issues/104) [#122](https://github.com/udibo/oauth2/issues/122)
+
 ## [0.24.0](https://github.com/udibo/oauth2/compare/0.23.0...0.24.0) (2026-10-14)
 
 ### Features
