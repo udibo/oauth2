@@ -360,6 +360,14 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+A request with `prompt=consent` reaches the handler even when the scope is
+already authorized, and the handler's fifth argument carries `prompt` so it can
+ask again instead of reusing a stored decision. A server with no handler cannot
+ask, so it answers `prompt=consent` with `consent_required`. Under `prompt=none`
+the server never shows the page a handler returns; it redirects with
+`consent_required` instead. See
+[Honor `prompt`, `max_age` and `acr_values`](#honor-prompt-max_age-and-acr_values).
+
 ## Error responses
 
 The OAuth endpoints answer every error in the RFC 6749 §5.2 format:
@@ -700,6 +708,11 @@ un-advertises it, and the field is omitted entirely when no authorization-code
 grant is registered. It reports what the server will actually accept rather than
 a fixed string.
 
+With an authorization-code grant registered, the document also carries
+`prompt_values_supported`: `none`, `login` and `consent` unless you set
+`promptValuesSupported`. The OIDC discovery document adds
+`acr_values_supported` when you set `acrValuesSupported`.
+
 `token_endpoint_auth_methods_supported` always carries `none` — the RFC 7591
 method for a client with no secret — because the token endpoint accepts it
 unconditionally: a request that presents only `client_id` reaches your
@@ -923,14 +936,104 @@ Custom `generateAccessToken` wrappers must forward the fourth
 (`authenticationContext`) argument to the JWT generator. Tokens without a
 resource owner receive no event context.
 
-`parseAuthorizeParameters` exposes `acrValues`, `maxAge`, and `prompt` as raw
-strings, including invalid values. Your application must validate and enforce
-the authentication and consent policy before returning a user. Parsing these
-controls does not implement step-up or freshness enforcement.
+The ID token's `auth_time` and `acr` come from the credential's recorded
+context, whatever `userClaims` returns: each is present exactly when the context
+has it, so a claims hook cannot report a stronger or more recent sign-in than
+the one the code captured.
 
 For a BFF requesting assurance or freshness, pin `acr_values` and `max_age` in
 `extraParams`. They are forbidden in `forwardedParams`, case-insensitively,
 because browser-chosen values could weaken the server's requirements.
+
+### Honor `prompt`, `max_age` and `acr_values`
+
+The authorize endpoint validates the OpenID Connect authentication controls once
+the redirect URI is verified, and hands them to `authenticateUser` as a second
+argument, an `AuthenticationRequest` of `{ prompt, maxAge?, acrValues }`. A
+repeated parameter, a `prompt` value the server does not support, `none`
+combined with another value, or a `max_age` that is not a non-negative integer
+is refused with `invalid_request`. A parameter sent without a value counts as
+omitted.
+
+The server enforces what it can check, so a client is never handed a code that
+contradicts what it asked for:
+
+| Control          | What the server does                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt=none`    | A `Response` from `authenticateUser` becomes a `login_required` redirect, and one from `handleConsent` becomes `consent_required`. No page reaches the browser. |
+| `prompt=login`   | Issues a code only when `authenticateUser` returns `reauthenticated: true`, and otherwise redirects with `login_required`.                                 |
+| `max_age`        | Issues a code only when `authenticationContext.auth_time` is at most `max_age` seconds old, or the user re-authenticated for this request.                 |
+| `max_age=0`      | Treated as `prompt=login`, as OIDC Core specifies.                                                                                                         |
+| `prompt=consent` | Calls `handleConsent` even for an authorized scope. With no handler, it answers `consent_required`.                                                        |
+| `acr_values`     | Passes the preferences through. The ID token's `acr` is the one `authenticationContext` reports.                                                           |
+
+The server cannot show a login page itself, so `authenticateUser` does the
+re-authentication. Check the session against the request with
+`satisfiesAuthenticationRequest`, the same check the server applies, and send
+the user to sign in when it fails. Report `reauthenticated: true` only when the
+user signed in again for this authorization request. A session that merely
+exists, or one that signed in for a different request, does not count. One way
+to know is to have your login route record, on the session it creates, the
+authorize URL it returns to, and compare it on the way back:
+
+```ts
+import type { Context } from "hono";
+import type { HonoAuthenticateUserFn } from "@udibo/oauth2/hono/authorization-server";
+import { satisfiesAuthenticationRequest } from "@udibo/oauth2/server";
+
+interface AppUser {
+  id: string;
+}
+
+interface AppSession {
+  user: AppUser;
+  authTime: number;
+  acr?: string;
+  signedInFor?: string;
+}
+
+declare function readSession(c: Context): Promise<AppSession | undefined>;
+
+const authenticateUser: HonoAuthenticateUserFn<AppUser> = async (
+  c,
+  authentication,
+) => {
+  const { pathname, search } = new URL(c.req.url);
+  const returnTo = `${pathname}${search}`;
+  const login = c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+  const session = await readSession(c);
+  if (!session) return login;
+  const result = {
+    user: session.user,
+    authenticationContext: { auth_time: session.authTime, acr: session.acr },
+    reauthenticated: session.signedInFor === returnTo,
+  };
+  if (
+    authentication &&
+    !satisfiesAuthenticationRequest(authentication, result)
+  ) {
+    return login;
+  }
+  return result;
+};
+```
+
+Under `prompt=none` the same code needs no special case: the server turns the
+login redirect into `login_required`. Throw `InteractionRequiredError` or
+`AccountSelectionRequiredError` from either callback when some other screen
+would be needed, and the server redirects with that code.
+
+Use `acrValues` to choose how to sign the user in, for example offering a
+second factor when one is requested. `acr_values` is a preference, so the server
+never refuses a sign-in for missing it. Report the `acr` the sign-in achieved,
+never the requested one. Set `acrValuesSupported` to advertise the values you
+can achieve.
+
+The server enforces `none`, `login` and `consent`. To accept `select_account`,
+`create` or another value, list it in `promptValuesSupported` along with the
+enforced values you keep. The server passes it through to `authenticateUser`
+but cannot check that you honored it. Any value not listed is refused with
+`invalid_request`.
 
 ## Where to go next
 

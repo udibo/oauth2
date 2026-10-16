@@ -215,6 +215,13 @@ With `"consent": "prompt"`, an approval screen (`#consent-form`, `#approve`,
 `#deny`) appears before the code is issued. Denial redirects back with
 `error=access_denied`, which is the branch most applications never test.
 
+The authorize endpoint honors the OpenID Connect controls a relying party sends.
+`prompt=login`, `max_age=0`, or a `max_age` the session is older than shows the
+sign-in page again even for a signed-in browser, and the ID token's `auth_time`
+records that sign-in. `prompt=none` never shows a page: a signed-out browser
+goes back with `error=login_required`, and with `"consent": "prompt"` a pending
+approval goes back with `error=consent_required`.
+
 `GET /logout` drops the session. It honours `post_logout_redirect_uri` only when
 the value exactly matches a redirect URI one of the configured clients
 registered — an unregistered target is answered with a 400 rather than a

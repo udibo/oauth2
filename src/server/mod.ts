@@ -10,7 +10,10 @@
  */
 
 export type { ClientCredentials, ClientInterface } from "../models/client.ts";
-export type { AuthenticationContext } from "../models/authentication.ts";
+export type {
+  AuthenticationContext,
+  AuthenticationRequest,
+} from "../models/authentication.ts";
 export type {
   IntrospectionResponse,
   RefreshToken,
@@ -32,16 +35,20 @@ export type {
 
 export {
   AccessDeniedError,
+  AccountSelectionRequiredError,
   AuthorizationPendingError,
+  ConsentRequiredError,
   ExpiredTokenError,
   InsufficientPermissionsError,
   InsufficientScopeError,
+  InteractionRequiredError,
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
   InvalidTokenError,
   isOAuth2Error,
+  LoginRequiredError,
   OAuth2Error,
   ServerError,
   SlowDownError,
@@ -57,6 +64,10 @@ export type {
   OAuth2ProblemDetailsExtensions,
 } from "../errors.ts";
 
+export {
+  type AuthenticationOutcome,
+  satisfiesAuthenticationRequest,
+} from "./authentication-request.ts";
 export type { TokenReaderInterface } from "./services/token.ts";
 
 export {

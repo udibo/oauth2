@@ -22,3 +22,32 @@ export interface AuthenticationContext {
   /** Truthful authentication methods; omitted when the complete set is unknown. */
   readonly amr?: readonly string[];
 }
+
+/**
+ * The OpenID Connect authentication controls of one authorization request,
+ * validated by the authorization server and handed to the application's
+ * `authenticateUser` and `handleConsent` callbacks.
+ *
+ * The server enforces what it can verify: `prompt=none` never reaches a login
+ * or consent page, and a code is issued only when the returned authentication
+ * satisfies `prompt=login` and `max_age` (see
+ * `satisfiesAuthenticationRequest`). `acrValues` is a preference the
+ * application meets as it can; report the `acr` it actually achieved.
+ *
+ * @example
+ * ```ts
+ * const authentication: AuthenticationRequest = {
+ *   prompt: ["login"],
+ *   maxAge: 300,
+ *   acrValues: ["urn:example:mfa"],
+ * };
+ * ```
+ */
+export interface AuthenticationRequest {
+  /** Requested `prompt` values, each one the server supports; empty when absent. */
+  readonly prompt: readonly string[];
+  /** Requested `max_age` in seconds, when present. */
+  readonly maxAge?: number;
+  /** Requested `acr_values` in preference order; empty when absent. */
+  readonly acrValues: readonly string[];
+}

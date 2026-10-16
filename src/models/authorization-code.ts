@@ -44,11 +44,11 @@ export interface AuthorizationCode<
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.1
  */
 export interface AuthorizeParameters {
-  /** Raw space-delimited ACR preferences; application policy must validate and honor them. */
+  /** Raw space-delimited ACR preferences; `authenticateUser` receives them validated. */
   acrValues?: string;
-  /** Raw maximum authentication age in seconds; application policy must validate and enforce it. */
+  /** Raw maximum authentication age in seconds; the authorize endpoint validates and enforces it. */
   maxAge?: string;
-  /** Raw prompt values; application policy must honor or refuse every supported control. */
+  /** Raw prompt values; the authorize endpoint validates them and enforces `none`, `login` and `consent`. */
   prompt?: string;
   /** Must be "code" for authorization code flow. */
   responseType?: string;

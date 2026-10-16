@@ -89,8 +89,10 @@ The package implements these specifications, with the limits noted:
 - [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) JWT access tokens, opt-in;
   access tokens are opaque by default.
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html):
-  the authorization code flow, ES256 ID tokens, `nonce`, and UserInfo. The
-  server does not act on `prompt` or `max_age`.
+  the authorization code flow, ES256 ID tokens, `nonce`, UserInfo, and the
+  `prompt`, `max_age` and `acr_values` controls, with `auth_time` and `acr` in
+  the ID token. Your login callback performs any re-authentication they need,
+  and there is no `claims` request parameter.
 - OpenID Connect [Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
   and [RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
 - [OpenID Connect Back-Channel Logout 1.0](https://openid.net/specs/openid-connect-backchannel-1_0.html),
