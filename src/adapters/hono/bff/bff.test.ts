@@ -2912,6 +2912,16 @@ describe("HonoBff", () => {
       );
     });
 
+    it("allows an auth_time up to a minute ahead of the BFF's clock", async () => {
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() + 50 }), {
+          extraParams: { max_age: "300" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
     it("refuses an ID token it cannot decode", async () => {
       await expectRefused(
         await finishSignIn(
