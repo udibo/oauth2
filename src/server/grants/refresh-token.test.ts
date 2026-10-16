@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeTime } from "../../_test_fake-time.ts";
 import { rejection } from "../../_test_assert.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
@@ -999,6 +999,34 @@ describe("RefreshTokenGrant", () => {
           );
         });
 
+        it("revokes the family two minutes after rotation, a whole number of minutes past", async () => {
+          using time = new FakeTime();
+          const {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          } = await graceGrant(30);
+          time.tick(120_000);
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(original.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([original.familyId]);
+          expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+            undefined,
+          );
+        });
+
         it("treats a replay inside the window as reuse when no successor is live", async () => {
           const {
             grant,
@@ -1143,7 +1171,7 @@ describe("RefreshTokenGrant", () => {
         using time = new FakeTime();
         const { grant, tokenService, client, original, rotated, reuseEvents } =
           await storeJudgedGrant(30);
-        time.tick(600_000);
+        time.tick(60_000);
 
         await rejection(
           () =>
@@ -1159,6 +1187,44 @@ describe("RefreshTokenGrant", () => {
           await tokenService.getRefreshToken(rotated.refreshToken),
           "the store's clock decides the window, not the application's",
         ).not.toBe(undefined);
+      });
+
+      it("treats a replay as reuse once the application clock is past the grace by more than the clock tolerance, whatever the store says", async () => {
+        using time = new FakeTime();
+        const { grant, tokenService, client, original, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        time.tick((30 + 300 + 1) * 1000);
+
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
+
+        expect(reuseEvents).toStrictEqual([original.familyId]);
+        expect(
+          await tokenService.getRefreshToken(rotated.refreshToken),
+          "a store check that ignores elapsed time must not keep excusing " +
+            "replays while the family lives",
+        ).toBe(undefined);
+      });
+
+      it("treats a replay as reuse when the rotation is further in the future than the clock tolerance, whatever the store says", async () => {
+        using time = new FakeTime();
+        const { grant, tokenService, client, original, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        vi.setSystemTime(time.now - (300 + 1) * 1000);
+
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
+
+        expect(reuseEvents).toStrictEqual([original.familyId]);
+        expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+          undefined,
+        );
       });
 
       it("treats a replay as reuse when the store places it outside the window, however recent by the application clock", async () => {

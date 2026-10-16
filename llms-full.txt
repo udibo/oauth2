@@ -1335,7 +1335,12 @@ async function isWithinReplayGrace(
 
 `graceSeconds` can be fractional. The grant asks only when
 `replayGraceSeconds` is above zero and the tombstone carries `rotatedAt` and a
-`familyId`, and the family still needs a live token. `MemoryTokenService`
+`familyId`, and the family still needs a live token. The grant also bounds
+the store's answer by its own clock with five minutes of tolerance for skew:
+once `rotatedAt` is more than `graceSeconds` plus five minutes in the past, or
+more than five minutes in the future, the replay is treated as reuse whatever
+the store says. A store check with an arithmetic mistake can then excuse
+replays for minutes at most, not for the family's whole life. `MemoryTokenService`
 implements it on its own clock, and `runTokenServiceContractTests` checks that
 a store's answer turns false once the window has passed and that the store
 still returns the tombstone inside it.

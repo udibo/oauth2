@@ -731,17 +731,23 @@ export function runTokenServiceContractTests<
           ).toBe(undefined);
         });
 
-        it("judges a rotated-out token outside a replay grace that has passed", async ({
+        it("judges a rotated-out token inside a one-second grace, then outside it once the second has passed", async ({
           skip,
         }) => {
           const { tombstone } = await rotateOut(skip);
 
+          expect(
+            await tokenService.isWithinReplayGrace!(tombstone, 1),
+            "a token rotated out a moment ago is inside a one-second grace",
+          ).toBe(true);
+
           await delay(1_200);
 
           expect(
-            await tokenService.isWithinReplayGrace!(tombstone, 0.1),
-            "a grace that always answers true excuses every replay while " +
-              "the family is live, which turns reuse detection off",
+            await tokenService.isWithinReplayGrace!(tombstone, 1),
+            "a grace that answers true regardless of elapsed time excuses " +
+              "every replay while the family is live, which turns reuse " +
+              "detection off",
           ).toBe(false);
           expect(await tokenService.isWithinReplayGrace!(tombstone, 3600)).toBe(
             true,

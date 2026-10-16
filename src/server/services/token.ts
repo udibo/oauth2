@@ -297,6 +297,9 @@ export interface TokenServiceInterface<
    * The grant calls it only when `replayGraceSeconds` is above zero and the
    * tombstone carries `rotatedAt` and a `familyId`; `graceSeconds` may be
    * fractional. The window still needs {@linkcode hasLiveRefreshToken}.
+   * The grant treats the replay as outside the window, whatever this
+   * resolves, once `rotatedAt` is more than five minutes ahead of the
+   * grant's clock or more than `graceSeconds` plus five minutes behind it.
    * Implementing this never licenses hiding a tombstone from
    * `getRevokedRefreshToken`.
    */
