@@ -120,6 +120,44 @@ function twoStep(
 }
 
 /**
+ * The token service without `isWithinReplayGrace`, so the refresh grant
+ * judges the replay grace on its own clock.
+ */
+function withoutGraceHook(tokenService: TestTokenService): TestTokenService {
+  return new Proxy(tokenService, {
+    get(target, prop) {
+      if (prop === "isWithinReplayGrace") return undefined;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/**
+ * MemoryTokenService subclass whose replay-grace verdict is fixed by the test,
+ * standing in for a store that judges the grace on a clock the application
+ * does not share.
+ */
+class StoreJudgedGraceTokenService extends MemoryTokenService<
+  TestClient,
+  TestUser,
+  BasicScope
+> {
+  verdict = true;
+  graceChecks: Array<{ refreshToken: string; graceSeconds: number }> = [];
+  override isWithinReplayGrace(
+    tombstone: RefreshToken<TestClient, TestUser, BasicScope>,
+    graceSeconds: number,
+  ): Promise<boolean> {
+    this.graceChecks.push({
+      refreshToken: tombstone.refreshToken,
+      graceSeconds,
+    });
+    return Promise.resolve(this.verdict);
+  }
+}
+
+/**
  * MemoryTokenService subclass that counts the storage calls a refresh makes,
  * to pin rotation onto `rotate` when a service implements it.
  */
@@ -843,159 +881,351 @@ describe("RefreshTokenGrant", () => {
   });
 
   describe("replay grace", () => {
-    async function graceGrant(replayGraceSeconds?: number) {
-      const userService = new MemoryUserService();
-      const clientService = new MemoryClientService(userService);
-      const tokenService = new MemoryTokenService<
-        TestClient,
-        TestUser,
-        BasicScope
-      >({ clientService, userService });
-      await userService.add(testUser, "password");
-      await clientService.add(testClient, "secret", testUser.id);
-      const reuseEvents: string[] = [];
-      const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
-        resolve: () => ({ clientService, tokenService }),
-        onTokenReuse: (event) => {
-          reuseEvents.push(event.familyId);
-        },
-        ...(replayGraceSeconds === undefined ? {} : { replayGraceSeconds }),
+    for (const judge of [
+      {
+        name: "the token service's isWithinReplayGrace",
+        wrap: (tokenService: TestTokenService) => tokenService,
+      },
+      { name: "the application clock", wrap: withoutGraceHook },
+    ]) {
+      describe(`judged by ${judge.name}`, () => {
+        async function graceGrant(replayGraceSeconds?: number) {
+          const userService = new MemoryUserService();
+          const clientService = new MemoryClientService(userService);
+          const tokenService = judge.wrap(
+            new MemoryTokenService<TestClient, TestUser, BasicScope>({
+              clientService,
+              userService,
+            }),
+          );
+          await userService.add(testUser, "password");
+          await clientService.add(testClient, "secret", testUser.id);
+          const reuseEvents: string[] = [];
+          const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>(
+            {
+              resolve: () => ({ clientService, tokenService }),
+              onTokenReuse: (event) => {
+                reuseEvents.push(event.familyId);
+              },
+              ...(replayGraceSeconds === undefined
+                ? {}
+                : { replayGraceSeconds }),
+            },
+          );
+          const client = (await clientService.get("client-1"))!;
+          const original: RefreshToken<TestClient, TestUser, BasicScope> = {
+            accessToken: crypto.randomUUID(),
+            accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+            refreshToken: crypto.randomUUID(),
+            refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+            client,
+            user: testUser,
+            familyId: crypto.randomUUID(),
+          };
+          await tokenService.save(original);
+          const rotated = await exchangeToken(
+            grant,
+            refreshRequest(original.refreshToken),
+            client,
+          );
+          return {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          };
+        }
+
+        it("answers invalid_grant without revoking the family for a replay inside the window", async () => {
+          const {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          } = await graceGrant(30);
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(original.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([]);
+          expect(
+            await tokenService.getRefreshToken(rotated.refreshToken),
+            "the successor must survive a replay inside the grace",
+          ).not.toBe(undefined);
+          const next = await exchangeToken(
+            grant,
+            refreshRequest(rotated.refreshToken),
+            client,
+          );
+          expect(next.familyId).toBe(original.familyId);
+        });
+
+        it("revokes the family as before once the window has passed", async () => {
+          using time = new FakeTime();
+          const {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          } = await graceGrant(30);
+          time.tick(30_001);
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(original.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([original.familyId]);
+          expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+            undefined,
+          );
+        });
+
+        it("treats a replay inside the window as reuse when no successor is live", async () => {
+          const {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          } = await graceGrant(30);
+          await tokenService.revoke(rotated);
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(original.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([original.familyId]);
+        });
+
+        it("treats a token revoked other than by rotation as reuse inside the window", async () => {
+          const { grant, tokenService, client, rotated, reuseEvents } =
+            await graceGrant(30);
+          const sibling: RefreshToken<TestClient, TestUser, BasicScope> = {
+            ...rotated,
+            accessToken: crypto.randomUUID(),
+            refreshToken: crypto.randomUUID(),
+          };
+          await tokenService.save(sibling);
+          await tokenService.revoke(sibling);
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(sibling.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([rotated.familyId]);
+        });
+
+        it("is off by default, so a replay right after rotation revokes the family", async () => {
+          const {
+            grant,
+            tokenService,
+            client,
+            original,
+            rotated,
+            reuseEvents,
+          } = await graceGrant();
+
+          await rejection(
+            () =>
+              exchangeToken(
+                grant,
+                refreshRequest(original.refreshToken),
+                client,
+              ),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([original.familyId]);
+          expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+            undefined,
+          );
+        });
+
+        it("keeps the family of a thief who rotated first when the client replays inside the window", async () => {
+          const { grant, tokenService, client, rotated, reuseEvents } =
+            await graceGrant(30);
+          const stolen = rotated.refreshToken;
+          const thiefToken = await exchangeToken(
+            grant,
+            refreshRequest(stolen),
+            client,
+          );
+
+          await rejection(
+            () => exchangeToken(grant, refreshRequest(stolen), client),
+            InvalidGrantError,
+          );
+
+          expect(reuseEvents).toStrictEqual([]);
+          const thiefNext = await exchangeToken(
+            grant,
+            refreshRequest(thiefToken.refreshToken),
+            client,
+          );
+          expect(thiefNext.familyId).toBe(rotated.familyId);
+          expect(
+            await tokenService.getRefreshToken(thiefNext.refreshToken),
+          ).not.toBe(undefined);
+        });
       });
-      const client = (await clientService.get("client-1"))!;
-      const original: RefreshToken<TestClient, TestUser, BasicScope> = {
-        accessToken: crypto.randomUUID(),
-        accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
-        refreshToken: crypto.randomUUID(),
-        refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
-        client,
-        user: testUser,
-        familyId: crypto.randomUUID(),
-      };
-      await tokenService.save(original);
-      const rotated = await exchangeToken(
-        grant,
-        refreshRequest(original.refreshToken),
-        client,
-      );
-      return { grant, tokenService, client, original, rotated, reuseEvents };
     }
 
-    it("answers invalid_grant without revoking the family for a replay inside the window", async () => {
-      const { grant, tokenService, client, original, rotated, reuseEvents } =
-        await graceGrant(30);
+    describe("with a token service that judges the window", () => {
+      async function storeJudgedGrant(replayGraceSeconds?: number) {
+        const userService = new MemoryUserService();
+        const clientService = new MemoryClientService(userService);
+        const tokenService = new StoreJudgedGraceTokenService({
+          clientService,
+          userService,
+        });
+        await userService.add(testUser, "password");
+        await clientService.add(testClient, "secret", testUser.id);
+        const reuseEvents: string[] = [];
+        const grant = new RefreshTokenGrant<TestClient, TestUser, BasicScope>({
+          resolve: () => ({ clientService, tokenService }),
+          onTokenReuse: (event) => {
+            reuseEvents.push(event.familyId);
+          },
+          ...(replayGraceSeconds === undefined ? {} : { replayGraceSeconds }),
+        });
+        const client = (await clientService.get("client-1"))!;
+        const original: RefreshToken<TestClient, TestUser, BasicScope> = {
+          accessToken: crypto.randomUUID(),
+          accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+          refreshToken: crypto.randomUUID(),
+          refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+          client,
+          user: testUser,
+          familyId: crypto.randomUUID(),
+        };
+        await tokenService.save(original);
+        const rotated = await exchangeToken(
+          grant,
+          refreshRequest(original.refreshToken),
+          client,
+        );
+        return { grant, tokenService, client, original, rotated, reuseEvents };
+      }
 
-      await rejection(
-        () =>
-          exchangeToken(grant, refreshRequest(original.refreshToken), client),
-        InvalidGrantError,
-      );
+      it("excuses a replay the store places inside the window after the application clock has left it", async () => {
+        using time = new FakeTime();
+        const { grant, tokenService, client, original, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        time.tick(600_000);
 
-      expect(reuseEvents).toStrictEqual([]);
-      expect(
-        await tokenService.getRefreshToken(rotated.refreshToken),
-        "the successor must survive a replay inside the grace",
-      ).not.toBe(undefined);
-      const next = await exchangeToken(
-        grant,
-        refreshRequest(rotated.refreshToken),
-        client,
-      );
-      expect(next.familyId).toBe(original.familyId);
-    });
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
 
-    it("revokes the family as before once the window has passed", async () => {
-      using time = new FakeTime();
-      const { grant, tokenService, client, original, rotated, reuseEvents } =
-        await graceGrant(30);
-      time.tick(30_001);
+        expect(tokenService.graceChecks).toStrictEqual([
+          { refreshToken: original.refreshToken, graceSeconds: 30 },
+        ]);
+        expect(reuseEvents).toStrictEqual([]);
+        expect(
+          await tokenService.getRefreshToken(rotated.refreshToken),
+          "the store's clock decides the window, not the application's",
+        ).not.toBe(undefined);
+      });
 
-      await rejection(
-        () =>
-          exchangeToken(grant, refreshRequest(original.refreshToken), client),
-        InvalidGrantError,
-      );
+      it("treats a replay as reuse when the store places it outside the window, however recent by the application clock", async () => {
+        const { grant, tokenService, client, original, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        tokenService.verdict = false;
 
-      expect(reuseEvents).toStrictEqual([original.familyId]);
-      expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
-        undefined,
-      );
-    });
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
 
-    it("treats a replay inside the window as reuse when no successor is live", async () => {
-      const { grant, tokenService, client, original, rotated, reuseEvents } =
-        await graceGrant(30);
-      await tokenService.revoke(rotated);
+        expect(reuseEvents).toStrictEqual([original.familyId]);
+        expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
+          undefined,
+        );
+      });
 
-      await rejection(
-        () =>
-          exchangeToken(grant, refreshRequest(original.refreshToken), client),
-        InvalidGrantError,
-      );
+      it("still requires a live successor when the store places the replay inside the window", async () => {
+        const { grant, tokenService, client, original, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        await tokenService.revoke(rotated);
 
-      expect(reuseEvents).toStrictEqual([original.familyId]);
-    });
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
 
-    it("treats a token revoked other than by rotation as reuse inside the window", async () => {
-      const { grant, tokenService, client, rotated, reuseEvents } =
-        await graceGrant(30);
-      const sibling: RefreshToken<TestClient, TestUser, BasicScope> = {
-        ...rotated,
-        accessToken: crypto.randomUUID(),
-        refreshToken: crypto.randomUUID(),
-      };
-      await tokenService.save(sibling);
-      await tokenService.revoke(sibling);
+        expect(reuseEvents).toStrictEqual([original.familyId]);
+      });
 
-      await rejection(
-        () =>
-          exchangeToken(grant, refreshRequest(sibling.refreshToken), client),
-        InvalidGrantError,
-      );
+      it("does not ask the store when the grace is off", async () => {
+        const { grant, tokenService, client, original, reuseEvents } =
+          await storeJudgedGrant();
 
-      expect(reuseEvents).toStrictEqual([rotated.familyId]);
-    });
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(original.refreshToken), client),
+          InvalidGrantError,
+        );
 
-    it("is off by default, so a replay right after rotation revokes the family", async () => {
-      const { grant, tokenService, client, original, rotated, reuseEvents } =
-        await graceGrant();
+        expect(tokenService.graceChecks).toStrictEqual([]);
+        expect(reuseEvents).toStrictEqual([original.familyId]);
+      });
 
-      await rejection(
-        () =>
-          exchangeToken(grant, refreshRequest(original.refreshToken), client),
-        InvalidGrantError,
-      );
+      it("does not excuse a token revoked other than by rotation, whatever the store says", async () => {
+        const { grant, tokenService, client, rotated, reuseEvents } =
+          await storeJudgedGrant(30);
+        const sibling: RefreshToken<TestClient, TestUser, BasicScope> = {
+          ...rotated,
+          accessToken: crypto.randomUUID(),
+          refreshToken: crypto.randomUUID(),
+        };
+        await tokenService.save(sibling);
+        await tokenService.revoke(sibling);
 
-      expect(reuseEvents).toStrictEqual([original.familyId]);
-      expect(await tokenService.getRefreshToken(rotated.refreshToken)).toBe(
-        undefined,
-      );
-    });
+        await rejection(
+          () =>
+            exchangeToken(grant, refreshRequest(sibling.refreshToken), client),
+          InvalidGrantError,
+        );
 
-    it("keeps the family of a thief who rotated first when the client replays inside the window", async () => {
-      const { grant, tokenService, client, rotated, reuseEvents } =
-        await graceGrant(30);
-      const stolen = rotated.refreshToken;
-      const thiefToken = await exchangeToken(
-        grant,
-        refreshRequest(stolen),
-        client,
-      );
-
-      await rejection(
-        () => exchangeToken(grant, refreshRequest(stolen), client),
-        InvalidGrantError,
-      );
-
-      expect(reuseEvents).toStrictEqual([]);
-      const thiefNext = await exchangeToken(
-        grant,
-        refreshRequest(thiefToken.refreshToken),
-        client,
-      );
-      expect(thiefNext.familyId).toBe(rotated.familyId);
-      expect(
-        await tokenService.getRefreshToken(thiefNext.refreshToken),
-      ).not.toBe(undefined);
+        expect(tokenService.graceChecks).toStrictEqual([]);
+        expect(reuseEvents).toStrictEqual([rotated.familyId]);
+      });
     });
 
     it("refuses a grace that is not a non-negative number of seconds", () => {

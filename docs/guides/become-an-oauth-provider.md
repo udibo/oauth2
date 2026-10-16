@@ -629,6 +629,49 @@ token. `MemoryTokenService` implements both. With a service that lacks either,
 the grace never applies. `runTokenServiceContractTests` checks both when a
 service implements them.
 
+By default the grant measures the window by comparing `rotatedAt` with its own
+clock. If your store stamps `rotatedAt` from its own clock, such as the
+database's, and several application instances share it, their clocks can
+disagree with the store's and with each other. Implement
+`isWithinReplayGrace(tombstone, graceSeconds)` and the grant asks the store
+instead, so every instance judges the window on the clock that stamped it:
+
+```ts
+import type { ClientInterface, RefreshToken } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const db: {
+  queryOne<T>(sql: string, params: unknown[]): Promise<T | undefined>;
+};
+declare function hashToken(token: string): Promise<string>;
+
+async function isWithinReplayGrace(
+  tombstone: RefreshToken<AppClient, AppUser>,
+  graceSeconds: number,
+): Promise<boolean> {
+  const row = await db.queryOne<{ within: boolean }>(
+    `SELECT rotated_at >= now() - make_interval(secs => $2) AS within
+       FROM refresh_tokens WHERE token_hash = $1`,
+    [await hashToken(tombstone.refreshToken), graceSeconds],
+  );
+  return row?.within ?? false;
+}
+```
+
+`graceSeconds` can be fractional. The grant asks only when
+`replayGraceSeconds` is above zero and the tombstone carries `rotatedAt` and a
+`familyId`, and the family still needs a live token. `MemoryTokenService`
+implements it on its own clock, and `runTokenServiceContractTests` checks that
+a store's answer turns false once the window has passed and that the store
+still returns the tombstone inside it.
+
 ## Revocation and introspection
 
 Both endpoints require client authentication, both take `token` and an optional
@@ -671,9 +714,10 @@ checks that a service implementing `revokeRotated` returns the family and client
 from a rotated-out token.
 
 Return the tombstone from `getRevokedRefreshToken` unconditionally. Apply a
-replay grace through `replayGraceSeconds`, never by hiding recently rotated
-tombstones in the store: a hidden tombstone also hides the family from a
-sign-out that races the refresh.
+replay grace through `replayGraceSeconds`, judged on the store's clock by
+`isWithinReplayGrace` when the application's clock cannot be trusted, never by
+hiding recently rotated tombstones in the store: a hidden tombstone also hides
+the family from a sign-out that races the refresh.
 
 Without `rotate`, the refresh grant saves the successor after it claims the
 presented token, as two storage calls. A revocation that lands between them

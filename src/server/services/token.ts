@@ -245,9 +245,10 @@ export interface TokenServiceInterface<
    * is silently disabled and `/revoke` cannot reach a successor.
    *
    * Return the tombstone unconditionally. Apply any replay grace through
-   * `RefreshTokenGrantOptions.replayGraceSeconds`, never by hiding recent
-   * tombstones here: a hidden tombstone also hides the family from a sign-out
-   * racing the refresh, which then leaves the successor live.
+   * `RefreshTokenGrantOptions.replayGraceSeconds`, judged on the store's clock
+   * by {@linkcode isWithinReplayGrace} when it needs one, never by hiding
+   * recent tombstones here: a hidden tombstone also hides the family from a
+   * sign-out racing the refresh, which then leaves the successor live.
    */
   getRevokedRefreshToken?(
     refreshToken: string,
@@ -283,6 +284,26 @@ export interface TokenServiceInterface<
    * never applies and every replay is treated as reuse.
    */
   hasLiveRefreshToken?(familyId: string): Promise<boolean>;
+
+  /**
+   * Whether `tombstone`, a record {@linkcode getRevokedRefreshToken} just
+   * returned, was rotated out no more than `graceSeconds` ago, measured on the
+   * clock that stamped its rotation. Implement it when that clock is the
+   * store's own, such as a database's, so instances whose clocks drift
+   * apart agree on the refresh grant's `replayGraceSeconds` window. Without
+   * it, the grant compares {@linkcode RefreshToken.rotatedAt} with its own
+   * `Date.now()`.
+   *
+   * The grant calls it only when `replayGraceSeconds` is above zero and the
+   * tombstone carries `rotatedAt` and a `familyId`; `graceSeconds` may be
+   * fractional. The window still needs {@linkcode hasLiveRefreshToken}.
+   * Implementing this never licenses hiding a tombstone from
+   * `getRevokedRefreshToken`.
+   */
+  isWithinReplayGrace?(
+    tombstone: RefreshToken<Client, User, Scope>,
+    graceSeconds: number,
+  ): Promise<boolean>;
 }
 
 /** Options for configuring an abstract token service. */
