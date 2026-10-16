@@ -1,3 +1,9 @@
+## [0.31.0](https://github.com/udibo/oauth2/compare/0.30.0...0.31.0) (2026-10-16)
+
+### Features
+
+* **server:** let the token store judge the replay grace ([#135](https://github.com/udibo/oauth2/issues/135)) ([8dd1a86](https://github.com/udibo/oauth2/commit/8dd1a867643e69157d8c24bb12a3472b3294b267)), closes [#111](https://github.com/udibo/oauth2/issues/111) [#116](https://github.com/udibo/oauth2/issues/116) [#124](https://github.com/udibo/oauth2/issues/124)
+
 ## [0.30.0](https://github.com/udibo/oauth2/compare/0.29.0...0.30.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
