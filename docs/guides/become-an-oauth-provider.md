@@ -1024,7 +1024,10 @@ the main instance's callback, and an instance that pins `max_age` leaves
 sign-ins that carried none unchecked. A record without these fields was
 written by an earlier release, or kept by an `AuthRequestStorage` that drops
 fields it does not know. It is checked against the callback instance's own
-`extraParams` and `forwardedParams`, as before.
+`extraParams` and `forwardedParams`, as before. A store that returns the fields
+with other types fails closed: a recorded `maxAge` that is neither `null` nor a
+non-negative integer is refused as `login_required`, and a `scopeForwarded`
+other than `false` counts as forwarded.
 
 ### Honor `prompt`, `max_age` and `acr_values`
 

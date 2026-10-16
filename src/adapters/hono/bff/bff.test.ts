@@ -3184,6 +3184,63 @@ describe("HonoBff", () => {
         );
       });
 
+      describe("a store that does not return the recorded controls as written", () => {
+        function recordingAs(
+          factory: MemoryAuthRequestStorageFactory,
+          rewrite: (record: AuthRequestRecord) => Record<string, unknown>,
+        ): MemoryAuthRequestStorageFactory {
+          const storage = factory.forRequest(undefined as never);
+          const set = storage.set.bind(storage);
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the point is a store that breaks the record's types
+          storage.set = (state, value) =>
+            set(state, rewrite(value) as unknown as AuthRequestRecord);
+          return factory;
+        }
+
+        it("refuses a sign-in whose recorded max_age comes back as text", async () => {
+          const authRequestStorage = recordingAs(
+            new MemoryAuthRequestStorageFactory(),
+            (record) => ({ ...record, maxAge: String(record.maxAge) }),
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+            ),
+            "max_age",
+          );
+        });
+
+        it("refuses a missing ID token when the recorded scope source is not the boolean false", async () => {
+          const authRequestStorage = recordingAs(
+            new MemoryAuthRequestStorageFactory(),
+            ({ scopeForwarded: _scopeForwarded, ...record }) => record,
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, {
+                scope: "openid",
+                forwardedParams: ["scope"],
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(undefined, { authRequestStorage }),
+              {
+                query: "?scope=profile",
+                serverAuthTime: nowSeconds() - 86_400,
+              },
+            ),
+            "auth_time",
+          );
+        });
+      });
+
       describe("a record written before the max_age was recorded", () => {
         function withoutRecordedControls(
           factory: MemoryAuthRequestStorageFactory,

@@ -151,8 +151,8 @@ every other instance, and a callback served by another instance fails with an
 unknown `state`. An `AuthRequestStorage` that needs no request context, such as
 one over your database, is passed as `{ forRequest: () => storage }`; the BFF
 never falls back to the `DirectClient`'s own `authRequestStorage`. Such a
-store must return every field of the record it was given, `maxAge: null`
-included. The login records the `max_age` the sign-in was started with, and a
+store must return every field of the record it was given, with its type,
+`maxAge: null` included. The login records the `max_age` the sign-in was started with, and a
 store that keeps only the fields it knows makes the callback check against its
 own options instead. Check your own stores with `runSessionStoreContractTests`
 from `@udibo/oauth2/hono/bff/testing` and `runAuthRequestStorageContractTests`

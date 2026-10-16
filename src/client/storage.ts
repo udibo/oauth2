@@ -74,7 +74,8 @@ export interface AuthRequestRecord {
    * token's `auth_time` against it at `/auth/callback`, whichever instance
    * serves either one. Absent on a record from a release that did not record
    * it; the callback then falls back to its own pinned `max_age`. A storage
-   * must return `null` as `null`, not as an absent field.
+   * must return `null` as `null`, not as an absent field, and a number as a
+   * number: the callback refuses any other value with `login_required`.
    */
   maxAge?: number | null;
   /**
@@ -82,7 +83,8 @@ export interface AuthRequestRecord {
    * `forwardedParams` names `scope`). When it did and {@link maxAge} is set,
    * the callback refuses a token response without an ID token, because a
    * scope without `openid` would otherwise skip the `auth_time` check.
-   * Recorded alongside {@link maxAge}.
+   * Recorded alongside {@link maxAge}; the callback reads any value other than
+   * `false` as `true`.
    */
   scopeForwarded?: boolean;
   /** When the request was created (epoch ms), used for TTL expiry. */

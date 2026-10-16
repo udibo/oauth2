@@ -994,6 +994,28 @@ function recordingAuthenticationControls(
   };
 }
 
+function recordedAuthenticationControls(recorded: {
+  maxAge?: unknown;
+  scopeForwarded?: unknown;
+}): { maxAge: number | undefined; scopeForwarded: boolean } {
+  const { maxAge } = recorded;
+  const scopeForwarded = recorded.scopeForwarded !== false;
+  if (maxAge === null) return { maxAge: undefined, scopeForwarded };
+  if (
+    typeof maxAge === "number" &&
+    Number.isSafeInteger(maxAge) &&
+    maxAge >= 0
+  ) {
+    return { maxAge, scopeForwarded };
+  }
+  throw new CallbackRefusal({
+    error: "login_required",
+    error_description:
+      "the pending authorization request recorded a max_age that is not a " +
+      "non-negative integer, so the ID token's auth_time could not be checked",
+  });
+}
+
 class CallbackRefusal extends Error {
   readonly refusal: BffCallbackError;
 
@@ -1756,10 +1778,7 @@ export class HonoBff {
         const { maxAge, scopeForwarded } =
           exchanged.maxAge === undefined
             ? this.#extraAuthorizeParams
-            : {
-                maxAge: exchanged.maxAge ?? undefined,
-                scopeForwarded: exchanged.scopeForwarded === true,
-              };
+            : recordedAuthenticationControls(exchanged);
         if (maxAge !== undefined && (idToken || scopeForwarded)) {
           let claims: unknown;
           try {
