@@ -97,6 +97,14 @@ export interface ExternalProfileInput {
   codeVerifier?: string;
   /** The expected id_token `nonce` from the transient, when one was sent. */
   nonce?: string;
+  /**
+   * The callback's `iss` parameter (RFC 9207), when it carried one. Refuse
+   * the callback before redeeming `code` when this is not exactly the
+   * provider's issuer, or when it is missing and the provider advertises
+   * `authorization_response_iss_parameter_supported`. The flow has already
+   * refused a callback with more than one `iss`.
+   */
+  iss?: string;
 }
 
 /**
@@ -130,10 +138,12 @@ export interface ExternalProvider {
   /**
    * Exchanges the authorization code and returns the verified, normalized
    * profile. Implementations must validate the id_token `nonce` against
-   * `input.nonce` when one was sent.
+   * `input.nonce` when one was sent, and should check `input.iss` before the
+   * exchange as {@link ExternalProfileInput.iss} describes.
    *
    * @throws {ExternalAuthError} `provider_error` when the exchange or profile
-   *   fetch fails, `nonce_mismatch` when the id_token nonce does not match.
+   *   fetch fails, `nonce_mismatch` when the id_token nonce does not match,
+   *   `invalid_callback` when `input.iss` is refused.
    */
   fetchProfile(input: ExternalProfileInput): Promise<ExternalProfile>;
 }

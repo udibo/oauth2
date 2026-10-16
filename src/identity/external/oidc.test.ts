@@ -10,7 +10,10 @@ const clientId = "web-app";
 const clientSecret = "secret";
 const redirectUri = "https://app.example/cb";
 
-function discoveryStub(issuer: string): typeof fetch {
+function discoveryStub(
+  issuer: string,
+  extraMetadata: Record<string, unknown> = {},
+): typeof fetch {
   return (input) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.endsWith("/.well-known/oauth-authorization-server")) {
@@ -22,6 +25,7 @@ function discoveryStub(issuer: string): typeof fetch {
           issuer,
           authorization_endpoint: `${issuer}/authorize`,
           token_endpoint: `${issuer}/token`,
+          ...extraMetadata,
         }),
       );
     }
@@ -33,12 +37,17 @@ function segment(value: unknown): string {
   return encodeBase64Url(new TextEncoder().encode(JSON.stringify(value)));
 }
 
-function tokenStub(issuer: string, claims: Record<string, unknown>) {
-  const discovery = discoveryStub(issuer);
-  const context = { nonce: undefined as string | undefined };
+function tokenStub(
+  issuer: string,
+  claims: Record<string, unknown>,
+  extraMetadata: Record<string, unknown> = {},
+) {
+  const discovery = discoveryStub(issuer, extraMetadata);
+  const context = { nonce: undefined as string | undefined, tokenCalls: 0 };
   const fetchStub: typeof fetch = (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url !== `${issuer}/token`) return discovery(input, init);
+    context.tokenCalls++;
     const payload = segment({
       iss: issuer,
       aud: clientId,
@@ -62,9 +71,10 @@ function tokenStub(issuer: string, claims: Record<string, unknown>) {
 function signIn(
   claims: Record<string, unknown>,
   config?: Pick<OidcProviderOptions, "azp">,
+  callback: { iss?: string[]; metadata?: Record<string, unknown> } = {},
+  stub = tokenStub("https://sso.example", claims, callback.metadata),
 ): Promise<Awaited<ReturnType<ExternalAuthFlow["finish"]>>> {
   const issuer = "https://sso.example";
-  const stub = tokenStub(issuer, claims);
   const flow = new ExternalAuthFlow({
     provider: oidcProvider({
       issuer,
@@ -76,10 +86,12 @@ function signIn(
   });
   return flow.start({ redirectUri }).then(({ transient }) => {
     stub.context.nonce = transient.nonce;
-    return flow.finish({
-      params: new URLSearchParams({ code: "sso-code", state: transient.state }),
-      transient,
+    const params = new URLSearchParams({
+      code: "sso-code",
+      state: transient.state,
     });
+    for (const iss of callback.iss ?? []) params.append("iss", iss);
+    return flow.finish({ params, transient });
   });
 }
 
@@ -253,5 +265,77 @@ describe("oidcProvider", () => {
   it("accepts a foreign azp when the config opts out of the check", async () => {
     const profile = await signIn({ azp: "another-client" }, { azp: "ignore" });
     expect(profile.subject).toStrictEqual("sso-1");
+  });
+
+  describe("authorization response issuer (RFC 9207)", () => {
+    const issuer = "https://sso.example";
+    const advertised = { authorization_response_iss_parameter_supported: true };
+
+    it("refuses an iss naming another issuer before redeeming the code", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const error = await rejection(
+        () => signIn({}, undefined, { iss: ["https://evil.example"] }, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(error.message).toContain("does not match the issuer");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
+    it("refuses a mismatched iss from an issuer that does not advertise it", async () => {
+      const stub = tokenStub(issuer, {});
+      const error = await rejection(
+        () => signIn({}, undefined, { iss: ["https://evil.example"] }, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
+    it("compares iss exactly, refusing a trailing-slash variant", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const error = await rejection(
+        () => signIn({}, undefined, { iss: [`${issuer}/`] }, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
+    it("compares iss case-sensitively, refusing a letter-case variant", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const error = await rejection(
+        () => signIn({}, undefined, { iss: ["https://SSO.example"] }, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(error.message).toContain("does not match the issuer");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
+    it("refuses a missing iss when discovery advertises the parameter", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const error = await rejection(
+        () => signIn({}, undefined, {}, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(error.message).toContain("missing `iss`");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
+    it("accepts a missing iss when discovery does not advertise the parameter", async () => {
+      const stub = tokenStub(issuer, {});
+      const profile = await signIn({}, undefined, {}, stub);
+      expect(profile.subject).toStrictEqual("sso-1");
+      expect(stub.context.tokenCalls).toStrictEqual(1);
+    });
+
+    it("accepts an iss equal to the discovered issuer", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const profile = await signIn({}, undefined, { iss: [issuer] }, stub);
+      expect(profile.subject).toStrictEqual("sso-1");
+      expect(stub.context.tokenCalls).toStrictEqual(1);
+    });
   });
 });

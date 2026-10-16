@@ -235,7 +235,19 @@ provider supports S256, as Twitch does. `authorizationParams` adds fixed extras
 to the authorize URL (an `audience`, a tenant hint); the protocol params —
 `state`, `redirect_uri`, `client_id`, `scope`, `response_type`, and the PKCE
 pair — are written after it, so a same-named key in config can never replace the
-flow's CSRF `state` or downgrade PKCE.
+flow's CSRF `state` or downgrade PKCE. When the provider sends `iss` in its
+callback (RFC 9207), set `issuer` to its issuer identifier so a callback from
+another provider is refused before the code is redeemed, and set
+`authorizationResponseIssParameterSupported: true` as well when it always sends
+one.
+
+**The OIDC, Google, Apple and configured `oauth2Provider` connectors check the
+callback's `iss`** (RFC 9207) before they redeem the code, so a response from
+one provider is not accepted at another provider's callback. Generic `oidcProvider` and Google compare it with the
+discovered issuer and require it when discovery advertises
+`authorization_response_iss_parameter_supported`; Apple compares it with
+`https://appleid.apple.com`; `oauth2Provider` compares it with `issuer` when you
+configure one. A refused callback is `invalid_callback`.
 
 **Validation depends on the connector.** Apple verifies the ID-token signature
 against its JWKS and validates the claims. Generic `oidcProvider` and Google

@@ -175,8 +175,9 @@ each start can cost.
 
 The authorization server adds `iss` to every redirect from its authorization
 endpoint and advertises `authorization_response_iss_parameter_supported`.
-`DirectClient.handleAuthorizationCallback` and `HonoBff`'s `/auth/callback`
-check it before they redeem the code. The check has these limits:
+`DirectClient.handleAuthorizationCallback`, `HonoBff`'s `/auth/callback` and
+the external sign-in connectors check it before they redeem the code. The check
+has these limits:
 
 - **A request that resolves no `issuer` gets no `iss`.** Such a server cannot
   serve metadata either, so configure `issuer` in `resolve`.
@@ -198,9 +199,22 @@ check it before they redeem the code. The check has these limits:
   only allowlisted origins.
 - **`exchangeAuthorizationCode` does not see the response.** A server that
   completes the flow with it calls `verifyAuthorizationResponseIssuer` first.
-- **The external sign-in connectors do not check `iss`.** `ExternalAuthFlow`
-  hands `oidcProvider`, `oauth2Provider`, Google and Apple the code without the
-  rest of the provider's response, so they cannot see `iss`.
+- **The connectors check `iss` only on a callback that carries a code.**
+  `ExternalAuthFlow` surfaces a provider `error` callback as `provider_error`
+  without comparing its `iss`, so an error from another provider is reported
+  as this one's. No code is redeemed either way.
+- **`oauth2Provider` checks `iss` only when configured with `issuer`.** A plain
+  OAuth2 provider publishes no discovery document, so the connector has nothing
+  to compare against until you set `issuer`, and it requires `iss` only when
+  you also set `authorizationResponseIssParameterSupported`.
+- **`githubProvider` and `discordProvider` do not check `iss`.** Neither preset
+  has an issuer configured to compare it with.
+- **The Apple connector does not require `iss`.** It has no discovery step, and
+  Apple does not advertise the parameter, so it refuses an `iss` other than
+  `https://appleid.apple.com` but accepts a callback without one.
+- **A custom `ExternalProvider` checks `iss` itself.** The flow refuses a
+  callback with more than one `iss` and hands a single one to `fetchProfile` as
+  `input.iss`; comparing it with the provider's issuer is the connector's job.
 
 ## Deliberate deviations (stricter than spec)
 

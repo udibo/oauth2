@@ -23,6 +23,7 @@ import {
   packageDeadlineSignal,
 } from "../../utils/_default-fetch.ts";
 import {
+  assertAuthorizationResponseIssuer,
   assertIdTokenClaims,
   describeError,
   PROVIDER_REQUEST_TIMEOUT_MS,
@@ -97,6 +98,9 @@ interface JwkWithKid extends JsonWebKey {
  * `id_token`'s RS256 signature against Apple's published keys before trusting
  * its claims (`iss`, `aud`, `azp`, `exp`, and the `nonce` when one was sent,
  * checked as {@link oidcProvider} checks them, with the default `azp` policy).
+ * A callback `iss` (RFC 9207) other than `https://appleid.apple.com` is
+ * refused before the code is redeemed; Apple does not advertise the
+ * parameter, so a callback without one is accepted.
  * `emailVerified` is `true` when Apple's `email_verified` claim is `true` or
  * the string `"true"`; private-relay addresses
  * (`@privaterelay.appleid.com`) are returned as-is. The raw `id_token`
@@ -331,6 +335,12 @@ export function appleProvider(options: AppleProviderOptions): ExternalProvider {
       return Promise.resolve(url.toString());
     },
     async fetchProfile(input: ExternalProfileInput): Promise<ExternalProfile> {
+      assertAuthorizationResponseIssuer({
+        provider: id,
+        iss: input.iss,
+        issuer: APPLE_ISSUER,
+        required: false,
+      });
       const idToken = await exchangeCode(input);
       const claims = await verifyIdToken(idToken, input.nonce);
       return profileFromClaims(claims);

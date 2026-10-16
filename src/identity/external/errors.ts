@@ -20,7 +20,9 @@
  * - `provider_error` — the provider rejected the request (callback `error`
  *   param, token-endpoint error, profile-endpoint failure, malformed
  *   response). The message carries the provider's error code/description.
- * - `invalid_callback` — the callback URL is missing `code` or `state`.
+ * - `invalid_callback` — the callback URL is missing `code` or `state`, or
+ *   its `iss` (RFC 9207) is not the provider's issuer: repeated, naming
+ *   another issuer, or missing from a provider that advertises it.
  * - `state_mismatch` — the callback `state` does not match the transient
  *   (possible CSRF or a stale/mixed-up sign-in attempt).
  * - `transient_expired` — the sign-in attempt outlived the configured max

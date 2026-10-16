@@ -7,6 +7,7 @@
  * @module
  */
 
+import { DUPLICATE_ISS_PROBLEM } from "../../client/_issuer-refusal.ts";
 import { timingSafeEqualString } from "../../utils/crypto.ts";
 import { generateCodeVerifier, generateState } from "../../utils/pkce.ts";
 import { ExternalAuthError } from "./errors.ts";
@@ -146,8 +147,10 @@ export class ExternalAuthFlow {
    * Completes a sign-in attempt from the provider callback: checks the
    * transient belongs to this flow's provider, enforces the max transient
    * age, verifies `state` with a timing-safe compare, and only then surfaces a
-   * provider `error` callback param; finally the provider exchanges the code
-   * and (for nonce-using providers) validates the id_token nonce, and the
+   * provider `error` callback param. A callback with more than one `iss` is
+   * refused; a single `iss` is handed to the provider, which checks it against
+   * its issuer (RFC 9207) before it exchanges the code. The provider then
+   * (for nonce-using providers) validates the id_token nonce, and the
    * normalized profile is returned.
    *
    * @throws {ExternalAuthError} with a code describing the failure — see
@@ -217,11 +220,21 @@ export class ExternalAuthFlow {
       );
     }
 
+    const issValues = params.getAll("iss");
+    if (issValues.length > 1) {
+      throw new ExternalAuthError(
+        providerId,
+        "invalid_callback",
+        `${DUPLICATE_ISS_PROBLEM}. Ask the user to start again.`,
+      );
+    }
+
     return await this.provider.fetchProfile({
       code,
       redirectUri: transient.redirectUri,
       codeVerifier: transient.codeVerifier,
       nonce: transient.nonce,
+      ...(issValues.length === 1 ? { iss: issValues[0] } : {}),
     });
   }
 }

@@ -17,6 +17,7 @@ import {
 } from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import {
+  assertAuthorizationResponseIssuer,
   assertIdTokenClaims,
   type AzpPolicy,
   describeError,
@@ -90,6 +91,12 @@ export interface OidcProviderOptions {
  * `email_verified`). A UserInfo response whose `sub` differs from the
  * id_token `sub` (OIDC Core §5.3.2) is discarded, and a UserInfo failure is
  * non-fatal — the profile then comes from the id_token claims alone.
+ *
+ * **Authorization response issuer:** before the code is redeemed, a callback
+ * `iss` (RFC 9207) that is not exactly the discovered issuer is refused, and
+ * so is a missing `iss` when the discovery document advertises
+ * `authorization_response_iss_parameter_supported: true`. A provider that
+ * does not advertise it may leave `iss` out.
  *
  * **id_token validation:** the `iss`, `aud`, `azp` (when the token has multiple
  * audiences or an `azp` claim, unless `azp: "ignore"` is configured), `exp`,
@@ -310,6 +317,12 @@ export function oidcProvider(options: OidcProviderOptions): ExternalProvider {
     },
     async fetchProfile(input: ExternalProfileInput): Promise<ExternalProfile> {
       const meta = await discover();
+      assertAuthorizationResponseIssuer({
+        provider: id,
+        iss: input.iss,
+        issuer: meta.issuer,
+        required: meta.authorization_response_iss_parameter_supported === true,
+      });
       const response = await exchangeCode(input);
       const claims = decodeAndValidateIdToken(response, meta, input.nonce);
       const userInfo = await fetchUserInfoClaims(

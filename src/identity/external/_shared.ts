@@ -9,6 +9,7 @@
  * @module
  */
 
+import { authorizationResponseIssuerProblem } from "../../client/_issuer-refusal.ts";
 import { isOAuth2Error } from "../../errors.ts";
 import { readBoundedBody } from "../../utils/_body.ts";
 import { timingSafeEqualString } from "../../utils/crypto.ts";
@@ -114,6 +115,42 @@ export async function readErrorBody(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/** Input to {@link assertAuthorizationResponseIssuer}. */
+export interface AuthorizationResponseIssuerInput {
+  /** The connector id, for the error prefix. */
+  provider: string;
+  /** The callback's `iss`, from {@link ExternalProfileInput.iss}. */
+  iss: string | undefined;
+  /** The provider's issuer identifier; `iss` must equal it exactly. */
+  issuer: string;
+  /** Whether the provider advertises `authorization_response_iss_parameter_supported`. */
+  required: boolean;
+}
+
+/**
+ * Refuses a callback whose `iss` (RFC 9207 §2.4) is not exactly `issuer`, or
+ * is absent while `required`. Call it before redeeming the code.
+ *
+ * @throws {ExternalAuthError} `invalid_callback` when the response is refused.
+ */
+export function assertAuthorizationResponseIssuer(
+  input: AuthorizationResponseIssuerInput,
+): void {
+  const problem = authorizationResponseIssuerProblem(
+    input.iss === undefined ? [] : [input.iss],
+    [input.issuer],
+    input.required,
+  );
+  if (problem === undefined) return;
+  throw new ExternalAuthError(
+    input.provider,
+    "invalid_callback",
+    `${problem}. The callback did not come from "${input.issuer}" — a ` +
+      `response from another provider replayed here, or a provider that ` +
+      `does not send the issuer it advertises. Ask the user to start again.`,
+  );
 }
 
 /**

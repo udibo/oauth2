@@ -85,7 +85,7 @@ The package implements these specifications, with the limits noted:
   [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) device authorization.
 - [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) `iss` in authorization
   responses. `DirectClient` and the BFF check it when the client is configured
-  with an `issuer`.
+  with an `issuer`, and so do the external sign-in connectors.
 - [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) JWT access tokens, opt-in;
   access tokens are opaque by default.
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html):
