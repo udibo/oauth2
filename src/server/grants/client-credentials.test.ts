@@ -243,7 +243,13 @@ describe("ClientCredentialsGrant", () => {
           { authorization: encodeBasicAuth(publicClient.id, "") },
         ),
       );
-      await assertInvalidClient(response);
+      const body = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description).toBe(
+        "multiple client authentication methods",
+      );
+      expect(body.access_token).toBe(undefined);
     });
 
     it("refuses a public client that presents a secret it was never issued", async () => {

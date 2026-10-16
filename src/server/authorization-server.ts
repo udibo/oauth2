@@ -1806,6 +1806,8 @@ export class AuthorizationServer<
    * authenticate through the same implementation, so a request that fails here
    * fails identically at the token endpoint.
    *
+   * @throws {InvalidRequestError} If the request uses more than one client
+   *   authentication method (RFC 6749 Section 2.3)
    * @throws {InvalidClientError} If client authentication fails
    */
   async authenticateClient(
