@@ -22,6 +22,7 @@ import {
 import {
   AccessDeniedError,
   InvalidGrantError,
+  InvalidRequestError,
   ServerError,
   TemporarilyUnavailableError,
 } from "../errors.ts";
@@ -2444,5 +2445,286 @@ describe("OAuth2ErrorCode", () => {
     // Type-level guard: compiles only if the union covers both codes.
     const codes: OAuth2ErrorCode[] = ["invalid_token", "insufficient_scope"];
     expect(codes).toStrictEqual(["invalid_token", "insufficient_scope"]);
+  });
+});
+
+describe("DirectClient authorization response issuer (RFC 9207)", () => {
+  const OTHER_ISSUER = "https://evil.example";
+
+  function issuerProvider(metadata: Record<string, unknown> = {}): {
+    fetch: typeof fetch;
+    tokenCalls: () => number;
+  } {
+    let tokenCalls = 0;
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      if (url === METADATA_URL) {
+        return Promise.resolve(
+          jsonResponse({
+            issuer: ISSUER,
+            authorization_endpoint: AUTHORIZE_URL,
+            token_endpoint: TOKEN_URL,
+            ...metadata,
+          }),
+        );
+      }
+      if (url === TOKEN_URL) {
+        tokenCalls++;
+        return Promise.resolve(
+          jsonResponse({
+            access_token: "at-issuer",
+            token_type: "Bearer",
+            expires_in: 3600,
+          }),
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    }) as typeof fetch;
+    return { fetch: fetchImpl, tokenCalls: () => tokenCalls };
+  }
+
+  function issuerClient(fetchImpl: typeof fetch): DirectClient {
+    return new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
+      clientId: testPublicClient.id,
+      redirectUri: REDIRECT_URI,
+      issuer: ISSUER,
+      fetch: fetchImpl,
+    });
+  }
+
+  async function callbackFor(
+    client: DirectClient,
+    response: Record<string, string>,
+  ): Promise<string> {
+    const { state } = await client.login();
+    return `${REDIRECT_URI}?${new URLSearchParams({ code: "abc", state, ...response })}`;
+  }
+
+  it("accepts the issuer it sent the request to on a full round trip", async () => {
+    const fixture = await buildFixture();
+    const client = issuerClient(fixture.fetchImpl);
+    const { url } = await client.login({ returnTo: "/home" });
+
+    const callback = await performAuthorizeRedirect(fixture.authServer, url);
+
+    expect(new URL(callback).searchParams.get("iss")).toBe(ISSUER);
+    expect(
+      (await client.discover()).authorization_response_iss_parameter_supported,
+    ).toBe(true);
+    const result = await client.handleAuthorizationCallback(callback);
+    expect(result.returnTo).toBe("/home");
+    expect(typeof result.tokens.accessToken).toBe("string");
+  });
+
+  it("refuses a response naming another issuer without redeeming the code", async () => {
+    const provider = issuerProvider();
+    const client = issuerClient(provider.fetch);
+    const events: OAuth2ClientEvent[] = [];
+    client.subscribe((event) => events.push(event));
+
+    const error = await rejection(
+      client.handleAuthorizationCallback(
+        await callbackFor(client, { iss: OTHER_ISSUER }),
+      ),
+      InvalidRequestError,
+      "does not match",
+    );
+
+    expect(error.extensions.error).toBe("invalid_request");
+    expect(provider.tokenCalls()).toBe(0);
+    expect(events).toStrictEqual([{ type: "error", error }]);
+  });
+
+  it("compares the issuer as an exact string", async () => {
+    const provider = issuerProvider();
+    const client = issuerClient(provider.fetch);
+
+    await rejection(
+      client.handleAuthorizationCallback(
+        await callbackFor(client, { iss: `${ISSUER}/` }),
+      ),
+      InvalidRequestError,
+      "does not match",
+    );
+    expect(provider.tokenCalls()).toBe(0);
+  });
+
+  it("refuses a response that repeats iss", async () => {
+    const provider = issuerProvider();
+    const client = issuerClient(provider.fetch);
+    const callback = new URL(await callbackFor(client, { iss: ISSUER }));
+    callback.searchParams.append("iss", OTHER_ISSUER);
+
+    await rejection(
+      client.handleAuthorizationCallback(callback),
+      InvalidRequestError,
+      "more than one `iss`",
+    );
+    expect(provider.tokenCalls()).toBe(0);
+  });
+
+  it("refuses a response without iss when the issuer advertises it", async () => {
+    const provider = issuerProvider({
+      authorization_response_iss_parameter_supported: true,
+    });
+    const client = issuerClient(provider.fetch);
+
+    await rejection(
+      client.handleAuthorizationCallback(await callbackFor(client, {})),
+      InvalidRequestError,
+      "missing `iss`",
+    );
+    expect(provider.tokenCalls()).toBe(0);
+  });
+
+  it("accepts a response without iss when the issuer does not advertise it", async () => {
+    for (const advertised of [undefined, false]) {
+      const provider = issuerProvider({
+        authorization_response_iss_parameter_supported: advertised,
+      });
+      const client = issuerClient(provider.fetch);
+
+      const { tokens } = await client.handleAuthorizationCallback(
+        await callbackFor(client, {}),
+      );
+
+      expect(tokens.accessToken).toBe("at-issuer");
+      expect(provider.tokenCalls()).toBe(1);
+    }
+  });
+
+  it("refuses a mismatched iss even when the issuer does not advertise it", async () => {
+    const provider = issuerProvider();
+    const client = issuerClient(provider.fetch);
+
+    await rejection(
+      client.handleAuthorizationCallback(
+        await callbackFor(client, { iss: OTHER_ISSUER }),
+      ),
+      InvalidRequestError,
+      "does not match",
+    );
+    expect(provider.tokenCalls()).toBe(0);
+  });
+
+  it("refuses an error response naming another issuer instead of reporting its error", async () => {
+    const client = issuerClient(issuerProvider().fetch);
+
+    await rejection(
+      client.handleAuthorizationCallback(
+        `${REDIRECT_URI}?error=access_denied&iss=${encodeURIComponent(OTHER_ISSUER)}`,
+      ),
+      InvalidRequestError,
+      "does not match",
+    );
+  });
+
+  it("refuses an error response without iss when the issuer advertises it", async () => {
+    const client = issuerClient(
+      issuerProvider({ authorization_response_iss_parameter_supported: true })
+        .fetch,
+    );
+
+    await rejection(
+      client.handleAuthorizationCallback(`${REDIRECT_URI}?error=access_denied`),
+      InvalidRequestError,
+      "missing `iss`",
+    );
+  });
+
+  it("reports the issuer's error when an error response names the expected issuer", async () => {
+    const client = issuerClient(
+      issuerProvider({ authorization_response_iss_parameter_supported: true })
+        .fetch,
+    );
+
+    const error = await rejection(
+      client.handleAuthorizationCallback(
+        `${REDIRECT_URI}?error=access_denied&error_description=nope&iss=${encodeURIComponent(ISSUER)}`,
+      ),
+      Error,
+      "nope",
+    );
+    expect(
+      (error as InstanceType<typeof InvalidRequestError>).extensions.error,
+    ).toBe("access_denied");
+  });
+
+  it("does not compare iss for a client configured with endpoints instead of an issuer", async () => {
+    const provider = issuerProvider();
+    const client = new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
+      clientId: testPublicClient.id,
+      redirectUri: REDIRECT_URI,
+      endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+      fetch: provider.fetch,
+    });
+
+    const { tokens } = await client.handleAuthorizationCallback(
+      await callbackFor(client, { iss: OTHER_ISSUER }),
+    );
+    expect(tokens.accessToken).toBe("at-issuer");
+  });
+
+  describe("verifyAuthorizationResponseIssuer", () => {
+    it("accepts the issuer retargeted at the origin the request was sent to", async () => {
+      const client = issuerClient(issuerProvider().fetch);
+
+      await client.verifyAuthorizationResponseIssuer(
+        "?code=abc&iss=https%3A%2F%2Fpreview.example",
+        { origin: "https://preview.example" },
+      );
+      await client.verifyAuthorizationResponseIssuer(
+        `?code=abc&iss=${ISSUER}`,
+        {
+          origin: "https://preview.example",
+        },
+      );
+      await rejection(
+        client.verifyAuthorizationResponseIssuer(
+          "?code=abc&iss=https%3A%2F%2Fpreview.example",
+        ),
+        InvalidRequestError,
+        "does not match",
+      );
+      await rejection(
+        client.verifyAuthorizationResponseIssuer(
+          "?code=abc&iss=https%3A%2F%2Fother.example",
+          { origin: "https://preview.example" },
+        ),
+        InvalidRequestError,
+        "does not match",
+      );
+    });
+
+    it("keeps the issuer's path when retargeting it at an origin", async () => {
+      const tenantIssuer = "https://auth.example/tenants/a";
+      const client = new DirectClient({
+        clientId: "spa",
+        issuer: tenantIssuer,
+        fetch: respondingWith(() =>
+          jsonResponse({
+            issuer: tenantIssuer,
+            authorization_endpoint: `${tenantIssuer}/authorize`,
+          }),
+        ).fetch,
+      });
+
+      await client.verifyAuthorizationResponseIssuer(
+        "?iss=https%3A%2F%2Fpreview.example%2Ftenants%2Fa",
+        { origin: "https://preview.example" },
+      );
+      await rejection(
+        client.verifyAuthorizationResponseIssuer(
+          "?iss=https%3A%2F%2Fpreview.example",
+          { origin: "https://preview.example" },
+        ),
+        InvalidRequestError,
+        "does not match",
+      );
+    });
   });
 });

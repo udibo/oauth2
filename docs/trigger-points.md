@@ -138,7 +138,7 @@ seams.
 | refresh-lease | `RefreshLease` (`withRefreshLock` argument) | Storing a refreshed session, or ending it after the authorization server refuses the refresh token | no | blocks | A refused `update` or `destroy` → the session is re-read: gone → signed out; a peer's tokens → used; otherwise `502` and the session is kept. Any other throw → `502`, session kept |
 | resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Failure behavior) |
 | callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Failure behavior)                        |
-| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"                |
+| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → `server_error` before the `iss` check (RFC 9207)                   |
 | auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | yes                      | blocks  | Login → propagates; callback → `invalid_grant`                                                                   |
 | logout-token-verifier    | `verifyLogoutToken` (`backchannelLogout`)     | `POST /auth/backchannel`, verifying the JWT       | with `backchannelLogout` | blocks  | Throw or `null` → `400 invalid_request` (deliberate "throw-or-null to reject" contract)                          |
 | proxy-fetch              | `fetch` (`HonoBffProxyOptions`)               | The upstream call in `bff.proxy`                  | no                       | blocks  | Wrapped → `502` `temporarily_unavailable`                                                                        |
@@ -201,8 +201,8 @@ These responsibilities stay in the application or use a separate API.
 - **Inconsistent legacy-credential contract.** A `getLegacyCredential` throw
   aborts sign-in, but a `clearLegacyCredential` throw is swallowed — even though
   the docs tell implementers to provide both together.
-- **BFF `resolveUser` / `resolveOrigin` throws are misclassified.** Failures in
-  these post-exchange app hooks are relabeled `invalid_grant` "code exchange
-  failed" because they sit inside the exchange `try`/`catch`.
+- **BFF `resolveUser` throws are misclassified.** A failure in this
+  post-exchange app hook is relabeled `invalid_grant` "code exchange failed"
+  because it sits inside the exchange `try`/`catch`.
 - **BFF `onCallbackError` is unguarded.** A throw from the error handler itself
   propagates to Hono (500).

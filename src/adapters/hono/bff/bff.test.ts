@@ -8,6 +8,7 @@ import {
   vi,
 } from "vitest";
 import { serve } from "../../../_test_server.ts";
+import { InvalidRequestError } from "../../../errors.ts";
 import { thrown } from "../../../_test_assert.ts";
 import { delay } from "../../../utils/_delay.ts";
 import { FakeTime } from "../../../_test_fake-time.ts";
@@ -43,7 +44,7 @@ import {
   EncryptedCookieAuthRequestStorage,
   MemoryAuthRequestStorageFactory,
 } from "./auth-request-store.ts";
-import { HonoBff, type HonoBffOptions } from "./bff.ts";
+import { type BffCallbackError, HonoBff, type HonoBffOptions } from "./bff.ts";
 import {
   EncryptedCookieSessionStore,
   MemorySessionStore,
@@ -2765,6 +2766,220 @@ describe("HonoBff", () => {
       expect(res.status).toBe(400);
       expect((await res.json()).error).toBe("invalid_grant");
       expect(cookieValue(res, "oauth2_session")).toBe(undefined);
+    });
+  });
+
+  describe("authorization response issuer (RFC 9207)", () => {
+    const OTHER_ISSUER = "https://evil.example";
+
+    function issuerBff(
+      extra: Partial<ConstructorParameters<typeof HonoBff>[0]> = {},
+    ): HonoBff {
+      return makeBff({
+        client: new DirectClient({
+          clientId: testClient.id,
+          clientSecret: CLIENT_SECRET,
+          redirectUri: REDIRECT_URI,
+          issuer: ISSUER,
+          fetch: localAuthServerFetch(fixture.authServer),
+        }),
+        ...extra,
+      });
+    }
+
+    function withIss(callbackPath: string, iss: string | null): string {
+      const url = new URL(callbackPath, ISSUER);
+      url.searchParams.delete("iss");
+      if (iss !== null) url.searchParams.set("iss", iss);
+      return `${url.pathname}${url.search}`;
+    }
+
+    it("opens a session when the callback names the issuer", async () => {
+      const app = makeApp(issuerBff());
+      const { callbackPath, cookies } = await beginLogin(app);
+
+      expect(new URL(callbackPath, ISSUER).searchParams.get("iss")).toBe(
+        ISSUER,
+      );
+      const res = await app.request(
+        callbackPath,
+        withCookies(undefined, cookies),
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/home");
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
+    it("refuses a callback naming another issuer without redeeming the code", async () => {
+      const app = makeApp(issuerBff());
+      const { callbackPath, cookies } = await beginLogin(app);
+
+      const refused = await app.request(
+        withIss(callbackPath, OTHER_ISSUER),
+        withCookies(undefined, cookies),
+      );
+      expect(refused.status).toBe(400);
+      const body = await refused.json();
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description).toContain("does not match");
+      expect(cookieValue(refused, "oauth2_session")).toBe(undefined);
+
+      const genuine = await app.request(
+        callbackPath,
+        withCookies(undefined, cookies),
+      );
+      expect(genuine.status).toBe(302);
+      expect(typeof cookieValue(genuine, "oauth2_session")).toBe("string");
+    });
+
+    it("refuses a callback without iss when the issuer advertises it", async () => {
+      const app = makeApp(issuerBff());
+      const { callbackPath, cookies } = await beginLogin(app);
+
+      const res = await app.request(
+        withIss(callbackPath, null),
+        withCookies(undefined, cookies),
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("invalid_request");
+      expect(body.error_description).toContain("missing `iss`");
+    });
+
+    it("refuses an error callback naming another issuer instead of reporting its error", async () => {
+      const app = makeApp(issuerBff());
+
+      const res = await app.request(
+        `/auth/callback?error=access_denied&state=x&iss=${encodeURIComponent(OTHER_ISSUER)}`,
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_request");
+    });
+
+    it("routes an issuer refusal through onCallbackError", async () => {
+      const seen: BffCallbackError[] = [];
+      const app = makeApp(
+        issuerBff({
+          onCallbackError: (c, error) => {
+            seen.push(error);
+            return c.redirect(`/sign-in?error=${error.error}`);
+          },
+        }),
+      );
+      const { callbackPath, cookies } = await beginLogin(app);
+
+      const res = await app.request(
+        withIss(callbackPath, OTHER_ISSUER),
+        withCookies(undefined, cookies),
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe(
+        "/sign-in?error=invalid_request",
+      );
+      expect(seen.map(({ error }) => error)).toStrictEqual(["invalid_request"]);
+      expect(seen[0]!.error_description).toContain("does not match");
+      expect(seen[0]!.cause).toBeInstanceOf(InvalidRequestError);
+    });
+
+    it("reports a discovery failure at the callback as server_error", async () => {
+      const app = makeApp(
+        makeBff({
+          client: new DirectClient({
+            clientId: testClient.id,
+            clientSecret: CLIENT_SECRET,
+            redirectUri: REDIRECT_URI,
+            issuer: ISSUER,
+            fetch: () => Promise.resolve(new Response(null, { status: 503 })),
+          }),
+        }),
+      );
+
+      const res = await app.request(
+        `/auth/callback?code=abc&state=x&iss=${encodeURIComponent(ISSUER)}`,
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("server_error");
+    });
+
+    it("reports a resolveOrigin throw at the callback as server_error", async () => {
+      const seen: BffCallbackError[] = [];
+      const failure = new Error("no trusted origin");
+      const app = makeApp(
+        makeBff({
+          resolveOrigin: () => {
+            throw failure;
+          },
+          onCallbackError: (c, error) => {
+            seen.push(error);
+            return c.json({ error: error.error }, 400);
+          },
+        }),
+      );
+
+      const res = await app.request("/auth/callback?code=abc&state=x");
+      expect(res.status).toBe(400);
+      expect(seen.map(({ error }) => error)).toStrictEqual(["server_error"]);
+      expect(seen[0]!.cause).toBe(failure);
+    });
+
+    it("accepts the issuer of the origin resolveOrigin retargeted sign-in at", async () => {
+      const PREVIEW = "http://preview.localhost";
+      const previewClient: TestClient = {
+        id: "preview-bff",
+        confidential: true,
+        grants: ["authorization_code"],
+        redirectUris: [REDIRECT_URI, `${PREVIEW}/auth/callback`],
+      };
+      await fixture.clientService.add(
+        previewClient,
+        CLIENT_SECRET,
+        testUser.id,
+      );
+      const perOriginServer = new AuthorizationServer<TestClient, TestUser>({
+        resolve: (request) => ({
+          services: {
+            clientService: fixture.clientService,
+            tokenService: fixture.tokenService,
+          },
+          issuer: new URL(request.url).origin,
+        }),
+        grants: {
+          authorization_code: new AuthorizationCodeGrant({
+            resolve: () => ({
+              clientService: fixture.clientService,
+              tokenService: fixture.tokenService,
+              authorizationCodeService: fixture.authorizationCodeService,
+            }),
+          }),
+        },
+      });
+      const app = makeApp(
+        makeBff({
+          client: new DirectClient({
+            clientId: "preview-bff",
+            clientSecret: CLIENT_SECRET,
+            redirectUri: REDIRECT_URI,
+            issuer: ISSUER,
+            fetch: localAuthServerFetch(perOriginServer),
+          }),
+          resolveOrigin: () => PREVIEW,
+        }),
+      );
+
+      const loginRes = await app.request(`${PREVIEW}/auth/login`);
+      const callback = await performAuthorizeRedirect(
+        perOriginServer,
+        loginRes.headers.get("Location")!,
+      );
+      expect(new URL(callback).searchParams.get("iss")).toBe(PREVIEW);
+
+      const res = await app.request(
+        callback,
+        withCookies(undefined, jar(loginRes)),
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get("Location")).toBe("/home");
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
     });
   });
 

@@ -2923,3 +2923,237 @@ describe("discovery scopes from per-request context", () => {
     expect("scopes_supported" in (await response.json())).toStrictEqual(false);
   });
 });
+
+describe("authorization response issuer (RFC 9207)", () => {
+  const authenticated = () =>
+    Promise.resolve({
+      user: testUser,
+      authorizedScope: new BasicScope("read write"),
+    });
+
+  async function issuerServer(
+    issuerFor: (request: Request) => string | undefined,
+  ) {
+    const services = createTestServices();
+    await setupTestData(services);
+    const authorizationCodeGrant = new AuthorizationCodeGrant({
+      resolve: () => ({
+        clientService: services.clientService,
+        tokenService: services.tokenService,
+        authorizationCodeService: services.authorizationCodeService,
+      }),
+      requirePKCE: false,
+    });
+    const server = new AuthorizationServer({
+      resolve: (request) => ({
+        services: {
+          clientService: services.clientService,
+          tokenService: services.tokenService,
+        },
+        issuer: issuerFor(request),
+      }),
+      grants: { authorization_code: authorizationCodeGrant },
+    });
+    return { server, ...services };
+  }
+
+  function authorizeRequest(
+    query: Record<string, string>,
+    origin = "https://auth.example.com",
+  ): Request {
+    return new Request(`${origin}/authorize?${new URLSearchParams(query)}`);
+  }
+
+  function redirectParams(response: Response): URLSearchParams {
+    expect(response.status).toBe(302);
+    return new URL(response.headers.get("Location")!).searchParams;
+  }
+
+  it("sends the issuer with the code on a successful redirect", async () => {
+    const { server } = await issuerServer(() => "https://auth.example.com");
+
+    const params = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({
+          response_type: "code",
+          client_id: "client-1",
+          state: "xyz",
+        }),
+        authenticated,
+      ),
+    );
+
+    expect(params.has("code")).toBe(true);
+    expect(params.get("state")).toBe("xyz");
+    expect(params.getAll("iss")).toStrictEqual(["https://auth.example.com"]);
+  });
+
+  it("sends the issuer on an error redirect for an invalid request", async () => {
+    const { server } = await issuerServer(() => "https://auth.example.com");
+
+    const params = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({ client_id: "client-1", state: "xyz" }),
+        authenticated,
+      ),
+    );
+
+    expect(params.get("error")).toBe("invalid_request");
+    expect(params.get("state")).toBe("xyz");
+    expect(params.getAll("iss")).toStrictEqual(["https://auth.example.com"]);
+  });
+
+  it("sends the issuer on an error redirect when the user is not authenticated", async () => {
+    const { server } = await issuerServer(() => "https://auth.example.com");
+
+    const params = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({
+          response_type: "code",
+          client_id: "client-1",
+          state: "xyz",
+        }),
+        () => Promise.resolve(null),
+      ),
+    );
+
+    expect(params.get("error")).toBe("access_denied");
+    expect(params.getAll("iss")).toStrictEqual(["https://auth.example.com"]);
+  });
+
+  it("sends the issuer on an error redirect that has no state to echo", async () => {
+    const { server } = await issuerServer(() => "https://auth.example.com");
+
+    const params = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({ response_type: "code", client_id: "client-1" }),
+        authenticated,
+      ),
+    );
+
+    expect(params.get("error")).toBe("invalid_request");
+    expect(params.has("state")).toBe(false);
+    expect(params.getAll("iss")).toStrictEqual(["https://auth.example.com"]);
+  });
+
+  it("sends the issuer resolved for each request", async () => {
+    const { server } = await issuerServer(
+      (request) => new URL(request.url).origin,
+    );
+    const query = {
+      response_type: "code",
+      client_id: "client-1",
+      state: "xyz",
+    };
+
+    const [first, second] = await Promise.all([
+      server.handleAuthorizeRequest(
+        authorizeRequest(query, "https://a.example.com"),
+        authenticated,
+      ),
+      server.handleAuthorizeRequest(
+        authorizeRequest(query, "https://b.example.com"),
+        authenticated,
+      ),
+    ]);
+
+    expect(redirectParams(first).get("iss")).toBe("https://a.example.com");
+    expect(redirectParams(second).get("iss")).toBe("https://b.example.com");
+  });
+
+  it("replaces an iss parameter carried by the registered redirect URI", async () => {
+    const { server, clientService } = await issuerServer(
+      () => "https://auth.example.com",
+    );
+    await clientService.add({
+      id: "query-client",
+      grants: ["authorization_code"],
+      redirectUris: ["https://example.com/callback?iss=https://evil.example"],
+    });
+
+    const params = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({
+          response_type: "code",
+          client_id: "query-client",
+          state: "xyz",
+        }),
+        authenticated,
+      ),
+    );
+
+    expect(params.getAll("iss")).toStrictEqual(["https://auth.example.com"]);
+  });
+
+  it("omits iss when the request resolves no issuer", async () => {
+    const { server } = await issuerServer(() => undefined);
+
+    const success = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({
+          response_type: "code",
+          client_id: "client-1",
+          state: "xyz",
+        }),
+        authenticated,
+      ),
+    );
+    const failure = redirectParams(
+      await server.handleAuthorizeRequest(
+        authorizeRequest({ client_id: "client-1", state: "xyz" }),
+        authenticated,
+      ),
+    );
+
+    expect(success.has("code")).toBe(true);
+    expect(success.has("iss")).toBe(false);
+    expect(failure.get("error")).toBe("invalid_request");
+    expect(failure.has("iss")).toBe(false);
+  });
+
+  it("advertises authorization_response_iss_parameter_supported with an authorization code grant", async () => {
+    const { server } = await issuerServer(() => "https://auth.example.com");
+
+    const response = await server.handleMetadataRequest(
+      new Request(
+        "https://auth.example.com/.well-known/oauth-authorization-server",
+      ),
+    );
+
+    expect(
+      (await response.json()).authorization_response_iss_parameter_supported,
+    ).toBe(true);
+  });
+
+  it("does not advertise authorization_response_iss_parameter_supported without an authorization endpoint", async () => {
+    const services = createTestServices();
+    const server = new AuthorizationServer({
+      resolve: () => ({
+        services: {
+          clientService: services.clientService,
+          tokenService: services.tokenService,
+        },
+        issuer: "https://auth.example.com",
+      }),
+      grants: {
+        client_credentials: new ClientCredentialsGrant({
+          resolve: () => ({
+            clientService: services.clientService,
+            tokenService: services.tokenService,
+          }),
+        }),
+      },
+    });
+
+    const context = await server.authorizationContext(
+      new Request(
+        "https://auth.example.com/.well-known/oauth-authorization-server",
+      ),
+    );
+
+    expect(
+      server.getMetadata(context)
+        .authorization_response_iss_parameter_supported,
+    ).toBeUndefined();
+  });
+});

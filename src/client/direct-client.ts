@@ -14,7 +14,9 @@
 import {
   AccessDeniedError,
   InvalidGrantError,
+  InvalidRequestError,
   isOAuth2Error,
+  type OAuth2Error,
   OAuth2Error as OAuth2ErrorClass,
   ServerError,
 } from "../errors.ts";
@@ -217,6 +219,16 @@ export interface AuthorizationRedirect {
   url: string;
   /** Opaque `state` value the callback will echo back. */
   state: string;
+}
+
+/** Options accepted by {@link DirectClient.verifyAuthorizationResponseIssuer}. */
+export interface VerifyIssuerOptions {
+  /**
+   * The origin {@link DirectClient.login} retargeted the authorize URL at, if
+   * any. The issuer moved to that origin, path kept, is accepted as well as
+   * the discovered one.
+   */
+  origin?: string;
 }
 
 /** Result of {@link DirectClient.handleAuthorizationCallback}. */
@@ -666,6 +678,10 @@ export class DirectClient extends OAuth2ClientBase {
    * than redeeming the single-use code twice. A call after it settles redeems
    * again, and fails.
    *
+   * The response's `iss` is checked first, error responses included, as
+   * {@link verifyAuthorizationResponseIssuer} describes. A refused response
+   * is never redeemed.
+   *
    * @param input The callback URL, its query string, or the parsed params.
    * @returns The persisted tokens and the `returnTo` recorded at login.
    * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
@@ -673,6 +689,7 @@ export class DirectClient extends OAuth2ClientBase {
    * `cause` is the transport failure.
    * @throws {OAuth2Error} when the callback carries `?error=…`, or the token
    * exchange fails.
+   * @throws {InvalidRequestError} when the response's `iss` is refused.
    * @throws {TypeError} when `code` or `state` is missing, or outside a
    * browser when the client has no `authRequestStorage` or no
    * `refreshTokenStorage`; checked before the pending request is claimed.
@@ -694,23 +711,7 @@ export class DirectClient extends OAuth2ClientBase {
   ): Promise<AuthorizationCallbackResult> {
     const params = toSearchParams(input);
 
-    const error = params.get("error");
-    if (error) {
-      const description = params.get("error_description") ?? undefined;
-      const errorUri = params.get("error_uri") ?? undefined;
-      const instance = new OAuth2ErrorClass(
-        description ?? "authorization error",
-        {
-          extensions: {
-            error,
-            error_description: description,
-            error_uri: errorUri,
-          },
-        },
-      );
-      this.emit({ type: "error", error: instance });
-      return Promise.reject(instance);
-    }
+    if (params.get("error")) return this.#rejectAuthorizationError(params);
 
     try {
       this.#requireAuthRequestStorage();
@@ -729,7 +730,7 @@ export class DirectClient extends OAuth2ClientBase {
     const existing = this.#callbackPromises.get(code);
     if (existing) return existing;
 
-    const promise = this.#exchangeCode(code, state);
+    const promise = this.#exchangeCode(code, state, params);
     this.#callbackPromises.set(code, promise);
     const cleanup = () =>
       queueMicrotask(() => this.#callbackPromises.delete(code));
@@ -737,15 +738,102 @@ export class DirectClient extends OAuth2ClientBase {
     return promise;
   }
 
+  async #rejectAuthorizationError(params: URLSearchParams): Promise<never> {
+    const error =
+      (await this.#issuerRefusal(params)) ?? authorizationResponseError(params);
+    this.emit({ type: "error", error });
+    throw error;
+  }
+
   async #exchangeCode(
     code: string,
     state: string,
+    params: URLSearchParams,
   ): Promise<AuthorizationCallbackResult> {
     const version = ++this.#sessionVersion;
+    const refusal = await this.#issuerRefusal(params);
+    if (refusal) {
+      this.emit({ type: "error", error: refusal });
+      throw refusal;
+    }
     const result = await this.exchangeAuthorizationCode(code, state);
     const tokens = await this.#saveTokens(result.raw, version);
     this.emit({ type: "authenticated", tokens });
     return { tokens, returnTo: result.returnTo };
+  }
+
+  /**
+   * Checks an authorization response's `iss` parameter (RFC 9207), which
+   * tells a client that signs in with more than one authorization server
+   * which of them answered. {@link handleAuthorizationCallback} calls it; a
+   * server that completes the flow with {@link exchangeAuthorizationCode}
+   * calls it first, on every response, error responses included.
+   *
+   * For a client configured with an `issuer`, it refuses an `iss` that is
+   * not exactly the discovered issuer, an `iss` given more than once, and a
+   * missing `iss` when the metadata advertises
+   * `authorization_response_iss_parameter_supported: true`. A missing `iss`
+   * is accepted from a server that does not advertise it. A client
+   * configured with `endpoints` has no issuer to compare against, so it
+   * accepts every response.
+   *
+   * @param input The callback URL, its query string, or the parsed params.
+   * @param options The `origin` the authorize URL was retargeted at, if any.
+   * @throws {InvalidRequestError} when the response is refused.
+   * @throws {ServerError} when discovery fails.
+   * @throws {TemporarilyUnavailableError} when the discovery endpoint cannot
+   * be reached.
+   *
+   * @example
+   * ```ts
+   * import { DirectClient } from "@udibo/oauth2/client";
+   *
+   * declare const client: DirectClient;
+   * declare const callbackUrl: string;
+   * await client.verifyAuthorizationResponseIssuer(callbackUrl);
+   * ```
+   */
+  async verifyAuthorizationResponseIssuer(
+    input: URL | URLSearchParams | string,
+    options: VerifyIssuerOptions = {},
+  ): Promise<void> {
+    const refusal = await this.#issuerRefusal(
+      toSearchParams(input),
+      options.origin,
+    );
+    if (refusal) throw refusal;
+  }
+
+  async #issuerRefusal(
+    params: URLSearchParams,
+    origin?: string,
+  ): Promise<OAuth2Error | undefined> {
+    if (!this.#issuer) return undefined;
+    const metadata = await this.discover();
+    const received = params.getAll("iss");
+    if (received.length > 1) {
+      return new InvalidRequestError(
+        "the authorization response carries more than one `iss` (RFC 9207)",
+      );
+    }
+    const [iss] = received;
+    if (iss === undefined) {
+      if (metadata.authorization_response_iss_parameter_supported !== true) {
+        return undefined;
+      }
+      return new InvalidRequestError(
+        "the authorization response is missing `iss`, which the issuer " +
+          "advertises with `authorization_response_iss_parameter_supported` " +
+          "(RFC 9207 §2.4)",
+      );
+    }
+    const accepted = [metadata.issuer];
+    if (origin) accepted.push(issuerAtOrigin(metadata.issuer, origin));
+    if (accepted.includes(iss)) return undefined;
+    return new InvalidRequestError(
+      "the authorization response `iss` does not match the issuer the " +
+        "request was sent to (RFC 9207 §2.4)",
+    );
   }
 
   /**
@@ -766,7 +854,8 @@ export class DirectClient extends OAuth2ClientBase {
    * two callbacks racing on one `state` reach the token endpoint at most once
    * (atomically so for a storage that implements
    * {@link AuthRequestStorage.take}). Emits nothing — the caller owns session
-   * semantics.
+   * semantics. It does not see the response's `iss`: call
+   * {@link verifyAuthorizationResponseIssuer} before it.
    *
    * @param code The authorization code from the callback.
    * @param state The `state` the callback echoed back.
@@ -1646,6 +1735,21 @@ function metadataToEndpoints(
   if (meta.userinfo_endpoint) out.userInfo = meta.userinfo_endpoint;
   if (meta.end_session_endpoint) out.endSession = meta.end_session_endpoint;
   return out;
+}
+
+function authorizationResponseError(params: URLSearchParams): OAuth2Error {
+  const description = params.get("error_description") ?? undefined;
+  return new OAuth2ErrorClass(description ?? "authorization error", {
+    extensions: {
+      error: params.get("error") ?? undefined,
+      error_description: description,
+      error_uri: params.get("error_uri") ?? undefined,
+    },
+  });
+}
+
+function issuerAtOrigin(issuer: string, origin: string): string {
+  return `${new URL(origin).origin}${issuer.slice(new URL(issuer).origin.length)}`;
 }
 
 function toSearchParams(

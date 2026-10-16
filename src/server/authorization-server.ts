@@ -635,6 +635,15 @@ export const ENDPOINT_METHODS: Readonly<
 
 interface AuthorizeRedirectTarget {
   url: URL | null;
+  issuer?: string;
+}
+
+function authorizationResponseRedirect(target: {
+  url: URL;
+  issuer?: string;
+}): Response {
+  if (target.issuer) target.url.searchParams.set("iss", target.issuer);
+  return Response.redirect(target.url.toString(), 302);
 }
 
 interface ResolvedToken<
@@ -1414,6 +1423,11 @@ export class AuthorizationServer<
    * responses from this endpoint, since there is no verified place to send the
    * user back to.
    *
+   * Every redirect to the client, the code and the error alike, carries `iss`
+   * set to the request's resolved issuer (RFC 9207), replacing any `iss` the
+   * registered `redirect_uri` itself carries. A request that resolves no
+   * `issuer` sends none.
+   *
    * Requires a grant extending {@linkcode AuthorizationCodeGrant} registered
    * under `authorization_code`; without one the endpoint answers 500
    * `server_error` (or rethrows, with `throwOnError`).
@@ -1437,7 +1451,7 @@ export class AuthorizationServer<
         handleConsent,
       );
     } catch (error) {
-      return this.#authorizeErrorResponse(error, target.url);
+      return this.#authorizeErrorResponse(error, target);
     }
   }
 
@@ -1449,7 +1463,7 @@ export class AuthorizationServer<
   ): Promise<Response> {
     const params = this.parseAuthorizeParameters(request);
     const grant = this.#authorizationCodeGrant();
-    const { services } = await this.authorizationContext(request);
+    const { services, issuer } = await this.authorizationContext(request);
     const client = await this.#resolveAuthorizeClient(
       grant,
       params.clientId,
@@ -1458,6 +1472,7 @@ export class AuthorizationServer<
 
     const redirectUrl = this.#resolveRedirectTarget(client, params.redirectUri);
     target.url = redirectUrl;
+    target.issuer = issuer;
 
     if (!params.state) {
       throw new InvalidRequestError("state required");
@@ -1510,10 +1525,14 @@ export class AuthorizationServer<
     );
 
     redirectUrl.searchParams.set("code", authorizationCode.code);
-    return Response.redirect(redirectUrl.toString(), 302);
+    return authorizationResponseRedirect({ url: redirectUrl, issuer });
   }
 
-  #authorizeErrorResponse(error: unknown, redirectUrl: URL | null): Response {
+  #authorizeErrorResponse(
+    error: unknown,
+    target: AuthorizeRedirectTarget,
+  ): Response {
+    const redirectUrl = target.url;
     if (!redirectUrl || !(error instanceof Error) || !isOAuth2Error(error)) {
       return this.#handleEndpointError(error);
     }
@@ -1530,7 +1549,10 @@ export class AuthorizationServer<
     if (errorUri) {
       searchParams.set("error_uri", errorUri);
     }
-    return Response.redirect(redirectUrl.toString(), 302);
+    return authorizationResponseRedirect({
+      url: redirectUrl,
+      issuer: target.issuer,
+    });
   }
 
   #authorizationCodeGrant(): AuthorizationCodeGrant<Client, User, S> {
@@ -1957,7 +1979,9 @@ export class AuthorizationServer<
    * authorization code grant's own `challengeMethods`, so a server that
    * registers an extra method (or drops `S256`) advertises what it will
    * actually accept. It is omitted entirely when no authorization code grant
-   * is registered, since PKCE has nothing to apply to.
+   * is registered, since PKCE has nothing to apply to. The same condition
+   * governs `authorization_response_iss_parameter_supported: true`
+   * (RFC 9207 §3): the authorization endpoint's redirects carry `iss`.
    *
    * `token_endpoint_auth_methods_supported` always includes `none`, the
    * RFC 7591 method for a client with no secret. The token endpoint accepts it
@@ -2008,6 +2032,9 @@ export class AuthorizationServer<
       metadata.code_challenge_methods_supported = challengeMethods;
     }
     metadata.response_types_supported = hasAuthCodeGrant ? ["code"] : [];
+    if (hasAuthCodeGrant) {
+      metadata.authorization_response_iss_parameter_supported = true;
+    }
 
     const scopesSupported = context.scopesSupported ?? this.scopesSupported;
     if (scopesSupported) {

@@ -54,6 +54,7 @@ export {
   type IntrospectionResult,
   type LoginOptions,
   type PollDeviceTokenOptions,
+  type VerifyIssuerOptions,
 } from "./direct-client.ts";
 export {
   DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES,

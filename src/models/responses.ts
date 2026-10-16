@@ -79,6 +79,11 @@ export interface AuthorizationServerMetadata {
   scopes_supported?: string[];
   /** Supported response types. */
   response_types_supported?: string[];
+  /**
+   * Whether every authorization response carries the `iss` parameter
+   * (RFC 9207 §3). A client that sees `true` refuses a response without one.
+   */
+  authorization_response_iss_parameter_supported?: boolean;
   /** Supported grant types. */
   grant_types_supported?: string[];
   /** URL of the JWKS document (OIDC Discovery / RFC 8414). */

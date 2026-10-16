@@ -171,6 +171,34 @@ A rate limit on the login route, in your framework or reverse proxy, still
 limits how often one client can start a sign-in. The caps only bound the memory
 each start can cost.
 
+## Authorization response issuer (RFC 9207)
+
+The authorization server adds `iss` to every redirect from its authorization
+endpoint and advertises `authorization_response_iss_parameter_supported`.
+`DirectClient.handleAuthorizationCallback` and `HonoBff`'s `/auth/callback`
+check it before they redeem the code. The check has these limits:
+
+- **A request that resolves no `issuer` gets no `iss`.** Such a server cannot
+  serve metadata either, so configure `issuer` in `resolve`.
+- **A `DirectClient` configured with `endpoints` does not check `iss`.** It has
+  no issuer to compare against, so it accepts any response. A client that signs
+  in with more than one authorization server needs an `issuer` for each, which
+  also makes the check refuse a response from the wrong one.
+- **A missing `iss` is accepted from a server that does not advertise it.**
+  Such a client is protected against a server that names the wrong issuer, but
+  not against one that leaves `iss` out.
+- **A login retargeted at another origin accepts two issuers.** With `origin`
+  (the BFF's `resolveOrigin`), the client accepts the discovered issuer and the
+  same issuer moved to that origin, with its path unchanged. That covers servers
+  with one issuer for every host and servers that take the issuer from the
+  request's host. It trusts the origin, so `resolveOrigin` must return only
+  allowlisted origins.
+- **`exchangeAuthorizationCode` does not see the response.** A server that
+  completes the flow with it calls `verifyAuthorizationResponseIssuer` first.
+- **The external sign-in connectors do not check `iss`.** `ExternalAuthFlow`
+  hands `oidcProvider`, `oauth2Provider`, Google and Apple the code without the
+  rest of the provider's response, so they cannot see `iss`.
+
 ## Deliberate deviations (stricter than spec)
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists
