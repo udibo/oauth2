@@ -33,6 +33,31 @@ client secret is a credential.
 Mount the BFF at `/auth`. The browser talks to your own backend using its
 session cookie. It never needs your client secret or refresh token.
 
+### How sign-in flows
+
+The same flow applies when the issuer is your own authorization server.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant App as Your app / BFF
+    participant Issuer as Udibo or your app's authorization server
+    participant API as Your API
+    Browser->>App: Start sign-in
+    App-->>Browser: Redirect to authorization endpoint
+    Browser->>Issuer: Sign in
+    Issuer-->>Browser: Redirect back with code and state
+    Browser->>App: Complete callback
+    App->>Issuer: Exchange code with PKCE and client authentication
+    Issuer-->>App: Tokens
+    App-->>Browser: Session cookie
+    Browser->>App: Request application data
+    App->>API: Access token
+    API-->>Browser: Application data, through the BFF
+```
+
+### Mount the BFF
+
 The following is integration wiring. `sessions` is a persistent `SessionStore`
 you implement for your app; `resourceServer` validates access tokens using the
 [API protection guide](protect-an-api.md). Both are declared here so the example

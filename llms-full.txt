@@ -65,14 +65,17 @@ Every page linked from the `## Docs` section of `llms.txt`, concatenated in inde
 
 # @udibo/oauth2
 
-OAuth2 and OpenID Connect tools for TypeScript applications. Connect your app to
-Udibo's identity service, or host an authorization server for your own app. The
-package includes clients, authorization and resource servers, Hono middleware,
-React bindings, and optional login flows over your own database.
+[![npm version](https://img.shields.io/npm/v/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2) [![JSR version](https://jsr.io/badges/@udibo/oauth2)](https://jsr.io/@udibo/oauth2) [![JSR score](https://jsr.io/badges/@udibo/oauth2/score)](https://jsr.io/@udibo/oauth2/score) [![CI](https://github.com/udibo/oauth2/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/udibo/oauth2/actions/workflows/ci-cd.yml?query=branch%3Amain) [![License: MIT](https://img.shields.io/npm/l/@udibo/oauth2)](https://github.com/udibo/oauth2/blob/main/LICENSE) [![npm downloads](https://img.shields.io/npm/dw/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2) [![Node.js version](https://img.shields.io/node/v/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2)
 
-Using Udibo's managed identity service requires a Udibo account; see
-[udibo.com](https://www.udibo.com/) for how to get one. The self-hosted examples
-run locally without a hosted account.
+OAuth2 and OpenID Connect tools for TypeScript applications: clients,
+authorization and resource servers, Hono middleware, React bindings, and
+optional login flows over your own database. It runs standalone in your own app:
+host an authorization server, protect an API, or sign users in through an
+OAuth2 or OpenID Connect issuer.
+
+The package also connects your app to Udibo's managed identity service, which
+requires a Udibo account; see [udibo.com](https://www.udibo.com/) for how to get
+one. The self-hosted examples run locally without a hosted account.
 
 ## Choose your path
 
@@ -90,77 +93,97 @@ run locally without a hosted account.
 ## Install
 
 The package supports Node.js 22 and later and ships ESM with type declarations.
-Install it from npm:
+It is published to npm, and to [JSR](https://jsr.io/@udibo/oauth2) as
+TypeScript source:
 
 ```sh
-npm install @udibo/oauth2
-# or
-pnpm add @udibo/oauth2
-```
-
-It is also published to [JSR](https://jsr.io/@udibo/oauth2) as TypeScript
-source:
-
-```sh
-npx jsr add @udibo/oauth2
-# or, with Deno
-deno add jsr:@udibo/oauth2
+npm install @udibo/oauth2   # or: pnpm add @udibo/oauth2
+npx jsr add @udibo/oauth2   # or, with Deno: deno add jsr:@udibo/oauth2
 ```
 
 `hono`, `react`, and `react-dom` are optional peer dependencies. Install the
 ones for the entrypoints you import: `hono` for the `/hono/*` adapters, `react`
 and `react-dom` for `/react` and `/react/components`. `vitest` is an optional
-peer dependency of the testing helpers.
+peer dependency of the testing helpers. Import the part you use; there is no
+root barrel or default export.
 
-Import the part you use; there is no root barrel or default export:
+## Protect an API
+
+This Hono API accepts JWT access tokens from your issuer and requires the
+`profile` scope. The [API protection guide](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md)
+covers token introspection and scope checks.
 
 ```ts
-import { BffClient, DirectClient } from "@udibo/oauth2/client";
-import { HonoBff } from "@udibo/oauth2/hono/bff";
+import { Hono } from "hono";
 import { HonoResourceServer } from "@udibo/oauth2/hono/resource-server";
+import { JwksTokenReader } from "@udibo/oauth2/server/resource";
+
+const tokenService = new JwksTokenReader({
+  issuer: "https://auth.example.com",
+  audience: "https://api.example.com",
+  getClient: (claims) => ({ id: String(claims.client_id) }),
+  getUser: (claims) => (claims.sub ? { id: claims.sub } : undefined),
+});
+const api = new HonoResourceServer({
+  resolve: () => ({ services: { tokenService } }),
+});
+
+const app = new Hono();
+app.get("/api/me", api.protect("profile"), (c) =>
+  c.json(api.getContext(c).user),
+);
 ```
 
-The package is pre-1.0. Minor releases may contain breaking changes; review the
-[stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md) before upgrading.
+## Standards
+
+The package implements these specifications, with the limits noted:
+
+- [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) OAuth 2.0: authorization
+  code, client credentials, refresh token, and password grants; no implicit grant.
+- [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) bearer tokens in the
+  `Authorization` header or a form body, with `WWW-Authenticate` challenges.
+- [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) PKCE, `S256` unless you
+  register other methods.
+- [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009) revocation,
+  [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) introspection,
+  [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) server metadata, and
+  [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) device authorization.
+- [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) JWT access tokens, opt-in;
+  access tokens are opaque by default.
+- [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html):
+  the authorization code flow, ES256 ID tokens, `nonce`, and UserInfo. The
+  server does not act on `prompt` or `max_age`.
+- OpenID Connect [Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
+  and [RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
+- [OpenID Connect Back-Channel Logout 1.0](https://openid.net/specs/openid-connect-backchannel-1_0.html),
+  as a receiver in the BFF only. You supply the `logout_token` verifier, and the
+  server sends no logout tokens.
 
 ## How the pieces fit
 
-For a browser app, use a backend-for-frontend (BFF). The browser holds an
-HttpOnly session cookie; the BFF exchanges authorization codes and keeps access
-and refresh tokens on the server. `BffClient` connects the browser to the BFF,
-and the React adapter uses that same client.
+For a browser app, use a backend-for-frontend (BFF), so tokens stay on the
+server. `BffClient` connects the browser to it, and the React adapter uses that
+same client:
 
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant App as Your app / BFF
-    participant Issuer as Udibo or your app's authorization server
-    participant API as Your API
-    Browser->>App: Start sign-in
-    App-->>Browser: Redirect to authorization endpoint
-    Browser->>Issuer: Sign in
-    Issuer-->>Browser: Redirect back with code and state
-    Browser->>App: Complete callback
-    App->>Issuer: Exchange code with PKCE and client authentication
-    Issuer-->>App: Tokens
-    App-->>Browser: Session cookie
-    Browser->>App: Request application data
-    App->>API: Access token
-    API-->>Browser: Application data, through the BFF
-```
+1. The browser starts sign-in at your BFF, which redirects it to the issuer's
+   authorization endpoint.
+2. The user signs in, and the issuer redirects back with a code and `state`.
+3. The BFF exchanges the code, with PKCE and client authentication, for tokens.
+4. The BFF keeps the tokens and sets an HttpOnly session cookie.
+5. Later requests carry the cookie; the BFF calls your API with the access
+   token and returns the data.
+
+The [BFF guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md#how-sign-in-flows) has this flow as a
+sequence diagram.
 
 `DirectClient` is for a process that holds tokens: your backend, a CLI, a native
-app, or a public browser client. Supply a client secret only on the server. For
-a browser app with a backend, start with the BFF guide.
-
-`HonoResourceServer` validates access tokens and enforces scopes on API routes.
+app, or a public browser client. Supply a client secret only on the server.
 `HonoAuthorizationServer` issues tokens when your app hosts its own
 authorization server. The framework-independent core accepts standard `Request`
 and `Response` objects; Hono adapters add routing and middleware.
 
-For app-owned login, `CaptchaProvider` and `verifyCaptcha` let your route check
-a client-issued bot-challenge token before calling `IdentityService`. The
-package does not include a challenge provider; see the
+For app-owned login, `verifyCaptcha` checks a bot-challenge token from a
+`CaptchaProvider` you supply before your route calls `IdentityService`; see the
 [CAPTCHA route example](https://github.com/udibo/oauth2/blob/main/docs/guides/add-login.md#captcha-at-the-route-boundary).
 
 ## Examples
@@ -228,11 +251,9 @@ checks a consumer of every entrypoint, and imports each one on Node.
 | `/testing`, `/testing/contract`, `/hono/bff/testing`, `/react/testing` | Tested; need Vitest   | Not supported                               | Not verified  |
 | `udibo-oauth2` command (`bin`)                                         | Tested                | Not supported                               | Not supported |
 
-The `udibo-oauth2` command is a development tool: `udibo-oauth2 oidc keygen`
-prints an OIDC signing key, and `udibo-oauth2 idp dev` runs a local identity
-provider. Run it with `npx udibo-oauth2` once the package is installed; the
-[local identity provider guide](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md)
-covers its options. Nothing on the library path imports it.
+The `udibo-oauth2` development command prints OIDC signing keys (`oidc keygen`)
+and runs a [local identity provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md)
+(`idp dev`). Nothing on the library path imports it.
 
 See [stability](https://github.com/udibo/oauth2/blob/main/docs/stability.md#runtime-support) for the support boundary.
 
@@ -248,6 +269,13 @@ Read [known limitations](https://github.com/udibo/oauth2/blob/main/docs/known-li
 cookie-session, OIDC, and optional-protection behavior. Identity feature
 examples apply to apps hosting their own login; Udibo clients use the hosted
 sign-in flow.
+
+## Upgrading
+
+The package is pre-1.0, so a minor release may contain breaking changes. Each
+release lists them under **⚠ BREAKING CHANGES** in [CHANGELOG.md](https://github.com/udibo/oauth2/blob/main/CHANGELOG.md).
+The [stability policy](https://github.com/udibo/oauth2/blob/main/docs/stability.md) says what counts as public API and
+what a patch release preserves.
 
 ## For coding agents
 
@@ -372,6 +400,31 @@ client secret is a credential.
 
 Mount the BFF at `/auth`. The browser talks to your own backend using its
 session cookie. It never needs your client secret or refresh token.
+
+### How sign-in flows
+
+The same flow applies when the issuer is your own authorization server.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant App as Your app / BFF
+    participant Issuer as Udibo or your app's authorization server
+    participant API as Your API
+    Browser->>App: Start sign-in
+    App-->>Browser: Redirect to authorization endpoint
+    Browser->>Issuer: Sign in
+    Issuer-->>Browser: Redirect back with code and state
+    Browser->>App: Complete callback
+    App->>Issuer: Exchange code with PKCE and client authentication
+    Issuer-->>App: Tokens
+    App-->>Browser: Session cookie
+    Browser->>App: Request application data
+    App->>API: Access token
+    API-->>Browser: Application data, through the BFF
+```
+
+### Mount the BFF
 
 The following is integration wiring. `sessions` is a persistent `SessionStore`
 you implement for your app; `resourceServer` validates access tokens using the

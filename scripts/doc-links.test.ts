@@ -58,6 +58,24 @@ describe("findProblems", () => {
     ).toEqual(["README.md: missing heading docs/guide.md#missing"]);
   });
 
+  it("checks the target of a link whose text is an image", () => {
+    expect(
+      problemsFor({
+        "README.md":
+          "[![badge](https://img.example/b.svg)](GONE)\n[![ok](https://img.example/b.svg)](docs/guide.md)\n",
+        "docs/guide.md": "# Guide\n",
+      }),
+    ).toEqual(["README.md: missing file GONE"]);
+  });
+
+  it("checks a relative image inside a link", () => {
+    expect(
+      problemsFor({
+        "README.md": "[![badge](gone.svg)](https://example.com)\n",
+      }),
+    ).toEqual(["README.md: missing file gone.svg"]);
+  });
+
   it("resolves links relative to the document that holds them", () => {
     expect(
       problemsFor({

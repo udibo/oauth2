@@ -24,14 +24,18 @@ import { isMain } from "./_main.ts";
 const INDEX = "llms.txt";
 const FULL = "llms-full.txt";
 const UNINDEXED = new Set(["docs/migration-tests.md"]);
-const LINK = /\[[^\]]*\]\(([^)]+)\)/g;
+const LINK = /\[(?:!\[[^\]]*\]\(([^)]+)\)|[^\]]*)\]\(([^)]+)\)/g;
 
 function localLinks(markdown: string): string[] {
   const targets: string[] = [];
   for (const match of markdown.matchAll(LINK)) {
-    const target = match[1]!.trim();
-    if (/^[a-z]+:/i.test(target) || target.startsWith("#")) continue;
-    targets.push(target);
+    for (const found of [match[1], match[2]]) {
+      const target = found?.trim();
+      if (!target || /^[a-z]+:/i.test(target) || target.startsWith("#")) {
+        continue;
+      }
+      targets.push(target);
+    }
   }
   return targets;
 }
@@ -95,14 +99,16 @@ export function render(root: string, index: string): string {
   for (const source of order) {
     const body = readFileSync(resolve(root, source), "utf8")
       .trim()
-      .replace(LINK, (match, target: string) => {
-        if (/^[a-z]+:/i.test(target)) return match;
-        const url = new URL(
-          target,
-          `https://github.com/udibo/oauth2/blob/main/${source}`,
-        );
-        return match.replace(`(${target})`, `(${url.href})`);
-      });
+      .replace(LINK, (match, image: string | undefined, target: string) =>
+        [image, target].reduce<string>((link, found) => {
+          if (!found || /^[a-z]+:/i.test(found)) return link;
+          const url = new URL(
+            found,
+            `https://github.com/udibo/oauth2/blob/main/${source}`,
+          );
+          return link.replace(`(${found})`, `(${url.href})`);
+        }, match),
+      );
     parts.push(`<!-- llms-full:source=${source} -->\n\n${body}`);
   }
   return parts.join("\n\n---\n\n") + "\n";
