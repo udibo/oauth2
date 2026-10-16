@@ -1,3 +1,54 @@
+## [0.26.0](https://github.com/udibo/oauth2/compare/0.25.0...0.26.0) (2026-10-16)
+
+### ⚠ BREAKING CHANGES
+
+* DirectClient (with `issuer`) and HonoBff refuse an
+authorization response whose `iss` is not the discovered issuer, or that
+omits `iss` when the server advertises
+`authorization_response_iss_parameter_supported`. If your authorization
+endpoint is served from a host whose issuer differs from the one clients
+discover, pass that origin through `login({ origin })` /
+`resolveOrigin`, or give the server one issuer for every host.
+
+## Testing
+
+- Rebased on main with #131. `pnpm check` passes, and `pnpm test
+--maxWorkers=6` passes: 138 files, 3592 tests.
+- Security-review follow-up (L1): `keeps the discovery endpoint's own
+error out of the callback response` points discovery at a 404 OAuth JSON
+body containing a sentinel. It failed against the previous head
+(`not_found` plus the sentinel came back), including under an
+`exposedMessage` → `message` mutation. It now gets `server_error` and
+the exact fixed description. Two seeded mutations were also killed:
+treating every error as a refusal, and dropping the
+`temporarily_unavailable` mapping. The new
+`handleAuthorizationCallback(…, { origin })` tests failed before the
+origin was threaded through.
+- New tests in `authorization-server.test.ts`, `direct-client.test.ts`
+and `bff.test.ts` (each in an "RFC 9207" block). Before the change,
+every server, client and BFF test that asserts the new behavior failed
+at its assertion. The guard tests passed throughout: missing `iss`
+accepted when not advertised, endpoints-mode clients, and no issuer
+resolved.
+- Seeded mutations, each killed by named tests: error redirect without
+`iss`, metadata flag dropped, any `iss` accepted, missing `iss`
+accepted, duplicates accepted, origin retargeting dropped (client and
+BFF), error path unchecked, trailing-slash-tolerant compare, BFF check
+removed, BFF origin not passed, no `error` event on refusal.
+
+## Not in this PR
+
+The external sign-in connectors (`oidcProvider`, `oauth2Provider`,
+Google, Apple) still don't check the upstream provider's `iss`.
+`ExternalProfileInput` carries only the code, so checking it means
+widening that seam. This is listed in known limitations as a follow-up.
+
+## Closes
+
+### Features
+
+* send and check iss in authorization responses ([#130](https://github.com/udibo/oauth2/issues/130)) ([b3119e7](https://github.com/udibo/oauth2/commit/b3119e720b65eab6f181c0ba679ba0204fac6ad4)), closes [#128](https://github.com/udibo/oauth2/issues/128)
+
 ## [0.25.0](https://github.com/udibo/oauth2/compare/0.24.0...0.25.0) (2026-10-15)
 
 ### Features
