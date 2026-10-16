@@ -1,6 +1,6 @@
 import { connect } from "node:net";
 
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { rejection } from "../../_test_assert.ts";
 import {
   exportSigningKeyJwk,
@@ -417,6 +417,32 @@ describe("dev identity provider authentication controls", () => {
       expect(
         Math.abs(Math.floor(Date.now() / 1000) - Number(claims?.auth_time)),
       ).toBeLessThan(5);
+    });
+  });
+
+  it("asks again when a prompt=login URL is revisited more than ten minutes after its sign-in", async () => {
+    await withIdp({}, async (idp) => {
+      const challenge = await generateCodeChallenge(generateCodeVerifier());
+      const browser = await signedInBrowser(idp, authorizeUrl(idp, challenge));
+      const begin = authorizeUrl(idp, challenge, {
+        prompt: "login",
+        state: "fixed-state",
+      });
+      const signedIn = await signIn(browser, idp, begin);
+      await signedIn.body?.cancel();
+      const first = await browser.fetch(begin);
+      expect(first.status).toStrictEqual(302);
+      await first.body?.cancel();
+
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+        const revisit = await browser.fetch(begin);
+        expect(revisit.status).toStrictEqual(200);
+        assert((await revisit.text()).includes('id="sign-in-form"'));
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

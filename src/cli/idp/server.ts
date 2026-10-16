@@ -93,6 +93,8 @@ interface ConsentDecision {
   approved: boolean;
 }
 
+const REAUTHENTICATION_WINDOW_SECONDS = 600;
+
 interface DevIdpSession {
   userId: string;
   authTime: number;
@@ -337,7 +339,10 @@ function authenticateUserFor(
       const result = {
         user,
         authenticationContext: { auth_time: session.authTime },
-        reauthenticated: session.signedInFor === returnTo,
+        reauthenticated:
+          session.signedInFor === returnTo &&
+          Math.floor(Date.now() / 1000) - session.authTime <=
+            REAUTHENTICATION_WINDOW_SECONDS,
       };
       if (
         !authentication ||

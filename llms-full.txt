@@ -1642,7 +1642,10 @@ the user to sign in when it fails. Report `reauthenticated: true` only when the
 user signed in again for this authorization request. A session that merely
 exists, or one that signed in for a different request, does not count. One way
 to know is to have your login route record, on the session it creates, the
-authorize URL it returns to, and compare it on the way back:
+authorize URL it returns to, and compare it on the way back. Bound the match in
+time as well: the recorded URL stays on the session, so a client that sends the
+same authorize URL again would otherwise count as re-authenticated for as long
+as the session lives.
 
 ```ts
 import type { Context } from "hono";
@@ -1674,7 +1677,9 @@ const authenticateUser: HonoAuthenticateUserFn<AppUser> = async (
   const result = {
     user: session.user,
     authenticationContext: { auth_time: session.authTime, acr: session.acr },
-    reauthenticated: session.signedInFor === returnTo,
+    reauthenticated:
+      session.signedInFor === returnTo &&
+      Math.floor(Date.now() / 1000) - session.authTime <= 600,
   };
   if (
     authentication &&
