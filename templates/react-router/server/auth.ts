@@ -23,27 +23,48 @@ import { Hono } from "hono";
 import { csrf } from "hono/csrf";
 
 import { honoIdentityRoutes } from "@udibo/oauth2/hono/identity";
+import { satisfiesAuthenticationRequest } from "@udibo/oauth2/server";
+import { safeReturnTo } from "@udibo/oauth2/url";
 
 import api from "./api.ts";
 import { identity } from "./oauth2/identity.ts";
 import { authServer, bff, getUser } from "./oauth2/server.ts";
-import { endSession, readSessionUserId, startSession } from "./sessions.ts";
+import { endSession, readSession, startSession } from "./sessions.ts";
+
+const REAUTHENTICATION_WINDOW_SECONDS = 10 * 60;
 
 const auth = new Hono();
 
 auth.route(
   "/oauth2",
   authServer.routes({
-    authenticateUser: async (c) => {
-      const userId = readSessionUserId(c);
-      if (userId) {
-        const user = await getUser(userId);
-        if (user) return { user };
-        endSession(c);
-      }
+    authenticateUser: async (c, authentication) => {
       const url = new URL(c.req.url);
       const returnTo = `${url.pathname}${url.search}`;
-      return c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+      const login = () =>
+        c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+      const session = readSession(c);
+      if (!session) return login();
+      const user = await getUser(session.userId);
+      if (!user) {
+        endSession(c);
+        return login();
+      }
+      const result = {
+        user,
+        authenticationContext: { auth_time: session.authTime },
+        reauthenticated:
+          session.signedInFor === returnTo &&
+          Math.floor(Date.now() / 1000) - session.authTime <=
+            REAUTHENTICATION_WINDOW_SECONDS,
+      };
+      if (
+        authentication &&
+        !satisfiesAuthenticationRequest(authentication, result)
+      ) {
+        return login();
+      }
+      return result;
     },
   }),
 );
@@ -65,8 +86,9 @@ auth.route(
           email: user.email,
         });
       }
-      startSession(c, user.id);
-      return c.redirect(bff.loginContinuation(c.req.query("return_to")));
+      const returnTo = safeReturnTo(c.req.query("return_to"));
+      startSession(c, user.id, returnTo);
+      return c.redirect(bff.loginContinuation(returnTo));
     },
   }),
 );

@@ -16,7 +16,6 @@ import {
   InvalidGrantError,
   isOAuth2Error,
   type OAuth2Error,
-  OAuth2Error as OAuth2ErrorClass,
   ServerError,
 } from "../errors.ts";
 import type {
@@ -38,6 +37,7 @@ import {
   assertField,
   assertTokenResponse,
   type Endpoint,
+  errorClassForCode,
   errorFromResponse,
   receiveJson,
   sendGuarded,
@@ -693,7 +693,8 @@ export class DirectClient extends OAuth2ClientBase {
    * reached or its response does not arrive in full before the deadline;
    * `cause` is the transport failure.
    * @throws {OAuth2Error} when the callback carries `?error=…`, or the token
-   * exchange fails.
+   * exchange fails. A code with a typed class, such as `login_required`
+   * (`LoginRequiredError`), is thrown as that class.
    * @throws {InvalidRequestError} when the response's `iss` is refused.
    * @throws {TypeError} when `code` or `state` is missing, or outside a
    * browser when the client has no `authRequestStorage` or no
@@ -1740,7 +1741,8 @@ function authorizationResponseError(
   params: URLSearchParams,
 ): OAuth2Error {
   const description = params.get("error_description") ?? undefined;
-  return new OAuth2ErrorClass(description ?? "authorization error", {
+  const ErrorClass = errorClassForCode(error);
+  return new ErrorClass(description ?? "authorization error", {
     extensions: {
       error,
       error_description: description,

@@ -9,14 +9,18 @@
 
 import {
   AccessDeniedError,
+  AccountSelectionRequiredError,
   AuthorizationPendingError,
+  ConsentRequiredError,
   ExpiredTokenError,
   InsufficientScopeError,
+  InteractionRequiredError,
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
   InvalidTokenError,
+  LoginRequiredError,
   type OAuth2Error,
   OAuth2Error as OAuth2ErrorClass,
   type OAuth2ErrorClass as OAuth2ErrorClassType,
@@ -39,14 +43,18 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 
 const ERROR_CLASS_BY_CODE: Record<string, OAuth2ErrorClassType> = {
   access_denied: AccessDeniedError,
+  account_selection_required: AccountSelectionRequiredError,
   authorization_pending: AuthorizationPendingError,
+  consent_required: ConsentRequiredError,
   expired_token: ExpiredTokenError,
   insufficient_scope: InsufficientScopeError,
+  interaction_required: InteractionRequiredError,
   invalid_client: InvalidClientError,
   invalid_grant: InvalidGrantError,
   invalid_request: InvalidRequestError,
   invalid_scope: InvalidScopeError,
   invalid_token: InvalidTokenError,
+  login_required: LoginRequiredError,
   server_error: ServerError,
   slow_down: SlowDownError,
   temporarily_unavailable: TemporarilyUnavailableError,
@@ -55,6 +63,16 @@ const ERROR_CLASS_BY_CODE: Record<string, OAuth2ErrorClassType> = {
   unsupported_response_type: UnsupportedResponseTypeError,
   unsupported_token_type: UnsupportedTokenTypeError,
 };
+
+/**
+ * The typed error class for an OAuth2 or OpenID Connect error code, or the
+ * generic `OAuth2Error` for a code without one.
+ */
+export function errorClassForCode(code: string): OAuth2ErrorClassType {
+  return Object.hasOwn(ERROR_CLASS_BY_CODE, code)
+    ? ERROR_CLASS_BY_CODE[code]
+    : OAuth2ErrorClass;
+}
 
 /** How a call describes itself in an error message, e.g. `"token endpoint"`. */
 export type Endpoint = string;
@@ -312,7 +330,7 @@ function reportedError(value: unknown): ReportedError | null {
 }
 
 function buildError(reported: ReportedError, status?: number): OAuth2Error {
-  const ErrorClass = ERROR_CLASS_BY_CODE[reported.error] ?? OAuth2ErrorClass;
+  const ErrorClass = errorClassForCode(reported.error);
   return new ErrorClass(reported.description ?? reported.error, {
     status: status !== undefined && status >= 400 ? status : undefined,
     extensions: {

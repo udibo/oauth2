@@ -36,7 +36,10 @@
 import { Hono } from "hono";
 
 import type { HonoResourceServerVariables } from "@udibo/oauth2/hono/resource-server";
-import { BasicScope } from "@udibo/oauth2/server";
+import {
+  BasicScope,
+  satisfiesAuthenticationRequest,
+} from "@udibo/oauth2/server";
 
 import {
   authServer,
@@ -45,7 +48,7 @@ import {
   type DemoUser,
   userService,
 } from "./oauth2/server.ts";
-import { endSession, readSessionUserId } from "./sessions.ts";
+import { endSession, readSession } from "./sessions.ts";
 import home from "./routes/home.ts";
 import api from "./routes/api.ts";
 import login from "./routes/login.ts";
@@ -59,6 +62,8 @@ import consent, {
   takePendingConsent,
 } from "./routes/consent.ts";
 import device from "./routes/device.ts";
+
+const REAUTHENTICATION_WINDOW_SECONDS = 10 * 60;
 
 const app = new Hono<{
   Variables: HonoResourceServerVariables<DemoClient, DemoUser>;
@@ -77,19 +82,33 @@ app.route("/device", device);
 app.route(
   "/oauth2",
   authServer.routes({
-    authenticateUser: async (c) => {
-      const userId = readSessionUserId(c);
+    authenticateUser: async (c, authentication) => {
       const url = new URL(c.req.url);
       const returnTo = `${url.pathname}${url.search}`;
-      if (!userId) {
-        return c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
-      }
-      const user = await userService.get(userId);
+      const login = () =>
+        c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+      const session = readSession(c);
+      if (!session) return login();
+      const user = await userService.get(session.userId);
       if (!user) {
         endSession(c);
-        return c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+        return login();
       }
-      return { user };
+      const result = {
+        user,
+        authenticationContext: { auth_time: session.authTime },
+        reauthenticated:
+          session.signedInFor === returnTo &&
+          Math.floor(Date.now() / 1000) - session.authTime <=
+            REAUTHENTICATION_WINDOW_SECONDS,
+      };
+      if (
+        authentication &&
+        !satisfiesAuthenticationRequest(authentication, result)
+      ) {
+        return login();
+      }
+      return result;
     },
     handleConsent: (c, client, requestedScope, user) => {
       const u = user as DemoUser;

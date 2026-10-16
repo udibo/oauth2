@@ -21,8 +21,14 @@ import {
 } from "../testing/_test_fixtures.ts";
 import {
   AccessDeniedError,
+  AccountSelectionRequiredError,
+  ConsentRequiredError,
+  InteractionRequiredError,
   InvalidGrantError,
   InvalidRequestError,
+  isOAuth2Error,
+  LoginRequiredError,
+  type OAuth2ErrorClass,
   ServerError,
   TemporarilyUnavailableError,
 } from "../errors.ts";
@@ -2785,4 +2791,79 @@ describe("DirectClient authorization response issuer (RFC 9207)", () => {
       );
     });
   });
+});
+
+describe("DirectClient OpenID Connect authentication errors", () => {
+  const cases: [string, OAuth2ErrorClass][] = [
+    ["login_required", LoginRequiredError],
+    ["consent_required", ConsentRequiredError],
+    ["interaction_required", InteractionRequiredError],
+    ["account_selection_required", AccountSelectionRequiredError],
+  ];
+
+  function endpointsClient(fetchImpl: typeof fetch): DirectClient {
+    return new DirectClient({
+      authRequestStorage: new MemoryAuthRequestStorage(),
+      refreshTokenStorage: new MemoryRefreshTokenStorage(),
+      clientId: testPublicClient.id,
+      redirectUri: REDIRECT_URI,
+      endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+      fetch: fetchImpl,
+    });
+  }
+
+  it.each(cases)(
+    "rejects an authorization response's %s as its typed error",
+    async (code, ErrorClass) => {
+      const client = endpointsClient(() =>
+        Promise.reject(new Error("no request expected")),
+      );
+
+      const error = await rejection(
+        client.handleAuthorizationCallback(
+          `${REDIRECT_URI}?error=${code}&error_description=sign%20in%20again`,
+        ),
+        ErrorClass,
+        "sign in again",
+      );
+      expect(error.extensions.error).toBe(code);
+      expect(error.status).toBe(400);
+    },
+  );
+
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])(
+    "rejects an authorization response's %s as a generic OAuth2Error, never a prototype member",
+    async (code) => {
+      const client = endpointsClient(() =>
+        Promise.reject(new Error("no request expected")),
+      );
+
+      const error = await rejection(
+        client.handleAuthorizationCallback(`${REDIRECT_URI}?error=${code}`),
+        Error,
+      );
+      expect(isOAuth2Error(error)).toBe(true);
+      assert(isOAuth2Error(error));
+      expect(error.extensions.error).toBe(code);
+      expect(error.status).toBe(500);
+    },
+  );
+
+  it.each(cases)(
+    "maps a token endpoint's %s to its typed error",
+    async (code, ErrorClass) => {
+      const client = endpointsClient(() =>
+        Promise.resolve(jsonResponse({ error: code }, 400)),
+      );
+      const { state } = await client.login();
+
+      const error = await rejection(
+        client.handleAuthorizationCallback(
+          `${REDIRECT_URI}?code=a-code&state=${state}`,
+        ),
+        ErrorClass,
+      );
+      expect(error.extensions.error).toBe(code);
+    },
+  );
 });

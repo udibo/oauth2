@@ -188,6 +188,130 @@ describe("sign-in", () => {
   });
 });
 
+describe("prompt and max_age on the embedded authorization server", () => {
+  async function startLoginWith(
+    params: Record<string, string>,
+  ): Promise<{ authorizePath: string; loginState: string }> {
+    const loginRes = await app.request("/auth/login");
+    expect(loginRes.status).toBe(302);
+    const authorizeUrl = new URL(
+      loginRes.headers.get("location")!,
+      "http://localhost:8000",
+    );
+    for (const [name, value] of Object.entries(params)) {
+      authorizeUrl.searchParams.set(name, value);
+    }
+    return {
+      authorizePath: authorizeUrl.pathname + authorizeUrl.search,
+      loginState: setCookieValue(loginRes, bff.loginStateCookieName)!,
+    };
+  }
+
+  async function signInAgainFor(authorizePath: string): Promise<string> {
+    const res = await signIn({
+      email: DEMO_USER.email,
+      password: DEMO_PASSWORD,
+      returnTo: authorizePath,
+    });
+    expect(res.status).toBe(302);
+    expect(toPath(res.headers.get("location")!)).toBe(authorizePath);
+    await res.body?.cancel();
+    return setCookieValue(res, "idp_session")!;
+  }
+
+  async function authorize(
+    path: string,
+    idpSession: string,
+  ): Promise<Response> {
+    return await app.request(path, {
+      headers: { cookie: `idp_session=${idpSession}` },
+    });
+  }
+
+  function expectLoginRedirectFor(res: Response, authorizePath: string) {
+    expect(res.status).toBe(302);
+    const location = new URL(
+      res.headers.get("location")!,
+      "http://localhost:8000",
+    );
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("return_to")).toBe(authorizePath);
+  }
+
+  async function redeem(res: Response, loginState: string): Promise<string> {
+    expect(res.status).toBe(302);
+    const callbackUrl = res.headers.get("location")!;
+    expect(callbackUrl).toContain("code=");
+    const callbackRes = await app.request(toPath(callbackUrl), {
+      headers: { cookie: `${bff.loginStateCookieName}=${loginState}` },
+    });
+    expect(callbackRes.status).toBe(302);
+    return setCookieValue(callbackRes, "oauth2_session")!;
+  }
+
+  it("prompt=login sends a signed-in user to sign in again, then issues a code", async () => {
+    const { idpSession } = await followToSession(
+      await signIn({ email: DEMO_USER.email, password: DEMO_PASSWORD }),
+    );
+    const { authorizePath, loginState } = await startLoginWith({
+      prompt: "login",
+    });
+
+    expectLoginRedirectFor(
+      await authorize(authorizePath, idpSession),
+      authorizePath,
+    );
+
+    const freshSession = await signInAgainFor(authorizePath);
+    const bffSession = await redeem(
+      await authorize(authorizePath, freshSession),
+      loginState,
+    );
+    expect(typeof bffSession).toBe("string");
+  });
+
+  it("prompt=login does not count a sign-in older than ten minutes", async () => {
+    const { authorizePath } = await startLoginWith({ prompt: "login" });
+    const freshSession = await signInAgainFor(authorizePath);
+
+    vi.useFakeTimers({ now: Date.now() + 11 * 60 * 1000, toFake: ["Date"] });
+    try {
+      expectLoginRedirectFor(
+        await authorize(authorizePath, freshSession),
+        authorizePath,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prompt=login does not count a sign-in made for another authorize request", async () => {
+    const first = await startLoginWith({ prompt: "login" });
+    const freshSession = await signInAgainFor(first.authorizePath);
+    const second = await startLoginWith({ prompt: "login" });
+
+    expectLoginRedirectFor(
+      await authorize(second.authorizePath, freshSession),
+      second.authorizePath,
+    );
+  });
+
+  it("max_age issues a code for a recent sign-in, reporting its auth_time", async () => {
+    const { idpSession } = await followToSession(
+      await signIn({ email: DEMO_USER.email, password: DEMO_PASSWORD }),
+    );
+    const { authorizePath, loginState } = await startLoginWith({
+      max_age: "300",
+    });
+
+    const bffSession = await redeem(
+      await authorize(authorizePath, idpSession),
+      loginState,
+    );
+    expect(typeof bffSession).toBe("string");
+  });
+});
+
 describe("sign-up", () => {
   it("creates an account, sends a console verification link, and signs in", async () => {
     let verifyUrl = "";
