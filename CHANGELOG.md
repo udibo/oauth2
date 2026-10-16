@@ -1,3 +1,74 @@
+## [0.28.0](https://github.com/udibo/oauth2/compare/0.27.0...0.28.0) (2026-10-16)
+
+### ⚠ BREAKING CHANGES
+
+* `DirectClient.handleAuthorizationCallback` throws the
+typed error class for an authorization-response error code that has one
+(`AccessDeniedError`, `LoginRequiredError`, `ConsentRequiredError`,
+`InteractionRequiredError`, `AccountSelectionRequiredError`, …) instead
+of a generic `OAuth2Error`; such an error is no longer `instanceof
+OAuth2Error`, and its `status` and `name` are the class's
+(`access_denied` is 401, the OIDC codes 400, `temporarily_unavailable`
+503). Check `isOAuth2Error(error)` and `error.extensions.error` instead
+of `instanceof OAuth2Error`. `HonoBff` throws at construction for a
+pinned `max_age` that is not a non-negative integer, and with `max_age`
+pinned, `/auth/callback` fails with `login_required` when the ID token's
+`auth_time` is missing, more than 60 seconds in the future, or older
+than `max_age` plus 60 seconds, or when `scope` is in `forwardedParams`
+and the token response has no ID token.
+
+## Testing
+
+- `pnpm check` passes. `pnpm test --maxWorkers=6`: 139 files, 3701
+passed, 14 skipped.
+- Every new test was run against the unfixed code first:
+- `direct-client.test.ts`: four callback cases and four token-endpoint
+cases. All 8 failed at `instanceof`.
+- `bff.test.ts`, "ID token auth_time against a pinned max_age": 8 of the
+refusal tests failed with `302` where they expect `400`, and the
+construction test failed with "not to be reached". The guards passed
+before and after: within `max_age`, no pinned `max_age`, no ID token.
+- Example `main.test.ts` and template `auth.test.ts`, "prompt and
+max_age on the embedded authorization server": all 4 failed in each. The
+`prompt=login` tests landed on `/auth/callback` (`login_required`)
+instead of `/login`, and the `max_age` test got no code.
+- Security-review follow-ups, each checked against a mutation:
+- The missing ID token with a forwarded `scope` is refused. Reverting
+the condition to `idToken` alone fails `refuses a missing ID token when
+the browser chooses the scope`.
+- With two spellings pinned, the stricter value wins. Swapping
+`Math.min` for `Math.max` fails `checks the strictest max_age when two
+spellings are pinned`.
+- Prototype codes stay generic: `?error=constructor`, `__proto__`,
+`toString` and `hasOwnProperty` give a generic `OAuth2Error` with status
+500. Dropping the `Object.hasOwn` guard fails all 4.
+- The future clock-skew allowance is pinned. An `auth_time` 50 seconds
+ahead of the BFF is accepted, and dropping the allowance (`age < 0`)
+fails `allows an auth_time up to a minute ahead of the BFF's clock`.
+- Seeded mutations, each killed by the named test:
+  - Skew allowance removed or doubled.
+  - Future check removed.
+  - `max_age=0` given an age limit.
+  - Exact-case name match.
+  - Check removed (8 failures).
+  - Construction validation removed.
+  - Callback errors left untyped (4 failures).
+  - `login_required` map entry removed (2 failures).
+- In the example and in the template: any-request match (2 failures),
+unbounded window, `auth_time` dropped.
+
+## Not in this PR
+
+- The `claims` request parameter. It needs request parsing and
+validation, persistence on the authorization code and token records, a
+`userClaims` signature that receives the requested claims, the UserInfo
+and ID-token paths, and the discovery flag. That's too large for this
+
+### Features
+
+* check auth_time for a pinned max_age and type OIDC errors ([#138](https://github.com/udibo/oauth2/issues/138)) ([eb5850a](https://github.com/udibo/oauth2/commit/eb5850aa6f5fb2bc4de093554d61a219b3be6a95)), closes [#132](https://github.com/udibo/oauth2/issues/132) [#130](https://github.com/udibo/oauth2/issues/130) [#132](https://github.com/udibo/oauth2/issues/132) [#134](https://github.com/udibo/oauth2/issues/134) [#140](https://github.com/udibo/oauth2/issues/140) [#134](https://github.com/udibo/oauth2/issues/134)
+* **identity:** check iss in external sign-in callbacks ([#136](https://github.com/udibo/oauth2/issues/136)) ([b1a910e](https://github.com/udibo/oauth2/commit/b1a910ea2500467cc6dbcbcd4e1231405f9b5908)), closes [#130](https://github.com/udibo/oauth2/issues/130) [#130](https://github.com/udibo/oauth2/issues/130) [#133](https://github.com/udibo/oauth2/issues/133)
+
 ## [0.27.0](https://github.com/udibo/oauth2/compare/0.26.0...0.27.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
