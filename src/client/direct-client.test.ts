@@ -2652,6 +2652,24 @@ describe("DirectClient authorization response issuer (RFC 9207)", () => {
     ).toBe("access_denied");
   });
 
+  it("reports an error response's code, URI and default message once its iss matches", async () => {
+    const client = issuerClient(issuerProvider().fetch);
+    const callback = new URL(REDIRECT_URI);
+    callback.searchParams.set("error", "temporarily_unavailable");
+    callback.searchParams.set("error_uri", "https://auth.example/errors/1");
+    callback.searchParams.set("iss", ISSUER);
+
+    const error = await rejection(
+      client.handleAuthorizationCallback(callback),
+      Error,
+      "authorization error",
+    );
+    const { extensions } = error as InstanceType<typeof InvalidRequestError>;
+    expect(extensions.error).toBe("temporarily_unavailable");
+    expect(extensions.error_uri).toBe("https://auth.example/errors/1");
+    expect(extensions.error_description).toBeUndefined();
+  });
+
   it("does not compare iss for a client configured with endpoints instead of an issuer", async () => {
     const provider = issuerProvider();
     const client = new DirectClient({

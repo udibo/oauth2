@@ -1696,18 +1696,19 @@ export class HonoBff {
       });
       return undefined;
     } catch (cause) {
-      return isOAuth2Error(cause)
-        ? {
-            error: cause.extensions.error ?? "server_error",
-            error_description: cause.exposedMessage,
-            cause,
-          }
-        : {
-            error: "server_error",
-            error_description:
-              "the authorization response issuer was not checked",
-            cause,
-          };
+      if (!isOAuth2Error(cause)) {
+        return {
+          error: "server_error",
+          error_description:
+            "the authorization response issuer was not checked",
+          cause,
+        };
+      }
+      return {
+        error: cause.extensions.error!,
+        error_description: cause.exposedMessage,
+        cause,
+      };
     }
   }
 

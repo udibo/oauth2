@@ -711,7 +711,8 @@ export class DirectClient extends OAuth2ClientBase {
   ): Promise<AuthorizationCallbackResult> {
     const params = toSearchParams(input);
 
-    if (params.get("error")) return this.#rejectAuthorizationError(params);
+    const error = params.get("error");
+    if (error) return this.#rejectAuthorizationError(error, params);
 
     try {
       this.#requireAuthRequestStorage();
@@ -738,9 +739,13 @@ export class DirectClient extends OAuth2ClientBase {
     return promise;
   }
 
-  async #rejectAuthorizationError(params: URLSearchParams): Promise<never> {
+  async #rejectAuthorizationError(
+    code: string,
+    params: URLSearchParams,
+  ): Promise<never> {
     const error =
-      (await this.#issuerRefusal(params)) ?? authorizationResponseError(params);
+      (await this.#issuerRefusal(params)) ??
+      authorizationResponseError(code, params);
     this.emit({ type: "error", error });
     throw error;
   }
@@ -1737,11 +1742,14 @@ function metadataToEndpoints(
   return out;
 }
 
-function authorizationResponseError(params: URLSearchParams): OAuth2Error {
+function authorizationResponseError(
+  error: string,
+  params: URLSearchParams,
+): OAuth2Error {
   const description = params.get("error_description") ?? undefined;
   return new OAuth2ErrorClass(description ?? "authorization error", {
     extensions: {
-      error: params.get("error") ?? undefined,
+      error,
       error_description: description,
       error_uri: params.get("error_uri") ?? undefined,
     },
