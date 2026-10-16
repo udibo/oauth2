@@ -83,6 +83,20 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build the npm package
         run: pnpm build
+      # Node 22 bundles npm 10, which crashes resolving the pinned smoke
+      # consumer whenever its Vitest pin trails Vitest's newest release:
+      # https://github.com/npm/cli/issues/9787. The fix,
+      # https://github.com/npm/cli/pull/8448, first shipped in npm 11.6.0 and
+      # no npm 10 release carries it. The bundled npm installs the tarball
+      # first, so a package change npm 10 cannot install still fails here; the
+      # pinned consumer then runs on a fixed npm. docs/known-limitations.md
+      # gives users the same workaround.
+      - name: Install the packed tarball with Node 22's bundled npm
+        if: matrix.node == 22
+        run: node scripts/npm-smoke.ts --install-only
+      - name: Upgrade npm past the npm 10 peer-resolution crash
+        if: matrix.node == 22
+        run: npm install -g npm@11.21.0
       - name: Install the packed tarball and run it from Node
         run: pnpm smoke
       - name: Verify the package publishes to JSR (dry run)

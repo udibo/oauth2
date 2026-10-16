@@ -82,7 +82,12 @@ JSDoc `@example`), `doc:links` (local links and headings), and `llms:check`
 `pnpm smoke` packs the package, installs the tarball into an empty project, type
 checks a consumer of every subpath under NodeNext resolution, runs the
 `udibo-oauth2` command from the installed package, and imports each subpath on
-Node.
+Node. It needs npm 11.6.0 or later, because earlier npm can crash resolving the
+consumer's Vitest pin (see
+[Known Limitations](docs/known-limitations.md#runtime)). `--install-only` skips
+the pins, the type check and the imports, so it runs on any npm: the Node 22 job
+uses it to install the tarball with Node 22's bundled npm 10, then upgrades npm
+for the full run.
 
 The workflow in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
 runs `pnpm check` and `pnpm test` on Node 22, 24, and 26 on Linux and on Node 26
