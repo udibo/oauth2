@@ -145,7 +145,7 @@ RFC 6749 §4.4 limits that grant to confidential clients, so it refuses any
 request that presents no client secret with `401 invalid_client` — a public
 client, or a confidential client that left its secret out. Register each machine
 client with a secret and have it send that secret with HTTP Basic or as
-`client_secret` in the body.
+`client_secret` in the body, not both.
 
 Any endpoint you omit defaults to `${issuer}${path}` (e.g. `${issuer}/token`),
 so a server whose endpoints sit at the issuer root needs only `issuer`. The
@@ -240,11 +240,25 @@ These protections are on by default, deliberately stricter than RFC 6749:
 - **`state` is required** at the authorize endpoint. Requests without it are
   rejected with `invalid_request` rather than degrading CSRF protection to
   optional.
+- **A request authenticates its client by exactly one method.** The token,
+  revocation, introspection and device authorization endpoints refuse a request
+  that combines HTTP Basic with a body `client_secret` or `client_assertion`, or
+  a body `client_secret` with a `client_assertion`, with `400 invalid_request`
+  (RFC 6749 §2.3: a client MUST NOT use more than one authentication method in
+  each request). A body `client_id` next to Basic credentials is allowed only
+  when it names the same client. An `Authorization` header that uses the Basic
+  scheme is the method the client chose, so a malformed one is answered with
+  `401 invalid_client` even when the body names a client.
 - **PKCE is required** for the authorization-code grant, for all clients
   including confidential ones, matching OAuth 2.1. The only challenge method
   registered by default is `S256`. Set `requirePKCE: false` on the
   `AuthorizationCodeGrant` only if you must support a legacy confidential client
   that cannot send a challenge.
+- **An omitted `code_challenge_method` means `S256`.** RFC 7636 §4.3 defaults
+  it to `plain`; this server deliberately follows OAuth 2.1 and the OAuth
+  security BCP instead. A challenge sent without a method is verified as the
+  SHA-256 of the verifier, so a client that sends its verifier as the challenge
+  and omits the method fails the token exchange with `invalid_grant`.
 - **The challenge's format is enforced too.** For `S256` and `plain` — the two
   methods the IANA PKCE registry defines and whose output shape RFC 7636 §4.2
   fixes — `/authorize` rejects a `code_challenge` that is not 43–128 characters
@@ -411,9 +425,7 @@ The token handler selects the grant-specific fields from the single raw
 `grant_type`. It leaves another grant's fields and unknown extensions alone.
 Repeated `resource` and `audience` values are preserved, as are custom-grant
 extension fields; your custom grant owns their validation. This check does not
-change the existing priority of Basic authentication over singleton body
-credentials, or validate authorization-query, callback or end-session
-parameters.
+validate authorization-query, callback or end-session parameters.
 
 [RFC 6749 §3.2](https://www.rfc-editor.org/rfc/rfc6749.html#section-3.2) and
 [RFC 8628 §3.1](https://www.rfc-editor.org/rfc/rfc8628.html#section-3.1)

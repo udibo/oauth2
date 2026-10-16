@@ -652,6 +652,107 @@ describe("HonoAuthorizationServer", () => {
     });
   });
 
+  describe("omitted code_challenge_method", () => {
+    function authorizeApp(): Hono {
+      const app = new Hono();
+      app.route(
+        "/oauth2",
+        server.routes({
+          authenticateUser: () =>
+            Promise.resolve({
+              user: testUser,
+              authorizedScope: new BasicScope("read"),
+            }),
+        }),
+      );
+      return app;
+    }
+
+    async function authorize(
+      app: Hono,
+      params: Record<string, string>,
+    ): Promise<URL> {
+      const url = new URL("http://localhost/oauth2/authorize");
+      for (const [key, value] of Object.entries({
+        response_type: "code",
+        client_id: "client-1",
+        state: "xyz",
+        scope: "read",
+        redirect_uri: "https://example.com/callback",
+        ...params,
+      })) {
+        url.searchParams.set(key, value);
+      }
+      const res = await app.request(url.pathname + url.search);
+      expect(res.status).toBe(302);
+      return new URL(res.headers.get("Location")!);
+    }
+
+    async function exchange(
+      app: Hono,
+      code: string,
+      verifier: string,
+    ): Promise<Response> {
+      return await app.request(
+        "/oauth2/token",
+        formRequestInit(
+          {
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "https://example.com/callback",
+            code_verifier: verifier,
+          },
+          basicAuthHeader("client-1", "secret"),
+        ),
+      );
+    }
+
+    it("verifies the challenge as S256, not as RFC 7636's plain default", async () => {
+      const app = authorizeApp();
+      const verifier = generateCodeVerifier();
+      const location = await authorize(app, {
+        code_challenge: await generateCodeChallenge(verifier),
+      });
+      const code = location.searchParams.get("code");
+      assert.exists(code);
+
+      const res = await exchange(app, code, verifier);
+
+      expect(res.status).toBe(200);
+      assert.exists((await res.json()).access_token);
+    });
+
+    it("refuses a verifier sent back as its own challenge", async () => {
+      const app = authorizeApp();
+      const verifier = generateCodeVerifier();
+      const location = await authorize(app, { code_challenge: verifier });
+      const code = location.searchParams.get("code");
+      assert.exists(code);
+
+      const res = await exchange(app, code, verifier);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("invalid_grant");
+      expect(body.access_token).toBe(undefined);
+    });
+
+    for (const method of ["plain", "S512", "toString", "__proto__"]) {
+      it(`refuses ${method} as a code_challenge_method by default`, async () => {
+        const location = await authorize(authorizeApp(), {
+          code_challenge: await generateCodeChallenge(generateCodeVerifier()),
+          code_challenge_method: method,
+        });
+
+        expect(location.searchParams.get("error")).toBe("invalid_request");
+        expect(location.searchParams.get("error_description")).toBe(
+          "unsupported code_challenge_method",
+        );
+        expect(location.searchParams.get("code")).toBe(null);
+      });
+    }
+  });
+
   describe("metadata PKCE advertisement (RFC 8414)", () => {
     it("advertises every own challenge method the authorization code grant accepts", async () => {
       const services = createTestServices();

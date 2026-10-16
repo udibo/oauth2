@@ -535,7 +535,7 @@ describe("AuthorizationCodeGrant", () => {
       expect(credentials.codeVerifier).toBe("test-verifier");
     });
 
-    it("should fall back to body client_id when Basic auth is invalid", async () => {
+    it("refuses a malformed Basic header even when the body names a client", async () => {
       const { grant } = await createTestGrant();
       const request = tokenRequest(
         { client_id: "body-client" },
@@ -543,12 +543,13 @@ describe("AuthorizationCodeGrant", () => {
           Authorization: "Basic invalid!!!",
         },
       );
+      const body = await request.clone().formData();
 
-      const credentials = grant.getClientCredentials(
-        request,
-        await request.clone().formData(),
+      thrown(
+        () => grant.getClientCredentials(request, body),
+        InvalidClientError,
+        "unsupported authorization header",
       );
-      expect(credentials.clientId).toBe("body-client");
     });
   });
 

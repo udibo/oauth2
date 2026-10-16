@@ -227,18 +227,6 @@ Confidential clients authenticate alongside PKCE by default.
 `requireClientAuthentication: false` remains an explicit legacy opt-out and
 should not be enabled for new deployments.
 
-- **Both Basic and body client credentials are accepted, and the header wins
-  silently.** `extractClientCredentials` reads the `Authorization: Basic` header
-  first and returns as soon as it parses; `client_id` / `client_secret` in the
-  form body are consulted only when there is no usable header. RFC 6749 §2.3.1
-  says a client MUST NOT use more than one authentication method and that a
-  server receiving both SHOULD refuse the request; this server picks one
-  instead. The consequence worth knowing is a logging one: a request carrying
-  `Basic <credentials for A>` **and** `client_id=B` in the body authenticates as
-  **A**, while an access log or audit hook that reads `client_id` off the body
-  records **B**. Log the authenticated client the grant hands you, never the
-  request body's `client_id`.
-
 ## Spec-level gaps
 
 - **Introspection (RFC 7662) emits a subset of the optional fields:** `active`,

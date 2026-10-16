@@ -3,7 +3,11 @@ import { rejection, thrown } from "../../_test_assert.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import { BasicScope } from "../../models/scope.ts";
-import { InvalidClientError, InvalidScopeError } from "../../errors.ts";
+import {
+  InvalidClientError,
+  InvalidRequestError,
+  InvalidScopeError,
+} from "../../errors.ts";
 import type { ClientCredentials } from "../../models/client.ts";
 import { basicAuthHeader, tokenRequest } from "../../testing/_test_fixtures.ts";
 import type { ClientServiceInterface } from "../services/client.ts";
@@ -356,7 +360,7 @@ describe("AbstractGrant", () => {
       );
     });
 
-    it("should prefer Basic Auth over POST body", async () => {
+    it("refuses Basic Auth together with POST body credentials", async () => {
       const { grant } = createTestGrant();
       const request = tokenRequest(
         {
@@ -365,15 +369,13 @@ describe("AbstractGrant", () => {
         },
         basicAuthHeader("header-client", "header-secret"),
       );
+      const body = await request.clone().formData();
 
-      const credentials = grant.getClientCredentials(
-        request,
-        await request.clone().formData(),
+      thrown(
+        () => grant.getClientCredentials(request, body),
+        InvalidRequestError,
+        "multiple client authentication methods",
       );
-      expect(credentials).toStrictEqual({
-        clientId: "header-client",
-        clientSecret: "header-secret",
-      });
     });
   });
 

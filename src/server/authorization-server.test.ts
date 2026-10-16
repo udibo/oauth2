@@ -2098,6 +2098,138 @@ describe("AuthorizationServer", () => {
           expect(response.status).toBe(200);
         });
 
+        it("accepts client_id and client_secret in the body as the only method", async () => {
+          const response = await endpoint.handle(
+            server,
+            request(
+              {},
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+              },
+            ),
+          );
+
+          expect(response.status).toBe(200);
+        });
+
+        for (const [name, extra] of [
+          [
+            "body client credentials",
+            { client_id: "endpoint-client", client_secret: "secret" },
+          ],
+          ["a body client_secret", { client_secret: "secret" }],
+          [
+            "a client assertion",
+            {
+              client_assertion_type:
+                "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+              client_assertion: "header.payload.signature",
+            },
+          ],
+        ] as const) {
+          it(`refuses Basic credentials together with ${name}`, async () => {
+            const response = await endpoint.handle(
+              server,
+              authenticated({ ...endpoint.body, ...extra }),
+            );
+
+            expect(response.status).toBe(400);
+            const body = await response.json();
+            expect(body.error).toBe("invalid_request");
+            expect(body.error_description).toBe(
+              "multiple client authentication methods",
+            );
+          });
+        }
+
+        it("refuses body client credentials together with a client assertion", async () => {
+          const response = await endpoint.handle(
+            server,
+            request(
+              {},
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+                client_assertion: "header.payload.signature",
+              },
+            ),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "multiple client authentication methods",
+          );
+        });
+
+        it("refuses a malformed Basic header together with a body client_secret", async () => {
+          const response = await endpoint.handle(
+            server,
+            request(
+              { headers: { authorization: "Basic invalid!!!" } },
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+              },
+            ),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "multiple client authentication methods",
+          );
+        });
+
+        it("refuses Basic credentials alongside a body client_id naming another client", async () => {
+          const response = await endpoint.handle(
+            server,
+            authenticated({ ...endpoint.body, client_id: "other-client" }),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "client_id does not match the Basic credentials",
+          );
+        });
+
+        it("accepts Basic credentials alongside a body client_id naming the same client", async () => {
+          const response = await endpoint.handle(
+            server,
+            authenticated({ ...endpoint.body, client_id: "endpoint-client" }),
+          );
+
+          expect(response.status).toBe(200);
+        });
+
+        it("answers a malformed Basic header with invalid_client even when the body names a client", async () => {
+          const response = await endpoint.handle(
+            server,
+            request(
+              { headers: { authorization: "Basic invalid!!!" } },
+              { ...endpoint.body, client_id: "endpoint-client" },
+            ),
+          );
+
+          expect(response.status).toBe(401);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_client");
+          expect(body.error_description).toBe(
+            "unsupported authorization header",
+          );
+          expect(response.headers.get("WWW-Authenticate") ?? "").toContain(
+            "Basic",
+          );
+        });
+
         it("accepts a well-formed authenticated request", async () => {
           const response = await endpoint.handle(server, authenticated());
 

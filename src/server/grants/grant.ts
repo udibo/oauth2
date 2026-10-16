@@ -185,11 +185,13 @@ export abstract class AbstractGrant<
   }
 
   /**
-   * Extracts client credentials from a request: HTTP Basic first, then the
-   * `client_id`/`client_secret` of the already-parsed `body`. Override to add
-   * grant-specific credential rules (as the authorization-code grant does for
-   * PKCE).
+   * Extracts client credentials from a request by the one method it uses: HTTP
+   * Basic, or the `client_id`/`client_secret` of the already-parsed `body`.
+   * Override to add grant-specific credential rules (as the authorization-code
+   * grant does for PKCE).
    *
+   * @throws {InvalidRequestError} If the request uses more than one client
+   *   authentication method.
    * @throws {InvalidClientError} If the request presents no usable credentials.
    */
   protected getClientCredentials(

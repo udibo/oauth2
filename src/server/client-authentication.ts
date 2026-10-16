@@ -8,41 +8,65 @@
  */
 
 import type { ClientCredentials, ClientInterface } from "../models/client.ts";
-import { InvalidClientError } from "../errors.ts";
-import { parseBasicAuth, tryParseBasicAuth } from "../utils/basic-auth.ts";
+import { InvalidClientError, InvalidRequestError } from "../errors.ts";
+import { parseBasicAuth } from "../utils/basic-auth.ts";
 import type { ClientServiceInterface } from "./services/client.ts";
 
+const BASIC_SCHEME = /^ *basic(?: |$)/i;
+
 /**
- * Reads the credentials a request presents: HTTP Basic first (RFC 6749 Section
- * 2.3.1), then `client_id`/`client_secret` in `body`, the form body the
- * endpoint already parsed. An `Authorization` header that is not usable Basic
- * falls through to the body, so a request that also carries body credentials
- * authenticates by the method it did present.
+ * Reads the credentials a request presents by the one client-authentication
+ * method it uses: HTTP Basic (RFC 6749 Section 2.3.1), or
+ * `client_id`/`client_secret` in `body`, the form body the endpoint already
+ * parsed. A `client_id` alone identifies a public client. An `Authorization`
+ * header with a scheme other than Basic is not client authentication and is
+ * ignored.
  *
- * @throws {InvalidClientError} If the request presents no usable credentials.
+ * @throws {InvalidRequestError} If the request uses more than one method —
+ *   Basic plus a body `client_secret` or a `client_assertion`, or a body
+ *   `client_secret` plus a `client_assertion` — or sends Basic credentials
+ *   with a body `client_id` naming a different client.
+ * @throws {InvalidClientError} If the request presents no usable credentials,
+ *   or its Basic header is malformed.
  */
 export function extractClientCredentials(
   request: Request,
   body: FormData,
 ): ClientCredentials {
   const authorization = request.headers.get("authorization");
+  const usesBasic = !!authorization && BASIC_SCHEME.test(authorization);
+  const clientId = body.get("client_id");
+  const clientSecret = body.get("client_secret");
+  const methods = [
+    usesBasic,
+    clientSecret !== null,
+    body.has("client_assertion") || body.has("client_assertion_type"),
+  ].filter(Boolean).length;
+  if (methods > 1) {
+    throw new InvalidRequestError("multiple client authentication methods");
+  }
 
-  const basicAuth = tryParseBasicAuth(authorization);
-  if (basicAuth) {
+  if (usesBasic) {
+    const basicAuth = parseBasicAuth(authorization);
+    if (clientId !== null && clientId !== basicAuth.name) {
+      throw new InvalidRequestError(
+        "client_id does not match the Basic credentials",
+      );
+    }
     return { clientId: basicAuth.name, clientSecret: basicAuth.pass };
   }
 
-  const clientId = body.get("client_id");
   if (typeof clientId === "string") {
     const credentials: ClientCredentials = { clientId };
-    const clientSecret = body.get("client_secret");
     if (typeof clientSecret === "string") {
       credentials.clientSecret = clientSecret;
     }
     return credentials;
   }
 
-  if (authorization) throw parseBasicAuth(authorization);
+  if (authorization) {
+    throw new InvalidClientError("unsupported authorization header");
+  }
   throw new InvalidClientError("client authentication required");
 }
 

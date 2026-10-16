@@ -153,6 +153,9 @@ export function validateCodeChallenge(
  * own, callable properties of `methods` resolve here; every other name is
  * `undefined`, including names inherited from a prototype.
  *
+ * An omitted method means `S256`, deliberately not RFC 7636 §4.3's `plain`,
+ * following OAuth 2.1.
+ *
  * @param methods The challenge methods the server allows
  * @param method The client-supplied method name; defaults to `S256`
  * @returns The transform for that method, or `undefined` when it is not allowed

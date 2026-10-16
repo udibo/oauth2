@@ -329,6 +329,7 @@ describe("singleton protocol form parameters", () => {
     it(`${transport} keeps unrelated and multivalue extension parameters on the client-credentials grant`, async () => {
       using fixture = await createFixture(transport);
       const fields = fieldsFor("token");
+      fields.delete("client_secret");
       for (const parameter of [
         "resource",
         "audience",
