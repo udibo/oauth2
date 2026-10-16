@@ -2144,6 +2144,113 @@ describe("AuthorizationServer", () => {
           });
         }
 
+        it("refuses a client_assertion_type alone together with Basic credentials", async () => {
+          const response = await endpoint.handle(
+            server,
+            authenticated({
+              ...endpoint.body,
+              client_assertion_type:
+                "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            }),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "multiple client authentication methods",
+          );
+        });
+
+        it("refuses a client_assertion_type alone together with a body client_secret", async () => {
+          const response = await endpoint.handle(
+            server,
+            request(
+              {},
+              {
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+                client_assertion_type:
+                  "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+              },
+            ),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "multiple client authentication methods",
+          );
+        });
+
+        for (const [name, authorization] of [
+          [
+            "a lowercase basic scheme",
+            `basic ${btoa("endpoint-client:secret")}`,
+          ],
+          [
+            "an uppercase BASIC scheme",
+            `BASIC ${btoa("endpoint-client:secret")}`,
+          ],
+          [
+            "a Basic scheme followed by a tab",
+            `Basic\t${btoa("endpoint-client:secret")}`,
+          ],
+        ] as const) {
+          it(`refuses ${name} together with body client credentials`, async () => {
+            const response = await endpoint.handle(
+              server,
+              request(
+                { headers: { authorization } },
+                {
+                  ...endpoint.body,
+                  client_id: "endpoint-client",
+                  client_secret: "secret",
+                },
+              ),
+            );
+
+            expect(response.status).toBe(400);
+            const body = await response.json();
+            expect(body.error).toBe("invalid_request");
+            expect(body.error_description).toBe(
+              "multiple client authentication methods",
+            );
+          });
+        }
+
+        it("refuses Basic credentials sent as a second Authorization header together with body client credentials", async () => {
+          const headers = new Headers({
+            "content-type": "application/x-www-form-urlencoded",
+          });
+          headers.append("authorization", "Bearer some-token");
+          headers.append(
+            "authorization",
+            basicAuthHeader("endpoint-client", "secret").authorization,
+          );
+          const response = await endpoint.handle(
+            server,
+            new Request(endpoint.url, {
+              method: "POST",
+              headers,
+              body: new URLSearchParams({
+                ...endpoint.body,
+                client_id: "endpoint-client",
+                client_secret: "secret",
+              }),
+            }),
+          );
+
+          expect(response.status).toBe(400);
+          const body = await response.json();
+          expect(body.error).toBe("invalid_request");
+          expect(body.error_description).toBe(
+            "multiple client authentication methods",
+          );
+        });
+
         it("refuses body client credentials together with a client assertion", async () => {
           const response = await endpoint.handle(
             server,

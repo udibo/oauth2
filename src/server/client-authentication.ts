@@ -12,7 +12,7 @@ import { InvalidClientError, InvalidRequestError } from "../errors.ts";
 import { parseBasicAuth } from "../utils/basic-auth.ts";
 import type { ClientServiceInterface } from "./services/client.ts";
 
-const BASIC_SCHEME = /^ *basic(?: |$)/i;
+const BASIC_SCHEME = /(?:^|,)[ \t]*basic(?:[ \t]|$)/i;
 
 /**
  * Reads the credentials a request presents by the one client-authentication
