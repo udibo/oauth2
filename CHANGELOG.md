@@ -1,3 +1,26 @@
+## [0.30.0](https://github.com/udibo/oauth2/compare/0.29.0...0.30.0) (2026-10-16)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** `JwksTokenReader` refuses a JWT access token that lacks
+`sub`, `iat` or `jti`, or carries one with the wrong type (`sub` and
+`jti` must be non-empty strings, `iat` a number), as RFC 9068 §2.2
+requires. `JwtAccessTokenClaims` now types `sub` and `iat` as required.
+Migration: make sure your issuer emits these claims
+(`createJwtAccessTokenGenerator` always has). For an issuer that names
+its token identifier differently, set `tokenIdClaim` (for example
+`tokenIdClaim: "uti"` for Microsoft Entra ID).
+
+## Closes
+
+Nothing. No issue in this repository tracks it.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Bug Fixes
+
+* **server:** require RFC 9068 claims in JwksTokenReader ([#139](https://github.com/udibo/oauth2/issues/139)) ([53add29](https://github.com/udibo/oauth2/commit/53add29e39ec774d70af6b39351cd0eceb57dd4f))
+
 ## [0.29.0](https://github.com/udibo/oauth2/compare/0.28.0...0.29.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
