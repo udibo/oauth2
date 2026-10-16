@@ -153,10 +153,13 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
-      # npm trusted publishing (OIDC) needs npm 11.5.1 or later.
+      # npm trusted publishing (OIDC) needs npm 11.5.1 or later, and the release
+      # smoke below needs 11.6.0 or later. Pinned to the same npm the package
+      # job uses, so a new npm (or major) never reaches the job that holds
+      # id-token without a reviewed bump; scripts/release-config.test.ts checks it.
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11.21.0
           npm --version
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
