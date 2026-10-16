@@ -1,3 +1,27 @@
+## [0.29.0](https://github.com/udibo/oauth2/compare/0.28.0...0.29.0) (2026-10-16)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** a request that combines HTTP Basic with a body
+`client_secret` or `client_assertion`, or a body `client_secret` with a
+`client_assertion`, is refused with `400 invalid_request` instead of
+authenticating by the Basic header. A body `client_id` sent with Basic
+credentials must name the same client, and a malformed Basic header is
+answered with `401 invalid_client` even when the body names a client.
+Migration: configure each client to send its credentials by one method
+only, either HTTP Basic (`client_secret_basic`) or `client_id` and
+`client_secret` in the body (`client_secret_post`).
+
+## Closes
+
+Nothing. No issue in this repository tracks it.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Bug Fixes
+
+* **server:** refuse more than one client auth method ([#137](https://github.com/udibo/oauth2/issues/137)) ([267d9e3](https://github.com/udibo/oauth2/commit/267d9e31c9a377de7c9e4da1bae05e1cc152c49f))
+
 ## [0.28.0](https://github.com/udibo/oauth2/compare/0.27.0...0.28.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
