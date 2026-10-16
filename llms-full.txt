@@ -2801,8 +2801,13 @@ A token is accepted only when all of these hold:
 - its `typ` header is `at+jwt`,
 - it carries a client-id claim — `client_id`, which RFC 9068 §2.2 makes
   REQUIRED. Point `clientIdClaim` at the vendor claim for issuers that deviate
-  (Okta's `cid`, Azure AD v1's `appid`); there is no way to drop the
-  requirement,
+  (Okta's `cid`, Azure AD v1's `appid`). The requirement cannot be turned off,
+  but pointing it at a claim every token carries defeats it,
+- it carries the rest of the claims RFC 9068 §2.2 makes REQUIRED: `sub` and
+  `jti` as non-empty strings and `iat` as a number. Point `tokenIdClaim` at the
+  vendor claim for an issuer that names its token identifier differently
+  (Microsoft Entra ID's `uti`). The requirement cannot be turned off, but
+  pointing it at a claim every token carries defeats it,
 - it carries no `id_token`-only claim (`nonce`, `at_hash`, `c_hash`, `s_hash`)
   and no `crit` header (RFC 7515 §4.1.11 — this reader implements no JWS
   extensions, so it must reject any token that requires one). `auth_time`, `acr`
