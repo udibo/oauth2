@@ -221,6 +221,7 @@ runTokenReaderContractTests<TestClient, TestUser>({
       aud: AUDIENCE,
       iat: now,
       exp: now + 3600,
+      jti: crypto.randomUUID(),
       scope: "read write",
     };
     return {

@@ -313,14 +313,11 @@ describe("JwksTokenReader", () => {
       );
     });
 
-    it("omits scope and user when the token carries neither", async () => {
+    it("omits scope and user when the token carries no scope and the reader maps no user", async () => {
       const key = await createKey("key-a");
       const { fetch } = jwksFetch({ keys: [key.jwk] });
       const reader = createReader(fetch, { getUser: undefined });
-      const accessToken = await signToken(
-        key,
-        claimsFor({ scope: undefined, sub: undefined }),
-      );
+      const accessToken = await signToken(key, claimsFor({ scope: undefined }));
       const token = await reader.getToken(accessToken);
 
       expect(token?.scope).toBe(undefined);
@@ -934,6 +931,74 @@ describe("JwksTokenReader", () => {
       );
 
       expect(calls.length).toBe(1);
+    });
+  });
+
+  describe("RFC 9068 required claims", () => {
+    for (const claim of [
+      "iss",
+      "exp",
+      "aud",
+      "sub",
+      "client_id",
+      "iat",
+      "jti",
+    ]) {
+      it(`rejects a token with no ${claim} claim`, async () => {
+        const key = await createKey("key-a");
+        const { fetch } = jwksFetch({ keys: [key.jwk] });
+        const reader = createReader(fetch);
+        const accessToken = await signToken(
+          key,
+          claimsFor({ [claim]: undefined }),
+        );
+
+        expect(await reader.getToken(accessToken)).toBe(undefined);
+      });
+    }
+
+    for (const [claim, value] of [
+      ["sub", 42],
+      ["sub", ""],
+      ["iat", "1700000000"],
+      ["iat", null],
+      ["jti", 7],
+      ["jti", ""],
+    ] as const) {
+      it(`rejects a token whose ${claim} is ${JSON.stringify(value)}`, async () => {
+        const key = await createKey("key-a");
+        const { fetch } = jwksFetch({ keys: [key.jwk] });
+        const reader = createReader(fetch);
+        const accessToken = await signToken(key, claimsFor({ [claim]: value }));
+
+        expect(await reader.getToken(accessToken)).toBe(undefined);
+      });
+    }
+
+    it("accepts a token carrying every required claim", async () => {
+      const key = await createKey("key-a");
+      const { fetch } = jwksFetch({ keys: [key.jwk] });
+      const reader = createReader(fetch);
+      const claims = claimsFor();
+      const token = await reader.getToken(await signToken(key, claims));
+
+      expect(token?.client.id).toBe("my-client");
+      expect(token?.user?.id).toBe("user-1");
+      expect(token?.claims).toStrictEqual(claims);
+    });
+
+    it("reads the token identifier from a vendor claim when configured", async () => {
+      const key = await createKey("key-a");
+      const { fetch } = jwksFetch({ keys: [key.jwk] });
+      const reader = createReader(fetch, { tokenIdClaim: "uti" });
+      const vendorToken = await signToken(
+        key,
+        claimsFor({ jti: undefined, uti: "AbC123" }),
+      );
+      const missingBoth = await signToken(key, claimsFor({ jti: undefined }));
+
+      expect((await reader.getToken(vendorToken))?.client.id).toBe("my-client");
+      expect(await reader.getToken(missingBoth)).toBe(undefined);
     });
   });
 

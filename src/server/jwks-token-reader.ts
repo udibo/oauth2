@@ -2,10 +2,11 @@
  * Token reader that validates JWT access tokens locally against the
  * issuer's published JWKS, with no per-request network hop.
  *
- * This is the validating half of RFC 9068 (`at+jwt`): the authorization
- * server signs access tokens and publishes its public keys at a `jwks_uri`;
- * the resource server fetches those keys once, caches them, and verifies
- * every subsequent token in-process. Signature verification uses Web Crypto
+ * It validates RFC 9068 (`at+jwt`) access tokens: the authorization server
+ * signs access tokens and publishes its public keys at a `jwks_uri`; the
+ * resource server fetches those keys once, caches them, and verifies every
+ * subsequent token in-process, including the `typ` header and every claim
+ * RFC 9068 §2.2 makes REQUIRED. Signature verification uses Web Crypto
  * only — the package takes no JOSE dependency.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc9068
@@ -42,19 +43,25 @@ import { readResponseJson } from "./_response-json.ts";
 export interface JwtAccessTokenClaims {
   /** Issuer that signed the token. Verified against the configured issuer. */
   iss: string;
-  /** Subject — the end user, or the client itself for client-credentials tokens. */
-  sub?: string;
+  /** Subject — the end user, or the client itself for client-credentials tokens. Required. */
+  sub: string;
   /** Audience(s) the token is intended for. Verified against the configured audience. */
   aud: string | string[];
   /** Expiration time, seconds since the epoch. */
   exp: number;
-  /** Issued-at time, seconds since the epoch. */
-  iat?: number;
+  /** Issued-at time, seconds since the epoch. Required. */
+  iat: number;
   /** Not-before time, seconds since the epoch. */
   nbf?: number;
-  /** Unique token identifier. */
+  /**
+   * Unique token identifier. Required unless
+   * {@linkcode JwksTokenReaderOptions.tokenIdClaim} names another claim.
+   */
   jti?: string;
-  /** Client the token was issued to. */
+  /**
+   * Client the token was issued to. Required unless
+   * {@linkcode JwksTokenReaderOptions.clientIdClaim} names another claim.
+   */
   client_id?: string;
   /** Space-delimited granted scopes. */
   scope?: string;
@@ -128,6 +135,13 @@ export interface JwksTokenReaderOptions<
    * AD v1's `appid`. There is deliberately no way to drop the requirement.
    */
   clientIdClaim?: string;
+  /**
+   * Claim carrying the unique token identifier, required on every accepted
+   * token (RFC 9068 §2.2 makes `jti` REQUIRED). Defaults to `"jti"`; point it
+   * at the vendor claim for issuers that deviate — Microsoft Entra ID's
+   * `uti`. There is deliberately no way to drop the requirement.
+   */
+  tokenIdClaim?: string;
   /**
    * Leeway in seconds applied to `exp` and `nbf` to absorb clock drift
    * between the issuer and this server. Defaults to 30. Must be finite and
@@ -425,6 +439,7 @@ export class JwksTokenReader<
   readonly #algorithms: string[];
   readonly #types: string[];
   readonly #clientIdClaim: string;
+  readonly #tokenIdClaim: string;
   readonly #clockSkewSeconds: number;
   readonly #cacheMaxAgeMs: number;
   readonly #minFetchIntervalMs: number;
@@ -448,7 +463,8 @@ export class JwksTokenReader<
 
   /**
    * Defaults: every Web Crypto asymmetric algorithm accepted, `at+jwt`
-   * required as `typ`, `client_id` as the required client-id claim, 30
+   * required as `typ`, `client_id` as the required client-id claim, `jti` as
+   * the required token-identifier claim, 30
    * seconds of clock skew, a 10-minute cache with a 30-second minimum
    * between fetches, a 5-second request deadline, a 256 KiB response cap,
    * {@linkcode BasicScope}, and the global `fetch`.
@@ -477,6 +493,7 @@ export class JwksTokenReader<
     }
     this.#types = (options.types ?? ["at+jwt"]).map(normalizeType);
     this.#clientIdClaim = options.clientIdClaim ?? "client_id";
+    this.#tokenIdClaim = options.tokenIdClaim ?? "jti";
     this.#clockSkewSeconds = options.clockSkewSeconds ?? 30;
     assertClockSkewSeconds(this.#clockSkewSeconds);
     this.#cacheMaxAgeMs = options.cacheMaxAgeMs ?? 600_000;
@@ -566,8 +583,13 @@ export class JwksTokenReader<
   #validClaims(claims: JwtAccessTokenClaims): boolean {
     if (claims.iss !== this.#issuer) return false;
 
-    const clientId = claims[this.#clientIdClaim];
-    if (typeof clientId !== "string" || !clientId) return false;
+    for (const claim of [this.#clientIdClaim, this.#tokenIdClaim, "sub"]) {
+      const value = claims[claim];
+      if (typeof value !== "string" || !value) return false;
+    }
+    if (typeof claims.iat !== "number" || !Number.isFinite(claims.iat)) {
+      return false;
+    }
     for (const claim of ID_TOKEN_ONLY_CLAIMS) {
       if (claims[claim] !== undefined) return false;
     }
