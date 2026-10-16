@@ -302,6 +302,17 @@ describe("oidcProvider", () => {
       expect(stub.context.tokenCalls).toStrictEqual(0);
     });
 
+    it("compares iss case-sensitively, refusing a letter-case variant", async () => {
+      const stub = tokenStub(issuer, {}, advertised);
+      const error = await rejection(
+        () => signIn({}, undefined, { iss: ["https://SSO.example"] }, stub),
+        ExternalAuthError,
+      );
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(error.message).toContain("does not match the issuer");
+      expect(stub.context.tokenCalls).toStrictEqual(0);
+    });
+
     it("refuses a missing iss when discovery advertises the parameter", async () => {
       const stub = tokenStub(issuer, {}, advertised);
       const error = await rejection(
