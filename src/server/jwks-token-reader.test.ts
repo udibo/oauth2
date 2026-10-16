@@ -960,6 +960,7 @@ describe("JwksTokenReader", () => {
     for (const [claim, value] of [
       ["sub", 42],
       ["sub", ""],
+      ["client_id", ""],
       ["iat", "1700000000"],
       ["iat", null],
       ["jti", 7],

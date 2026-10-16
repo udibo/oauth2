@@ -132,14 +132,16 @@ export interface JwksTokenReaderOptions<
    * §2.2 makes `client_id` REQUIRED, and its absence is what tells an
    * `id_token` apart from an access token). Defaults to `"client_id"`; point
    * it at the vendor claim for issuers that deviate — Okta's `cid`, Azure
-   * AD v1's `appid`. There is deliberately no way to drop the requirement.
+   * AD v1's `appid`. The requirement cannot be turned off, but pointing this
+   * at a claim every token carries defeats it.
    */
   clientIdClaim?: string;
   /**
    * Claim carrying the unique token identifier, required on every accepted
    * token (RFC 9068 §2.2 makes `jti` REQUIRED). Defaults to `"jti"`; point it
    * at the vendor claim for issuers that deviate — Microsoft Entra ID's
-   * `uti`. There is deliberately no way to drop the requirement.
+   * `uti`. The requirement cannot be turned off, but pointing this at a claim
+   * every token carries defeats it.
    */
   tokenIdClaim?: string;
   /**
