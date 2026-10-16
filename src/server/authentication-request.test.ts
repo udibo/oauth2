@@ -372,6 +372,31 @@ describe("max_age", () => {
     ).toBe("the user's last authentication is older than max_age");
   });
 
+  it("refuses an hour-old session whose auth_time was recorded in milliseconds", async () => {
+    const { server } = await createServer();
+    const response = await server.handleAuthorizeRequest(
+      authorizeRequest({ max_age: "300" }),
+      signedIn({ auth_time: Date.now() - 3_600_000 }),
+    );
+    expect(
+      expectError(response, "login_required").get("error_description"),
+    ).toBe("the user's authentication time is in the future");
+  });
+
+  it("accepts an auth_time up to a minute ahead of the server's clock", () => {
+    const now = 1_700_000_000_000;
+    const at = (auth_time: number) => ({
+      authenticationContext: { auth_time },
+    });
+    const request = { prompt: [], maxAge: 300, acrValues: [] };
+    expect(
+      satisfiesAuthenticationRequest(request, at(now / 1000 + 60), now),
+    ).toBe(true);
+    expect(
+      satisfiesAuthenticationRequest(request, at(now / 1000 + 61), now),
+    ).toBe(false);
+  });
+
   it("issues a code for an authentication within max_age and puts its auth_time in the ID token", async () => {
     const { server, key } = await createServer();
     const authTime = nowSeconds() - 120;

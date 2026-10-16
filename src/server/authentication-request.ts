@@ -24,6 +24,8 @@ export interface AuthenticationOutcome {
   reauthenticated?: boolean;
 }
 
+const MAX_AUTH_TIME_SKEW_SECONDS = 60;
+
 function spaceDelimited(value: string | null): string[] {
   return [...new Set((value ?? "").split(" ").filter(Boolean))];
 }
@@ -106,8 +108,12 @@ export function authenticationShortfall(
   if (typeof authTime !== "number" || !Number.isFinite(authTime)) {
     return "max_age requires the time the user authenticated";
   }
+  const age = Math.floor(now / 1000) - authTime;
+  if (age < -MAX_AUTH_TIME_SKEW_SECONDS) {
+    return "the user's authentication time is in the future";
+  }
   if (reauthenticated) return undefined;
-  if (Math.floor(now / 1000) - authTime > request.maxAge) {
+  if (age > request.maxAge) {
     return "the user's last authentication is older than max_age";
   }
   return undefined;
@@ -123,8 +129,8 @@ export function authenticationShortfall(
  * `prompt=login` and `max_age=0`, which OIDC Core makes equivalent, need
  * `reauthenticated: true`. Any `max_age` needs a recorded `auth_time`, since
  * the ID token must carry one, no older than `max_age` seconds unless the user
- * re-authenticated for this request. `acr_values` is a
- * preference and never fails the check.
+ * re-authenticated for this request, and never more than a minute in the
+ * future. `acr_values` is a preference and never fails the check.
  *
  * @param now The current time in epoch milliseconds. Defaults to `Date.now()`.
  *
