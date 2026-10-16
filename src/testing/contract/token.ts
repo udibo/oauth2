@@ -18,6 +18,7 @@
  * @module
  */
 
+import { setTimeout as delay } from "node:timers/promises";
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { ClientInterface } from "../../models/client.ts";
 import { BasicScope } from "../../models/scope.ts";
@@ -675,6 +676,82 @@ export function runTokenServiceContractTests<
             "an expired successor cannot be used, so a replay of its " +
               "predecessor must not be excused as a straggler",
           ).toBe(false);
+        });
+
+        async function rotateOut(
+          skip: (condition: boolean, note: string) => void,
+        ): Promise<{
+          tombstone: RefreshToken<C, U, S>;
+          successor: RefreshToken<C, U, S>;
+        }> {
+          skip(
+            typeof tokenService.isWithinReplayGrace !== "function",
+            "the service does not implement isWithinReplayGrace",
+          );
+          skip(
+            typeof tokenService.rotate !== "function" &&
+              typeof tokenService.revokeRotated !== "function",
+            "the service implements neither rotate nor revokeRotated",
+          );
+          const parent = await saveFamilyMember(FAMILY);
+          const successor = await familyMember(FAMILY);
+          if (tokenService.rotate) {
+            assert(await tokenService.rotate(parent, successor));
+          } else {
+            assert(await tokenService.revokeRotated!(parent));
+            await tokenService.save(successor);
+          }
+          const tombstone = await tokenService.getRevokedRefreshToken!(
+            parent.refreshToken,
+          );
+          assert(
+            tombstone?.familyId === FAMILY && tombstone.rotatedAt,
+            "a store that judges the replay grace must still return every " +
+              "rotated-out tombstone, with its family and rotatedAt; hiding " +
+              "one inside the window hides the family from a sign-out " +
+              "racing the refresh, which then leaves the successor live",
+          );
+          return { tombstone, successor };
+        }
+
+        it("returns the tombstone of a token inside its replay grace, so revoking it ends the successor", async ({
+          skip,
+        }) => {
+          const { tombstone, successor } = await rotateOut(skip);
+
+          expect(
+            await tokenService.isWithinReplayGrace!(tombstone, 60),
+            "a token rotated out a moment ago is inside a 60-second grace",
+          ).toBe(true);
+          expect(await tokenService.revokeFamily!(tombstone.familyId!)).toBe(
+            true,
+          );
+          expect(
+            await tokenService.getRefreshToken(successor.refreshToken),
+          ).toBe(undefined);
+        });
+
+        it("judges a rotated-out token inside a one-second grace, then outside it once the second has passed", async ({
+          skip,
+        }) => {
+          const { tombstone } = await rotateOut(skip);
+
+          expect(
+            await tokenService.isWithinReplayGrace!(tombstone, 1),
+            "a token rotated out a moment ago is inside a one-second grace",
+          ).toBe(true);
+
+          await delay(1_200);
+
+          expect(
+            await tokenService.isWithinReplayGrace!(tombstone, 1),
+            "a grace that answers true regardless of elapsed time excuses " +
+              "every replay while the family is live, which turns reuse " +
+              "detection off",
+          ).toBe(false);
+          expect(await tokenService.isWithinReplayGrace!(tombstone, 3600)).toBe(
+            true,
+          );
         });
       });
     } else {

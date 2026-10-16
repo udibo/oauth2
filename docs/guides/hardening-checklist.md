@@ -76,7 +76,9 @@ sections apply only when you host those flows.
       `revokeFamily` records the family and `save` stores any later member of
       it already revoked.
 - [ ] `getRevokedRefreshToken` returns every tombstone; a replay grace comes
-      from `replayGraceSeconds`, not from hiding recent tombstones.
+      from `replayGraceSeconds`, judged on the store's clock by
+      `isWithinReplayGrace` when the store stamps `rotatedAt` itself, not
+      from hiding recent tombstones.
 - [ ] Client-credentials tokens represent the client or its service account, not
       its human owner.
 - [ ] Consent and scope policy match the clients you allow.

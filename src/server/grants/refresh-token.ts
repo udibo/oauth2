@@ -19,6 +19,8 @@ import {
   type GrantServices,
 } from "./grant.ts";
 
+const REPLAY_GRACE_CLOCK_TOLERANCE_SECONDS = 300;
+
 /** Services required by the refresh token grant. */
 export type RefreshTokenGrantServices<
   Client extends ClientInterface,
@@ -89,7 +91,13 @@ export interface RefreshTokenGrantOptions<
    *
    * Needs a token service that sets {@linkcode RefreshToken.rotatedAt} in
    * `revokeRotated` and implements `hasLiveRefreshToken`; with any other
-   * service the grace never applies.
+   * service the grace never applies. The window is measured by the token
+   * service's `isWithinReplayGrace` when it implements one, on the store's
+   * clock, and otherwise by comparing `rotatedAt` with this process's clock.
+   * The store's answer is honored only while `rotatedAt` is no more than five
+   * minutes ahead of this process's clock and no more than the grace plus
+   * five minutes behind it, so a faulty store check cannot excuse replays
+   * indefinitely.
    */
   replayGraceSeconds?: number;
 }
@@ -116,7 +124,7 @@ export class RefreshTokenGrant<
   #onTokenReuse?: (
     event: TokenReuseEvent<Client, User>,
   ) => void | Promise<void>;
-  readonly #replayGraceMs: number;
+  readonly #replayGraceSeconds: number;
 
   /** Creates the grant from its {@linkcode RefreshTokenGrantOptions}. */
   constructor(options: RefreshTokenGrantOptions<Client, User, S>) {
@@ -128,7 +136,7 @@ export class RefreshTokenGrant<
         `replayGraceSeconds must be a non-negative number of seconds, got ${graceSeconds}`,
       );
     }
-    this.#replayGraceMs = graceSeconds * 1000;
+    this.#replayGraceSeconds = graceSeconds;
   }
 
   /**
@@ -288,9 +296,27 @@ export class RefreshTokenGrant<
     replayed: RefreshToken<Client, User, S>,
   ): Promise<boolean> {
     const { rotatedAt, familyId } = replayed;
-    if (this.#replayGraceMs === 0 || !rotatedAt || !familyId) return false;
-    if (Date.now() - rotatedAt.getTime() > this.#replayGraceMs) return false;
+    if (this.#replayGraceSeconds === 0 || !rotatedAt || !familyId) {
+      return false;
+    }
+    const elapsedMs = Date.now() - rotatedAt.getTime();
+    const withinWindow = tokenService.isWithinReplayGrace
+      ? this.#withinClockTolerance(elapsedMs) &&
+        (await tokenService.isWithinReplayGrace(
+          replayed,
+          this.#replayGraceSeconds,
+        ))
+      : elapsedMs <= this.#replayGraceSeconds * 1000;
+    if (!withinWindow) return false;
     return (await tokenService.hasLiveRefreshToken?.(familyId)) ?? false;
+  }
+
+  #withinClockTolerance(elapsedMs: number): boolean {
+    const toleranceMs = REPLAY_GRACE_CLOCK_TOLERANCE_SECONDS * 1000;
+    return (
+      elapsedMs >= -toleranceMs &&
+      elapsedMs <= this.#replayGraceSeconds * 1000 + toleranceMs
+    );
   }
 
   async #notifyTokenReuse(event: TokenReuseEvent<Client, User>): Promise<void> {

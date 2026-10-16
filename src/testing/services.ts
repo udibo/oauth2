@@ -626,6 +626,23 @@ export class MemoryTokenService<
     return Promise.resolve(false);
   }
 
+  /**
+   * Whether the tombstone was rotated out no more than `graceSeconds` ago,
+   * judged from the rotation time this store recorded rather than the one on
+   * the record passed in. Resolves `false` for a token it holds no rotated-out
+   * tombstone for.
+   */
+  async isWithinReplayGrace(
+    tombstone: RefreshToken<C, U, S>,
+    graceSeconds: number,
+  ): Promise<boolean> {
+    const rotatedAt = this.#revokedByRefreshHash.get(
+      await sha256Hash(tombstone.refreshToken),
+    )?.rotatedAt;
+    if (!rotatedAt) return false;
+    return Date.now() - rotatedAt.getTime() <= graceSeconds * 1000;
+  }
+
   #tombstone(refreshTokenHash: string, stored: StoredToken<S>): void {
     this.#revokedByRefreshHash.set(refreshTokenHash, stored);
   }

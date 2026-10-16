@@ -1440,6 +1440,38 @@ describe("AuthorizationServer", () => {
         ).toStrictEqual([]);
       });
 
+      it("revokes the family after the store's own replay grace excused a straggler", async () => {
+        const {
+          server: rotating,
+          tokenService,
+          reuseEvents,
+        } = await rotatingServer({ replayGraceSeconds: 30 });
+        const original = await issueFamily(tokenService);
+        const successor = await rotate(rotating, original.refreshToken);
+        const tombstone = await tokenService.getRevokedRefreshToken(
+          original.refreshToken,
+        );
+        expect(
+          tombstone && (await tokenService.isWithinReplayGrace(tombstone, 30)),
+        ).toBe(true);
+
+        const straggler = await refresh(rotating, original.refreshToken);
+        expect(straggler.status).toBe(400);
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "the store judged the straggler inside its grace",
+        ).not.toBe(undefined);
+
+        await revoke(rotating, { token: original.refreshToken });
+
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+          "a store that judges the grace still returns the tombstone, so " +
+            "a sign-out inside the window ends the successor",
+        ).toBe(undefined);
+        expect(reuseEvents).toStrictEqual([]);
+      });
+
       it("leaves the family of a token rotated for another client alone", async () => {
         const { server: rotating, tokenService } = await rotatingServer();
         const original = await issueFamily(tokenService, otherClient);
