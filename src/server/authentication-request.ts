@@ -127,8 +127,10 @@ export function authenticationShortfall(
  *
  * `prompt=login` and `max_age=0`, which OIDC Core makes equivalent, need
  * `reauthenticated: true`. Any `max_age` needs a recorded `auth_time`, since
- * the ID token must carry one, no older than `max_age` seconds (whether or not
- * the user re-authenticated) and never more than a minute in the future. `acr_values` is a preference and never fails the check.
+ * the ID token must carry one, never more than a minute in the future. Above
+ * zero, it must also be no older than `max_age` seconds, whether or not the
+ * user re-authenticated. `acr_values` is a preference and never fails the
+ * check.
  *
  * @param now The current time in epoch milliseconds. Defaults to `Date.now()`.
  *

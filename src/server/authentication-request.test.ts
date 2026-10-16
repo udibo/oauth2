@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { setCookie } from "hono/cookie";
 import { assert, describe, expect, it, vi } from "vitest";
 import { HonoAuthorizationServer } from "../adapters/hono/authorization-server.ts";
 import type {
@@ -434,6 +435,15 @@ describe("max_age", () => {
     expect(redirectParams(fresh).has("code")).toBe(true);
   });
 
+  it("accepts max_age=0 after a re-authentication that finished seconds before the code", async () => {
+    const { server } = await createServer();
+    const response = await server.handleAuthorizeRequest(
+      authorizeRequest({ max_age: "0" }),
+      signedIn({ auth_time: nowSeconds() - 5 }, { reauthenticated: true }),
+    );
+    expect(redirectParams(response).has("code")).toBe(true);
+  });
+
   it("refuses a re-authentication whose recorded auth_time is older than max_age", async () => {
     const { server } = await createServer();
     const response = await server.handleAuthorizeRequest(
@@ -735,6 +745,57 @@ describe("Hono authorize handler", () => {
       ["none"],
       ["consent"],
       ["consent"],
+    ]);
+  });
+});
+
+describe("Hono prompt=none cookies", () => {
+  it("sets no cookie on a prompt=none answer when the callbacks set one on their pages", async () => {
+    const { hono } = await createServer();
+    const app = new Hono();
+    app.get(
+      "/authorize",
+      hono.authorizeHandler({
+        authenticateUser: (c) => {
+          setCookie(c, "login_flow", "started");
+          return Promise.resolve(
+            c.req.query("signed_in")
+              ? { user }
+              : c.html("<form>sign in</form>"),
+          );
+        },
+        handleConsent: (c) => {
+          setCookie(c, "consent_flow", "started");
+          return Promise.resolve(c.html("<form>consent</form>"));
+        },
+      }),
+    );
+    const login = await app.request(authorizeRequest({ prompt: "none" }));
+    expectError(login, "login_required");
+    expect(login.headers.getSetCookie()).toStrictEqual([]);
+    const consent = await app.request(
+      authorizeRequest({ prompt: "none", signed_in: "1" }),
+    );
+    expectError(consent, "consent_required");
+    expect(consent.headers.getSetCookie()).toStrictEqual([]);
+  });
+
+  it("keeps the cookie a callback sets on a page it is allowed to show", async () => {
+    const { hono } = await createServer();
+    const app = new Hono();
+    app.get(
+      "/authorize",
+      hono.authorizeHandler({
+        authenticateUser: (c) => {
+          setCookie(c, "login_flow", "started");
+          return Promise.resolve(c.html("<form>sign in</form>"));
+        },
+      }),
+    );
+    const response = await app.request(authorizeRequest());
+    expect(response.status).toBe(200);
+    expect(response.headers.getSetCookie()).toStrictEqual([
+      "login_flow=started; Path=/",
     ]);
   });
 });
