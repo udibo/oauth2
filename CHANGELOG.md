@@ -1,3 +1,9 @@
+## [0.32.0](https://github.com/udibo/oauth2/compare/0.31.0...0.32.0) (2026-10-16)
+
+### Features
+
+* **bff:** check auth_time against the recorded max_age ([#141](https://github.com/udibo/oauth2/issues/141)) ([bac1c4b](https://github.com/udibo/oauth2/commit/bac1c4bc8b9052bc148bc300e96fc3f50bf8ab6a)), closes [#140](https://github.com/udibo/oauth2/issues/140)
+
 ## [0.31.0](https://github.com/udibo/oauth2/compare/0.30.0...0.31.0) (2026-10-16)
 
 ### Features
