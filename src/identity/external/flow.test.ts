@@ -21,6 +21,11 @@ import {
 import { ExternalAuthError } from "./errors.ts";
 import { DEFAULT_MAX_TRANSIENT_AGE_MS, ExternalAuthFlow } from "./flow.ts";
 import { oidcProvider } from "./oidc.ts";
+import type {
+  ExternalProfile,
+  ExternalProfileInput,
+  ExternalProvider,
+} from "./provider.ts";
 
 const issuer = "https://idp.example";
 const redirectUri = "https://app.example/cb";
@@ -285,5 +290,109 @@ describe("ExternalAuthFlow with the embedded OIDC provider", () => {
     expect(error.message).toContain(
       "https://missing.example/.well-known/openid-configuration",
     );
+  });
+
+  it("redeems the embedded server's callback, whose iss names the issuer", async () => {
+    const { flow, authorize } = await createHarness();
+    const { url, transient } = await flow.start({ redirectUri });
+    const callback = await authorize(url);
+    expect(callback.searchParams.get("iss")).toStrictEqual(issuer);
+
+    const profile = await flow.finish({ params: callback, transient });
+    expect(profile.subject).toStrictEqual(user.id);
+  });
+
+  it("refuses the embedded server's callback when its iss is swapped for another issuer", async () => {
+    const { flow, authorize } = await createHarness();
+    const { url, transient } = await flow.start({ redirectUri });
+    const callback = await authorize(url);
+    callback.searchParams.set("iss", "https://other-idp.example");
+
+    const error = await rejection(
+      () => flow.finish({ params: callback, transient }),
+      ExternalAuthError,
+    );
+    expect(error.code).toStrictEqual("invalid_callback");
+  });
+
+  it("refuses the embedded server's callback when its iss is removed", async () => {
+    const { flow, authorize } = await createHarness();
+    const { url, transient } = await flow.start({ redirectUri });
+    const callback = await authorize(url);
+    callback.searchParams.delete("iss");
+
+    const error = await rejection(
+      () => flow.finish({ params: callback, transient }),
+      ExternalAuthError,
+    );
+    expect(error.code).toStrictEqual("invalid_callback");
+  });
+});
+
+describe("ExternalAuthFlow handing iss to a provider", () => {
+  function recordingProvider() {
+    const inputs: ExternalProfileInput[] = [];
+    const provider: ExternalProvider = {
+      id: "custom",
+      displayName: "Custom",
+      defaultScopes: [],
+      usesPkce: false,
+      usesNonce: false,
+      buildAuthorizationUrl: () =>
+        Promise.resolve("https://custom.example/authorize"),
+      fetchProfile: (input): Promise<ExternalProfile> => {
+        inputs.push(input);
+        return Promise.resolve({
+          provider: "custom",
+          subject: "custom-1",
+          emailVerified: false,
+          raw: {},
+        });
+      },
+    };
+    return { flow: new ExternalAuthFlow({ provider }), inputs };
+  }
+
+  it("passes the callback iss to fetchProfile", async () => {
+    const { flow, inputs } = recordingProvider();
+    const { transient } = await flow.start({ redirectUri });
+    await flow.finish({
+      params: new URLSearchParams({
+        code: "c",
+        state: transient.state,
+        iss: "https://custom.example",
+      }),
+      transient,
+    });
+    expect(inputs.map((input) => input.iss)).toStrictEqual([
+      "https://custom.example",
+    ]);
+  });
+
+  it("passes no iss when the callback has none", async () => {
+    const { flow, inputs } = recordingProvider();
+    const { transient } = await flow.start({ redirectUri });
+    await flow.finish({
+      params: new URLSearchParams({ code: "c", state: transient.state }),
+      transient,
+    });
+    expect(inputs.length).toStrictEqual(1);
+    expect(inputs[0].iss).toStrictEqual(undefined);
+  });
+
+  it("refuses a callback with more than one iss before the provider sees it", async () => {
+    const { flow, inputs } = recordingProvider();
+    const { transient } = await flow.start({ redirectUri });
+    const params = new URLSearchParams({ code: "c", state: transient.state });
+    params.append("iss", "https://custom.example");
+    params.append("iss", "https://evil.example");
+
+    const error = await rejection(
+      () => flow.finish({ params, transient }),
+      ExternalAuthError,
+    );
+    expect(error.code).toStrictEqual("invalid_callback");
+    expect(error.message).toContain("more than one `iss`");
+    expect(inputs.length).toStrictEqual(0);
   });
 });

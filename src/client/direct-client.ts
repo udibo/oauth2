@@ -55,7 +55,10 @@ import {
   type UserInfoClaims,
 } from "./base.ts";
 import { SessionStorageAuthRequestStorage } from "./browser-storage.ts";
-import { issuerRefusal } from "./_issuer-refusal.ts";
+import {
+  authorizationResponseIssuerProblem,
+  issuerRefusal,
+} from "./_issuer-refusal.ts";
 import {
   DEFAULT_DISCOVERY_TTL_MS,
   type DiscoveryCache,
@@ -821,30 +824,14 @@ export class DirectClient extends OAuth2ClientBase {
   ): Promise<OAuth2Error | undefined> {
     if (!this.#issuer) return undefined;
     const metadata = await this.discover();
-    const received = params.getAll("iss");
-    if (received.length > 1) {
-      return issuerRefusal(
-        "the authorization response carries more than one `iss` (RFC 9207)",
-      );
-    }
-    const [iss] = received;
-    if (iss === undefined) {
-      if (metadata.authorization_response_iss_parameter_supported !== true) {
-        return undefined;
-      }
-      return issuerRefusal(
-        "the authorization response is missing `iss`, which the issuer " +
-          "advertises with `authorization_response_iss_parameter_supported` " +
-          "(RFC 9207 §2.4)",
-      );
-    }
     const accepted = [metadata.issuer];
     if (origin) accepted.push(issuerAtOrigin(metadata.issuer, origin));
-    if (accepted.includes(iss)) return undefined;
-    return issuerRefusal(
-      "the authorization response `iss` does not match the issuer the " +
-        "request was sent to (RFC 9207 §2.4)",
+    const problem = authorizationResponseIssuerProblem(
+      params.getAll("iss"),
+      accepted,
+      metadata.authorization_response_iss_parameter_supported === true,
     );
+    return problem === undefined ? undefined : issuerRefusal(problem);
   }
 
   /**

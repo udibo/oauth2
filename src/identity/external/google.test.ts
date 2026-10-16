@@ -20,9 +20,11 @@ function unsignedIdToken(claims: Record<string, unknown>): string {
 function createGoogleStub(options: {
   claims: Record<string, unknown>;
   userinfo?: Record<string, unknown>;
+  advertisesIss?: boolean;
 }) {
   const context = {
     nonce: undefined as string | undefined,
+    tokenCalls: 0,
     tokenRequest: undefined as
       | { headers: Headers; body: URLSearchParams }
       | undefined,
@@ -41,6 +43,9 @@ function createGoogleStub(options: {
           authorization_endpoint:
             "https://accounts.google.com/o/oauth2/v2/auth",
           token_endpoint: "https://oauth2.googleapis.com/token",
+          ...(options.advertisesIss
+            ? { authorization_response_iss_parameter_supported: true }
+            : {}),
           ...(options.userinfo
             ? {
                 userinfo_endpoint:
@@ -49,6 +54,7 @@ function createGoogleStub(options: {
             : {}),
         });
       case "https://oauth2.googleapis.com/token":
+        context.tokenCalls++;
         context.tokenRequest = {
           headers: request.headers,
           body: new URLSearchParams(await request.text()),
@@ -77,6 +83,7 @@ function createGoogleStub(options: {
 async function signIn(
   stub: ReturnType<typeof createGoogleStub>,
   config?: Pick<GoogleProviderOptions, "azp">,
+  iss?: string,
 ): Promise<Awaited<ReturnType<ExternalAuthFlow["finish"]>>> {
   const flow = new ExternalAuthFlow({
     provider: googleProvider({
@@ -93,6 +100,7 @@ async function signIn(
     params: new URLSearchParams({
       code: "google-code",
       state: transient.state,
+      ...(iss === undefined ? {} : { iss }),
     }),
     transient,
   });
@@ -233,5 +241,39 @@ describe("googleProvider", () => {
     const profile = await signIn(stub);
     expect(profile.email).toStrictEqual("ada@example.com");
     expect(profile.subject).toStrictEqual("g-123");
+  });
+
+  it("refuses a callback iss naming another issuer before redeeming the code", async () => {
+    const stub = createGoogleStub({ claims: { sub: "g-mixup" } });
+    const error = await rejection(
+      () => signIn(stub, undefined, "https://evil.example"),
+      ExternalAuthError,
+    );
+    expect(error.code).toStrictEqual("invalid_callback");
+    expect(error.message).toContain("[google]");
+    expect(stub.context.tokenCalls).toStrictEqual(0);
+  });
+
+  it("refuses a missing callback iss once Google's discovery advertises it", async () => {
+    const stub = createGoogleStub({
+      claims: { sub: "g-no-iss" },
+      advertisesIss: true,
+    });
+    const error = await rejection(() => signIn(stub), ExternalAuthError);
+    expect(error.code).toStrictEqual("invalid_callback");
+    expect(stub.context.tokenCalls).toStrictEqual(0);
+  });
+
+  it("accepts a callback iss of https://accounts.google.com", async () => {
+    const stub = createGoogleStub({
+      claims: { sub: "g-iss" },
+      advertisesIss: true,
+    });
+    const profile = await signIn(
+      stub,
+      undefined,
+      "https://accounts.google.com",
+    );
+    expect(profile.subject).toStrictEqual("g-iss");
   });
 });

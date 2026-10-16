@@ -14,6 +14,7 @@ import {
 } from "../../utils/_default-fetch.ts";
 import { generateCodeChallenge } from "../../utils/pkce.ts";
 import {
+  assertAuthorizationResponseIssuer,
   describeError,
   PROVIDER_REQUEST_TIMEOUT_MS,
   readErrorBody,
@@ -109,6 +110,20 @@ export interface OAuth2ProviderOptions {
    */
   authorizationParams?: Record<string, string>;
   /**
+   * The provider's issuer identifier, for the RFC 9207 check. When set, a
+   * callback `iss` that is not exactly this value is refused before the code
+   * is redeemed. Unset, the callback's `iss` is not checked.
+   */
+  issuer?: string;
+  /**
+   * Set `true` when the provider always sends `iss` in its authorization
+   * responses (its metadata advertises
+   * `authorization_response_iss_parameter_supported`), so a callback without
+   * one is refused. Requires {@link OAuth2ProviderOptions.issuer}. Defaults to
+   * `false`.
+   */
+  authorizationResponseIssParameterSupported?: boolean;
+  /**
    * Fetch implementation for all provider traffic. Defaults to
    * `globalThis.fetch`. A wrapper must pass `init` through intact: its
    * `redirect` and `signal` carry the connector's redirect refusal and timeout.
@@ -124,7 +139,11 @@ export interface OAuth2ProviderOptions {
  * credentials in the body (`client_secret_post`); the profile is read from
  * `userInfoEndpoint` with the bearer token when set, else from the token
  * response, and handed to `mapProfile`. Presets like {@link discordProvider}
- * are thin wrappers over this.
+ * are thin wrappers over this. With `issuer` set, the callback's `iss`
+ * (RFC 9207) is checked before the exchange.
+ *
+ * @throws {ExternalAuthError} `configuration` when
+ *   `authorizationResponseIssParameterSupported` is set without `issuer`.
  *
  * @example
  * ```ts
@@ -146,6 +165,18 @@ export function oauth2Provider(
   options: OAuth2ProviderOptions,
 ): ExternalProvider {
   const id = options.id;
+  const { issuer } = options;
+  const issRequired =
+    options.authorizationResponseIssParameterSupported === true;
+  if (issRequired && issuer === undefined) {
+    throw new ExternalAuthError(
+      id,
+      "configuration",
+      `authorizationResponseIssParameterSupported needs an issuer to ` +
+        `compare the callback's "iss" with — set the provider's issuer ` +
+        `identifier as "issuer".`,
+    );
+  }
   const fetchImpl: typeof fetch = (input, init) =>
     (options.fetch ?? defaultFetch)(input, init);
   const scopeSeparator = options.scopeSeparator ?? " ";
@@ -259,6 +290,14 @@ export function oauth2Provider(
       return url.toString();
     },
     async fetchProfile(input: ExternalProfileInput): Promise<ExternalProfile> {
+      if (issuer !== undefined) {
+        assertAuthorizationResponseIssuer({
+          provider: id,
+          iss: input.iss,
+          issuer,
+          required: issRequired,
+        });
+      }
       const tokens = await exchangeCode(input);
       const profile = options.userInfoEndpoint
         ? await fetchUserInfo(tokens.accessToken)

@@ -87,6 +87,7 @@ async function harness(
     tokenStatus: 200 as number,
     tokenBody: undefined as Record<string, unknown> | undefined,
     tokenRequest: undefined as URLSearchParams | undefined,
+    tokenCalls: 0,
   };
   const fetchStub: typeof fetch = async (input, init) => {
     const request =
@@ -94,6 +95,7 @@ async function harness(
         ? new Request(input, init)
         : new Request(String(input), init);
     if (request.url === "https://appleid.apple.com/auth/token") {
+      holder.tokenCalls++;
       holder.tokenRequest = new URLSearchParams(await request.text());
       if (holder.tokenStatus !== 200) {
         return new Response("bad", { status: holder.tokenStatus });
@@ -391,5 +393,43 @@ describe("appleProvider", () => {
     expect(holder.tokenRequest!.get("client_secret")).toStrictEqual(
       "stub.secret.jwt",
     );
+  });
+
+  describe("authorization response issuer (RFC 9207)", () => {
+    async function finishWith(iss: string | undefined) {
+      const signer = await createSigner("apple-key-1");
+      const { flow, holder } = await harness({ signer });
+      const { transient } = await flow.start({ redirectUri });
+      holder.idToken = await signer.sign(
+        baseClaims({ nonce: transient.nonce }),
+      );
+      const params = new URLSearchParams({
+        code: "apple-code",
+        state: transient.state,
+      });
+      if (iss !== undefined) params.set("iss", iss);
+      return { holder, result: flow.finish({ params, transient }) };
+    }
+
+    it("refuses an iss naming another issuer before redeeming the code", async () => {
+      const { holder, result } = await finishWith("https://evil.example");
+      const error = await rejection(result, ExternalAuthError);
+      expect(error.code).toStrictEqual("invalid_callback");
+      expect(error.message).toContain("[apple]");
+      expect(holder.tokenCalls).toStrictEqual(0);
+    });
+
+    it("accepts the callback without iss, which Apple does not advertise", async () => {
+      const { holder, result } = await finishWith(undefined);
+      const profile = await result;
+      expect(profile.subject).toStrictEqual("001999.apple-subject.0001");
+      expect(holder.tokenCalls).toStrictEqual(1);
+    });
+
+    it("accepts an iss of https://appleid.apple.com", async () => {
+      const { result } = await finishWith(APPLE_ISSUER);
+      const profile = await result;
+      expect(profile.subject).toStrictEqual("001999.apple-subject.0001");
+    });
   });
 });
