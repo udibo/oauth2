@@ -34,7 +34,9 @@ semantic-release from Conventional Commits (see
 The supported runtime is Node.js 22 and later. CI runs the complete test suite
 on Node 22, 24, and 26, and smoke-tests the packed npm tarball from a clean
 consumer: it type checks every entrypoint under NodeNext resolution and imports
-each one. The testing exports (`/testing`, `/testing/contract`,
+each one. On Node 22 it installs the tarball with the bundled npm 10, then runs
+that consumer on npm 11, because npm 10 can crash resolving a Vitest pin (see
+[Known Limitations](known-limitations.md#runtime)). The testing exports (`/testing`, `/testing/contract`,
 `/hono/bff/testing`, `/react/testing`) register tests through Vitest, an
 optional peer dependency. The `udibo-oauth2` command is Node-only.
 
