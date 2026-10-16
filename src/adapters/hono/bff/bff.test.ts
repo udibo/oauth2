@@ -3051,6 +3051,259 @@ describe("HonoBff", () => {
         );
       }
     });
+
+    describe("against the max_age recorded at login, whichever instance serves the callback", () => {
+      const SECRET = "test-secret-at-least-32-bytes-long!!";
+      const sharedStorages = [
+        ["a shared memory store", () => new MemoryAuthRequestStorageFactory()],
+        [
+          "the encrypted auth-request cookie",
+          () =>
+            new EncryptedCookieAuthRequestStorage({
+              secret: SECRET,
+              cookie: { secure: false },
+            }),
+        ],
+      ] as const;
+
+      async function signInAcross(
+        login: HonoBff,
+        callback: HonoBff,
+        options: { query?: string; serverAuthTime?: number } = {},
+      ): Promise<Response> {
+        const loginRes = await makeApp(login).request(
+          `/auth/login${options.query ?? ""}`,
+        );
+        const authorizeUrl = new URL(loginRes.headers.get("Location")!);
+        await loginRes.body?.cancel();
+        authorizeUrl.searchParams.delete("max_age");
+        const response = await fixture.authServer.handleAuthorizeRequest(
+          new Request(authorizeUrl),
+          () =>
+            Promise.resolve({
+              user: testUser,
+              authenticationContext: {
+                auth_time: options.serverAuthTime ?? nowSeconds(),
+              },
+            }),
+        );
+        const location = response.headers.get("Location")!;
+        expect(new URL(location).searchParams.has("code")).toBe(true);
+        return await makeApp(callback).request(
+          location.slice(ISSUER.length),
+          withCookies(undefined, jar(loginRes)),
+        );
+      }
+
+      async function expectSignedIn(res: Response) {
+        expect(res.status).toBe(302);
+        expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+        await res.body?.cancel();
+      }
+
+      for (const [storageName, storage] of sharedStorages) {
+        it(`checks a max_age pinned only on the instance that served the login, through ${storageName}`, async () => {
+          const authRequestStorage = storage();
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                authRequestStorage,
+              }),
+            ),
+            "older than the max_age",
+          );
+        });
+
+        it(`does not check a sign-in that carried no max_age, even when the callback instance pins one, through ${storageName}`, async () => {
+          const authRequestStorage = storage();
+          await expectSignedIn(
+            await signInAcross(
+              idTokenBff(undefined, { authRequestStorage }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+            ),
+          );
+        });
+      }
+
+      it("checks the login's max_age rather than a stricter one the callback instance pins", async () => {
+        const authRequestStorage = new MemoryAuthRequestStorageFactory();
+        await expectSignedIn(
+          await signInAcross(
+            idTokenBff(undefined, {
+              extraParams: { max_age: "86400" },
+              authRequestStorage,
+            }),
+            idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+              extraParams: { max_age: "300" },
+              authRequestStorage,
+            }),
+          ),
+        );
+      });
+
+      it("refuses a missing ID token when the login instance let the browser choose the scope", async () => {
+        const authRequestStorage = new MemoryAuthRequestStorageFactory();
+        await expectRefused(
+          await signInAcross(
+            idTokenBff(undefined, {
+              scope: "openid",
+              forwardedParams: ["scope"],
+              extraParams: { max_age: "300" },
+              authRequestStorage,
+            }),
+            idTokenBff(undefined, { authRequestStorage }),
+            { query: "?scope=profile", serverAuthTime: nowSeconds() - 86_400 },
+          ),
+          "auth_time",
+        );
+      });
+
+      it("opens a session without an ID token when the login instance chose the scope itself", async () => {
+        const authRequestStorage = new MemoryAuthRequestStorageFactory();
+        await expectSignedIn(
+          await signInAcross(
+            idTokenBff(undefined, {
+              scope: "profile",
+              extraParams: { max_age: "300" },
+              authRequestStorage,
+            }),
+            idTokenBff(undefined, {
+              scope: "openid",
+              forwardedParams: ["scope"],
+              extraParams: { max_age: "300" },
+              authRequestStorage,
+            }),
+          ),
+        );
+      });
+
+      describe("a store that does not return the recorded controls as written", () => {
+        function recordingAs(
+          factory: MemoryAuthRequestStorageFactory,
+          rewrite: (record: AuthRequestRecord) => Record<string, unknown>,
+        ): MemoryAuthRequestStorageFactory {
+          const storage = factory.forRequest(undefined as never);
+          const set = storage.set.bind(storage);
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the point is a store that breaks the record's types
+          storage.set = (state, value) =>
+            set(state, rewrite(value) as unknown as AuthRequestRecord);
+          return factory;
+        }
+
+        it("refuses a sign-in whose recorded max_age comes back as text", async () => {
+          const authRequestStorage = recordingAs(
+            new MemoryAuthRequestStorageFactory(),
+            (record) => ({ ...record, maxAge: String(record.maxAge) }),
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+            ),
+            "max_age",
+          );
+        });
+
+        it("refuses a missing ID token when the recorded scope source is not the boolean false", async () => {
+          const authRequestStorage = recordingAs(
+            new MemoryAuthRequestStorageFactory(),
+            ({ scopeForwarded: _scopeForwarded, ...record }) => record,
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, {
+                scope: "openid",
+                forwardedParams: ["scope"],
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(undefined, { authRequestStorage }),
+              {
+                query: "?scope=profile",
+                serverAuthTime: nowSeconds() - 86_400,
+              },
+            ),
+            "auth_time",
+          );
+        });
+      });
+
+      describe("a record written before the max_age was recorded", () => {
+        function withoutRecordedControls(
+          factory: MemoryAuthRequestStorageFactory,
+        ): MemoryAuthRequestStorageFactory {
+          const storage = factory.forRequest(undefined as never);
+          const set = storage.set.bind(storage);
+          storage.set = (state, { codeVerifier, returnTo, scope, createdAt }) =>
+            set(state, { codeVerifier, returnTo, scope, createdAt });
+          return factory;
+        }
+
+        it("falls back to the callback instance's pinned max_age", async () => {
+          const authRequestStorage = withoutRecordedControls(
+            new MemoryAuthRequestStorageFactory(),
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, { authRequestStorage }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+            ),
+            "older than the max_age",
+          );
+        });
+
+        it("falls back to the callback instance's forwarded scope for a missing ID token", async () => {
+          const authRequestStorage = withoutRecordedControls(
+            new MemoryAuthRequestStorageFactory(),
+          );
+          await expectRefused(
+            await signInAcross(
+              idTokenBff(undefined, { scope: "profile", authRequestStorage }),
+              idTokenBff(undefined, {
+                scope: "openid",
+                forwardedParams: ["scope"],
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+            ),
+            "auth_time",
+          );
+        });
+
+        it("checks nothing when the callback instance pins no max_age", async () => {
+          const authRequestStorage = withoutRecordedControls(
+            new MemoryAuthRequestStorageFactory(),
+          );
+          await expectSignedIn(
+            await signInAcross(
+              idTokenBff(undefined, {
+                extraParams: { max_age: "300" },
+                authRequestStorage,
+              }),
+              idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+                authRequestStorage,
+              }),
+            ),
+          );
+        });
+      });
+    });
   });
 
   describe("authorization response issuer (RFC 9207)", () => {

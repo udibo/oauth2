@@ -59,6 +59,7 @@ import {
 } from "../../../utils/_body.ts";
 
 import type {
+  AuthRequestRecord,
   AuthRequestStorage,
   DirectClient,
   SessionState,
@@ -600,7 +601,20 @@ export interface HonoBffOptions {
    * `auth_time` but no particular age. A token response without an ID token
    * is not checked, unless {@link HonoBffOptions.forwardedParams} names
    * `scope`: the browser could then leave out `openid` to skip the check, so
-   * a missing ID token fails with `login_required` too. A pinned `scope` is
+   * a missing ID token fails with `login_required` too.
+   *
+   * Both rules follow the sign-in, not the instance that finishes it.
+   * `/auth/login` records the `max_age` it sent, and whether it forwarded
+   * `scope`, on the pending authorization request
+   * ({@link AuthRequestRecord.maxAge}). `/auth/callback` checks against that
+   * record, so a login-only instance that pins `max_age` for a step-up route
+   * is enforced by a callback another instance serves. An instance that pins
+   * `max_age` does not check a sign-in that carried none. A record without
+   * the field, written by an earlier release or kept by an
+   * {@link HonoBffOptions.authRequestStorage} that drops fields it does not
+   * know, is checked against the callback instance's own options instead.
+   *
+   * A pinned `scope` is
    * accepted only when
    * {@link scope} is unset; setting both would leave which one applies
    * ambiguous. Either configuration supplies the scope the login flow records
@@ -966,6 +980,40 @@ function pinnedMaxAge(fixed: Record<string, string>): number | undefined {
       strictest === undefined ? seconds : Math.min(strictest, seconds);
   }
   return strictest;
+}
+
+function recordingAuthenticationControls(
+  storage: AuthRequestStorage,
+  controls: Pick<AuthRequestRecord, "maxAge" | "scopeForwarded">,
+): AuthRequestStorage {
+  return {
+    get: storage.get.bind(storage),
+    set: (state, value) => storage.set(state, { ...value, ...controls }),
+    delete: storage.delete.bind(storage),
+    clear: storage.clear.bind(storage),
+  };
+}
+
+function recordedAuthenticationControls(recorded: {
+  maxAge?: unknown;
+  scopeForwarded?: unknown;
+}): { maxAge: number | undefined; scopeForwarded: boolean } {
+  const { maxAge } = recorded;
+  const scopeForwarded = recorded.scopeForwarded !== false;
+  if (maxAge === null) return { maxAge: undefined, scopeForwarded };
+  if (
+    typeof maxAge === "number" &&
+    Number.isSafeInteger(maxAge) &&
+    maxAge >= 0
+  ) {
+    return { maxAge, scopeForwarded };
+  }
+  throw new CallbackRefusal({
+    error: "login_required",
+    error_description:
+      "the pending authorization request recorded a max_age that is not a " +
+      "non-negative integer, so the ID token's auth_time could not be checked",
+  });
 }
 
 class CallbackRefusal extends Error {
@@ -1639,7 +1687,13 @@ export class HonoBff {
         prompt: requested.prompt,
         extraParams: requested.extraParams,
         redirectUri: this.#derivedRedirectUri(c, origin),
-        authRequestStorage: this.#authRequestStorage(c),
+        authRequestStorage: recordingAuthenticationControls(
+          this.#authRequestStorage(c),
+          {
+            maxAge: this.#extraAuthorizeParams.maxAge ?? null,
+            scopeForwarded: this.#extraAuthorizeParams.scopeForwarded,
+          },
+        ),
       });
       this.#writeLoginStateHashes(c, [
         ...this.#loginStateHashes(c),
@@ -1707,17 +1761,24 @@ export class HonoBff {
 
       try {
         const origin = this.#options.resolveOrigin?.(c);
-        const { tokens, refreshToken, returnTo, raw } =
-          await this.#client.exchangeAuthorizationCode(code, state, {
+        const exchanged = await this.#client.exchangeAuthorizationCode(
+          code,
+          state,
+          {
             origin,
             redirectUri: this.#derivedRedirectUri(c, origin),
             authRequestStorage: this.#authRequestStorage(c),
-          });
+          },
+        );
+        const { tokens, refreshToken, returnTo, raw } = exchanged;
 
         let user: UserInfoClaims | null = null;
         let sid: string | undefined;
         const idToken = (raw as { id_token?: string }).id_token;
-        const { maxAge, scopeForwarded } = this.#extraAuthorizeParams;
+        const { maxAge, scopeForwarded } =
+          exchanged.maxAge === undefined
+            ? this.#extraAuthorizeParams
+            : recordedAuthenticationControls(exchanged);
         if (maxAge !== undefined && (idToken || scopeForwarded)) {
           let claims: unknown;
           try {

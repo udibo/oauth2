@@ -123,6 +123,17 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     expect(await readBack(app, cookie, "state-1")).toStrictEqual(value);
   });
 
+  it("round-trips the max_age and scope source recorded at login, null included", async () => {
+    const pinned = record({ maxAge: 300, scopeForwarded: true });
+    const unpinned = record({ maxAge: null, scopeForwarded: false });
+    const cookie = await seal(app, [
+      ["state-1", pinned],
+      ["state-2", unpinned],
+    ]);
+    expect(await readBack(app, cookie, "state-1")).toStrictEqual(pinned);
+    expect(await readBack(app, cookie, "state-2")).toStrictEqual(unpinned);
+  });
+
   it("marks the cookie HttpOnly and SameSite=Lax so it survives the IdP redirect", async () => {
     const response = await app.request("/set", {
       method: "POST",

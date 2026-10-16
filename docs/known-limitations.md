@@ -382,7 +382,11 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `forwardedParams` names `scope` (a browser could then drop `openid` to skip
   the check, so a missing ID token is refused), and for `max_age=0`
   it requires `auth_time` but no particular age, since that value means
-  `prompt=login`. `DirectClient` does not check `auth_time`; a caller that
+  `prompt=login`. Both rules come from the instance that served
+  `/auth/login`, recorded on the pending authorization request. A callback
+  reads the record, whichever instance serves it. Its own options apply only
+  to a record without them: one from an earlier release, or from an
+  `AuthRequestStorage` that does not return every field it was given. `DirectClient` does not check `auth_time`; a caller that
   sends `max_age` through `login({ extraParams })` checks the claims itself.
 
 ## Identity flows (`@udibo/oauth2/identity`)

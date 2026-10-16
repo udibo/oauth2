@@ -279,6 +279,16 @@ export interface ExchangeResult {
   refreshToken?: string;
   /** `returnTo` recorded at authorize time, for the code exchange. */
   returnTo?: string;
+  /**
+   * {@link AuthRequestRecord.maxAge} as recorded at authorize time, for the
+   * code exchange. Absent when the record carries none.
+   */
+  maxAge?: number | null;
+  /**
+   * {@link AuthRequestRecord.scopeForwarded} as recorded at authorize time,
+   * for the code exchange. Absent when the record carries none.
+   */
+  scopeForwarded?: boolean;
   /** The raw token-endpoint response. */
   raw: TokenResponse;
 }
@@ -899,6 +909,10 @@ export class DirectClient extends OAuth2ClientBase {
       tokens: responseToBundle(raw),
       refreshToken: raw.refresh_token,
       returnTo: record.returnTo,
+      ...(record.maxAge === undefined ? {} : { maxAge: record.maxAge }),
+      ...(record.scopeForwarded === undefined
+        ? {}
+        : { scopeForwarded: record.scopeForwarded }),
       raw,
     };
   }
