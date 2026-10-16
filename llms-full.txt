@@ -6636,12 +6636,15 @@ check it before they redeem the code. The check has these limits:
 - **A missing `iss` is accepted from a server that does not advertise it.**
   Such a client is protected against a server that names the wrong issuer, but
   not against one that leaves `iss` out.
-- **A login retargeted at another origin accepts two issuers.** With `origin`
-  (the BFF's `resolveOrigin`), the client accepts the discovered issuer and the
-  same issuer moved to that origin, with its path unchanged. That covers servers
-  with one issuer for every host and servers that take the issuer from the
-  request's host. It trusts the origin, so `resolveOrigin` must return only
-  allowlisted origins.
+- **A login retargeted at another origin accepts two issuers, once the
+  callback is told the origin.** The BFF passes its `resolveOrigin` to the
+  check. A `DirectClient` that calls `login({ origin })` passes the same origin
+  to `handleAuthorizationCallback(url, { origin })`; without it, only the
+  discovered issuer is accepted. With the origin, the client accepts the
+  discovered issuer and the same issuer moved to that origin, with its path
+  unchanged. That covers servers with one issuer for every host and servers
+  that take the issuer from the request's host. It trusts the origin, so pass
+  only allowlisted origins.
 - **`exchangeAuthorizationCode` does not see the response.** A server that
   completes the flow with it calls `verifyAuthorizationResponseIssuer` first.
 - **The external sign-in connectors do not check `iss`.** `ExternalAuthFlow`

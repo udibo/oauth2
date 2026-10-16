@@ -2881,24 +2881,77 @@ describe("HonoBff", () => {
       expect(seen[0]!.cause).toBeInstanceOf(InvalidRequestError);
     });
 
-    it("reports a discovery failure at the callback as server_error", async () => {
-      const app = makeApp(
+    const UNCHECKED_ISSUER =
+      "the authorization response issuer could not be checked";
+
+    function discoveryFailingApp(fetchImpl: typeof fetch): Hono {
+      return makeApp(
         makeBff({
           client: new DirectClient({
             clientId: testClient.id,
             clientSecret: CLIENT_SECRET,
             redirectUri: REDIRECT_URI,
             issuer: ISSUER,
-            fetch: () => Promise.resolve(new Response(null, { status: 503 })),
+            fetch: fetchImpl,
           }),
         }),
+      );
+    }
+
+    it("reports a discovery failure at the callback as server_error", async () => {
+      const app = discoveryFailingApp(() =>
+        Promise.resolve(new Response(null, { status: 503 })),
       );
 
       const res = await app.request(
         `/auth/callback?code=abc&state=x&iss=${encodeURIComponent(ISSUER)}`,
       );
       expect(res.status).toBe(400);
-      expect((await res.json()).error).toBe("server_error");
+      expect(await res.json()).toStrictEqual({
+        error: "server_error",
+        error_description: UNCHECKED_ISSUER,
+      });
+    });
+
+    it("keeps the discovery endpoint's own error out of the callback response", async () => {
+      const sentinel = "sentinel-text-from-the-discovery-endpoint";
+      const app = discoveryFailingApp(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: "not_found",
+              error_description: sentinel,
+            }),
+            { status: 404, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const res = await app.request(
+        `/auth/callback?code=abc&state=x&iss=${encodeURIComponent(ISSUER)}`,
+      );
+      const text = await res.text();
+      expect(res.status).toBe(400);
+      expect(JSON.parse(text)).toStrictEqual({
+        error: "server_error",
+        error_description: UNCHECKED_ISSUER,
+      });
+      expect(text).not.toContain(sentinel);
+    });
+
+    it("reports an unreachable discovery endpoint at the callback as temporarily_unavailable", async () => {
+      const app = discoveryFailingApp(() =>
+        Promise.reject(new TypeError("fetch failed")),
+      );
+
+      const res = await app.request(
+        `/auth/callback?code=abc&state=x&iss=${encodeURIComponent(ISSUER)}`,
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toStrictEqual({
+        error: "temporarily_unavailable",
+        error_description: UNCHECKED_ISSUER,
+      });
     });
 
     it("reports a resolveOrigin throw at the callback as server_error", async () => {
@@ -2919,6 +2972,7 @@ describe("HonoBff", () => {
       const res = await app.request("/auth/callback?code=abc&state=x");
       expect(res.status).toBe(400);
       expect(seen.map(({ error }) => error)).toStrictEqual(["server_error"]);
+      expect(seen[0]!.error_description).toBe(UNCHECKED_ISSUER);
       expect(seen[0]!.cause).toBe(failure);
     });
 

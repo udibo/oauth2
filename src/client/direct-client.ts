@@ -14,7 +14,6 @@
 import {
   AccessDeniedError,
   InvalidGrantError,
-  InvalidRequestError,
   isOAuth2Error,
   type OAuth2Error,
   OAuth2Error as OAuth2ErrorClass,
@@ -56,6 +55,7 @@ import {
   type UserInfoClaims,
 } from "./base.ts";
 import { SessionStorageAuthRequestStorage } from "./browser-storage.ts";
+import { issuerRefusal } from "./_issuer-refusal.ts";
 import {
   DEFAULT_DISCOVERY_TTL_MS,
   type DiscoveryCache,
@@ -683,6 +683,8 @@ export class DirectClient extends OAuth2ClientBase {
    * is never redeemed.
    *
    * @param input The callback URL, its query string, or the parsed params.
+   * @param options The `origin` given to {@link login}, when it retargeted
+   * the authorize URL, so the issuer at that origin is accepted as `iss`.
    * @returns The persisted tokens and the `returnTo` recorded at login.
    * @throws {TemporarilyUnavailableError} when the token endpoint cannot be
    * reached or its response does not arrive in full before the deadline;
@@ -708,11 +710,13 @@ export class DirectClient extends OAuth2ClientBase {
    */
   handleAuthorizationCallback(
     input: URL | URLSearchParams | string,
+    options: VerifyIssuerOptions = {},
   ): Promise<AuthorizationCallbackResult> {
     const params = toSearchParams(input);
+    const { origin } = options;
 
     const error = params.get("error");
-    if (error) return this.#rejectAuthorizationError(error, params);
+    if (error) return this.#rejectAuthorizationError(error, params, origin);
 
     try {
       this.#requireAuthRequestStorage();
@@ -731,7 +735,7 @@ export class DirectClient extends OAuth2ClientBase {
     const existing = this.#callbackPromises.get(code);
     if (existing) return existing;
 
-    const promise = this.#exchangeCode(code, state, params);
+    const promise = this.#exchangeCode(code, state, params, origin);
     this.#callbackPromises.set(code, promise);
     const cleanup = () =>
       queueMicrotask(() => this.#callbackPromises.delete(code));
@@ -742,9 +746,10 @@ export class DirectClient extends OAuth2ClientBase {
   async #rejectAuthorizationError(
     code: string,
     params: URLSearchParams,
+    origin: string | undefined,
   ): Promise<never> {
     const error =
-      (await this.#issuerRefusal(params)) ??
+      (await this.#issuerRefusal(params, origin)) ??
       authorizationResponseError(code, params);
     this.emit({ type: "error", error });
     throw error;
@@ -754,9 +759,10 @@ export class DirectClient extends OAuth2ClientBase {
     code: string,
     state: string,
     params: URLSearchParams,
+    origin: string | undefined,
   ): Promise<AuthorizationCallbackResult> {
     const version = ++this.#sessionVersion;
-    const refusal = await this.#issuerRefusal(params);
+    const refusal = await this.#issuerRefusal(params, origin);
     if (refusal) {
       this.emit({ type: "error", error: refusal });
       throw refusal;
@@ -817,7 +823,7 @@ export class DirectClient extends OAuth2ClientBase {
     const metadata = await this.discover();
     const received = params.getAll("iss");
     if (received.length > 1) {
-      return new InvalidRequestError(
+      return issuerRefusal(
         "the authorization response carries more than one `iss` (RFC 9207)",
       );
     }
@@ -826,7 +832,7 @@ export class DirectClient extends OAuth2ClientBase {
       if (metadata.authorization_response_iss_parameter_supported !== true) {
         return undefined;
       }
-      return new InvalidRequestError(
+      return issuerRefusal(
         "the authorization response is missing `iss`, which the issuer " +
           "advertises with `authorization_response_iss_parameter_supported` " +
           "(RFC 9207 §2.4)",
@@ -835,7 +841,7 @@ export class DirectClient extends OAuth2ClientBase {
     const accepted = [metadata.issuer];
     if (origin) accepted.push(issuerAtOrigin(metadata.issuer, origin));
     if (accepted.includes(iss)) return undefined;
-    return new InvalidRequestError(
+    return issuerRefusal(
       "the authorization response `iss` does not match the issuer the " +
         "request was sent to (RFC 9207 §2.4)",
     );

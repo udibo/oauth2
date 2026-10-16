@@ -2687,6 +2687,46 @@ describe("DirectClient authorization response issuer (RFC 9207)", () => {
     expect(tokens.accessToken).toBe("at-issuer");
   });
 
+  it("accepts the issuer at the origin the login was retargeted at when the callback names it", async () => {
+    const provider = issuerProvider();
+    const client = issuerClient(provider.fetch);
+    const preview = "https://preview.example";
+    const { state } = await client.login({ origin: preview });
+    const callback = `${REDIRECT_URI}?${new URLSearchParams({
+      code: "abc",
+      state,
+      iss: preview,
+    })}`;
+
+    const { tokens } = await client.handleAuthorizationCallback(callback, {
+      origin: preview,
+    });
+
+    expect(tokens.accessToken).toBe("at-issuer");
+    await rejection(
+      client.handleAuthorizationCallback(
+        await callbackFor(client, { iss: preview }),
+      ),
+      InvalidRequestError,
+      "does not match",
+    );
+  });
+
+  it("checks an error response against the origin the login was retargeted at", async () => {
+    const client = issuerClient(issuerProvider().fetch);
+    const preview = "https://preview.example";
+
+    const error = await rejection(
+      client.handleAuthorizationCallback(
+        `${REDIRECT_URI}?error=access_denied&iss=${encodeURIComponent(preview)}`,
+        { origin: preview },
+      ),
+    );
+    expect(
+      (error as InstanceType<typeof InvalidRequestError>).extensions.error,
+    ).toBe("access_denied");
+  });
+
   describe("verifyAuthorizationResponseIssuer", () => {
     it("accepts the issuer retargeted at the origin the request was sent to", async () => {
       const client = issuerClient(issuerProvider().fetch);

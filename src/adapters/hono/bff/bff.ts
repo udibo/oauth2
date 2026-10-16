@@ -101,6 +101,7 @@ import {
   supportsRefreshLock,
 } from "./session-store.ts";
 import { RotatedCookies } from "./_rotated-cookies.ts";
+import { isIssuerRefusal } from "../../../client/_issuer-refusal.ts";
 import {
   buildDownstreamHeaders,
   buildUpstreamHeaders,
@@ -364,8 +365,9 @@ export interface BffCallbackError {
    * `invalid_request` (missing `code`/`state`, a `state` this browser never
    * started — see {@link HonoBffOptions.loginStateTtlMs} — or an `iss` the
    * client refused, see `DirectClient.verifyAuthorizationResponseIssuer`),
-   * the code of the error that kept `iss` from being checked (`server_error`
-   * or `temporarily_unavailable` when discovery fails), or `invalid_grant`
+   * `server_error` or `temporarily_unavailable` (discovery failed or
+   * `resolveOrigin` threw, so `iss` could not be checked; the description is
+   * fixed and the failure is in `cause`), or `invalid_grant`
    * (the code exchange failed — expired/replayed code, unknown `state` — or
    * a later step threw: `resolveUser` or the session store).
    */
@@ -1696,17 +1698,20 @@ export class HonoBff {
       });
       return undefined;
     } catch (cause) {
-      if (!isOAuth2Error(cause)) {
+      if (isIssuerRefusal(cause)) {
         return {
-          error: "server_error",
-          error_description:
-            "the authorization response issuer was not checked",
+          error: "invalid_request",
+          error_description: cause.message,
           cause,
         };
       }
+      const unreachable =
+        isOAuth2Error(cause) &&
+        cause.extensions.error === "temporarily_unavailable";
       return {
-        error: cause.extensions.error!,
-        error_description: cause.exposedMessage,
+        error: unreachable ? "temporarily_unavailable" : "server_error",
+        error_description:
+          "the authorization response issuer could not be checked",
         cause,
       };
     }
