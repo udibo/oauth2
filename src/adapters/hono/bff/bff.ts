@@ -101,6 +101,7 @@ import {
   supportsRefreshLock,
 } from "./session-store.ts";
 import { RotatedCookies } from "./_rotated-cookies.ts";
+import { isIssuerRefusal } from "../../../client/_issuer-refusal.ts";
 import {
   buildDownstreamHeaders,
   buildUpstreamHeaders,
@@ -361,15 +362,22 @@ export interface HonoBffBackchannelOptions {
 export interface BffCallbackError {
   /**
    * OAuth2-style error code: the IDP's `error` (e.g. `access_denied`),
-   * `invalid_request` (missing `code`/`state`, or a `state` this browser never
-   * started — see {@link HonoBffOptions.loginStateTtlMs}), or `invalid_grant`
+   * `invalid_request` (missing `code`/`state`, a `state` this browser never
+   * started — see {@link HonoBffOptions.loginStateTtlMs} — or an `iss` the
+   * client refused, see `DirectClient.verifyAuthorizationResponseIssuer`),
+   * `server_error` or `temporarily_unavailable` (discovery failed or
+   * `resolveOrigin` threw, so `iss` could not be checked; the description is
+   * fixed and the failure is in `cause`), or `invalid_grant`
    * (the code exchange failed — expired/replayed code, unknown `state` — or
    * a later step threw: `resolveUser` or the session store).
    */
   error: string;
   /** Human-readable description; never contains secrets. */
   error_description: string;
-  /** The thrown cause for the `invalid_grant` case; otherwise `undefined`. */
+  /**
+   * The thrown cause for the `invalid_grant` case and for an `iss` that was
+   * refused or could not be checked; otherwise `undefined`.
+   */
   cause?: unknown;
 }
 
@@ -1569,8 +1577,9 @@ export class HonoBff {
   }
 
   /**
-   * Callback handler — requires the login-state cookie to vouch for the
-   * returned `state`, then exchanges the code and opens a session.
+   * Callback handler — checks the response's `iss` (RFC 9207), requires the
+   * login-state cookie to vouch for the returned `state`, then exchanges the
+   * code and opens a session.
    */
   callbackHandler(): Handler {
     return async (c) => {
@@ -1587,6 +1596,9 @@ export class HonoBff {
               },
               400,
             );
+
+      const issuerRefusal = await this.#issuerRefusal(c, params);
+      if (issuerRefusal) return await fail(issuerRefusal);
 
       if (params.get("error")) {
         return await fail({
@@ -1674,6 +1686,35 @@ export class HonoBff {
         });
       }
     };
+  }
+
+  async #issuerRefusal(
+    c: Context,
+    params: URLSearchParams,
+  ): Promise<BffCallbackError | undefined> {
+    try {
+      await this.#client.verifyAuthorizationResponseIssuer(params, {
+        origin: this.#options.resolveOrigin?.(c),
+      });
+      return undefined;
+    } catch (cause) {
+      if (isIssuerRefusal(cause)) {
+        return {
+          error: "invalid_request",
+          error_description: cause.message,
+          cause,
+        };
+      }
+      const unreachable =
+        isOAuth2Error(cause) &&
+        cause.extensions.error === "temporarily_unavailable";
+      return {
+        error: unreachable ? "temporarily_unavailable" : "server_error",
+        error_description:
+          "the authorization response issuer could not be checked",
+        cause,
+      };
+    }
   }
 
   /** Logout handler — revokes the refresh token and clears the session cookie. */

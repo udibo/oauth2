@@ -148,6 +148,9 @@ The package implements these specifications, with the limits noted:
   [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) introspection,
   [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) server metadata, and
   [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) device authorization.
+- [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) `iss` in authorization
+  responses. `DirectClient` and the BFF check it when the client is configured
+  with an `issuer`.
 - [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) JWT access tokens, opt-in;
   access tokens are opaque by default.
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html):
@@ -6371,7 +6374,7 @@ seams.
 | refresh-lease | `RefreshLease` (`withRefreshLock` argument) | Storing a refreshed session, or ending it after the authorization server refuses the refresh token | no | blocks | A refused `update` or `destroy` → the session is re-read: gone → signed out; a peer's tokens → used; otherwise `502` and the session is kept. Any other throw → `502`, session kept |
 | resolve-user             | `resolveUser` (`HonoBffOptions`)              | `/auth/callback`, enriching session user claims   | no                       | blocks  | **Relabeled as `invalid_grant` "code exchange failed"** even though it runs post-exchange (see Failure behavior) |
 | callback-error           | `onCallbackError` (`HonoBffOptions`)          | `/auth/callback` cannot complete                  | no (default 400 JSON)    | blocks  | **Invoked with no guard — its own throw propagates to Hono (500)** (see Failure behavior)                        |
-| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → relabeled as `invalid_grant` "code exchange failed"                |
+| resolve-origin           | `resolveOrigin` (`HonoBffOptions`)            | Login/callback/logout, to pick the trusted origin | no                       | blocks  | Login/logout → propagates to Hono; callback → `server_error` before the `iss` check (RFC 9207)                   |
 | auth-request-storage     | `authRequestStorage` (`HonoBffOptions`)       | `/auth/login` and `/auth/callback`, per request   | yes                      | blocks  | Login → propagates; callback → `invalid_grant`                                                                   |
 | logout-token-verifier    | `verifyLogoutToken` (`backchannelLogout`)     | `POST /auth/backchannel`, verifying the JWT       | with `backchannelLogout` | blocks  | Throw or `null` → `400 invalid_request` (deliberate "throw-or-null to reject" contract)                          |
 | proxy-fetch              | `fetch` (`HonoBffProxyOptions`)               | The upstream call in `bff.proxy`                  | no                       | blocks  | Wrapped → `502` `temporarily_unavailable`                                                                        |
@@ -6434,9 +6437,9 @@ These responsibilities stay in the application or use a separate API.
 - **Inconsistent legacy-credential contract.** A `getLegacyCredential` throw
   aborts sign-in, but a `clearLegacyCredential` throw is swallowed — even though
   the docs tell implementers to provide both together.
-- **BFF `resolveUser` / `resolveOrigin` throws are misclassified.** Failures in
-  these post-exchange app hooks are relabeled `invalid_grant` "code exchange
-  failed" because they sit inside the exchange `try`/`catch`.
+- **BFF `resolveUser` throws are misclassified.** A failure in this
+  post-exchange app hook is relabeled `invalid_grant` "code exchange failed"
+  because it sits inside the exchange `try`/`catch`.
 - **BFF `onCallbackError` is unguarded.** A throw from the error handler itself
   propagates to Hono (500).
 
@@ -6616,6 +6619,37 @@ so the package bounds what each start can cost:
 A rate limit on the login route, in your framework or reverse proxy, still
 limits how often one client can start a sign-in. The caps only bound the memory
 each start can cost.
+
+## Authorization response issuer (RFC 9207)
+
+The authorization server adds `iss` to every redirect from its authorization
+endpoint and advertises `authorization_response_iss_parameter_supported`.
+`DirectClient.handleAuthorizationCallback` and `HonoBff`'s `/auth/callback`
+check it before they redeem the code. The check has these limits:
+
+- **A request that resolves no `issuer` gets no `iss`.** Such a server cannot
+  serve metadata either, so configure `issuer` in `resolve`.
+- **A `DirectClient` configured with `endpoints` does not check `iss`.** It has
+  no issuer to compare against, so it accepts any response. A client that signs
+  in with more than one authorization server needs an `issuer` for each, which
+  also makes the check refuse a response from the wrong one.
+- **A missing `iss` is accepted from a server that does not advertise it.**
+  Such a client is protected against a server that names the wrong issuer, but
+  not against one that leaves `iss` out.
+- **A login retargeted at another origin accepts two issuers, once the
+  callback is told the origin.** The BFF passes its `resolveOrigin` to the
+  check. A `DirectClient` that calls `login({ origin })` passes the same origin
+  to `handleAuthorizationCallback(url, { origin })`; without it, only the
+  discovered issuer is accepted. With the origin, the client accepts the
+  discovered issuer and the same issuer moved to that origin, with its path
+  unchanged. That covers servers with one issuer for every host and servers
+  that take the issuer from the request's host. It trusts the origin, so pass
+  only allowlisted origins.
+- **`exchangeAuthorizationCode` does not see the response.** A server that
+  completes the flow with it calls `verifyAuthorizationResponseIssuer` first.
+- **The external sign-in connectors do not check `iss`.** `ExternalAuthFlow`
+  hands `oidcProvider`, `oauth2Provider`, Google and Apple the code without the
+  rest of the provider's response, so they cannot see `iss`.
 
 ## Deliberate deviations (stricter than spec)
 
