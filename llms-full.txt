@@ -1683,6 +1683,17 @@ particular age. A token response without an ID token is not checked, unless
 skip the check, so a missing ID token is refused as well. A refusal reaches
 `onCallbackError` as `login_required`.
 
+These checks follow the sign-in, not the instance that finishes it.
+`/auth/login` records the `max_age` it sent, and whether it forwarded `scope`,
+on the pending authorization request (`AuthRequestRecord.maxAge` and
+`scopeForwarded`), and `/auth/callback` checks against that record. A second
+`HonoBff` that serves only a step-up login with `max_age` pinned is enforced by
+the main instance's callback, and an instance that pins `max_age` leaves
+sign-ins that carried none unchecked. A record without these fields was
+written by an earlier release, or kept by an `AuthRequestStorage` that drops
+fields it does not know. It is checked against the callback instance's own
+`extraParams` and `forwardedParams`, as before.
+
 ### Honor `prompt`, `max_age` and `acr_values`
 
 The authorize endpoint validates the OpenID Connect authentication controls once
@@ -5753,10 +5764,13 @@ process that wrote them: a restart signs everyone out, a session is unknown to
 every other instance, and a callback served by another instance fails with an
 unknown `state`. An `AuthRequestStorage` that needs no request context, such as
 one over your database, is passed as `{ forRequest: () => storage }`; the BFF
-never falls back to the `DirectClient`'s own `authRequestStorage`. Check
-your own stores with `runSessionStoreContractTests` from
-`@udibo/oauth2/hono/bff/testing` and `runAuthRequestStorageContractTests` from
-`@udibo/oauth2/testing/contract`.
+never falls back to the `DirectClient`'s own `authRequestStorage`. Such a
+store must return every field of the record it was given, `maxAge: null`
+included. The login records the `max_age` the sign-in was started with, and a
+store that keeps only the fields it knows makes the callback check against its
+own options instead. Check your own stores with `runSessionStoreContractTests`
+from `@udibo/oauth2/hono/bff/testing` and `runAuthRequestStorageContractTests`
+from `@udibo/oauth2/testing/contract`.
 
 Prefer a stateful `SessionStore` when your app needs immediate revocation,
 session listings, or backchannel logout. `EncryptedCookieSessionStore` is an
@@ -7038,7 +7052,11 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `forwardedParams` names `scope` (a browser could then drop `openid` to skip
   the check, so a missing ID token is refused), and for `max_age=0`
   it requires `auth_time` but no particular age, since that value means
-  `prompt=login`. `DirectClient` does not check `auth_time`; a caller that
+  `prompt=login`. Both rules come from the instance that served
+  `/auth/login`, recorded on the pending authorization request. A callback
+  reads the record, whichever instance serves it. Its own options apply only
+  to a record without them: one from an earlier release, or from an
+  `AuthRequestStorage` that does not return every field it was given. `DirectClient` does not check `auth_time`; a caller that
   sends `max_age` through `login({ extraParams })` checks the claims itself.
 
 ## Identity flows (`@udibo/oauth2/identity`)

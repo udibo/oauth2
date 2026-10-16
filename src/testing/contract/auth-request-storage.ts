@@ -9,6 +9,11 @@
  * concurrent callers taking one record. This suite races eight of them on one
  * record.
  *
+ * Every field of a record must come back as it was stored, `maxAge: null`
+ * included: a store that keeps only the fields it knows makes `HonoBff` check
+ * a sign-in against the callback instance's options instead of the
+ * `max_age` the sign-in was started with.
+ *
  * @example Verify a Redis-backed store
  * ```ts
  * import { runAuthRequestStorageContractTests } from "@udibo/oauth2/testing/contract";
@@ -86,6 +91,8 @@ function record(overrides: Partial<AuthRequestRecord> = {}): AuthRequestRecord {
     codeVerifier: "verifier-1",
     returnTo: "/dashboard",
     scope: "openid profile",
+    maxAge: 300,
+    scopeForwarded: true,
     createdAt: Date.now(),
     ...overrides,
   };
@@ -122,6 +129,16 @@ export function runAuthRequestStorageContractTests(
         const stored = record();
         await store.set("state-1", stored);
         expect(await store.get("state-1")).toStrictEqual(stored);
+      });
+
+      it("returns a recorded maxAge of null as null, not as an absent field", async () => {
+        const stored = record({ maxAge: null, scopeForwarded: false });
+        await store.set("state-1", stored);
+        expect(
+          await store.get("state-1"),
+          "null records a sign-in that carried no max_age; an absent field " +
+            "makes the callback fall back to its own pinned max_age",
+        ).toStrictEqual(stored);
       });
 
       it("keeps records under different states independent", async () => {

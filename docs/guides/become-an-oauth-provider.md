@@ -1015,6 +1015,17 @@ particular age. A token response without an ID token is not checked, unless
 skip the check, so a missing ID token is refused as well. A refusal reaches
 `onCallbackError` as `login_required`.
 
+These checks follow the sign-in, not the instance that finishes it.
+`/auth/login` records the `max_age` it sent, and whether it forwarded `scope`,
+on the pending authorization request (`AuthRequestRecord.maxAge` and
+`scopeForwarded`), and `/auth/callback` checks against that record. A second
+`HonoBff` that serves only a step-up login with `max_age` pinned is enforced by
+the main instance's callback, and an instance that pins `max_age` leaves
+sign-ins that carried none unchecked. A record without these fields was
+written by an earlier release, or kept by an `AuthRequestStorage` that drops
+fields it does not know. It is checked against the callback instance's own
+`extraParams` and `forwardedParams`, as before.
+
 ### Honor `prompt`, `max_age` and `acr_values`
 
 The authorize endpoint validates the OpenID Connect authentication controls once

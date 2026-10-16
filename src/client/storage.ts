@@ -68,6 +68,23 @@ export interface AuthRequestRecord {
   returnTo?: string;
   /** Scope requested for this authorization, space-delimited. */
   scope?: string;
+  /**
+   * The `max_age` the authorize request carried, in seconds, or `null` when
+   * it carried none. `HonoBff` records it at `/auth/login` and checks the ID
+   * token's `auth_time` against it at `/auth/callback`, whichever instance
+   * serves either one. Absent on a record from a release that did not record
+   * it; the callback then falls back to its own pinned `max_age`. A storage
+   * must return `null` as `null`, not as an absent field.
+   */
+  maxAge?: number | null;
+  /**
+   * Whether the browser chose this request's `scope` (`HonoBff`'s
+   * `forwardedParams` names `scope`). When it did and {@link maxAge} is set,
+   * the callback refuses a token response without an ID token, because a
+   * scope without `openid` would otherwise skip the `auth_time` check.
+   * Recorded alongside {@link maxAge}.
+   */
+  scopeForwarded?: boolean;
   /** When the request was created (epoch ms), used for TTL expiry. */
   createdAt: number;
 }
