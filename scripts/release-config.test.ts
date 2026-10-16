@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
+import { pinnedConsumerNpmProblem } from "./npm-smoke.ts";
+
 interface Step {
   name?: string;
   uses?: string;
@@ -44,6 +46,30 @@ function pluginOptions(name: string): Record<string, unknown> {
     if (Array.isArray(plugin) && plugin[0] === name) return plugin[1];
   }
   throw new Error(`${name} is not configured`);
+}
+
+const TRUSTED_PUBLISHING_MIN_NPM = "11.5.1";
+
+function npmInstalls(steps: Step[]): string[] {
+  return steps.flatMap((step) =>
+    (step.run ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("npm install -g npm@")),
+  );
+}
+
+function exactNpmVersion(install: string): string | undefined {
+  return /^npm install -g npm@(\d+\.\d+\.\d+)$/.exec(install)?.[1];
+}
+
+function compareVersions(a: string, b: string): number {
+  const [left, right] = [a, b].map((version) => version.split(".").map(Number));
+  for (let index = 0; index < 3; index++) {
+    const difference = left![index]! - right![index]!;
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 const manifest = JSON.parse(read("package.json")) as {
@@ -237,10 +263,24 @@ describe("release workflow", () => {
     expect(configuresRegistry).toBe(false);
   });
 
-  it("runs an npm new enough for trusted publishing", () => {
+  it("installs one exact npm new enough for trusted publishing and the release smoke", () => {
+    const installs = npmInstalls(release.steps);
+    expect(installs).toHaveLength(1);
+    const version = exactNpmVersion(installs[0]!);
+    expect(version, installs[0]).toBeDefined();
     expect(
-      release.steps.some((step) => step.run?.includes("npm install -g npm@")),
-    ).toBe(true);
+      compareVersions(version!, TRUSTED_PUBLISHING_MIN_NPM),
+      `npm ${version} predates trusted publishing`,
+    ).toBeGreaterThanOrEqual(0);
+    expect(pinnedConsumerNpmProblem(version!)).toBeUndefined();
+  });
+
+  it("pins the same npm in every job that installs one", () => {
+    const versions = Object.values(workflow.jobs).flatMap((job) =>
+      npmInstalls(job.steps).map((line) => exactNpmVersion(line) ?? line),
+    );
+    expect(versions.length).toBeGreaterThan(1);
+    expect(new Set(versions).size, versions.join(", ")).toBe(1);
   });
 
   it("gives both semantic-release invocations the same credentials", () => {

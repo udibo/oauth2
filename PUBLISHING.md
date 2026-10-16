@@ -143,8 +143,9 @@ Two things follow from that, both enforced by `scripts/release-config.test.ts`:
   and does not set `registry-url` on `actions/setup-node`, which would write an
   `.npmrc` with a placeholder token.
 
-OIDC publishing needs npm 11.5.1 or later, so the release job upgrades npm
-before it runs.
+OIDC publishing needs npm 11.5.1 or later, so the release job installs an
+exact npm before it runs: the version the package job's Node 22 smoke uses,
+never `latest`. Bump both together.
 
 ## What the release does
 
