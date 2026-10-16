@@ -962,7 +962,7 @@ contradicts what it asked for:
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prompt=none`    | A `Response` from `authenticateUser` becomes a `login_required` redirect, and one from `handleConsent` becomes `consent_required`. No page reaches the browser. |
 | `prompt=login`   | Issues a code only when `authenticateUser` returns `reauthenticated: true`, and otherwise redirects with `login_required`.                                 |
-| `max_age`        | Requires `authenticationContext.auth_time`, no more than a minute in the future. Issues a code only when it is at most `max_age` seconds old, or the user re-authenticated for this request. |
+| `max_age`        | Requires `authenticationContext.auth_time`, no more than a minute in the future. Issues a code only when it is at most `max_age` seconds old, even after a re-authentication. |
 | `max_age=0`      | Treated as `prompt=login`, as OIDC Core specifies.                                                                                                         |
 | `prompt=consent` | Calls `handleConsent` even for an authorized scope. With no handler, it answers `consent_required`.                                                        |
 | `acr_values`     | Passes the preferences through. The ID token's `acr` is the one `authenticationContext` reports.                                                           |

@@ -434,13 +434,15 @@ describe("max_age", () => {
     expect(redirectParams(fresh).has("code")).toBe(true);
   });
 
-  it("accepts a re-authentication made for this request even when it took longer than max_age", async () => {
+  it("refuses a re-authentication whose recorded auth_time is older than max_age", async () => {
     const { server } = await createServer();
     const response = await server.handleAuthorizeRequest(
       authorizeRequest({ max_age: "60" }),
-      signedIn({ auth_time: nowSeconds() - 120 }, { reauthenticated: true }),
+      signedIn({ auth_time: nowSeconds() - 3600 }, { reauthenticated: true }),
     );
-    expect(redirectParams(response).has("code")).toBe(true);
+    expect(
+      expectError(response, "login_required").get("error_description"),
+    ).toBe("the user's last authentication is older than max_age");
   });
 
   for (const value of ["-1", "1.5", "abc", "1e3", " 60", "9007199254740993"]) {
