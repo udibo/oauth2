@@ -598,7 +598,10 @@ export interface HonoBffOptions {
    * authorization server) fails with
    * `login_required`. `max_age=0` means `prompt=login`, so it needs
    * `auth_time` but no particular age. A token response without an ID token
-   * is not checked. A pinned `scope` is accepted only when
+   * is not checked, unless {@link HonoBffOptions.forwardedParams} names
+   * `scope`: the browser could then leave out `openid` to skip the check, so
+   * a missing ID token fails with `login_required` too. A pinned `scope` is
+   * accepted only when
    * {@link scope} is unset; setting both would leave which one applies
    * ambiguous. Either configuration supplies the scope the login flow records
    * for its authorization request.
@@ -941,6 +944,7 @@ interface ResolvedExtraAuthorizeParams {
   fixed: Record<string, string>;
   forwarded: readonly string[];
   maxAge: number | undefined;
+  scopeForwarded: boolean;
 }
 
 const AUTH_TIME_LEEWAY_SECONDS = 60;
@@ -1064,7 +1068,12 @@ function resolveExtraAuthorizeParams(
       );
     }
   }
-  return { fixed, forwarded, maxAge: pinnedMaxAge(fixed) };
+  return {
+    fixed,
+    forwarded,
+    maxAge: pinnedMaxAge(fixed),
+    scopeForwarded: forwarded.some((name) => name.toLowerCase() === "scope"),
+  };
 }
 
 interface RequestAuthorizeParams {
@@ -1708,11 +1717,11 @@ export class HonoBff {
         let user: UserInfoClaims | null = null;
         let sid: string | undefined;
         const idToken = (raw as { id_token?: string }).id_token;
-        const { maxAge } = this.#extraAuthorizeParams;
-        if (idToken && maxAge !== undefined) {
+        const { maxAge, scopeForwarded } = this.#extraAuthorizeParams;
+        if (maxAge !== undefined && (idToken || scopeForwarded)) {
           let claims: unknown;
           try {
-            claims = this.#client.decodeIdToken(idToken);
+            claims = idToken ? this.#client.decodeIdToken(idToken) : undefined;
           } catch {
             claims = undefined;
           }

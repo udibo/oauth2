@@ -26,6 +26,7 @@ import {
   InteractionRequiredError,
   InvalidGrantError,
   InvalidRequestError,
+  isOAuth2Error,
   LoginRequiredError,
   type OAuth2ErrorClass,
   ServerError,
@@ -2827,6 +2828,24 @@ describe("DirectClient OpenID Connect authentication errors", () => {
       );
       expect(error.extensions.error).toBe(code);
       expect(error.status).toBe(400);
+    },
+  );
+
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])(
+    "rejects an authorization response's %s as a generic OAuth2Error, never a prototype member",
+    async (code) => {
+      const client = endpointsClient(() =>
+        Promise.reject(new Error("no request expected")),
+      );
+
+      const error = await rejection(
+        client.handleAuthorizationCallback(`${REDIRECT_URI}?error=${code}`),
+        Error,
+      );
+      expect(isOAuth2Error(error)).toBe(true);
+      assert(isOAuth2Error(error));
+      expect(error.extensions.error).toBe(code);
+      expect(error.status).toBe(500);
     },
   );
 

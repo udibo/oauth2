@@ -376,7 +376,9 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   [Honor `prompt`, `max_age` and `acr_values`](guides/become-an-oauth-provider.md#honor-prompt-max_age-and-acr_values).
 - As a relying party, `HonoBff` checks the ID token's `auth_time` only for a
   `max_age` pinned in `extraParams`, with 60 seconds of clock-skew allowance.
-  It does not check a token response without an ID token, and for `max_age=0`
+  It does not check a token response without an ID token, unless
+  `forwardedParams` names `scope` (a browser could then drop `openid` to skip
+  the check, so a missing ID token is refused), and for `max_age=0`
   it requires `auth_time` but no particular age, since that value means
   `prompt=login`. `DirectClient` does not check `auth_time`; a caller that
   sends `max_age` through `login({ extraParams })` checks the claims itself.

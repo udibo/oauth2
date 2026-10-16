@@ -2980,6 +2980,57 @@ describe("HonoBff", () => {
       expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
     });
 
+    it("refuses a missing ID token when the browser chooses the scope", async () => {
+      const serverFetch = localAuthServerFetch(fixture.authServer);
+      const app = makeApp(
+        makeBff({
+          scope: "openid",
+          forwardedParams: ["scope"],
+          extraParams: { max_age: "300" },
+          client: new DirectClient({
+            clientId: testClient.id,
+            clientSecret: CLIENT_SECRET,
+            redirectUri: REDIRECT_URI,
+            endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+            fetch: serverFetch,
+          }),
+        }),
+      );
+      const loginRes = await app.request("/auth/login?scope=profile");
+      const authorizeUrl = new URL(loginRes.headers.get("Location")!);
+      await loginRes.body?.cancel();
+      authorizeUrl.searchParams.delete("max_age");
+      const response = await fixture.authServer.handleAuthorizeRequest(
+        new Request(authorizeUrl),
+        () =>
+          Promise.resolve({
+            user: testUser,
+            authenticationContext: { auth_time: nowSeconds() - 86_400 },
+          }),
+      );
+      const callback = response.headers.get("Location")!;
+      expect(new URL(callback).searchParams.has("code")).toBe(true);
+
+      await expectRefused(
+        await app.request(
+          callback.slice(ISSUER.length),
+          withCookies(undefined, jar(loginRes)),
+        ),
+        "auth_time",
+      );
+    });
+
+    it("checks the strictest max_age when two spellings are pinned", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+            extraParams: { MAX_AGE: "86400", max_age: "300" },
+          }),
+        ),
+        "older than the max_age",
+      );
+    });
+
     it("refuses a pinned max_age that is not a non-negative integer at construction", () => {
       for (const value of ["-1", "1.5", "five", " 30", "1e3"]) {
         thrown(

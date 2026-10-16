@@ -1617,7 +1617,10 @@ OpenID Connect Core §3.1.3.7 asks of a relying party. It refuses a token whose
 `auth_time` is missing, more than 60 seconds in the future, or older than
 `max_age` plus 60 seconds, which allows for clock skew between the BFF and the
 server. `max_age=0` means `prompt=login`, so it needs `auth_time` but no
-particular age. A refusal reaches `onCallbackError` as `login_required`.
+particular age. A token response without an ID token is not checked, unless
+`forwardedParams` names `scope`; then the browser could leave out `openid` to
+skip the check, so a missing ID token is refused as well. A refusal reaches
+`onCallbackError` as `login_required`.
 
 ### Honor `prompt`, `max_age` and `acr_values`
 
@@ -6949,7 +6952,9 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   [Honor `prompt`, `max_age` and `acr_values`](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#honor-prompt-max_age-and-acr_values).
 - As a relying party, `HonoBff` checks the ID token's `auth_time` only for a
   `max_age` pinned in `extraParams`, with 60 seconds of clock-skew allowance.
-  It does not check a token response without an ID token, and for `max_age=0`
+  It does not check a token response without an ID token, unless
+  `forwardedParams` names `scope` (a browser could then drop `openid` to skip
+  the check, so a missing ID token is refused), and for `max_age=0`
   it requires `auth_time` but no particular age, since that value means
   `prompt=login`. `DirectClient` does not check `auth_time`; a caller that
   sends `max_age` through `login({ extraParams })` checks the claims itself.

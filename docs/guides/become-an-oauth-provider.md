@@ -949,7 +949,10 @@ OpenID Connect Core §3.1.3.7 asks of a relying party. It refuses a token whose
 `auth_time` is missing, more than 60 seconds in the future, or older than
 `max_age` plus 60 seconds, which allows for clock skew between the BFF and the
 server. `max_age=0` means `prompt=login`, so it needs `auth_time` but no
-particular age. A refusal reaches `onCallbackError` as `login_required`.
+particular age. A token response without an ID token is not checked, unless
+`forwardedParams` names `scope`; then the browser could leave out `openid` to
+skip the check, so a missing ID token is refused as well. A refusal reaches
+`onCallbackError` as `login_required`.
 
 ### Honor `prompt`, `max_age` and `acr_values`
 
