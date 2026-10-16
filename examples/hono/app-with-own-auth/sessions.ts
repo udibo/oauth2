@@ -26,27 +26,48 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 const SESSION_COOKIE_NAME = "idp_session";
 
-interface SessionRecord {
+/** An IDP session: who signed in, when, and for which authorize request. */
+export interface SessionRecord {
   userId: string;
-  createdAt: number;
+  /** When the user signed in, in epoch seconds — the ID token's `auth_time`. */
+  authTime: number;
+  /** The authorize URL (path and query) the sign-in returned to, if any. */
+  signedInFor?: string;
 }
 
 const sessions = new Map<string, SessionRecord>();
+
+/** Returns the request's session, or `undefined` when there is none. */
+export function readSession(c: Context): SessionRecord | undefined {
+  const id = getCookie(c, SESSION_COOKIE_NAME);
+  if (!id) return undefined;
+  return sessions.get(id);
+}
 
 /**
  * Returns the user id for the request, or `undefined` if no session
  * cookie is set or the session is unknown.
  */
 export function readSessionUserId(c: Context): string | undefined {
-  const id = getCookie(c, SESSION_COOKIE_NAME);
-  if (!id) return undefined;
-  return sessions.get(id)?.userId;
+  return readSession(c)?.userId;
 }
 
-/** Sets the session cookie after a successful login. */
-export function startSession(c: Context, userId: string): void {
+/**
+ * Sets the session cookie after a successful login. Pass the `return_to` the
+ * sign-in redirects to as `signedInFor`, so the authorize handler can tell a
+ * sign-in made for that request from an older one.
+ */
+export function startSession(
+  c: Context,
+  userId: string,
+  signedInFor?: string,
+): void {
   const id = crypto.randomUUID();
-  sessions.set(id, { userId, createdAt: Date.now() });
+  sessions.set(id, {
+    userId,
+    authTime: Math.floor(Date.now() / 1000),
+    signedInFor,
+  });
   setCookie(c, SESSION_COOKIE_NAME, id, {
     path: "/",
     httpOnly: true,

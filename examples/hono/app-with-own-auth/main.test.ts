@@ -146,10 +146,11 @@ function toPath(u: string): string {
 async function approveConsentToSession(
   startUrl: string,
   idpSession: string,
+  startedLoginState?: string,
 ): Promise<string> {
   const cookie = `idp_session=${idpSession}`;
   let authorizeUrl = startUrl;
-  let loginState: string | undefined;
+  let loginState = startedLoginState;
 
   if (toPath(authorizeUrl).startsWith("/auth/login")) {
     const res = await app.request(toPath(authorizeUrl), {
@@ -759,6 +760,114 @@ describe("app-with-own-auth example", () => {
     expect(tokenRes.status).toBe(200);
     const tokens = await tokenRes.json();
     expect(typeof tokens.access_token).toBe("string");
+  });
+});
+
+describe("prompt and max_age on the embedded authorization server", () => {
+  async function startLoginWith(
+    params: Record<string, string>,
+  ): Promise<{ authorizePath: string; loginState: string }> {
+    const loginRes = await app.request("/auth/login", { method: "POST" });
+    expect(loginRes.status).toBe(302);
+    const authorizeUrl = new URL(loginRes.headers.get("Location")!);
+    for (const [name, value] of Object.entries(params)) {
+      authorizeUrl.searchParams.set(name, value);
+    }
+    return {
+      authorizePath: authorizeUrl.pathname + authorizeUrl.search,
+      loginState: setCookieValue(loginRes, bff.loginStateCookieName)!,
+    };
+  }
+
+  async function signInAgainFor(authorizePath: string): Promise<string> {
+    const submitRes = await app.request("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        username: "user",
+        password: "password",
+        return_to: authorizePath,
+      }),
+    });
+    expect(submitRes.status).toBe(302);
+    expect(toPath(submitRes.headers.get("Location")!)).toBe(authorizePath);
+    return setCookieValue(submitRes, "idp_session")!;
+  }
+
+  function expectLoginRedirectFor(res: Response, authorizePath: string) {
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("Location")!, "http://localhost");
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("return_to")).toBe(authorizePath);
+  }
+
+  it("prompt=login sends a signed-in user to sign in again, then issues a code", async () => {
+    const { idpSession } = await signInThroughLoginForm({ username: "user" });
+    const { authorizePath, loginState } = await startLoginWith({
+      prompt: "login",
+    });
+
+    expectLoginRedirectFor(
+      await app.request(authorizePath, {
+        headers: { cookie: `idp_session=${idpSession}` },
+      }),
+      authorizePath,
+    );
+
+    const freshSession = await signInAgainFor(authorizePath);
+    const session = await approveConsentToSession(
+      authorizePath,
+      freshSession,
+      loginState,
+    );
+    const me = await app.request("/api/me", {
+      headers: { cookie: `oauth2_session=${session}` },
+    });
+    expect(me.status).toBe(200);
+  });
+
+  it("prompt=login does not count a sign-in older than ten minutes", async () => {
+    const { authorizePath } = await startLoginWith({ prompt: "login" });
+    const freshSession = await signInAgainFor(authorizePath);
+
+    vi.useFakeTimers({ now: Date.now() + 11 * 60 * 1000, toFake: ["Date"] });
+    try {
+      expectLoginRedirectFor(
+        await app.request(authorizePath, {
+          headers: { cookie: `idp_session=${freshSession}` },
+        }),
+        authorizePath,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prompt=login does not count a sign-in made for another authorize request", async () => {
+    const first = await startLoginWith({ prompt: "login" });
+    const freshSession = await signInAgainFor(first.authorizePath);
+    const second = await startLoginWith({ prompt: "login" });
+
+    expectLoginRedirectFor(
+      await app.request(second.authorizePath, {
+        headers: { cookie: `idp_session=${freshSession}` },
+      }),
+      second.authorizePath,
+    );
+  });
+
+  it("max_age issues a code for a recent sign-in, reporting its auth_time", async () => {
+    const { idpSession } = await signInThroughLoginForm({ username: "user" });
+    const { authorizePath, loginState } = await startLoginWith({
+      max_age: "300",
+    });
+
+    const session = await approveConsentToSession(
+      authorizePath,
+      idpSession,
+      loginState,
+    );
+    expect(typeof session).toBe("string");
   });
 });
 

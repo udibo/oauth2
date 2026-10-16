@@ -130,6 +130,12 @@ test/                    # shared test setup, MSW server, route-stub renderer
    the browser gets only the HttpOnly `oauth2_session` cookie and lands back on
    `/dashboard`.
 
+An authorize request with `prompt=login` or `max_age` asks for a fresh sign-in.
+The authorize handler in `server/auth.ts` reports when the issuer session signed
+in as `auth_time`. It reports `reauthenticated: true` only when the session
+signed in for this exact authorize URL within the last ten minutes, and
+otherwise sends the user to `/login` again.
+
 Signing out via the header button hits `/auth/logout`, which revokes the refresh
 token and clears both sessions.
 

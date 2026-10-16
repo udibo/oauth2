@@ -53,6 +53,11 @@ see exactly what delegated auth drops.
   forge. The consent handler narrows the granted scope to the user's `maxScope`
   field — so an `admin`-only endpoint rejects tokens issued for the regular
   `user`.
+- **Re-authentication for `prompt=login` and `max_age`.** The authorize
+  handler in `main.ts` reports when the IDP session signed in as `auth_time`.
+  It reports `reauthenticated: true` only when that session signed in for this
+  exact authorize URL within the last ten minutes, and otherwise sends the user
+  to `/login`, which records the URL it returns to on the new session.
 - **Device-verification UI** at `/device` for the RFC 8628 device flow.
 - **BFF** (`HonoBff`) mounted at `/auth/*` wrapping a `DirectClient` with a
   client secret against the in-process auth server via `localAuthServerFetch` —

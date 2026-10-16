@@ -2769,6 +2769,229 @@ describe("HonoBff", () => {
     });
   });
 
+  describe("ID token auth_time against a pinned max_age (OIDC Core §3.1.3.7)", () => {
+    const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+    function segment(value: unknown): string {
+      return Buffer.from(JSON.stringify(value)).toString("base64url");
+    }
+
+    function idTokenWith(claims: Record<string, unknown>): string {
+      return `${segment({ alg: "ES256" })}.${segment({
+        iss: ISSUER,
+        sub: testUser.id,
+        aud: testClient.id,
+        ...claims,
+      })}.sig`;
+    }
+
+    function idTokenBff(
+      idToken: string | undefined,
+      extra: Partial<HonoBffOptions> = {},
+    ): HonoBff {
+      const serverFetch = localAuthServerFetch(fixture.authServer);
+      return makeBff({
+        client: new DirectClient({
+          clientId: testClient.id,
+          clientSecret: CLIENT_SECRET,
+          redirectUri: REDIRECT_URI,
+          endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+          fetch: async (input, init) => {
+            const res = await serverFetch(input, init);
+            const url = input instanceof Request ? input.url : String(input);
+            if (url !== TOKEN_URL || !res.ok || idToken === undefined) {
+              return res;
+            }
+            return Response.json({
+              ...(await res.json()),
+              id_token: idToken,
+            });
+          },
+        }),
+        ...extra,
+      });
+    }
+
+    async function callbackAfterFreshSignIn(
+      app: Hono,
+    ): Promise<{ callbackPath: string; cookies: string[] }> {
+      const loginRes = await app.request("/auth/login");
+      const authorizeUrl = loginRes.headers.get("Location")!;
+      await loginRes.body?.cancel();
+      const response = await fixture.authServer.handleAuthorizeRequest(
+        new Request(authorizeUrl),
+        () =>
+          Promise.resolve({
+            user: testUser,
+            authenticationContext: { auth_time: nowSeconds() },
+            reauthenticated: true,
+          }),
+      );
+      expect(response.status).toBe(302);
+      const callback = response.headers.get("Location")!;
+      expect(new URL(callback).searchParams.has("code")).toBe(true);
+      return {
+        callbackPath: callback.slice(ISSUER.length),
+        cookies: jar(loginRes),
+      };
+    }
+
+    async function finishSignIn(bff: HonoBff): Promise<Response> {
+      const app = makeApp(bff);
+      const { callbackPath, cookies } = await callbackAfterFreshSignIn(app);
+      return await app.request(callbackPath, withCookies(undefined, cookies));
+    }
+
+    async function expectRefused(res: Response, description: string) {
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("login_required");
+      expect(body.error_description).toContain(description);
+      expect(cookieValue(res, "oauth2_session")).toBe(undefined);
+    }
+
+    it("opens a session when auth_time is within max_age", async () => {
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() - 100 }), {
+          extraParams: { max_age: "300" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
+    it("refuses an auth_time older than max_age plus the clock-skew allowance", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({ auth_time: nowSeconds() - 300 - 65 }), {
+            extraParams: { max_age: "300" },
+          }),
+        ),
+        "older than the max_age",
+      );
+    });
+
+    it("allows up to a minute of clock skew past max_age", async () => {
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() - 300 - 50 }), {
+          extraParams: { max_age: "300" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
+    it("refuses an ID token without auth_time", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({}), { extraParams: { max_age: "300" } }),
+        ),
+        "auth_time",
+      );
+    });
+
+    it("refuses a non-numeric auth_time", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({ auth_time: String(nowSeconds()) }), {
+            extraParams: { max_age: "300" },
+          }),
+        ),
+        "auth_time",
+      );
+    });
+
+    it("refuses an auth_time more than a minute in the future", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({ auth_time: Date.now() }), {
+            extraParams: { max_age: "300" },
+          }),
+        ),
+        "in the future",
+      );
+    });
+
+    it("refuses an ID token it cannot decode", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff("not-a-jwt", { extraParams: { max_age: "300" } }),
+        ),
+        "auth_time",
+      );
+    });
+
+    it("reads a max_age pinned under another letter case", async () => {
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+            extraParams: { MAX_AGE: "300" },
+          }),
+        ),
+        "older than the max_age",
+      );
+    });
+
+    it("treats max_age=0 as prompt=login, checking only that auth_time is present", async () => {
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() - 300 }), {
+          extraParams: { max_age: "0" },
+        }),
+      );
+      expect(res.status).toBe(302);
+      await expectRefused(
+        await finishSignIn(
+          idTokenBff(idTokenWith({}), { extraParams: { max_age: "0" } }),
+        ),
+        "auth_time",
+      );
+    });
+
+    it("hands the refusal to onCallbackError once, as login_required", async () => {
+      const seen: BffCallbackError[] = [];
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() - 3600 }), {
+          extraParams: { max_age: "300" },
+          onCallbackError: (c, error) => {
+            seen.push(error);
+            return c.text("refused", 401);
+          },
+        }),
+      );
+      expect(res.status).toBe(401);
+      expect(seen.map((error) => error.error)).toStrictEqual([
+        "login_required",
+      ]);
+    });
+
+    it("does not check auth_time when no max_age is pinned", async () => {
+      const res = await finishSignIn(
+        idTokenBff(idTokenWith({ auth_time: nowSeconds() - 86_400 })),
+      );
+      expect(res.status).toBe(302);
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
+    it("opens a session when the token response carries no ID token", async () => {
+      const res = await finishSignIn(
+        idTokenBff(undefined, { extraParams: { max_age: "300" } }),
+      );
+      expect(res.status).toBe(302);
+      expect(typeof cookieValue(res, "oauth2_session")).toBe("string");
+    });
+
+    it("refuses a pinned max_age that is not a non-negative integer at construction", () => {
+      for (const value of ["-1", "1.5", "five", " 30", "1e3"]) {
+        thrown(
+          () => makeBff({ extraParams: { max_age: value } }),
+          Error,
+          "max_age",
+          JSON.stringify(value),
+        );
+      }
+    });
+  });
+
   describe("authorization response issuer (RFC 9207)", () => {
     const OTHER_ISSUER = "https://evil.example";
 

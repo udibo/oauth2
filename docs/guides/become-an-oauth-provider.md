@@ -943,7 +943,13 @@ the one the code captured.
 
 For a BFF requesting assurance or freshness, pin `acr_values` and `max_age` in
 `extraParams`. They are forbidden in `forwardedParams`, case-insensitively,
-because browser-chosen values could weaken the server's requirements.
+because browser-chosen values could weaken the server's requirements. With
+`max_age` pinned, `/auth/callback` also checks the ID token's `auth_time`, as
+OpenID Connect Core §3.1.3.7 asks of a relying party. It refuses a token whose
+`auth_time` is missing, more than 60 seconds in the future, or older than
+`max_age` plus 60 seconds, which allows for clock skew between the BFF and the
+server. `max_age=0` means `prompt=login`, so it needs `auth_time` but no
+particular age. A refusal reaches `onCallbackError` as `login_required`.
 
 ### Honor `prompt`, `max_age` and `acr_values`
 
@@ -977,7 +983,8 @@ to know is to have your login route record, on the session it creates, the
 authorize URL it returns to, and compare it on the way back. Bound the match in
 time as well: the recorded URL stays on the session, so a client that sends the
 same authorize URL again would otherwise count as re-authenticated for as long
-as the session lives.
+as the session lives. The `app-with-own-auth` example and the `react-router`
+template both work this way.
 
 ```ts
 import type { Context } from "hono";

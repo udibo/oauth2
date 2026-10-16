@@ -369,7 +369,9 @@ export interface BffCallbackError {
    * `resolveOrigin` threw, so `iss` could not be checked; the description is
    * fixed and the failure is in `cause`), or `invalid_grant`
    * (the code exchange failed — expired/replayed code, unknown `state` — or
-   * a later step threw: `resolveUser` or the session store).
+   * a later step threw: `resolveUser` or the session store), or
+   * `login_required` (a pinned `max_age` and an ID token whose `auth_time`
+   * does not satisfy it — see {@link HonoBffOptions.extraParams}).
    */
   error: string;
   /** Human-readable description; never contains secrets. */
@@ -588,7 +590,15 @@ export interface HonoBffOptions {
    * value, name it in {@link forwardedParams} instead.
    *
    * `prompt` is an ordinary name here — pin `{ prompt: "login" }` to make
-   * every sign-in re-authenticate. A pinned `scope` is accepted only when
+   * every sign-in re-authenticate. A pinned `max_age` must be a non-negative
+   * integer, and `/auth/callback` then checks the ID token's `auth_time`
+   * (OpenID Connect Core §3.1.3.7): a sign-in whose `auth_time` is missing,
+   * more than 60 seconds in the future, or older than `max_age` plus those
+   * 60 seconds (an allowance for clock skew between the BFF and the
+   * authorization server) fails with
+   * `login_required`. `max_age=0` means `prompt=login`, so it needs
+   * `auth_time` but no particular age. A token response without an ID token
+   * is not checked. A pinned `scope` is accepted only when
    * {@link scope} is unset; setting both would leave which one applies
    * ambiguous. Either configuration supplies the scope the login flow records
    * for its authorization request.
@@ -930,6 +940,59 @@ const RESERVED_AUTHORIZE_PARAM_SET = new Set(RESERVED_AUTHORIZE_PARAMS);
 interface ResolvedExtraAuthorizeParams {
   fixed: Record<string, string>;
   forwarded: readonly string[];
+  maxAge: number | undefined;
+}
+
+const AUTH_TIME_LEEWAY_SECONDS = 60;
+
+function pinnedMaxAge(fixed: Record<string, string>): number | undefined {
+  let strictest: number | undefined;
+  for (const [name, value] of Object.entries(fixed)) {
+    if (name.toLowerCase() !== "max_age" || value === "") continue;
+    const seconds = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(seconds)) {
+      throw new Error(
+        `extraParams pins ${JSON.stringify(name)} to ${JSON.stringify(value)}, ` +
+          "which is not a non-negative integer number of seconds. The " +
+          "authorization server refuses such a max_age, and the callback " +
+          "could not check the ID token's auth_time against it.",
+      );
+    }
+    strictest =
+      strictest === undefined ? seconds : Math.min(strictest, seconds);
+  }
+  return strictest;
+}
+
+class CallbackRefusal extends Error {
+  readonly refusal: BffCallbackError;
+
+  constructor(refusal: BffCallbackError) {
+    super(refusal.error_description);
+    this.refusal = refusal;
+  }
+}
+
+function authTimeShortfall(
+  claims: unknown,
+  maxAge: number,
+  now: number,
+): string | undefined {
+  const authTime =
+    typeof claims === "object" && claims !== null
+      ? (claims as { auth_time?: unknown }).auth_time
+      : undefined;
+  if (typeof authTime !== "number" || !Number.isFinite(authTime)) {
+    return "the ID token has no auth_time, which the max_age this sign-in requested requires";
+  }
+  const age = Math.floor(now / 1000) - authTime;
+  if (age < -AUTH_TIME_LEEWAY_SECONDS) {
+    return "the ID token's auth_time is in the future";
+  }
+  if (maxAge > 0 && age > maxAge + AUTH_TIME_LEEWAY_SECONDS) {
+    return "the ID token's auth_time is older than the max_age this sign-in requested";
+  }
+  return undefined;
 }
 
 function assertUsableAuthorizeParamName(name: string, option: string): void {
@@ -1001,7 +1064,7 @@ function resolveExtraAuthorizeParams(
       );
     }
   }
-  return { fixed, forwarded };
+  return { fixed, forwarded, maxAge: pinnedMaxAge(fixed) };
 }
 
 interface RequestAuthorizeParams {
@@ -1194,9 +1257,10 @@ export class HonoBff {
    * {@linkcode HonoBffOptions.forwardedParams} names a reserved authorize
    * parameter, gives one a name that is empty or not equal to its trimmed
    * form (`" state"` and `"organization "` are refused rather than trimmed),
-   * names the same parameter in both, or pins `scope` in
+   * names the same parameter in both, pins `scope` in
    * {@linkcode HonoBffOptions.extraParams} while
-   * {@linkcode HonoBffOptions.scope} is also set.
+   * {@linkcode HonoBffOptions.scope} is also set, or pins a `max_age` that is
+   * not a non-negative integer.
    */
   constructor(options: HonoBffOptions) {
     assertStoresConfigured(options);
@@ -1644,6 +1708,22 @@ export class HonoBff {
         let user: UserInfoClaims | null = null;
         let sid: string | undefined;
         const idToken = (raw as { id_token?: string }).id_token;
+        const { maxAge } = this.#extraAuthorizeParams;
+        if (idToken && maxAge !== undefined) {
+          let claims: unknown;
+          try {
+            claims = this.#client.decodeIdToken(idToken);
+          } catch {
+            claims = undefined;
+          }
+          const shortfall = authTimeShortfall(claims, maxAge, Date.now());
+          if (shortfall) {
+            throw new CallbackRefusal({
+              error: "login_required",
+              error_description: shortfall,
+            });
+          }
+        }
         if (idToken) {
           try {
             const claims = this.#client.decodeIdToken(idToken);
@@ -1679,6 +1759,7 @@ export class HonoBff {
 
         return c.redirect(this.#safeReturnTo(returnTo));
       } catch (cause) {
+        if (cause instanceof CallbackRefusal) return await fail(cause.refusal);
         return await fail({
           error: "invalid_grant",
           error_description: "code exchange failed",

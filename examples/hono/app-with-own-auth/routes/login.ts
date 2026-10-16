@@ -59,7 +59,7 @@ app.post("/", async (c) => {
     );
   }
 
-  startSession(c, user.id);
+  startSession(c, user.id, returnTo);
   return c.redirect(returnTo);
 });
 
