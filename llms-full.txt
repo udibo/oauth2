@@ -154,8 +154,10 @@ The package implements these specifications, with the limits noted:
 - [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068) JWT access tokens, opt-in;
   access tokens are opaque by default.
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html):
-  the authorization code flow, ES256 ID tokens, `nonce`, and UserInfo. The
-  server does not act on `prompt` or `max_age`.
+  the authorization code flow, ES256 ID tokens, `nonce`, UserInfo, and the
+  `prompt`, `max_age` and `acr_values` controls, with `auth_time` and `acr` in
+  the ID token. Your login callback performs any re-authentication they need,
+  and there is no `claims` request parameter.
 - OpenID Connect [Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
   and [RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
 - [OpenID Connect Back-Channel Logout 1.0](https://openid.net/specs/openid-connect-backchannel-1_0.html),
@@ -1026,6 +1028,14 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+A request with `prompt=consent` reaches the handler even when the scope is
+already authorized, and the handler's fifth argument carries `prompt` so it can
+ask again instead of reusing a stored decision. A server with no handler cannot
+ask, so it answers `prompt=consent` with `consent_required`. Under `prompt=none`
+the server never shows the page a handler returns; it redirects with
+`consent_required` instead. See
+[Honor `prompt`, `max_age` and `acr_values`](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#honor-prompt-max_age-and-acr_values).
+
 ## Error responses
 
 The OAuth endpoints answer every error in the RFC 6749 §5.2 format:
@@ -1366,6 +1376,11 @@ un-advertises it, and the field is omitted entirely when no authorization-code
 grant is registered. It reports what the server will actually accept rather than
 a fixed string.
 
+With an authorization-code grant registered, the document also carries
+`prompt_values_supported`: `none`, `login` and `consent` unless you set
+`promptValuesSupported`. The OIDC discovery document adds
+`acr_values_supported` when you set `acrValuesSupported`.
+
 `token_endpoint_auth_methods_supported` always carries `none` — the RFC 7591
 method for a client with no secret — because the token endpoint accepts it
 unconditionally: a request that presents only `client_id` reaches your
@@ -1589,14 +1604,109 @@ Custom `generateAccessToken` wrappers must forward the fourth
 (`authenticationContext`) argument to the JWT generator. Tokens without a
 resource owner receive no event context.
 
-`parseAuthorizeParameters` exposes `acrValues`, `maxAge`, and `prompt` as raw
-strings, including invalid values. Your application must validate and enforce
-the authentication and consent policy before returning a user. Parsing these
-controls does not implement step-up or freshness enforcement.
+The ID token's `auth_time` and `acr` come from the credential's recorded
+context, whatever `userClaims` returns: each is present exactly when the context
+has it, so a claims hook cannot report a stronger or more recent sign-in than
+the one the code captured.
 
 For a BFF requesting assurance or freshness, pin `acr_values` and `max_age` in
 `extraParams`. They are forbidden in `forwardedParams`, case-insensitively,
 because browser-chosen values could weaken the server's requirements.
+
+### Honor `prompt`, `max_age` and `acr_values`
+
+The authorize endpoint validates the OpenID Connect authentication controls once
+the redirect URI is verified, and hands them to `authenticateUser` as a second
+argument, an `AuthenticationRequest` of `{ prompt, maxAge?, acrValues }`. A
+repeated parameter, a `prompt` value the server does not support, `none`
+combined with another value, or a `max_age` that is not a non-negative integer
+is refused with `invalid_request`. A parameter sent without a value counts as
+omitted.
+
+The server enforces what it can check, so a client is never handed a code that
+contradicts what it asked for:
+
+| Control          | What the server does                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt=none`    | A `Response` from `authenticateUser` becomes a `login_required` redirect, and one from `handleConsent` becomes `consent_required`. No page reaches the browser. |
+| `prompt=login`   | Issues a code only when `authenticateUser` returns `reauthenticated: true`, and otherwise redirects with `login_required`.                                 |
+| `max_age`        | Requires `authenticationContext.auth_time`, no more than a minute in the future. Issues a code only when it is at most `max_age` seconds old, even after a re-authentication. |
+| `max_age=0`      | Treated as `prompt=login`, as OIDC Core specifies.                                                                                                         |
+| `prompt=consent` | Calls `handleConsent` even for an authorized scope. With no handler, it answers `consent_required`.                                                        |
+| `acr_values`     | Passes the preferences through. The ID token's `acr` is the one `authenticationContext` reports.                                                           |
+
+The server cannot show a login page itself, so `authenticateUser` does the
+re-authentication. Check the session against the request with
+`satisfiesAuthenticationRequest`, the same check the server applies, and send
+the user to sign in when it fails. Report `reauthenticated: true` only when the
+user signed in again for this authorization request. A session that merely
+exists, or one that signed in for a different request, does not count. One way
+to know is to have your login route record, on the session it creates, the
+authorize URL it returns to, and compare it on the way back. Bound the match in
+time as well: the recorded URL stays on the session, so a client that sends the
+same authorize URL again would otherwise count as re-authenticated for as long
+as the session lives.
+
+```ts
+import type { Context } from "hono";
+import type { HonoAuthenticateUserFn } from "@udibo/oauth2/hono/authorization-server";
+import { satisfiesAuthenticationRequest } from "@udibo/oauth2/server";
+
+interface AppUser {
+  id: string;
+}
+
+interface AppSession {
+  user: AppUser;
+  authTime: number;
+  acr?: string;
+  signedInFor?: string;
+}
+
+declare function readSession(c: Context): Promise<AppSession | undefined>;
+
+const authenticateUser: HonoAuthenticateUserFn<AppUser> = async (
+  c,
+  authentication,
+) => {
+  const { pathname, search } = new URL(c.req.url);
+  const returnTo = `${pathname}${search}`;
+  const login = c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
+  const session = await readSession(c);
+  if (!session) return login;
+  const result = {
+    user: session.user,
+    authenticationContext: { auth_time: session.authTime, acr: session.acr },
+    reauthenticated:
+      session.signedInFor === returnTo &&
+      Math.floor(Date.now() / 1000) - session.authTime <= 600,
+  };
+  if (
+    authentication &&
+    !satisfiesAuthenticationRequest(authentication, result)
+  ) {
+    return login;
+  }
+  return result;
+};
+```
+
+Under `prompt=none` the same code needs no special case: the server turns the
+login redirect into `login_required`. Throw `InteractionRequiredError` or
+`AccountSelectionRequiredError` from either callback when some other screen
+would be needed, and the server redirects with that code.
+
+Use `acrValues` to choose how to sign the user in, for example offering a
+second factor when one is requested. `acr_values` is a preference, so the server
+never refuses a sign-in for missing it. Report the `acr` the sign-in achieved,
+never the requested one. Set `acrValuesSupported` to advertise the values you
+can achieve.
+
+The server enforces `none`, `login` and `consent`. To accept `select_account`,
+`create` or another value, list it in `promptValuesSupported` along with the
+enforced values you keep. The server passes it through to `authenticateUser`
+but cannot check that you honored it. Any value not listed is refused with
+`invalid_request`.
 
 ## Where to go next
 
@@ -6046,6 +6156,13 @@ With `"consent": "prompt"`, an approval screen (`#consent-form`, `#approve`,
 `#deny`) appears before the code is issued. Denial redirects back with
 `error=access_denied`, which is the branch most applications never test.
 
+The authorize endpoint honors the OpenID Connect controls a relying party sends.
+`prompt=login`, `max_age=0`, or a `max_age` the session is older than shows the
+sign-in page again even for a signed-in browser, and the ID token's `auth_time`
+records that sign-in. `prompt=none` never shows a page: a signed-out browser
+goes back with `error=login_required`, and with `"consent": "prompt"` a pending
+approval goes back with `error=consent_required`.
+
 `GET /logout` drops the session. It honours `post_logout_redirect_uri` only when
 the value exactly matches a redirect URI one of the configured clients
 registered — an unregistered target is answered with a 400 rather than a
@@ -6276,8 +6393,8 @@ validated, a redirect to the client with `error=…`).
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | introspection-authorization | `canIntrospectToken` (`AuthorizationServerOptions`)                  | After client authentication and live-token lookup, before claims enrichment                | no (omit → all admitted clients may inspect any token) | blocks          | false → inactive response; throw → error response                                                                                    |
 | services-resolver           | `resolve` (`AuthorizationServerOptions`)                             | Top of every endpoint, to resolve per-request services                                     | yes                                                    | blocks          | Converted to an error response on token/authorize/revoke/introspect/device, and on the metadata and JWKS discovery endpoints         |
-| authenticate                | `AuthenticateUserFn` (`handleAuthorizeRequest` arg)                  | `GET /authorize`, after client/PKCE validation                                             | yes                                                    | blocks          | `null` → `access_denied`; a `Response` short-circuits; an OAuth2 error redirects to the client, other throws → direct error response |
-| consent                     | `HandleConsentFn` (`handleAuthorizeRequest` arg)                     | `GET /authorize`, only when the requested scope needs consent                              | no (omit → auto-grant)                                 | blocks          | `{ approved: false }` denies; same redirect/error conversion as authenticate                                                         |
+| authenticate                | `AuthenticateUserFn` (`handleAuthorizeRequest` arg)                  | `GET /authorize`, after client/PKCE and `prompt`/`max_age`/`acr_values` validation         | yes                                                    | blocks          | `null` → `access_denied`; a `Response` short-circuits (`login_required` under `prompt=none`); a user failing `prompt=login`/`max_age` → `login_required`; an OAuth2 error redirects to the client, other throws → direct error response |
+| consent                     | `HandleConsentFn` (`handleAuthorizeRequest` arg)                     | `GET /authorize`, when the requested scope needs consent or the request has `prompt=consent` | no (omit → auto-grant; `prompt=consent` → `consent_required`) | blocks          | `{ approved: false }` denies; a `Response` under `prompt=none` → `consent_required`; same redirect/error conversion as authenticate |
 | token-claims                | `userClaims` (`AuthorizationServerOptions`)                          | Assembling id_token and UserInfo claims (never the access token)                           | no                                                     | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
 | subject                     | `subjectOf` (`AuthorizationServerOptions`)                           | Assembling the `sub` for id_token and UserInfo                                             | no (defaults to `user.id`)                             | blocks          | Converted to a token-endpoint / UserInfo error response                                                                              |
 | signing-key                 | `SigningKeyProvider` (`signingKeys`)                                 | `mintIdToken` (`getSigningKey`) and `GET /jwks` (`getPublicJwks`)                          | no (unset → OIDC surface off)                          | blocks          | `getSigningKey` throw → token-endpoint `server_error`; `getPublicJwks` throw → JWKS-endpoint error response                          |
@@ -6809,14 +6926,20 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   option; verify your relying parties accept ES256.
 - `id_token` claims are released per scope through the app-provided `userClaims`
   hook; there is no `claims` request-parameter support.
-- Authentication-event claims (`auth_time`, `acr`, and `amr`) are opt-in through
-  the configured claims hooks. The application supplies verified evidence, and
-  its code/token stores must retain the captured snapshot across refreshes. The
-  package does not infer assurance or methods, or enforce the raw `acr_values`,
-  `max_age`, and `prompt` controls. Omit unknown evidence; legacy and userless
-  tokens do not gain it automatically. See
+- The application supplies authentication-event evidence (`auth_time`, `acr`,
+  and `amr`), and its code/token stores must retain the captured snapshot across
+  refreshes. The ID token carries the recorded `auth_time` and `acr`; `amr` and
+  the access-token, UserInfo and introspection claims stay opt-in through the
+  claims hooks. The package does not infer assurance or methods. Omit unknown
+  evidence; legacy and userless tokens do not gain it automatically. See
   [Preserve the authentication event](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#preserve-the-authentication-event)
   for store, hook, and BFF integration.
+- The server enforces `prompt=none`, `prompt=login`, `prompt=consent` and
+  `max_age`, but it cannot show a login page: `authenticateUser` performs the
+  re-authentication and reports it with `reauthenticated: true`. Other `prompt`
+  values, such as `select_account`, are refused unless listed in
+  `promptValuesSupported`, and then the application alone honors them. See
+  [Honor `prompt`, `max_age` and `acr_values`](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#honor-prompt-max_age-and-acr_values).
 
 ## Identity flows (`@udibo/oauth2/identity`)
 

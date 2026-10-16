@@ -1,6 +1,6 @@
 import { connect } from "node:net";
 
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { rejection } from "../../_test_assert.ts";
 import {
   exportSigningKeyJwk,
@@ -374,6 +374,105 @@ async function mintTokens(
   expect(response.status).toStrictEqual(200);
   return await response.json();
 }
+
+describe("dev identity provider authentication controls", () => {
+  async function signedInBrowser(
+    idp: DevIdentityProvider,
+    begin: string,
+  ): Promise<Browser> {
+    const browser = new Browser();
+    const signedIn = await signIn(browser, idp, begin);
+    expect(signedIn.status).toStrictEqual(303);
+    await signedIn.body?.cancel();
+    return browser;
+  }
+
+  it("shows the sign-in page again for prompt=login, then issues a code with a fresh auth_time", async () => {
+    await withIdp({}, async (idp) => {
+      const challenge = await generateCodeChallenge(generateCodeVerifier());
+      const browser = await signedInBrowser(idp, authorizeUrl(idp, challenge));
+      const verifier = generateCodeVerifier();
+      const begin = authorizeUrl(idp, await generateCodeChallenge(verifier), {
+        prompt: "login",
+        state: "login-state",
+      });
+
+      const again = await browser.fetch(begin);
+      expect(again.status).toStrictEqual(200);
+      assert((await again.text()).includes('id="sign-in-form"'));
+
+      const signedIn = await signIn(browser, idp, begin);
+      await signedIn.body?.cancel();
+      const authorized = await browser.fetch(
+        new URL(signedIn.headers.get("location")!, idp.url),
+      );
+      expect(authorized.status).toStrictEqual(302);
+      const code = new URL(
+        authorized.headers.get("location")!,
+      ).searchParams.get("code");
+      assert.exists(code);
+      const tokens = await exchangeCode(idp, code, verifier);
+      const claims = await verifyJwt(tokens.id_token, await firstJwk(idp));
+      expect(typeof claims?.auth_time).toStrictEqual("number");
+      expect(
+        Math.abs(Math.floor(Date.now() / 1000) - Number(claims?.auth_time)),
+      ).toBeLessThan(5);
+    });
+  });
+
+  it("asks again when a prompt=login URL is revisited more than ten minutes after its sign-in", async () => {
+    await withIdp({}, async (idp) => {
+      const challenge = await generateCodeChallenge(generateCodeVerifier());
+      const browser = await signedInBrowser(idp, authorizeUrl(idp, challenge));
+      const begin = authorizeUrl(idp, challenge, {
+        prompt: "login",
+        state: "fixed-state",
+      });
+      const signedIn = await signIn(browser, idp, begin);
+      await signedIn.body?.cancel();
+      const first = await browser.fetch(begin);
+      expect(first.status).toStrictEqual(302);
+      await first.body?.cancel();
+
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+        const revisit = await browser.fetch(begin);
+        expect(revisit.status).toStrictEqual(200);
+        assert((await revisit.text()).includes('id="sign-in-form"'));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("shows the sign-in page for a session older than max_age", async () => {
+    await withIdp({}, async (idp) => {
+      const challenge = await generateCodeChallenge(generateCodeVerifier());
+      const browser = await signedInBrowser(idp, authorizeUrl(idp, challenge));
+      const response = await browser.fetch(
+        authorizeUrl(idp, challenge, { max_age: "0", state: "other" }),
+      );
+      expect(response.status).toStrictEqual(200);
+      assert((await response.text()).includes('id="sign-in-form"'));
+    });
+  });
+
+  it("answers prompt=none for a signed-out browser with login_required", async () => {
+    await withIdp({}, async (idp) => {
+      const challenge = await generateCodeChallenge(generateCodeVerifier());
+      const response = await new Browser().fetch(
+        authorizeUrl(idp, challenge, { prompt: "none" }),
+      );
+      expect(response.status).toStrictEqual(302);
+      const redirect = new URL(response.headers.get("location")!);
+      expect(redirect.origin + redirect.pathname).toStrictEqual(REDIRECT_URI);
+      expect(redirect.searchParams.get("error")).toStrictEqual(
+        "login_required",
+      );
+    });
+  });
+});
 
 describe("dev identity provider status page", () => {
   it("lists the seeded users and clients, escaping their text", async () => {

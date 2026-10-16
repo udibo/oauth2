@@ -4,10 +4,12 @@
  * Includes the RFC 6750 Section 3.1 bearer-token error codes
  * (`invalid_token`, `insufficient_scope`) emitted by resource servers, in
  * addition to the RFC 6749 Section 5.2 / Section 4.1.2.1 codes and the RFC
- * 8628 device-flow codes.
+ * 8628 device-flow codes and the OpenID Connect Core §3.1.2.6
+ * authentication-error codes.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3.1
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#AuthError
  */
 export type OAuth2ErrorCode =
   | "invalid_request"
@@ -25,7 +27,11 @@ export type OAuth2ErrorCode =
   | "temporarily_unavailable"
   | "authorization_pending"
   | "slow_down"
-  | "expired_token";
+  | "expired_token"
+  | "login_required"
+  | "consent_required"
+  | "interaction_required"
+  | "account_selection_required";
 
 /**
  * Standard OAuth2 error response.
@@ -92,6 +98,10 @@ export interface AuthorizationServerMetadata {
   id_token_signing_alg_values_supported?: string[];
   /** Subject identifier types supported (OIDC Discovery). */
   subject_types_supported?: string[];
+  /** `prompt` values the authorization endpoint honors (OIDC Prompt Create). */
+  prompt_values_supported?: string[];
+  /** Authentication context class references the server can achieve (OIDC Discovery). */
+  acr_values_supported?: string[];
 }
 
 /**

@@ -37,7 +37,10 @@ import { Hono } from "hono";
 import type { Context, Handler, MiddlewareHandler } from "hono";
 
 import type { RequireConditions } from "../../models/authorization.ts";
-import type { AuthenticationContext } from "../../models/authentication.ts";
+import type {
+  AuthenticationContext,
+  AuthenticationRequest,
+} from "../../models/authentication.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
 import {
@@ -65,21 +68,33 @@ import {
  * or session variables without reconstructing a {@link Request}. Return one
  * of:
  *
- * - `{ user, authorizedScope?, authenticationContext? }` — user is authenticated;
- *   the authorize flow continues. Supply only verified event claims in
- *   `authenticationContext`; the code and its tokens retain that snapshot.
+ * - `{ user, authorizedScope?, authenticationContext?, reauthenticated? }` —
+ *   user is authenticated; the authorize flow continues. Supply only verified
+ *   event claims in `authenticationContext`; the code and its tokens retain
+ *   that snapshot. Set `reauthenticated: true` only when the user actively
+ *   authenticated in response to this authorization request.
  * - `null` — explicit denial; the framework redirects to `redirect_uri` with
  *   `error=access_denied`.
  * - A `Response` (typically `c.redirect(...)` to a login page) —
  *   short-circuits the authorize flow and is returned to the browser as-is.
  *   This is how login redirects, interstitials, etc. are wired without
- *   wrapping the framework handler.
+ *   wrapping the framework handler. Under `prompt=none` the server answers
+ *   `login_required` instead.
+ *
+ * The second argument, always passed, carries the request's validated
+ * `prompt`, `max_age` and `acr_values`. The server answers `login_required`
+ * when the returned user fails `satisfiesAuthenticationRequest`, so send the
+ * user to sign in again whenever the session cannot meet it.
  */
-export type HonoAuthenticateUserFn<User> = (c: Context) => Promise<
+export type HonoAuthenticateUserFn<User> = (
+  c: Context,
+  authentication?: AuthenticationRequest,
+) => Promise<
   | {
       user: User;
       authorizedScope?: AbstractScope;
       authenticationContext?: AuthenticationContext;
+      reauthenticated?: boolean;
     }
   | Response
   | null
@@ -99,7 +114,11 @@ export type HonoAuthenticateUserFn<User> = (c: Context) => Promise<
  * - A `Response` (typically `c.html(...)` rendering a consent page) —
  *   short-circuits the authorize flow and is returned to the browser as-is.
  *   The consent UI should resubmit to the authorize endpoint with a
- *   decision parameter the callback can read on the next request.
+ *   decision parameter the callback can read on the next request. Under
+ *   `prompt=none` the server answers `consent_required` instead.
+ *
+ * With `prompt=consent` the server calls it even when the scope is already
+ * authorized, and the fifth argument, always passed, says so.
  */
 export type HonoHandleConsentFn<
   Client extends ClientInterface,
@@ -109,6 +128,7 @@ export type HonoHandleConsentFn<
   client: Client,
   requestedScope: S | undefined,
   user: unknown,
+  authentication?: AuthenticationRequest,
 ) => Promise<{ approved: boolean; scope?: S } | Response>;
 
 /** Options for {@link HonoAuthorizationServer.routes}. */
@@ -219,10 +239,11 @@ export class HonoAuthorizationServer<
   ): Handler {
     const { authenticateUser, handleConsent } = options;
     return (c) => {
-      const auth: AuthenticateUserFn<User> = () => authenticateUser(c);
+      const auth: AuthenticateUserFn<User> = (_request, authentication) =>
+        authenticateUser(c, authentication);
       const consent: HandleConsentFn<Client, S> | undefined = handleConsent
-        ? (client, requestedScope, user) =>
-            handleConsent(c, client, requestedScope, user)
+        ? (client, requestedScope, user, authentication) =>
+            handleConsent(c, client, requestedScope, user, authentication)
         : undefined;
       return this.handleAuthorizeRequest(c.req.raw, auth, consent);
     };

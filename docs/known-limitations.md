@@ -360,14 +360,20 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   option; verify your relying parties accept ES256.
 - `id_token` claims are released per scope through the app-provided `userClaims`
   hook; there is no `claims` request-parameter support.
-- Authentication-event claims (`auth_time`, `acr`, and `amr`) are opt-in through
-  the configured claims hooks. The application supplies verified evidence, and
-  its code/token stores must retain the captured snapshot across refreshes. The
-  package does not infer assurance or methods, or enforce the raw `acr_values`,
-  `max_age`, and `prompt` controls. Omit unknown evidence; legacy and userless
-  tokens do not gain it automatically. See
+- The application supplies authentication-event evidence (`auth_time`, `acr`,
+  and `amr`), and its code/token stores must retain the captured snapshot across
+  refreshes. The ID token carries the recorded `auth_time` and `acr`; `amr` and
+  the access-token, UserInfo and introspection claims stay opt-in through the
+  claims hooks. The package does not infer assurance or methods. Omit unknown
+  evidence; legacy and userless tokens do not gain it automatically. See
   [Preserve the authentication event](guides/become-an-oauth-provider.md#preserve-the-authentication-event)
   for store, hook, and BFF integration.
+- The server enforces `prompt=none`, `prompt=login`, `prompt=consent` and
+  `max_age`, but it cannot show a login page: `authenticateUser` performs the
+  re-authentication and reports it with `reauthenticated: true`. Other `prompt`
+  values, such as `select_account`, are refused unless listed in
+  `promptValuesSupported`, and then the application alone honors them. See
+  [Honor `prompt`, `max_age` and `acr_values`](guides/become-an-oauth-provider.md#honor-prompt-max_age-and-acr_values).
 
 ## Identity flows (`@udibo/oauth2/identity`)
 

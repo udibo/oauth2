@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   AccessDeniedError,
+  AccountSelectionRequiredError,
   AuthorizationPendingError,
+  ConsentRequiredError,
   ExpiredTokenError,
   InsufficientScopeError,
+  InteractionRequiredError,
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
   InvalidTokenError,
   isOAuth2Error,
+  LoginRequiredError,
   OAuth2Error,
   ServerError,
   SlowDownError,
@@ -356,6 +360,23 @@ describe("ExpiredTokenError", () => {
     const error = new ExpiredTokenError("device code expired");
     expect(error.message).toBe("device code expired");
   });
+});
+
+describe("OpenID Connect authentication errors", () => {
+  for (const [ErrorClass, code] of [
+    [LoginRequiredError, "login_required"],
+    [ConsentRequiredError, "consent_required"],
+    [InteractionRequiredError, "interaction_required"],
+    [AccountSelectionRequiredError, "account_selection_required"],
+  ] as const) {
+    it(`${code} is a 400 OAuth2 error`, () => {
+      const error = new ErrorClass("needs the user");
+      expect(error.status).toBe(400);
+      expect(error.extensions.error).toBe(code);
+      expect(error.message).toBe("needs the user");
+      expect(isOAuth2Error(error)).toBe(true);
+    });
+  }
 });
 
 describe("InvalidTokenError", () => {

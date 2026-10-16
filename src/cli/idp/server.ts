@@ -33,6 +33,7 @@ import { AuthorizationCodeGrant } from "../../server/grants/authorization-code.t
 import { ClientCredentialsGrant } from "../../server/grants/client-credentials.ts";
 import { PasswordGrant } from "../../server/grants/password.ts";
 import { RefreshTokenGrant } from "../../server/grants/refresh-token.ts";
+import { satisfiesAuthenticationRequest } from "../../server/authentication-request.ts";
 import {
   type SigningKey,
   StaticSigningKeyProvider,
@@ -92,11 +93,27 @@ interface ConsentDecision {
   approved: boolean;
 }
 
+const REAUTHENTICATION_WINDOW_SECONDS = 600;
+
+interface DevIdpSession {
+  userId: string;
+  authTime: number;
+  signedInFor?: string;
+}
+
+function newSession(userId: string, signedInFor?: string): DevIdpSession {
+  return {
+    userId,
+    authTime: Math.floor(Date.now() / 1000),
+    ...(signedInFor === undefined ? {} : { signedInFor }),
+  };
+}
+
 interface DevIdpState {
   server: AuthorizationServer<ClientInterface, DevIdpUser, BasicScope>;
   userService: MemoryUserService<DevIdpUser>;
   clientService: MemoryClientService<ClientInterface, DevIdpUser>;
-  sessions: Map<string, string>;
+  sessions: Map<string, DevIdpSession>;
   consents: Map<string, ConsentDecision>;
   secrets: Map<string, string>;
 }
@@ -293,15 +310,20 @@ function formValue(form: FormData, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function currentSession(
+  state: DevIdpState,
+  request: Request,
+): DevIdpSession | undefined {
+  const sessionId = readCookie(request, SESSION_COOKIE);
+  return sessionId ? state.sessions.get(sessionId) : undefined;
+}
+
 async function currentUser(
   state: DevIdpState,
   request: Request,
 ): Promise<DevIdpUser | undefined> {
-  const sessionId = readCookie(request, SESSION_COOKIE);
-  if (!sessionId) return undefined;
-  const userId = state.sessions.get(sessionId);
-  if (!userId) return undefined;
-  return await state.userService.get(userId);
+  const session = currentSession(state, request);
+  return session ? await state.userService.get(session.userId) : undefined;
 }
 
 function authenticateUserFor(
@@ -309,12 +331,27 @@ function authenticateUserFor(
   config: DevIdpConfig,
   request: Request,
 ): AuthenticateUserFn<DevIdpUser> {
-  return async () => {
-    const user = await currentUser(state, request);
-    if (user) return { user };
-    return htmlResponse(
-      loginPage({ returnTo: pathAndQuery(request), users: config.users }),
-    );
+  return async (_request, authentication) => {
+    const returnTo = pathAndQuery(request);
+    const session = currentSession(state, request);
+    const user = session && (await state.userService.get(session.userId));
+    if (session && user) {
+      const result = {
+        user,
+        authenticationContext: { auth_time: session.authTime },
+        reauthenticated:
+          session.signedInFor === returnTo &&
+          Math.floor(Date.now() / 1000) - session.authTime <=
+            REAUTHENTICATION_WINDOW_SECONDS,
+      };
+      if (
+        !authentication ||
+        satisfiesAuthenticationRequest(authentication, result)
+      ) {
+        return result;
+      }
+    }
+    return htmlResponse(loginPage({ returnTo, users: config.users }));
   };
 }
 
@@ -396,7 +433,7 @@ async function handleLoginSubmission(
   }
 
   const sessionId = crypto.randomUUID();
-  state.sessions.set(sessionId, user.id);
+  state.sessions.set(sessionId, newSession(user.id, returnTo));
   return redirect(returnTo, {
     "set-cookie": cookie(SESSION_COOKIE, sessionId),
   });
@@ -505,7 +542,7 @@ async function handleAdminSession(
     return jsonError(400, 'no seeded user matched "userId" or "username"');
   }
   const sessionId = crypto.randomUUID();
-  state.sessions.set(sessionId, user.id);
+  state.sessions.set(sessionId, newSession(user.id));
   return new Response(
     JSON.stringify({
       sessionId,

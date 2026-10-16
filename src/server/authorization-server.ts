@@ -22,7 +22,10 @@
  */
 
 import type { AuthorizeParameters } from "../models/authorization-code.ts";
-import type { AuthenticationContext } from "../models/authentication.ts";
+import type {
+  AuthenticationContext,
+  AuthenticationRequest,
+} from "../models/authentication.ts";
 import { snapshotAuthenticationContext } from "../utils/authentication-context.ts";
 import type { ClientInterface } from "../models/client.ts";
 import type {
@@ -38,9 +41,11 @@ import type {
 import type { AbstractScope, BasicScope } from "../models/scope.ts";
 import {
   AccessDeniedError,
+  ConsentRequiredError,
   InvalidRequestError,
   InvalidTokenError,
   isOAuth2Error,
+  LoginRequiredError,
   OAuth2Error,
   ServerError,
   toOAuth2Error,
@@ -52,6 +57,12 @@ import {
   authenticateClientCredentials,
   extractClientCredentials,
 } from "./client-authentication.ts";
+import {
+  assertSupportedValues,
+  authenticationShortfall,
+  DEFAULT_PROMPT_VALUES_SUPPORTED,
+  parseAuthenticationRequest,
+} from "./authentication-request.ts";
 import type { IsPublicSuffix } from "./redirect-uri.ts";
 import { isRedirectUriPattern, matchRedirectUri } from "./redirect-uri.ts";
 import type { DispatchableGrant } from "./grants/grant.ts";
@@ -381,6 +392,32 @@ export interface AuthorizationServerOptions<
    *   integer.
    */
   maxBodyBytes?: number;
+  /**
+   * The `prompt` values the authorization endpoint accepts, advertised as
+   * `prompt_values_supported`. A request carrying any other value is refused
+   * with `invalid_request`.
+   *
+   * The server enforces `none`, `login` and `consent` itself. List another
+   * value, such as `select_account` or `create`, only when your
+   * `authenticateUser` honors it: the server passes it through in the
+   * {@linkcode AuthenticationRequest} and cannot check the result.
+   *
+   * @default ["none", "login", "consent"]
+   * @throws {TypeError} From the constructor when an entry is empty or
+   *   contains a space or non-ASCII character.
+   */
+  promptValuesSupported?: readonly string[];
+  /**
+   * Authentication context class references your `authenticateUser` can
+   * achieve, advertised as `acr_values_supported` in the OIDC discovery
+   * document. It does not restrict `acr_values`: the request's preferences
+   * reach `authenticateUser` either way, and the ID token's `acr` is what the
+   * returned `authenticationContext` records.
+   *
+   * @throws {TypeError} From the constructor when an entry is empty or
+   *   contains a space or non-ASCII character.
+   */
+  acrValuesSupported?: readonly string[];
 }
 
 /**
@@ -399,18 +436,33 @@ export interface AuthorizationServerOptions<
  *   pre-authorize everything, return the requested scope as `authorizedScope`.
  *   Supply only verified event claims in `authenticationContext`; the code,
  *   token and refresh descendants retain a snapshot. Omit unknown claims.
+ *   Set `reauthenticated: true` only when the user actively authenticated in
+ *   response to this authorization request.
  * - `null` — explicit denial. The framework redirects the browser to
  *   `redirect_uri` with `error=access_denied`. Use this for "the user said
  *   no", not for "the user isn't signed in yet."
  * - A `Response` — short-circuits the rest of the authorize flow and is
  *   returned to the browser as-is. Use this to redirect to a login page,
- *   render an interstitial, etc.
+ *   render an interstitial, etc. Under `prompt=none` the server answers
+ *   `login_required` instead of returning it.
+ *
+ * The second argument carries the request's validated `prompt`, `max_age` and
+ * `acr_values`; the server always passes it. Before issuing a code the server
+ * checks the returned user against it with
+ * {@linkcode satisfiesAuthenticationRequest} and answers `login_required` when
+ * the check fails, so send the user to sign in again (return a `Response`)
+ * whenever the session cannot meet it. Report the `acr` the login achieved in
+ * `authenticationContext`, never the requested one.
  */
-export type AuthenticateUserFn<User> = (request: Request) => Promise<
+export type AuthenticateUserFn<User> = (
+  request: Request,
+  authentication?: AuthenticationRequest,
+) => Promise<
   | {
       user: User;
       authorizedScope?: AbstractScope;
       authenticationContext?: AuthenticationContext;
+      reauthenticated?: boolean;
     }
   | Response
   | null
@@ -429,7 +481,12 @@ export type AuthenticateUserFn<User> = (request: Request) => Promise<
  *   `redirect_uri` with `error=access_denied`.
  * - A `Response` — short-circuits the rest of the authorize flow and is
  *   returned to the browser as-is. Use this to render a consent page that
- *   later resubmits to the authorize endpoint with the user's decision.
+ *   later resubmits to the authorize endpoint with the user's decision. Under
+ *   `prompt=none` the server answers `consent_required` instead.
+ *
+ * With `prompt=consent` the server calls it even when the scope is already
+ * authorized, and the fourth argument, always passed, says so: ask again
+ * rather than reusing a stored grant.
  */
 export type HandleConsentFn<
   Client extends ClientInterface,
@@ -438,6 +495,7 @@ export type HandleConsentFn<
   client: Client,
   requestedScope: S | undefined,
   user: unknown,
+  authentication?: AuthenticationRequest,
 ) => Promise<{ approved: boolean; scope?: S } | Response>;
 
 /** Resolved endpoint URLs for a request (issuer-derived unless overridden). */
@@ -728,6 +786,8 @@ export class AuthorizationServer<
   #endSession?: EndSessionFn<Client>;
   #isPublicSuffix?: IsPublicSuffix;
   #maxBodyBytes: number;
+  #promptValuesSupported: readonly string[];
+  #acrValuesSupported?: readonly string[];
   #subjectOf: (user: User) => string;
   #userClaims?: (
     user: User,
@@ -757,7 +817,8 @@ export class AuthorizationServer<
    * @throws {RangeError} If `maxBodyBytes` or `maxTokenBodyBytes` is not a
    *   positive integer.
    * @throws {TypeError} If `realm` contains a character outside printable
-   *   ASCII.
+   *   ASCII, or a `promptValuesSupported` or `acrValuesSupported` entry is
+   *   empty or contains a space or non-ASCII character.
    */
   constructor(options: AuthorizationServerOptions<Client, User, S>) {
     super({
@@ -795,6 +856,16 @@ export class AuthorizationServer<
     this.#isPublicSuffix = options.isPublicSuffix;
     this.#maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     assertMaxBodyBytes(this.#maxBodyBytes, "maxBodyBytes");
+    this.#promptValuesSupported = assertSupportedValues(
+      "promptValuesSupported",
+      options.promptValuesSupported ?? DEFAULT_PROMPT_VALUES_SUPPORTED,
+    );
+    if (options.acrValuesSupported) {
+      this.#acrValuesSupported = assertSupportedValues(
+        "acrValuesSupported",
+        options.acrValuesSupported,
+      );
+    }
     this.#subjectOf = options.subjectOf ?? defaultSubjectOf;
     this.#userClaims = options.userClaims;
     this.#introspectionClaims = options.introspectionClaims;
@@ -1104,7 +1175,9 @@ export class AuthorizationServer<
    * `openid`, or `undefined` when the OIDC surface is off (no signing keys),
    * the token has no user, the scope lacks `openid`, or no issuer resolved.
    * The id_token's `aud` is the client id and it expires one hour after
-   * issue.
+   * issue. Its `auth_time` and `acr` are the token's recorded
+   * `authenticationContext`, present exactly when the context has them,
+   * whatever `userClaims` returns.
    */
   async mintIdToken(
     token: Token<Client, User, S>,
@@ -1128,6 +1201,11 @@ export class AuthorizationServer<
     };
     if (token.nonce) claims.nonce = token.nonce;
     else delete claims.nonce;
+    const event = token.authenticationContext;
+    if (event?.auth_time !== undefined) claims.auth_time = event.auth_time;
+    else delete claims.auth_time;
+    if (event?.acr !== undefined) claims.acr = event.acr;
+    else delete claims.acr;
     return await signJwt(key, claims);
   }
 
@@ -1482,12 +1560,27 @@ export class AuthorizationServer<
     this.#validateResponseType(params.responseType);
     const requestedScope = grant.parseScope(params.scope);
     this.#validateChallenge(grant, params);
+    const authentication = parseAuthenticationRequest(
+      new URL(request.url).searchParams,
+      this.#promptValuesSupported,
+    );
+    const silent = authentication.prompt.includes("none");
 
-    const authResult = await authenticateUser(request);
-    if (authResult instanceof Response) return authResult;
+    const authResult = await authenticateUser(request, authentication);
+    if (authResult instanceof Response) {
+      if (!silent) return authResult;
+      await authResult.body?.cancel();
+      throw new LoginRequiredError("the user must sign in");
+    }
     if (!authResult) {
       throw new AccessDeniedError("authentication required");
     }
+    const shortfall = authenticationShortfall(
+      authentication,
+      authResult,
+      Date.now(),
+    );
+    if (shortfall) throw new LoginRequiredError(shortfall);
     const { user, authorizedScope } = authResult;
     const authenticationContext = snapshotAuthenticationContext(
       authResult.authenticationContext,
@@ -1507,6 +1600,7 @@ export class AuthorizationServer<
       authorizedScope,
       services,
       handleConsent,
+      authentication,
     });
     if (consented instanceof Response) return consented;
 
@@ -1659,6 +1753,7 @@ export class AuthorizationServer<
     authorizedScope: AbstractScope | undefined;
     services: AuthorizationServerServices<Client, User, S>;
     handleConsent?: HandleConsentFn<Client, S>;
+    authentication: AuthenticationRequest;
   }): Promise<{ scope: S | undefined } | Response> {
     const {
       grant,
@@ -1668,6 +1763,7 @@ export class AuthorizationServer<
       authorizedScope,
       services,
       handleConsent,
+      authentication,
     } = options;
 
     const acceptedScope = await grant.acceptedScope(
@@ -1678,11 +1774,22 @@ export class AuthorizationServer<
     );
     let scope = acceptedScope ?? undefined;
 
+    const forceConsent = authentication.prompt.includes("consent");
+    if (forceConsent && !handleConsent) {
+      throw new ConsentRequiredError(
+        "prompt=consent requires a consent handler",
+      );
+    }
     const needsConsent =
-      scope !== undefined && !(authorizedScope && authorizedScope.has(scope));
+      forceConsent ||
+      (scope !== undefined && !(authorizedScope && authorizedScope.has(scope)));
     if (needsConsent && handleConsent) {
-      const consent = await handleConsent(client, scope, user);
-      if (consent instanceof Response) return consent;
+      const consent = await handleConsent(client, scope, user, authentication);
+      if (consent instanceof Response) {
+        if (!authentication.prompt.includes("none")) return consent;
+        await consent.body?.cancel();
+        throw new ConsentRequiredError("the user must consent");
+      }
       if (!consent.approved) {
         throw new AccessDeniedError("user denied consent");
       }
@@ -2034,6 +2141,7 @@ export class AuthorizationServer<
     metadata.response_types_supported = hasAuthCodeGrant ? ["code"] : [];
     if (hasAuthCodeGrant) {
       metadata.authorization_response_iss_parameter_supported = true;
+      metadata.prompt_values_supported = [...this.#promptValuesSupported];
     }
 
     const scopesSupported = context.scopesSupported ?? this.scopesSupported;
@@ -2045,6 +2153,9 @@ export class AuthorizationServer<
       this.#advertiseEndpoints(metadata, endpoints, true);
       metadata.id_token_signing_alg_values_supported = ["ES256"];
       metadata.subject_types_supported = ["public"];
+      if (hasAuthCodeGrant && this.#acrValuesSupported?.length) {
+        metadata.acr_values_supported = [...this.#acrValuesSupported];
+      }
     }
 
     return metadata;
@@ -2350,6 +2461,11 @@ export type {
   AuthorizationCode,
   AuthorizeParameters,
 } from "../models/authorization-code.ts";
+export type { AuthenticationRequest } from "../models/authentication.ts";
+export {
+  type AuthenticationOutcome,
+  satisfiesAuthenticationRequest,
+} from "./authentication-request.ts";
 export type { DeviceAuthorization } from "../models/device-authorization.ts";
 export type {
   AuthorizationServerMetadata,

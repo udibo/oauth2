@@ -6,6 +6,7 @@
  * - RFC 6749 Section 5.2 (Token errors)
  * - RFC 6750 Section 3.1 (Bearer token errors)
  * - RFC 8628 Section 3.5 (Device flow errors)
+ * - OpenID Connect Core 1.0 Section 3.1.2.6 (Authentication errors)
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2
  * @see https://datatracker.ietf.org/doc/html/rfc6750#section-3.1
@@ -382,5 +383,70 @@ export const ExpiredTokenError: OAuth2ErrorClass =
     status: 400,
     extensions: {
       error: "expired_token",
+    },
+  });
+
+/**
+ * The authorization request requires the user to authenticate, and the server
+ * cannot show a login page (`prompt=none`) or cannot re-authenticate the user
+ * as `prompt=login` or `max_age` requires.
+ *
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#AuthError
+ */
+export const LoginRequiredError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Login Required",
+    status: 400,
+    extensions: {
+      error: "login_required",
+    },
+  });
+
+/**
+ * The authorization request requires the user's consent, and the server
+ * cannot obtain it: `prompt=none` forbids the consent page, or `prompt=consent`
+ * reached a server with no consent handler.
+ *
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#AuthError
+ */
+export const ConsentRequiredError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Consent Required",
+    status: 400,
+    extensions: {
+      error: "consent_required",
+    },
+  });
+
+/**
+ * The authorization request requires user interaction other than login or
+ * consent, and `prompt=none` forbids showing it. Throw it from
+ * `authenticateUser` or `handleConsent` for an interstitial the request
+ * cannot skip.
+ *
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#AuthError
+ */
+export const InteractionRequiredError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Interaction Required",
+    status: 400,
+    extensions: {
+      error: "interaction_required",
+    },
+  });
+
+/**
+ * The user must choose among several accounts and the server cannot ask:
+ * `prompt=none` with more than one signed-in account, or `prompt=select_account`
+ * that the application cannot honor.
+ *
+ * @see https://openid.net/specs/openid-connect-core-1_0.html#AuthError
+ */
+export const AccountSelectionRequiredError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Account Selection Required",
+    status: 400,
+    extensions: {
+      error: "account_selection_required",
     },
   });
