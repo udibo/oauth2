@@ -987,10 +987,10 @@ function recordingAuthenticationControls(
   controls: Pick<AuthRequestRecord, "maxAge" | "scopeForwarded">,
 ): AuthRequestStorage {
   return {
-    get: (state) => storage.get(state),
+    get: storage.get.bind(storage),
     set: (state, value) => storage.set(state, { ...value, ...controls }),
-    delete: (state) => storage.delete(state),
-    clear: () => storage.clear(),
+    delete: storage.delete.bind(storage),
+    clear: storage.clear.bind(storage),
   };
 }
 
