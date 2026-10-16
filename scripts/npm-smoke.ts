@@ -9,6 +9,13 @@
  * given no JSR registry, so the install itself fails when a runtime dependency
  * can only come from JSR, and the run also fails when one resolves through JSR
  * at all, which a published package must not do.
+ *
+ * The pinned consumer needs npm 11.6.0 or later: earlier npm crashes resolving
+ * it whenever the Vitest pin trails Vitest's newest release
+ * (https://github.com/npm/cli/issues/9787). With `--install-only` the consumer
+ * pins nothing, so any npm can run it: it installs the tarball, checks its
+ * contents and runs the `udibo-oauth2` command, without the type check and
+ * imports, which need the peers.
  */
 import { execFileSync, spawn } from "node:child_process";
 import {
@@ -24,6 +31,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isMain } from "./_main.ts";
+
 interface PackageManifest {
   name: string;
   version: string;
@@ -38,6 +47,8 @@ const smokeDir = join(packageDir, "scripts", "npm-smoke");
 const tscPath = join(packageDir, "node_modules", "typescript", "bin", "tsc");
 const isWindows = process.platform === "win32";
 const releaseMode = process.argv.includes("--release");
+const installOnly = process.argv.includes("--install-only");
+const PINNED_CONSUMER_MIN_NPM = [11, 6, 0] as const;
 const CONSUMER_PINS = [
   "hono",
   "react",
@@ -52,6 +63,25 @@ const CONSUMER_PINS = [
 function fail(message: string): never {
   console.error(`npm smoke: ${message}`);
   process.exit(1);
+}
+
+/**
+ * Why `npmVersion` cannot install the pinned consumer, or `undefined` when it
+ * can. npm before 11.6.0 lacks the `#loadPeerSet` fix (npm/cli#8448).
+ */
+export function pinnedConsumerNpmProblem(
+  npmVersion: string,
+): string | undefined {
+  const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(npmVersion.trim());
+  if (!parts) return `cannot read the npm version from "${npmVersion}"`;
+  const actual = parts.slice(1, 4).map(Number);
+  for (const [index, minimum] of PINNED_CONSUMER_MIN_NPM.entries()) {
+    if (actual[index]! > minimum) return undefined;
+    if (actual[index]! < minimum) {
+      return `npm ${npmVersion.trim()} cannot resolve the pinned consumer: npm before ${PINNED_CONSUMER_MIN_NPM.join(".")} crashes in #loadPeerSet whenever the Vitest pin trails Vitest's newest release (https://github.com/npm/cli/issues/9787). Use npm ${PINNED_CONSUMER_MIN_NPM.join(".")} or later, or pass --install-only`;
+    }
+  }
+  return undefined;
 }
 
 function run(
@@ -191,6 +221,11 @@ async function main(): Promise<void> {
       );
     }
   }
+  const npmVersion = run("npm", ["--version"], packageDir, "pipe").trim();
+  if (!installOnly) {
+    const problem = pinnedConsumerNpmProblem(npmVersion);
+    if (problem) fail(problem);
+  }
   const workDir = mkdtempSync(join(tmpdir(), "oauth2-smoke-"));
   try {
     const packDir = join(workDir, "pack");
@@ -213,7 +248,9 @@ async function main(): Promise<void> {
         name: "oauth2-smoke-consumer",
         private: true,
         type: "module",
-        dependencies: exactVersions(manifest.devDependencies ?? {}),
+        dependencies: installOnly
+          ? {}
+          : exactVersions(manifest.devDependencies ?? {}),
       }),
     );
     if (!releaseMode) {
@@ -299,6 +336,13 @@ async function main(): Promise<void> {
       );
     }
 
+    if (installOnly) {
+      console.log(
+        `npm smoke: ${tarballs[0]} installed with npm ${npmVersion} and ran its command on Node ${process.version}`,
+      );
+      return;
+    }
+
     copyFileSync(
       join(smokeDir, "consumer.tsx"),
       join(consumerDir, "consumer.tsx"),
@@ -333,4 +377,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (isMain(import.meta.url)) await main();

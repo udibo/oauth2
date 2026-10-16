@@ -609,6 +609,19 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   `/hono/bff/testing`, `/react/testing`) register suites through Vitest. The
   full matrix is in [the README](../README.md#runtime-support); the support
   boundary is in [the stability policy](stability.md#runtime-support).
+- **npm 10, the npm Node 22 bundles, can crash installing next to an older
+  Vitest.** When a project pins `vitest` to a release older than Vitest's newest
+  one, npm before 11.6.0 fails any install in that project with
+  `Cannot read properties of null (reading 'edgesOut')`, whether or not it
+  installs this package ([npm/cli#9787](https://github.com/npm/cli/issues/9787)).
+  Vitest pins its optional peers (`@vitest/browser-playwright`,
+  `@vitest/coverage-v8` and the rest) to its own version, and npm 10 crashes
+  reconciling those pins with its newest release. npm 11.6.0 carries the fix
+  ([npm/cli#8448](https://github.com/npm/cli/pull/8448)) and no npm 10 release
+  does. Run `npm install -g npm@11` on Node 22, or move `vitest` to its newest
+  release. `--legacy-peer-deps` is not a fix: it avoids the crash by skipping
+  peer installation for the whole project. This package needs Vitest only for
+  its testing helpers.
 - **On Deno, a request that misses the package's own deadline moves later
   requests off the pooled connection.** Deno's global `fetch` sends every
   request to an origin over one pooled HTTP/2 connection, and aborting a request
