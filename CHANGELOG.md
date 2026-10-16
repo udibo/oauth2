@@ -1,3 +1,36 @@
+## [0.27.0](https://github.com/udibo/oauth2/compare/0.26.0...0.27.0) (2026-10-16)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** the authorize endpoint now enforces OpenID Connect
+authentication controls it used to ignore. prompt=login and max_age=0
+answer login_required unless authenticateUser returns reauthenticated:
+true (true only when the user signed in again for this request). Any
+max_age answers login_required when the returned authenticationContext
+has no auth_time (even after a re-authentication), when auth_time is
+more than 60 seconds ahead of the server clock, or, for max_age above
+zero, when auth_time is older than max_age (also after a
+re-authentication). Use satisfiesAuthenticationRequest(authentication,
+result) in authenticateUser to redirect to login instead. prompt=none
+turns a login or consent Response into login_required or
+consent_required. prompt=consent with no handleConsent answers
+consent_required. prompt values other than none, login and consent are
+refused with invalid_request unless listed in the new
+promptValuesSupported option. A repeated or malformed prompt, max_age or
+acr_values is invalid_request. The ID token's auth_time and acr now come
+from the recorded authenticationContext, present exactly when it has
+them, whatever userClaims returns.
+createMemoryAuthorizationServer().authorize() with its default user now
+gives login_required for prompt=login and for any max_age, and
+consent_required for prompt=consent without handleConsent; pass an
+authenticateUser that reports auth_time and reauthenticated, and a
+handleConsent, to drive those flows.
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Features
+
+* **server:** enforce prompt, max_age and acr_values ([#132](https://github.com/udibo/oauth2/issues/132)) ([085d6b3](https://github.com/udibo/oauth2/commit/085d6b39aefd9268b90fe6c92779ac81f360f4c6)), closes [#130](https://github.com/udibo/oauth2/issues/130) [#129](https://github.com/udibo/oauth2/issues/129)
+
 ## [0.26.0](https://github.com/udibo/oauth2/compare/0.25.0...0.26.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
