@@ -58,6 +58,16 @@ describe("render", () => {
     );
   });
 
+  it("resolves the target of a link whose text is an image", () => {
+    const t = fixture({
+      "docs/guide.md":
+        "# Guide\n[![badge](https://img.example/b.svg)](../LICENSE)\n## Setup\n",
+    });
+    expect(render(t.root, INDEX)).toContain(
+      "[![badge](https://img.example/b.svg)](https://github.com/udibo/oauth2/blob/main/LICENSE)",
+    );
+  });
+
   it("stops the header at the Docs section", () => {
     const t = fixture();
     expect(render(t.root, INDEX)).not.toContain("## Optional");
@@ -93,6 +103,14 @@ describe("findProblems", () => {
     expect(findProblems(t.root)).toEqual([
       "llms-full.txt is missing; run `pnpm llms:generate`",
     ]);
+  });
+
+  it("reports a dead link behind an image in the README", () => {
+    const t = fixture({
+      "README.md": "[![badge](https://img.example/b.svg)](GONE)\n",
+    });
+    writeFull(t);
+    expect(findProblems(t.root)).toEqual(["dead link in README.md: GONE"]);
   });
 
   it("reports a dead link in the README", () => {

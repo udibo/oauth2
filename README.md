@@ -1,5 +1,7 @@
 # @udibo/oauth2
 
+[![npm version](https://img.shields.io/npm/v/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2) [![JSR version](https://jsr.io/badges/@udibo/oauth2)](https://jsr.io/@udibo/oauth2) [![JSR score](https://jsr.io/badges/@udibo/oauth2/score)](https://jsr.io/@udibo/oauth2/score) [![CI](https://github.com/udibo/oauth2/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/udibo/oauth2/actions/workflows/ci-cd.yml?query=branch%3Amain) [![License: MIT](https://img.shields.io/npm/l/@udibo/oauth2)](LICENSE) [![npm downloads](https://img.shields.io/npm/dm/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2) [![Node.js version](https://img.shields.io/node/v/@udibo/oauth2)](https://www.npmjs.com/package/@udibo/oauth2)
+
 OAuth2 and OpenID Connect tools for TypeScript applications. Connect your app to
 Udibo's identity service, or host an authorization server for your own app. The
 package includes clients, authorization and resource servers, Hono middleware,

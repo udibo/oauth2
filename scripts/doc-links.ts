@@ -101,9 +101,13 @@ export function findProblems(root: string): string[] {
         problems.push(`${file}: per-document changelog`);
       }
     }
-    for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-      const target = match[1]!;
-      if (/^[a-z]+:/i.test(target) || target.startsWith("//")) continue;
+    const targets = [
+      ...text.matchAll(/\[(?:!\[[^\]]*\]\(([^)]+)\)|[^\]]*)\]\(([^)]+)\)/g),
+    ].flatMap((match) => [match[1], match[2]]);
+    for (const target of targets) {
+      if (!target || /^[a-z]+:/i.test(target) || target.startsWith("//")) {
+        continue;
+      }
       const url = new URL(target, pathToFileURL(sourcePath));
       const fragment = decodeURIComponent(url.hash.slice(1));
       url.hash = "";
