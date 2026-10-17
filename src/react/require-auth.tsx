@@ -38,7 +38,9 @@ const isBrowser = (): boolean => typeof window !== "undefined";
  * Render `children` only when authenticated. Otherwise call
  * `login({ returnTo })` once and render `fallback` while the redirect
  * is in flight. While a `useOAuth2().logout()` is running or navigating away,
- * render `fallback` and start no login.
+ * no new login starts; what renders still follows `isLoading` and
+ * `isAuthenticated`, so the page shows `fallback` once the logout has signed
+ * it out.
  */
 export function RequireAuth(props: RequireAuthProps): ReactNode {
   const { children, fallback = null, returnTo } = props;

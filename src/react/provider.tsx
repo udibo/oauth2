@@ -67,18 +67,34 @@ const RENEW_JITTER = 0.1;
 
 const isBrowser = (): boolean => typeof window !== "undefined";
 
-function msUntilRenew(expiresIn: number): number {
-  return (expiresIn - RENEW_SKEW_SECONDS) * 1000;
+const EXPIRY_ROUNDING_MS = 1_000;
+
+interface ReportedExpiry {
+  expiresIn: number;
+  at: number;
 }
 
-function isFreshExpiry(expiresIn: number | null): boolean {
-  return expiresIn != null && msUntilRenew(expiresIn) > MIN_RENEW_MS;
+function reportExpiry(expiresIn: number | null): ReportedExpiry | null {
+  return expiresIn == null ? null : { expiresIn, at: Date.now() };
+}
+
+function isLaterExpiry(
+  next: ReportedExpiry | null,
+  prev: ReportedExpiry | null,
+): boolean {
+  if (next == null || next.expiresIn <= 0) return false;
+  if (prev == null) return true;
+  return (
+    next.at + next.expiresIn * 1000 >
+    prev.at + prev.expiresIn * 1000 + EXPIRY_ROUNDING_MS
+  );
 }
 
 function renewDelayMs(expiresIn: number, staleRenewals: number): number {
-  const base = isFreshExpiry(expiresIn)
-    ? msUntilRenew(expiresIn)
-    : Math.min(MAX_RENEW_BACKOFF_MS, MIN_RENEW_MS * 2 ** staleRenewals);
+  const base =
+    staleRenewals === 0
+      ? Math.max(MIN_RENEW_MS, (expiresIn - RENEW_SKEW_SECONDS) * 1000)
+      : Math.min(MAX_RENEW_BACKOFF_MS, MIN_RENEW_MS * 2 ** staleRenewals);
   return base * (1 - RENEW_JITTER * Math.random());
 }
 
@@ -95,13 +111,12 @@ function expiresInFrom(tokens: TokenBundle): number | null {
  * state via `useOAuth2()`.
  *
  * While authenticated it renews the session on a timer shortly before the
- * access token expires, re-arming after each renew. When the token is already
- * expired or within seconds of it, as a `BffClient` session reports
- * (`sessionExpiresIn: 0`) until a proxied call refreshes the token, it does
- * not poll at a fixed rate: it renews after 5 seconds, then doubles the wait
- * after each renew that still reports an expired token, up to one renew every
- * 5 minutes. A renew or client event that reports a later expiry returns it
- * to renewing shortly before that expiry. Renewal is per tab and
+ * access token expires (at least 5 seconds apart), re-arming after each
+ * renew. A renew that fails, or reports no later expiry than the one before,
+ * as a `BffClient` session does (`sessionExpiresIn: 0`) until a proxied call
+ * refreshes the token, backs off instead: the wait doubles after each one, up
+ * to one renew every 5 minutes. A renew or client event that reports a later
+ * expiry returns it to the pre-expiry schedule. Renewal is per tab and
  * uncoordinated: a `DirectClient` given a refresh-token storage shared across
  * tabs (e.g. `IndexedDBRefreshTokenStorage`) against a server that
  * rotates refresh tokens can still have two tabs redeem the same token, which
@@ -117,6 +132,7 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
   }));
   const [renewCount, setRenewCount] = useState(0);
   const staleRenewals = useRef(0);
+  const reportedExpiry = useRef<ReportedExpiry | null>(null);
   const [logoutsInFlight, setLogoutsInFlight] = useState(0);
 
   useEffect(() => {
@@ -191,22 +207,34 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     if (!isBrowser()) return;
     if (!state.isAuthenticated) {
       staleRenewals.current = 0;
+      reportedExpiry.current = null;
       return;
     }
     const expiresIn = state.sessionExpiresIn;
     if (expiresIn == null || !Number.isFinite(expiresIn) || expiresIn < 0) {
       return;
     }
-    if (isFreshExpiry(expiresIn)) staleRenewals.current = 0;
+    if (reportedExpiry.current?.expiresIn !== expiresIn) {
+      const reported = reportExpiry(expiresIn);
+      if (isLaterExpiry(reported, reportedExpiry.current)) {
+        staleRenewals.current = 0;
+      }
+      reportedExpiry.current = reported;
+    }
     let cancelled = false;
     const delayMs = renewDelayMs(expiresIn, staleRenewals.current);
     const timer = setTimeout(() => {
       client.renewSession().then(
         (session) => {
           if (cancelled) return;
-          staleRenewals.current = isFreshExpiry(session.sessionExpiresIn)
+          const reported = reportExpiry(session.sessionExpiresIn);
+          staleRenewals.current = isLaterExpiry(
+            reported,
+            reportedExpiry.current,
+          )
             ? 0
             : staleRenewals.current + 1;
+          reportedExpiry.current = reported;
           setState((prev) => ({ ...prev, ...session }));
           setRenewCount((count) => count + 1);
         },

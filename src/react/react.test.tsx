@@ -704,6 +704,124 @@ describe("OAuth2Provider renew timer", () => {
     ).toStrictEqual([90_000, 100_000]);
   });
 
+  it("backs off while every renewal fails", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    const start = time.now;
+    const times: number[] = [];
+    using _renew = vi.spyOn(client, "renewSession").mockImplementation(() => {
+      times.push(time.now - start);
+      return Promise.reject(new Error("session endpoint unreachable"));
+    });
+    for (let elapsed = 0; elapsed < 160; elapsed++) {
+      await act(async () => {
+        await time.tickAsync(1_000);
+      });
+    }
+
+    expect(times).toStrictEqual(
+      [5, 15, 35, 75, 155].map((seconds) => seconds * 1_000),
+    );
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+  });
+
+  it("starts the backoff from 5 s for a session signed in after a sign-out", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    for (let elapsed = 0; elapsed < 620; elapsed++) {
+      await act(async () => {
+        await time.tickAsync(1_000);
+      });
+    }
+    expect(
+      client.renewCount,
+      "probes at 5, 15, 35, 75, 155, 315 and 615 s reach the cap",
+    ).toBe(7);
+
+    await act(async () => {
+      client.signOut();
+    });
+    await act(async () => {
+      client.signIn({ sub: "u2" });
+    });
+    const times = await renewTimesOver(time, client, 10_000);
+
+    expect(
+      times,
+      "a new session must not inherit the last one's backoff",
+    ).toStrictEqual([5_000]);
+  });
+
+  it("keeps renewing at the floor while short-lived tokens keep refreshing", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 20,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+
+    const times = await renewTimesOver(time, client, 60_000);
+
+    expect(
+      times,
+      "each renewal reports a later expiry, so none of them counts as stale",
+    ).toStrictEqual(
+      [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map(
+        (seconds) => seconds * 1_000,
+      ),
+    );
+  });
+
+  it("stops renewing once a renewal reports no expiry", async () => {
+    using time = new FakeTime();
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    client.setSessionExpiresIn(null);
+
+    const times = await renewTimesOver(time, client, 600_000);
+
+    expect(times, "an unknown expiry schedules nothing").toHaveLength(1);
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+  });
+
   it("clears its timer on unmount", async () => {
     using time = new FakeTime();
     const client = createMockOAuth2Client({
@@ -744,6 +862,22 @@ describe("RequireAuth", () => {
       client.signIn({ sub: "u3" });
     });
     expect(screen.getByTestId("protected").textContent).toBe("secret");
+  });
+
+  it("starts a login under MockOAuth2Provider, which tracks no logout", async () => {
+    const client = createMockOAuth2Client();
+    using loginSpy = vi
+      .spyOn(client, "login")
+      .mockImplementation(() => Promise.resolve({ url: "" }));
+    render(
+      <MockOAuth2Provider client={client}>
+        <RequireAuth>
+          <span>secret</span>
+        </RequireAuth>
+      </MockOAuth2Provider>,
+    );
+    await act(async () => {});
+    expect(loginSpy).toHaveBeenCalledWith({ returnTo: "/" });
   });
 
   it("calls login with the current path as returnTo when unauthenticated", async () => {
@@ -892,6 +1026,36 @@ describe("RequireAuth", () => {
       "https://app.test/auth/logout",
       "https://app.test/auth/login?return_to=%2Faccount",
     ]);
+  });
+
+  it("keeps waiting on a logout through a pageshow that is not a cache restore", async () => {
+    using location = stubLocation();
+    const client = new BffClient({
+      endpoints: { baseUrl: "https://app.test" },
+    });
+    using loginSpy = vi.spyOn(client, "login");
+    render(
+      <OAuth2Provider
+        client={client}
+        initialState={{ isAuthenticated: true, user: { sub: "u1" } }}
+      >
+        <RequireAuth>
+          <SignOut />
+        </RequireAuth>
+      </OAuth2Provider>,
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "sign out" }).click();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: false }),
+      );
+    });
+
+    expect(loginSpy).not.toHaveBeenCalled();
+    expect(location.assigned).toStrictEqual(["https://app.test/auth/logout"]);
   });
 });
 
