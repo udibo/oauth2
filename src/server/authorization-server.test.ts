@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rejection, thrown } from "../_test_assert.ts";
 import { BasicScope } from "../models/scope.ts";
 import { OAuth2Error, ServerError } from "../errors.ts";
@@ -22,6 +22,7 @@ import { DeviceAuthorizationGrant } from "./grants/device-authorization.ts";
 import {
   AuthorizationServer,
   type AuthorizationServerOptions,
+  type RotatedOutRevocationEvent,
 } from "./authorization-server.ts";
 import type { DispatchableGrant } from "./grants/grant.ts";
 import {
@@ -1288,7 +1289,11 @@ describe("AuthorizationServer", () => {
       };
 
       async function rotatingServer(
-        options: { replayGraceSeconds?: number; tombstones?: boolean } = {},
+        options: {
+          replayGraceSeconds?: number;
+          tombstones?: boolean;
+          onRotatedOutRevocation?: () => void;
+        } = {},
       ) {
         const services = createTestServices();
         const { tokenService } = services;
@@ -1303,11 +1308,20 @@ describe("AuthorizationServer", () => {
         await services.clientService.add(publicClient);
         await services.clientService.add(otherPublicClient);
         const reuseEvents: string[] = [];
+        const revocationEvents: RotatedOutRevocationEvent<
+          TestClient,
+          TestUser
+        >[] = [];
         const rotating = new AuthorizationServer({
           resolve: () => ({
             services: { clientService: services.clientService, tokenService },
             issuer: "https://auth.example.com",
           }),
+          onRotatedOutRevocation:
+            options.onRotatedOutRevocation ??
+            ((event) => {
+              revocationEvents.push(event);
+            }),
           grants: {
             refresh_token: new RefreshTokenGrant({
               resolve: () => ({
@@ -1321,7 +1335,12 @@ describe("AuthorizationServer", () => {
             }),
           },
         });
-        return { server: rotating, tokenService, reuseEvents };
+        return {
+          server: rotating,
+          tokenService,
+          reuseEvents,
+          revocationEvents,
+        };
       }
 
       async function issueFamily(
@@ -1405,6 +1424,99 @@ describe("AuthorizationServer", () => {
           expect((await refused.json()).error).toBe("invalid_grant");
         });
       }
+
+      it("reports the family it revoked to onRotatedOutRevocation once, and never as reuse", async () => {
+        const {
+          server: rotating,
+          tokenService,
+          reuseEvents,
+          revocationEvents,
+        } = await rotatingServer();
+        const original = await issueFamily(tokenService);
+        await rotate(rotating, original.refreshToken);
+
+        await revoke(rotating, { token: original.refreshToken });
+
+        expect(
+          revocationEvents.map((event) => ({
+            familyId: event.familyId,
+            clientId: event.client.id,
+            userId: event.user?.id,
+            familyRevoked: event.familyRevoked,
+          })),
+        ).toStrictEqual([
+          {
+            familyId: original.familyId,
+            clientId: testClient.id,
+            userId: testUser.id,
+            familyRevoked: true,
+          },
+        ]);
+        expect(
+          reuseEvents,
+          "a sign-out that races a refresh is not a replay",
+        ).toStrictEqual([]);
+      });
+
+      it("reports familyRevoked false when the family had no live member left", async () => {
+        const {
+          server: rotating,
+          tokenService,
+          revocationEvents,
+        } = await rotatingServer();
+        const original = await issueFamily(tokenService);
+        await rotate(rotating, original.refreshToken);
+        await tokenService.revokeFamily(original.familyId);
+
+        await revoke(rotating, { token: original.refreshToken });
+
+        expect(
+          revocationEvents.map((event) => event.familyRevoked),
+        ).toStrictEqual([false]);
+      });
+
+      it("does not call onRotatedOutRevocation for a live token, another client's token, or one revoked other than by rotation", async () => {
+        const {
+          server: rotating,
+          tokenService,
+          revocationEvents,
+        } = await rotatingServer();
+        const live = await issueFamily(tokenService);
+        const foreign = await issueFamily(tokenService, otherClient);
+        await rotate(rotating, foreign.refreshToken, [
+          "client-2",
+          "other-secret",
+        ]);
+        const revoked = await issueFamily(tokenService);
+        await tokenService.revoke(revoked.refreshToken, "refresh_token");
+
+        await revoke(rotating, { token: live.refreshToken });
+        await revoke(rotating, { token: foreign.refreshToken });
+        await revoke(rotating, { token: revoked.refreshToken });
+
+        expect(revocationEvents).toStrictEqual([]);
+      });
+
+      it("still revokes the family and answers 200 when onRotatedOutRevocation throws", async () => {
+        using logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { server: rotating, tokenService } = await rotatingServer({
+          onRotatedOutRevocation: () => {
+            throw new Error("audit sink down");
+          },
+        });
+        const original = await issueFamily(tokenService);
+        const successor = await rotate(rotating, original.refreshToken);
+
+        const response = await revoke(rotating, {
+          token: original.refreshToken,
+        });
+
+        expect(response.status).toBe(200);
+        expect(
+          await tokenService.getRefreshToken(successor.refresh_token),
+        ).toBe(undefined);
+        expect(logged).toHaveBeenCalledOnce();
+      });
 
       it("revokes every generation after the presented one", async () => {
         const { server: rotating, tokenService } = await rotatingServer();

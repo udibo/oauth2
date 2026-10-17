@@ -98,6 +98,14 @@ export interface TokenServiceContractOptions<
    * loudly rather than losing reuse detection quietly.
    */
   refreshTokenReuseDetection?: boolean;
+  /**
+   * Set to `false` when the service's `revokeCode` deliberately ignores its
+   * `client` argument. The suite then registers an ignored case naming what is
+   * not covered — any client that presents a spent code revokes the tokens
+   * issued from it, so a client that sees a leaked code can end the session it
+   * started — instead of passing in silence. Defaults to `true`.
+   */
+  revokeCodeChecksClient?: boolean;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -125,6 +133,7 @@ export function runTokenServiceContractTests<
   const supportedScope = options.supportedScope ?? "read";
   const makeFamilyId = options.makeFamilyId ?? defaultMakeFamilyId;
   const expectReuseDetection = options.refreshTokenReuseDetection ?? true;
+  const expectCodeClientCheck = options.revokeCodeChecksClient ?? true;
 
   describe(options.describeName ?? "TokenServiceInterface contract", () => {
     let userService: UserServiceInterface<U>;
@@ -386,6 +395,44 @@ export function runTokenServiceContractTests<
       it("returns false when no tokens were issued for the code", async () => {
         expect(await tokenService.revokeCode("never-used")).toBe(false);
       });
+
+      if (expectCodeClientCheck) {
+        async function issueFromCode(code: string): Promise<string> {
+          const accessToken = await tokenService.generateAccessToken(
+            client,
+            user,
+          );
+          await tokenService.save({ accessToken, code, client, user });
+          return accessToken;
+        }
+
+        it("revokes nothing for a client other than the one the code's tokens were issued to", async () => {
+          const other = makeClient(2);
+          await options.addClient(clientService, other);
+          const accessToken = await issueFromCode("replayed-code");
+
+          expect(
+            await tokenService.revokeCode("replayed-code", other),
+            "a client that could never have redeemed the code must not " +
+              "revoke what it issued",
+          ).toBe(false);
+          expect(await tokenService.getToken(accessToken)).not.toBe(undefined);
+        });
+
+        it("revokes for the client the code's tokens were issued to, after another client was refused", async () => {
+          const other = makeClient(2);
+          await options.addClient(clientService, other);
+          const accessToken = await issueFromCode("replayed-code");
+          await tokenService.revokeCode("replayed-code", other);
+
+          expect(await tokenService.revokeCode("replayed-code", client)).toBe(
+            true,
+          );
+          expect(await tokenService.getToken(accessToken)).toBe(undefined);
+        });
+      } else {
+        it.skip("revokeCode ignores the presenting client — any client that presents a spent code revokes its tokens (revokeCodeChecksClient: false)", () => {});
+      }
     });
 
     if (expectReuseDetection) {

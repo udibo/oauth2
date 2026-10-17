@@ -1,5 +1,6 @@
 import type { ClientInterface } from "../../models/client.ts";
 import type { AuthenticationContext } from "../../models/authentication.ts";
+import type { AuthorizationCode } from "../../models/authorization-code.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
 import type { ClientServiceInterface } from "./client.ts";
@@ -225,16 +226,55 @@ export interface TokenServiceInterface<
   ): Promise<RefreshToken<Client, User, Scope> | undefined>;
 
   /**
-   * Revokes all tokens issued with the given authorization code.
-   * Returns true if any tokens were revoked (indicating code replay).
+   * Revokes all tokens issued with the given authorization code, called by the
+   * authorization code grant when a code is presented after it was claimed.
+   * Returns true if any tokens were revoked, which the grant reports as a code
+   * replay (RFC 6819 §4.4.1.1).
    *
-   * Per RFC 6819 Section 4.4.1.1, if an authorization code is used more
-   * than once, the authorization server MUST revoke all tokens previously
-   * issued based on that authorization code.
+   * `client` is the client that presented the code. Revoke only when it is the
+   * client the code's tokens were issued to; for any other client revoke
+   * nothing and resolve `false`. A different client could never have redeemed
+   * the code, since that needs the code's own client's credentials, so its
+   * replay says nothing about theft. A store that ignores `client` revokes on
+   * any client's replay, which lets a client that sees a leaked, spent code end
+   * the session it started.
+   *
+   * With {@linkcode exchangeCode}, make the two linearizable: a call that
+   * begins once `exchangeCode` has claimed the code must find and revoke the
+   * token it saved. Committing the claim and the insert together, as one
+   * database transaction does, meets this.
    *
    * @see https://datatracker.ietf.org/doc/html/rfc6819#section-4.4.1.1
    */
-  revokeCode(code: string): Promise<boolean>;
+  revokeCode(code: string, client?: Client): Promise<boolean>;
+
+  /**
+   * Exchanges an authorization code in one atomic step: claims
+   * `authorizationCode` as `AuthorizationCodeServiceInterface.revoke`
+   * would, and persists `token`, the token issued from it, or does neither.
+   * Resolves the saved token, or `undefined` with nothing persisted when the
+   * code was already claimed or never stored. Concurrent calls for one code
+   * persist exactly one token. `token.code` is already set to the code.
+   *
+   * When implemented, the authorization code grant calls it instead of
+   * claiming the code through the authorization code service and saving the
+   * token with {@linkcode save}. Without it, the grant claims and saves in two
+   * calls, and a replay that arrives between them finds the code claimed but
+   * no token to revoke: the replay is refused, and the token the first
+   * exchange saves next stays live. With it, a replay finds the token
+   * {@linkcode revokeCode} can revoke.
+   *
+   * After a successful call the code service's `get` must resolve `undefined`
+   * for the code, as after `revoke`. A failed insert must leave the code
+   * claimable. Store the token so `revokeCode` finds it by the code, and make
+   * the two linearizable, as `revokeCode` requires.
+   * `runCodeExchangeContractTests` checks it under concurrent callers, with
+   * the store's barrier wired between its claim and its insert.
+   */
+  exchangeCode?(
+    authorizationCode: AuthorizationCode<Client, User, Scope>,
+    token: Token<Client, User, Scope>,
+  ): Promise<Token<Client, User, Scope> | undefined>;
 
   /**
    * Looks up a refresh token that has already been revoked/rotated out. The
@@ -261,8 +301,8 @@ export interface TokenServiceInterface<
    * given a token whose tombstone carries {@linkcode RefreshToken.rotatedAt}.
    * Returns true if anything was revoked.
    *
-   * `/revoke` ends the family without firing `onTokenReuse`, so any audit
-   * trail for that case has to come from this method.
+   * `/revoke` ends the family without firing `onTokenReuse`; it reports the
+   * revocation to `AuthorizationServerOptions.onRotatedOutRevocation` instead.
    *
    * Without {@linkcode rotate}, keep the family revoked: a successor that a
    * concurrent rotation saves after this call must be stored already revoked,
@@ -505,6 +545,8 @@ export abstract class AbstractTokenService<
   /**
    * Revokes every token issued from the given authorization code, returning
    * true if any were revoked (signaling code replay per RFC 6819 §4.4.1.1).
+   * Revoke nothing when `client` is not the client the tokens were issued to
+   * ({@linkcode TokenServiceInterface.revokeCode} explains why).
    */
-  abstract revokeCode(code: string): Promise<boolean>;
+  abstract revokeCode(code: string, client?: Client): Promise<boolean>;
 }

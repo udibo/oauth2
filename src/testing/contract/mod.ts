@@ -30,6 +30,11 @@
  * claim and its insert wires `TokenRotationBarriers` into `rotate`, so the
  * suite can hold a rotation there.
  *
+ * `TokenServiceInterface.exchangeCode` has one too: two exchanges of one
+ * code, a replay racing an exchange through the authorization code grant,
+ * and an exchange whose insert fails. A store that awaits between its claim
+ * and its insert wires `CodeExchangeBarriers` into `exchangeCode`.
+ *
  * The service runners take a factory plus seed helpers because `add` /
  * `register` methods aren't part of the public service interfaces — the
  * consumer tells the runner how to populate test data.
@@ -55,6 +60,12 @@ export {
   type TokenRotationContractOptions,
   type TokenRotationContractServices,
 } from "./token-rotation.ts";
+export {
+  type CodeExchangeBarriers,
+  type CodeExchangeContractOptions,
+  type CodeExchangeContractServices,
+  runCodeExchangeContractTests,
+} from "./code-exchange.ts";
 export {
   runTokenReaderContractTests,
   type TokenReaderContractFixture,

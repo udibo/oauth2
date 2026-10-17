@@ -17,6 +17,7 @@ import {
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
+  type OAuth2Error,
   ServerError,
 } from "../../errors.ts";
 import type { ChallengeMethod, ChallengeMethods } from "../../utils/pkce.ts";
@@ -42,6 +43,21 @@ export interface AuthorizationCodeGrantServices<
 > extends GrantServices<Client, User, S> {
   /** Generates, stores, and looks up authorization codes for the exchange. */
   authorizationCodeService: AuthorizationCodeServiceInterface<Client, User, S>;
+}
+
+/**
+ * What the authorization code grant observed when a code that already issued
+ * tokens was presented again. Passed to
+ * {@link AuthorizationCodeGrantOptions.onCodeReuse}.
+ */
+export interface CodeReuseEvent<Client extends ClientInterface> {
+  /**
+   * The replayed authorization code. It is spent and its tokens are revoked,
+   * but it is still a credential string: hash it before recording it.
+   */
+  code: string;
+  /** The client that presented the code, which is the code's own client. */
+  client: Client;
 }
 
 /**
@@ -100,6 +116,18 @@ export interface AuthorizationCodeGrantOptions<
    * @see https://datatracker.ietf.org/doc/html/rfc9700#section-2.1.1
    */
   requireClientAuthentication?: boolean;
+  /**
+   * Called when a code that already issued tokens is presented again by its
+   * own client and the token service's `revokeCode` revoked those tokens —
+   * record it as a security event. A replay by any other client revokes
+   * nothing and does not fire it.
+   *
+   * Trigger point `code-reuse` (see `docs/trigger-points.md`).
+   * Fire-and-forget: it is awaited, but a throw is caught and logged, never
+   * rethrown, so a failing security-logging hook cannot change the
+   * client-facing `invalid_grant` a replayed code always yields.
+   */
+  onCodeReuse?: (event: CodeReuseEvent<Client>) => void | Promise<void>;
 }
 
 /** Client credentials extended with optional PKCE code_verifier. */
@@ -170,6 +198,9 @@ export class AuthorizationCodeGrant<
    * @see https://datatracker.ietf.org/doc/html/rfc7636#section-4.5
    */
   requireClientAuthentication: boolean;
+  readonly #onCodeReuse?: (
+    event: CodeReuseEvent<Client>,
+  ) => void | Promise<void>;
 
   /** Creates the grant from its {@linkcode AuthorizationCodeGrantOptions}. */
   constructor(options: AuthorizationCodeGrantOptions<Client, User, S>) {
@@ -181,6 +212,7 @@ export class AuthorizationCodeGrant<
     this.requirePKCE = options.requirePKCE ?? true;
     this.requireClientAuthentication =
       options.requireClientAuthentication ?? true;
+    this.#onCodeReuse = options.onCodeReuse;
   }
 
   /**
@@ -338,11 +370,24 @@ export class AuthorizationCodeGrant<
    * Exchanges an authorization code for an access token. If PKCE was used
    * during authorization, the code_verifier must be provided.
    *
-   * The code is claimed by revoking it before the client-match, verifier, and
-   * `redirect_uri` checks, so a failed exchange still consumes the code. Only
-   * the caller whose revoke wins receives a token, given an atomic
-   * `authorizationCodeService.revoke`. Presenting a code that already minted
-   * tokens asks `tokenService.revokeCode` to revoke those tokens and fails with
+   * A failed exchange still consumes the code: one that fails the
+   * client-match, verifier or `redirect_uri` check, or whose token cannot be
+   * generated, is claimed before the error is thrown. Only the caller whose
+   * claim wins receives a token, given an atomic
+   * `authorizationCodeService.revoke`.
+   *
+   * When the token service implements
+   * {@linkcode TokenServiceInterface.exchangeCode}, the grant claims the code
+   * and saves the token in that one call. Otherwise it claims the code with
+   * `authorizationCodeService.revoke` before its checks and saves the token
+   * with `tokenService.save` after them; a replay that lands between those
+   * two calls finds no token to revoke, so the token saved afterwards stays
+   * live.
+   *
+   * A code presented after it was claimed, whether it was gone when the
+   * request read it or a concurrent exchange won the claim, asks
+   * `tokenService.revokeCode` to revoke the tokens issued from it on behalf of
+   * the presenting client, fires `onCodeReuse` when it did, and fails with
    * `invalid_grant` (RFC 6819 §4.4.1.1).
    *
    * @throws {InvalidRequestError} When `code` is missing, a required `code_verifier` is absent, or the verifier is malformed.
@@ -364,19 +409,59 @@ export class AuthorizationCodeGrant<
       throw new InvalidRequestError("code parameter required");
     }
 
-    // RFC 6819 §4.4.1.1: code replay revokes already-issued tokens and rejects.
-    if (await tokenService.revokeCode(code)) {
-      throw new InvalidGrantError("code already used");
-    }
-
     const authorizationCode = await authorizationCodeService.get(code);
-    if (!authorizationCode || authorizationCode.expiresAt < new Date()) {
+    if (!authorizationCode) {
+      throw await this.#refuseClaimedCode(
+        tokenService,
+        code,
+        client,
+        "invalid code",
+      );
+    }
+    if (authorizationCode.expiresAt < new Date()) {
       throw new InvalidGrantError("invalid code");
     }
-    if (!(await authorizationCodeService.revoke(authorizationCode))) {
-      throw new InvalidGrantError("code already used");
+
+    const exchangeCode = tokenService.exchangeCode?.bind(tokenService);
+    if (
+      !exchangeCode &&
+      !(await authorizationCodeService.revoke(authorizationCode))
+    ) {
+      throw await this.#refuseClaimedCode(tokenService, code, client);
     }
 
+    let token: Token<Client, User, S>;
+    try {
+      await this.#checkExchange(authorizationCode, client, body);
+      token = await this.generateToken(
+        client,
+        authorizationCode.user,
+        authorizationCode.scope,
+        tokenService,
+        authorizationCode.authenticationContext,
+      );
+    } catch (error) {
+      if (exchangeCode)
+        await authorizationCodeService.revoke(authorizationCode);
+      throw error;
+    }
+    token.code = code;
+
+    const saved = exchangeCode
+      ? await exchangeCode(authorizationCode, token)
+      : await tokenService.save(token);
+    if (!saved) {
+      throw await this.#refuseClaimedCode(tokenService, code, client);
+    }
+    if (authorizationCode.nonce) saved.nonce = authorizationCode.nonce;
+    return saved;
+  }
+
+  async #checkExchange(
+    authorizationCode: AuthorizationCode<Client, User, S>,
+    client: Client,
+    body: FormData,
+  ): Promise<void> {
     const codeVerifier = body.get("code_verifier");
     if (typeof codeVerifier === "string") {
       if (!validateCodeVerifier(codeVerifier)) {
@@ -393,17 +478,12 @@ export class AuthorizationCodeGrant<
       throw new InvalidRequestError("PKCE is required for this grant");
     }
 
-    const {
-      client: codeClient,
-      user,
-      scope,
-      redirectUri: expectedRedirectUri,
-    } = authorizationCode;
-    if (client.id.toString() !== codeClient.id.toString()) {
+    if (client.id.toString() !== authorizationCode.client.id.toString()) {
       throw new InvalidClientError("code was issued to another client");
     }
 
     const redirectUri = body.get("redirect_uri");
+    const expectedRedirectUri = authorizationCode.redirectUri;
     if (expectedRedirectUri) {
       if (typeof redirectUri !== "string") {
         throw new InvalidGrantError("redirect_uri parameter required");
@@ -413,17 +493,34 @@ export class AuthorizationCodeGrant<
     } else if (redirectUri) {
       throw new InvalidGrantError("did not expect redirect_uri parameter");
     }
+  }
 
-    const token = await this.generateToken(
-      client,
-      user,
-      scope,
-      tokenService,
-      authorizationCode.authenticationContext,
-    );
-    token.code = code;
-    const saved = await tokenService.save(token);
-    if (authorizationCode.nonce) saved.nonce = authorizationCode.nonce;
-    return saved;
+  async #refuseClaimedCode(
+    tokenService: AuthorizationCodeGrantServices<
+      Client,
+      User,
+      S
+    >["tokenService"],
+    code: string,
+    client: Client,
+    unrevokedMessage = "code already used",
+  ): Promise<OAuth2Error> {
+    if (!(await tokenService.revokeCode(code, client))) {
+      return new InvalidGrantError(unrevokedMessage);
+    }
+    await this.#notifyCodeReuse({ code, client });
+    return new InvalidGrantError("code already used");
+  }
+
+  async #notifyCodeReuse(event: CodeReuseEvent<Client>): Promise<void> {
+    if (!this.#onCodeReuse) return;
+    try {
+      await this.#onCodeReuse(event);
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] onCodeReuse hook failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 }

@@ -962,8 +962,67 @@ have no secret and continue to use PKCE. The explicit
 
 Authorization-code replay is also handled: exchanging a code twice revokes every
 token the first exchange issued (RFC 6819 §4.4.1.1), via your token service's
-`revokeCode`. See [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) for the full list
-of deliberate deviations.
+`revokeCode(code, client)`. Two exchanges racing each other count too: the one
+that loses the claim revokes what the winner issued. `client` is the client that
+presented the code. Revoke only when it is the client the tokens were issued to:
+a different client could never have redeemed the code, so its replay only lets
+it end someone else's session. When `revokeCode` revoked something, the grant
+calls your `onCodeReuse` hook, so the replay lands in your audit log:
+
+```ts
+import {
+  AuthorizationCodeGrant,
+  type AuthorizationCodeServiceInterface,
+  type ClientServiceInterface,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import type { ClientInterface } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const clientService: ClientServiceInterface<AppClient, AppUser>;
+declare const tokenService: TokenServiceInterface<AppClient, AppUser>;
+declare const authorizationCodeService: AuthorizationCodeServiceInterface<
+  AppClient,
+  AppUser
+>;
+declare const auditLog: {
+  record(entry: Record<string, unknown>): Promise<void>;
+};
+declare function hashCode(code: string): Promise<string>;
+
+const codeGrant = new AuthorizationCodeGrant<AppClient, AppUser>({
+  resolve: () => ({ clientService, tokenService, authorizationCodeService }),
+  onCodeReuse: async (event) => {
+    await auditLog.record({
+      type: "authorization_code_reuse_detected",
+      codeHash: await hashCode(event.code),
+      clientId: event.client.id,
+    });
+  },
+});
+```
+
+Implement the optional `exchangeCode(authorizationCode, token)` on your token
+service so the grant claims the code and saves its token as one step, as a
+database transaction does. It resolves the saved token, or `undefined` with
+nothing saved when the code was already claimed. Without it, the grant claims
+the code through `authorizationCodeService.revoke` and saves the token in a
+second call, and a replay that lands between the two finds no token to revoke:
+the token saved next stays live. With it, make `revokeCode` see the token from
+the moment the code's claim is visible; committing both together does that.
+`runCodeExchangeContractTests` checks it (see
+[testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md#persistent-storage-contracts)). `MemoryTokenService`
+implements it when you pass it the `authorizationCodeService` the grant uses.
+
+See [Known Limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md) for the full list of deliberate
+deviations.
 
 ## Consent: optional by design
 
@@ -1380,9 +1439,10 @@ to another client leaves that client's family alone. A token service without
 not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
 and the successor stays live until it expires. `replayGraceSeconds` excuses a
 straggling refresh only, never a revocation, and this path does not call
-`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
-token ends the family without firing `onTokenReuse`, so any audit trail for it
-comes from your store's `revokeFamily`. `runTokenServiceContractTests`
+`onTokenReuse`, since a sign-out is not a replay. It calls the server's
+`onRotatedOutRevocation` instead, once, with the family, the client, the user
+and whether `revokeFamily` revoked anything, so you can record it next to your
+reuse events. `runTokenServiceContractTests`
 checks that a service implementing `revokeRotated` returns the family and client
 from a rotated-out token.
 
@@ -3950,6 +4010,65 @@ runTokenRotationContractTests<AppClient, AppUser>({
 });
 ```
 
+`runTokenServiceContractTests` checks that `revokeCode(code, client)` revokes
+nothing for a client other than the one the code's tokens were issued to. Set
+`revokeCodeChecksClient: false` only for a store that deliberately ignores the
+client; the suite then registers an ignored case naming the gap.
+
+A token service that implements `exchangeCode` also runs
+`runCodeExchangeContractTests`. It races `exchangeCode` against itself and,
+through the authorization code grant, against a replay of the code, and fails
+an exchange partway. The same barrier rule applies: your store's test build
+awaits `barriers.afterClaim()` inside `exchangeCode`, between claiming the code
+and inserting the token, and only a store that never awaits between them sets
+`exchangeAwaitsBarrier: false`, as `MemoryTokenService` does:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  AuthorizationCodeServiceInterface,
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import {
+  type CodeExchangeBarriers,
+  runCodeExchangeContractTests,
+} from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshCodeStores(barriers: CodeExchangeBarriers): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  authorizationCodeService: AuthorizationCodeServiceInterface<
+    AppClient,
+    AppUser
+  >;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runCodeExchangeContractTests<AppClient, AppUser>({
+  makeServices: freshCodeStores,
+  addUser,
+  addClient,
+});
+```
+
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
 - Two consumers of one OTP/code/refresh token cannot both succeed.
@@ -5804,6 +5923,12 @@ credential, your adapter must account for competing writes and failures, and
 `revokeFamily` must record the revoked family so a racing save cannot restore
 it.
 
+For authorization codes, implement `exchangeCode` so the claim of the code and
+the save of its token are one atomic step, and have `revokeCode` honor the
+client it is given; `runCodeExchangeContractTests` and
+`runTokenServiceContractTests` check them. Without `exchangeCode`, a code
+replayed between the claim and the save leaves the token saved next live.
+
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.
 Serialize issuance for each `(email, purpose)` across instances when your
@@ -6065,6 +6190,10 @@ sections apply only when you host those flows.
 - [ ] The token store implements `rotate`, claiming a refresh token and saving
       its successor in one step that `revokeFamily` cannot interleave with, and
       passes `runTokenRotationContractTests` with its barrier wired.
+- [ ] The token store implements `exchangeCode`, claiming a code and saving
+      its token in one step, and passes `runCodeExchangeContractTests` with its
+      barrier wired; its `revokeCode` revokes nothing for a client other than
+      the code's own.
 - [ ] Without `rotate`, family revocation, from a replay or from revoking a
       rotated-out token, cannot be undone by a concurrent token save:
       `revokeFamily` records the family and `save` stores any later member of
@@ -6590,7 +6719,9 @@ validated, a redirect to the client with `error=…`).
 | challenge-method            | `ChallengeMethods` (`challengeMethods`)                              | PKCE verification during the code→token exchange                                           | no (defaults to `S256`)                                | blocks          | Converted to a token-endpoint error response                                                                                         |
 | client-store                | `ClientServiceInterface` (`clientService`)                           | Client lookup/auth on every token/revoke/introspect/device call                            | yes                                                    | blocks          | `undefined` → `invalid_client`; other throws converted to an error response                                                          |
 | token-store                 | `TokenServiceInterface` (`tokenService`)                             | Token issuance, refresh, revoke, introspect                                                | yes                                                    | blocks          | Converted to a token-endpoint error response                                                                                         |
-| token-reuse                 | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed to the token endpoint, after the family is revoked; not inside `replayGraceSeconds`, nor when `/revoke` revokes a rotated-out token's family | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
+| token-reuse                 | `onTokenReuse` (`RefreshTokenGrantOptions`)                          | A rotated-out refresh token is replayed to the token endpoint, after the family is revoked; not inside `replayGraceSeconds`, nor when `/revoke` revokes a rotated-out token's family (see rotated-out-revocation) | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed token yields                     |
+| rotated-out-revocation      | `onRotatedOutRevocation` (`AuthorizationServerOptions`)              | `POST /revoke` revokes the family of a rotated-out refresh token issued to the authenticated client, after `revokeFamily`                                                            | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `200` the endpoint answers                                  |
+| code-reuse                  | `onCodeReuse` (`AuthorizationCodeGrantOptions`)                      | A claimed authorization code is presented again by its own client and `revokeCode` revoked the tokens issued from it; not for another client's replay                                | no                                                     | fire-and-forget | Isolated: caught and logged, never rethrown, so a throw can't change the `invalid_grant` a replayed code yields                      |
 | refresh-cap                 | `refreshTokenFamilyExpiresAt` (`TokenServiceInterface`)              | Refresh-token issuance and rotation                                                        | no (absent → uncapped)                                 | blocks          | A past cap → `invalid_grant`; other throws → token-endpoint error response                                                           |
 | accepted-scope              | `acceptedScope` (`TokenServiceInterface`)                            | Scope narrowing during issuance                                                            | yes (on the interface)                                 | blocks          | `false` → `invalid_scope`; other throws converted                                                                                    |
 | authorization-code-store    | `AuthorizationCodeServiceInterface` (`authorizationCodeService`)     | Authorize (mint code) and code→token exchange                                              | with the code grant                                    | blocks          | Missing/expired → `invalid_grant`; other throws converted                                                                            |
@@ -7038,6 +7169,23 @@ should not be enabled for new deployments.
   `IntrospectionTokenReader` does exactly that: it accepts an active response
   only when `token_type` names a bearer token, so an authorization server that
   omits `token_type` from active responses cannot be read by it.
+
+- **How completely a code replay revokes depends on the token store.** RFC 6819
+  §4.4.1.1 has a replayed authorization code revoke the tokens issued from it.
+  The grant asks `revokeCode(code, client)` to do that, passing the client that
+  presented the code. Two optional pieces of the store decide how far it goes:
+  - A `revokeCode` that ignores `client` revokes on any client's replay, so a
+    client that sees a spent code, such as from a log or a shared browser, can
+    end the session it started. Honor `client` and only the code's own client's
+    replay revokes.
+  - Without `exchangeCode`, the grant claims the code and saves its token in
+    two calls. A replay that lands between them finds the code claimed but no
+    token yet, so it is refused and the token saved next stays live. With
+    `exchangeCode`, the claim and the save are one step and a replay always
+    finds the token to revoke.
+
+  `MemoryTokenService` honors `client`, and implements `exchangeCode` when
+  constructed with the `authorizationCodeService` it shares with the grant.
 
 ## Resource servers (`@udibo/oauth2/server/resource`)
 

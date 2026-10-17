@@ -418,6 +418,41 @@ export interface AuthorizationServerOptions<
    *   contains a space or non-ASCII character.
    */
   acrValuesSupported?: readonly string[];
+  /**
+   * Called when the revocation endpoint revokes the rotation family of a
+   * refresh token that rotation already replaced — the client presented a
+   * token that is no longer live, so record it alongside your reuse events.
+   * It fires once per such request, after `revokeFamily`, only for a token
+   * issued to the authenticated client. It never fires `onTokenReuse`: a
+   * sign-out racing the client's own refresh presents the same token, so this
+   * is not by itself evidence of theft.
+   *
+   * Trigger point `rotated-out-revocation` (see `docs/trigger-points.md`).
+   * Fire-and-forget: it is awaited, but a throw is caught and logged, never
+   * rethrown, so a failing hook cannot change the `200` the endpoint answers.
+   */
+  onRotatedOutRevocation?: (
+    event: RotatedOutRevocationEvent<Client, User>,
+  ) => void | Promise<void>;
+}
+
+/**
+ * What the revocation endpoint observed when it revoked the rotation family of
+ * a refresh token that rotation already replaced. Passed to
+ * {@link AuthorizationServerOptions.onRotatedOutRevocation}.
+ */
+export interface RotatedOutRevocationEvent<
+  Client extends ClientInterface,
+  User,
+> {
+  /** The rotation family the presented token belonged to. */
+  familyId: string;
+  /** The client the presented token was issued to, which authenticated. */
+  client: Client;
+  /** The user the presented token was issued for, if any. */
+  user?: User;
+  /** Whether {@linkcode TokenServiceInterface.revokeFamily} revoked anything. */
+  familyRevoked: boolean;
 }
 
 /**
@@ -797,6 +832,11 @@ export class AuthorizationServer<
   #introspectionClaims?: (
     token: Token<Client, User, S>,
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  #onRotatedOutRevocation?: AuthorizationServerOptions<
+    Client,
+    User,
+    S
+  >["onRotatedOutRevocation"];
   #canIntrospectToken?: AuthorizationServerOptions<
     Client,
     User,
@@ -870,6 +910,7 @@ export class AuthorizationServer<
     this.#userClaims = options.userClaims;
     this.#introspectionClaims = options.introspectionClaims;
     this.#canIntrospectToken = options.canIntrospectToken;
+    this.#onRotatedOutRevocation = options.onRotatedOutRevocation;
   }
 
   #handleEndpointError(
@@ -1845,7 +1886,8 @@ export class AuthorizationServer<
    * revoked other than by rotation, a token with no family, and a service
    * without `getRevokedRefreshToken` and `revokeFamily` revoke nothing more.
    * The refresh grant's `replayGraceSeconds` does not apply here, and
-   * `onTokenReuse` does not fire.
+   * `onTokenReuse` does not fire; the server reports the revocation to
+   * {@linkcode AuthorizationServerOptions.onRotatedOutRevocation} instead.
    *
    * Always returns 200 OK, even if the token was invalid, already revoked, or
    * issued to another client: RFC 7009 Section 2.2 requires that answer so the
@@ -1908,7 +1950,29 @@ export class AuthorizationServer<
       rotatedOut.familyId &&
       rotatedOut.client.id.toString() === client.id.toString()
     ) {
-      await tokenService.revokeFamily(rotatedOut.familyId);
+      const familyRevoked = await tokenService.revokeFamily(
+        rotatedOut.familyId,
+      );
+      await this.#notifyRotatedOutRevocation({
+        familyId: rotatedOut.familyId,
+        client: rotatedOut.client,
+        user: rotatedOut.user,
+        familyRevoked,
+      });
+    }
+  }
+
+  async #notifyRotatedOutRevocation(
+    event: RotatedOutRevocationEvent<Client, User>,
+  ): Promise<void> {
+    if (!this.#onRotatedOutRevocation) return;
+    try {
+      await this.#onRotatedOutRevocation(event);
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] onRotatedOutRevocation hook failed:",
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 
@@ -2407,6 +2471,7 @@ export type { PKCEClientCredentials } from "./grants/authorization-code.ts";
 export type {
   AuthorizationCodeGrantOptions,
   AuthorizationCodeGrantServices,
+  CodeReuseEvent,
   GenerateAuthorizationCodeOptions,
 } from "./grants/authorization-code.ts";
 export { ClientCredentialsGrant } from "./grants/client-credentials.ts";
