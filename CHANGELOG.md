@@ -1,3 +1,22 @@
+## [0.33.0](https://github.com/udibo/oauth2/compare/0.32.1...0.33.0) (2026-10-17)
+
+### ⚠ BREAKING CHANGES
+
+* **testing:** `runSessionStoreContractTests` fails a store whose
+`withRefreshLock` passes no `RefreshLease`, where it skipped the lease
+checks before. Pass a lease, or set `refreshLockNeverExpires: true` when
+no holder can lose the lock while its refresh runs.
+`runTokenServiceContractTests` fails a token service without `rotate`
+whose `save` stores a member of a revoked family as live; record revoked
+families in `revokeFamily` and store any later member already revoked.
+The family cases in it and in `runTokenRotationContractTests` use a
+fresh `crypto.randomUUID()` per family, not `family-1` and `family-2`;
+pass `makeFamilyId` if your store needs another format.
+
+### Features
+
+* **testing:** tighten the token and session store contracts ([#144](https://github.com/udibo/oauth2/issues/144)) ([bde0e77](https://github.com/udibo/oauth2/commit/bde0e77cf02bf8d335002b01fab56388c1c45a42)), closes [#119](https://github.com/udibo/oauth2/issues/119) [#121](https://github.com/udibo/oauth2/issues/121) [#143](https://github.com/udibo/oauth2/issues/143)
+
 ## [0.32.1](https://github.com/udibo/oauth2/compare/0.32.0...0.32.1) (2026-10-17)
 
 ### Bug Fixes
