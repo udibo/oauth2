@@ -5830,13 +5830,19 @@ one process. Pick each one by where your requests can land:
 | Several instances or serverless isolates, no shared database  | `EncryptedCookieSessionStore`; against an authorization server that rotates refresh tokens it needs sticky routing, since only the instance that ran a refresh answers a pre-refresh cookie with the new session | `EncryptedCookieAuthRequestStorage`                                   |
 | Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
-Give the encrypted-cookie stores a secret every instance shares, so any of them
-can unseal a cookie another sealed. The memory stores keep their records in the
-process that wrote them: a restart signs everyone out, a session is unknown to
-every other instance, and a callback served by another instance fails with an
-unknown `state`. An `AuthRequestStorage` that needs no request context, such as
-one over your database, is passed as `{ forRequest: () => storage }`; the BFF
-never falls back to the `DirectClient`'s own `authRequestStorage`. Such a
+Give each encrypted-cookie store a secret every instance shares, so any of them
+can unseal a cookie another sealed. Use a separate secret per store instance
+(each store you construct) and per app: nothing in a sealed cookie binds it to
+the app or the store instance that sealed it, so two apps that share a secret
+can open each other's session cookies. One secret given to an app's session
+store and its pending-sign-in storage does not let either open the other's
+cookies, because each derives its own key from the secret with HKDF-SHA-256
+under a label of its own. The memory stores keep their records in the process
+that wrote them: a restart signs everyone out, a session is unknown to every
+other instance, and a callback served by another instance fails with an unknown
+`state`. An `AuthRequestStorage` that needs no request context, such as one over
+your database, is passed as `{ forRequest: () => storage }`; the BFF never falls
+back to the `DirectClient`'s own `authRequestStorage`. Such a
 store must return every field of the record it was given, with its type,
 `maxAge: null` included. The login records the `max_age` the sign-in was started with, and a
 store that keeps only the fields it knows makes the callback check against its
@@ -6007,12 +6013,14 @@ sections apply only when you host those flows.
 - [ ] HTTPS cookie and CSRF defaults are enabled; custom browser requests send
       the CSRF header.
 - [ ] The BFF's `sessionStore` and `authRequestStorage` work on every instance
-      that serves the app: encrypted-cookie stores with a shared secret, or
-      stores over shared storage. `MemorySessionStore` and
-      `MemoryAuthRequestStorageFactory` appear only in single-process, test and
-      local configurations. If sign-out must revoke a stolen session cookie,
-      use a shared `SessionStore`: `EncryptedCookieSessionStore` keeps a copied
-      cookie valid until its `maxAgeMs`. See
+      that serves the app: encrypted-cookie stores with secrets every instance
+      shares, a separate one per store instance and per app, or stores over
+      shared storage.
+      `MemorySessionStore` and `MemoryAuthRequestStorageFactory` appear only in
+      single-process, test and local configurations. If sign-out must revoke a
+      stolen session cookie, use a shared `SessionStore`:
+      `EncryptedCookieSessionStore` keeps a copied cookie valid until its
+      `maxAgeMs`. See
       [choosing the BFF's stores](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md#choosing-the-bffs-stores).
 - [ ] Login state and PKCE verifier survive callbacks to a different app
       instance.

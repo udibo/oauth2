@@ -11,10 +11,10 @@
  * caller chooses.
  *
  * {@link EncryptedCookieAuthRequestStorage} carries the record in an encrypted
- * cookie instead (AES-GCM under a server-held secret, the same construction
- * {@link EncryptedCookieSessionStore} uses), so no server-side storage is
- * involved and any instance can complete the flow. Apps that already have a
- * database can implement {@link AuthRequestStorage} against it instead.
+ * cookie instead (AES-GCM under a key derived from a server-held secret), so no
+ * server-side storage is involved and any instance can complete the flow. Apps
+ * that already have a database can implement {@link AuthRequestStorage} against
+ * it instead.
  *
  * **Which storage you pick is a reliability decision, not a security one.**
  * Server-side storage on its own says a `state` is pending somewhere — never
@@ -37,7 +37,11 @@ import {
   MemoryAuthRequestStorage,
   type MemoryAuthRequestStorageOptions,
 } from "../../../client/mod.ts";
-import { deriveAesKey, sealJson, unsealJson } from "../../../utils/crypto.ts";
+import { sealJson, unsealJson } from "../../../utils/crypto.ts";
+import {
+  AUTH_REQUEST_COOKIE_KEY_INFO,
+  deriveCookieKey,
+} from "./_cookie-keys.ts";
 import {
   resolveCookieName,
   resolvePrefixConstrainedAttributes,
@@ -99,6 +103,13 @@ export interface EncryptedCookieAuthRequestStorageOptions {
   /**
    * Secret the AES-256 key is derived from; at least 32 bytes. Reuse the
    * secret across instances so any of them can unseal a cookie another sealed.
+   *
+   * Give each store instance and each app a secret of its own. Nothing in a
+   * sealed cookie binds it to the app or store instance that sealed it, so two
+   * apps that share a secret can open each other's pending sign-ins. Sharing
+   * one with {@link EncryptedCookieSessionStore} does not let either store open
+   * the other's cookies: each derives its key with HKDF-SHA-256 under its own
+   * label.
    */
   secret: string;
   /** Cookie attribute overrides. */
@@ -129,6 +140,10 @@ const MAX_COOKIE_NAME_VALUE_BYTES = 3900;
 
 interface PendingRequests {
   [state: string]: AuthRequestRecord;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cookieAttributes(
@@ -180,8 +195,12 @@ export interface AuthRequestStorageFactory {
  * ```ts
  * const bff = new HonoBff({
  *   client,
- *   sessionStore: new EncryptedCookieSessionStore({ secret }),
- *   authRequestStorage: new EncryptedCookieAuthRequestStorage({ secret }),
+ *   sessionStore: new EncryptedCookieSessionStore({
+ *     secret: process.env.SESSION_SECRET!,
+ *   }),
+ *   authRequestStorage: new EncryptedCookieAuthRequestStorage({
+ *     secret: process.env.AUTH_REQUEST_SECRET!,
+ *   }),
  * });
  * ```
  */
@@ -227,21 +246,26 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
   }
 
   #key(): Promise<CryptoKey> {
-    return (this.#keyPromise ??= deriveAesKey(this.#secret));
+    return (this.#keyPromise ??= deriveCookieKey(
+      this.#secret,
+      AUTH_REQUEST_COOKIE_KEY_INFO,
+    ));
   }
 
   async #read(c: Context): Promise<PendingRequests> {
     const cookieValue = getCookie(c, this.#name);
     if (!cookieValue) return {};
-    const pending = await unsealJson<PendingRequests>(
-      await this.#key(),
-      cookieValue,
-    );
-    if (!pending) return {};
+    const pending = await unsealJson<unknown>(await this.#key(), cookieValue);
+    if (!isObject(pending)) return {};
 
     const cutoff = Date.now() - this.#ttlMs;
     return Object.fromEntries(
-      Object.entries(pending).filter(([, record]) => record.createdAt > cutoff),
+      Object.entries(pending).filter(
+        (entry): entry is [string, AuthRequestRecord] =>
+          isObject(entry[1]) &&
+          typeof entry[1].createdAt === "number" &&
+          entry[1].createdAt > cutoff,
+      ),
     );
   }
 
@@ -288,8 +312,10 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
   /** Returns the storage bound to `c`, for the duration of that request. */
   forRequest(c: Context): AuthRequestStorage {
     return {
-      get: async (state: string): Promise<AuthRequestRecord | null> =>
-        (await this.#read(c))[state] ?? null,
+      get: async (state: string): Promise<AuthRequestRecord | null> => {
+        const pending = await this.#read(c);
+        return Object.hasOwn(pending, state) ? pending[state] : null;
+      },
       set: async (state: string, value: AuthRequestRecord): Promise<void> => {
         const pending = await this.#read(c);
         pending[state] = value;
@@ -315,7 +341,7 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
  * import { encryptedCookieAuthRequestStorage } from "@udibo/oauth2/hono/bff";
  *
  * const authRequestStorage = encryptedCookieAuthRequestStorage({
- *   secret: process.env.SESSION_SECRET!,
+ *   secret: process.env.AUTH_REQUEST_SECRET!,
  * });
  * ```
  */

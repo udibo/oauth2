@@ -132,11 +132,13 @@ in
   out, and once requests land on more than one instance a session is unknown on
   the others (the user appears signed out) and a callback served elsewhere
   fails with `unknown state parameter`. For more than one instance, pass
-  `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage` with a
-  secret every instance shares (stateless, in `@udibo/oauth2/hono/bff`; sign-out
-  cannot invalidate a copied session cookie before its `maxAgeMs`), or a
-  `SessionStore` and an `AuthRequestStorageFactory` over a database or cache
-  every instance shares, verified with `runSessionStoreContractTests` and
+  `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage`, each
+  with a secret of its own that every instance shares and no other app uses
+  (stateless, in
+  `@udibo/oauth2/hono/bff`; sign-out cannot invalidate a copied session cookie
+  before its `maxAgeMs`), or a `SessionStore` and an
+  `AuthRequestStorageFactory` over a database or cache every instance shares,
+  verified with `runSessionStoreContractTests` and
   `runAuthRequestStorageContractTests`.
 - **Remove the `secure: false` cookie override** on the BFF — it defaults to
   `secure: true`; the example sets `false` only so it works over local HTTP.

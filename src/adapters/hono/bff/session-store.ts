@@ -26,7 +26,8 @@
 
 import { InvalidGrantError } from "../../../errors.ts";
 import type { TokenBundle, UserInfoClaims } from "../../../client/mod.ts";
-import { deriveAesKey, sealJson, unsealJson } from "../../../utils/crypto.ts";
+import { sealJson, unsealJson } from "../../../utils/crypto.ts";
+import { deriveCookieKey, SESSION_COOKIE_KEY_INFO } from "./_cookie-keys.ts";
 
 /** The data a BFF persists per session. */
 export interface SessionData {
@@ -477,6 +478,13 @@ export interface EncryptedCookieSessionStoreOptions {
    * Server-held secret(s) used to derive the AES-256 key(s). Each must have at
    * least 32 bytes of entropy; pass a base64 / hex string or raw bytes.
    *
+   * Give each store instance and each app a secret of its own. Nothing in a
+   * sealed cookie binds it to the app or store instance that sealed it, so two
+   * apps that share a secret can open each other's session cookies. Sharing one
+   * with `EncryptedCookieAuthRequestStorage` does not let either store open the
+   * other's cookies: each derives its key with HKDF-SHA-256 under its own
+   * label.
+   *
    * Pass an **ordered list** to rotate the secret without signing everyone out:
    * the **first** entry is current — every cookie is sealed under it — and
    * `read` tries each entry in turn, so a cookie sealed under a still-listed
@@ -502,10 +510,6 @@ export interface EncryptedCookieSessionStoreOptions {
    * `update` re-seals with a fresh stamp, so this is an **inactivity** window
    * for a session the BFF keeps refreshing. Must be a positive number of
    * milliseconds.
-   *
-   * The store stamps each cookie with a seal time at `create`/`update`; a
-   * cookie without that stamp is aged from its `updatedAt` instead, so it is
-   * bounded too.
    */
   maxAgeMs?: number;
 }
@@ -532,6 +536,11 @@ function isSealedSession(value: unknown): value is SealedSession {
  * Security notes:
  * - Each secret must have at least 256 bits of entropy. A weak secret defeats
  *   the confidentiality of the cookie.
+ * - The key is derived from the secret with HKDF-SHA-256 under a label of this
+ *   store's own, so a cookie sealed by another store under the same secret
+ *   does not open here.
+ * - `read` accepts only what `create` sealed: a cookie that is malformed,
+ *   foreign, or the wrong shape reads as `null`.
  * - AES-GCM provides authenticated encryption; tampered cookies fail `read`
  *   (returns `null`).
  * - `destroy` is a no-op on the server — the cookie must be cleared in the
@@ -600,7 +609,10 @@ export class EncryptedCookieSessionStore
   }
 
   #key(index: number): Promise<CryptoKey> {
-    return (this.#keyPromises[index] ??= deriveAesKey(this.#secrets[index]));
+    return (this.#keyPromises[index] ??= deriveCookieKey(
+      this.#secrets[index],
+      SESSION_COOKIE_KEY_INFO,
+    ));
   }
 
   /** Encrypts the session into the cookie value under the current secret; there is no server-side record. */
@@ -611,24 +623,19 @@ export class EncryptedCookieSessionStore
 
   /**
    * Decrypts the cookie value, trying each configured secret in turn. Returns
-   * `null` if it is tampered, malformed, sealed with an unknown secret, or
-   * sealed longer ago than
+   * `null` if it is tampered, malformed, sealed with an unknown secret or by
+   * another store, not in the shape `create` seals, or sealed longer ago than
    * {@linkcode EncryptedCookieSessionStoreOptions.maxAgeMs}.
    */
   async read(cookieValue: string): Promise<SessionData | null> {
     for (let index = 0; index < this.#secrets.length; index++) {
-      const unsealed = await unsealJson<SealedSession | SessionData>(
+      const unsealed = await unsealJson<unknown>(
         await this.#key(index),
         cookieValue,
       );
       if (unsealed === null) continue;
-      if (isSealedSession(unsealed)) {
-        return this.#isExpired(unsealed.issuedAt) ? null : unsealed.data;
-      }
-      const legacy = unsealed as SessionData;
-      return this.#isExpired(legacy.updatedAt ?? legacy.createdAt)
-        ? null
-        : legacy;
+      if (!isSealedSession(unsealed)) return null;
+      return this.#isExpired(unsealed.issuedAt) ? null : unsealed.data;
     }
     return null;
   }

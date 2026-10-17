@@ -1,5 +1,5 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { thrown } from "../../../_test_assert.ts";
+import { rejection, thrown } from "../../../_test_assert.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -26,6 +26,11 @@ import {
 } from "./auth-request-store.ts";
 import { HonoBff } from "./bff.ts";
 import { EncryptedCookieSessionStore } from "./session-store.ts";
+import { sealJson } from "../../../utils/crypto.ts";
+import {
+  AUTH_REQUEST_COOKIE_KEY_INFO,
+  deriveCookieKey,
+} from "./_cookie-keys.ts";
 
 const SECRET = "test-secret-at-least-32-bytes-long!!";
 const OTHER_SECRET = "another-secret-at-least-32-bytes-long";
@@ -154,6 +159,94 @@ describe("EncryptedCookieAuthRequestStorage", () => {
     expect(await readBack(other, cookie, "state-1")).toStrictEqual(null);
   });
 
+  it("reads no pending sign-in from an authentic cookie of another shape", async () => {
+    const key = await deriveCookieKey(SECRET, AUTH_REQUEST_COOKIE_KEY_INFO);
+    const payloads: unknown[] = [
+      { "state-1": null },
+      { "state-1": "record" },
+      { "state-1": { codeVerifier: "verifier", returnTo: "/home" } },
+      { "state-1": { ...record(), createdAt: String(Date.now()) } },
+      [record()],
+      "state-1",
+      42,
+      null,
+    ];
+    for (const payload of payloads) {
+      const cookie = `${COOKIE_NAME}=${await sealJson(key, payload)}`;
+      const response = await app.request("/get?state=state-1", {
+        headers: { cookie },
+      });
+      expect(response.status, JSON.stringify(payload)).toBe(200);
+      expect(await response.json(), JSON.stringify(payload)).toBe(null);
+    }
+  });
+
+  it("reads no pending sign-in from a malformed cookie", async () => {
+    for (const value of [
+      "not-a-real-cookie",
+      "%E0%A4%A",
+      "!!!",
+      "AAAAAAAAAAAAAAAAAA",
+      "x".repeat(4000),
+    ]) {
+      const response = await app.request("/get?state=state-1", {
+        headers: { cookie: `${COOKIE_NAME}=${value}` },
+      });
+      expect(response.status, value).toBe(200);
+      expect(await response.json(), value).toBe(null);
+    }
+  });
+
+  it("reads no pending sign-in under a key an object inherits", async () => {
+    const store = new EncryptedCookieAuthRequestStorage({
+      secret: SECRET,
+      cookie: { secure: false },
+    });
+    async function get(
+      cookie: string | undefined,
+      state: string,
+    ): Promise<AuthRequestRecord | null> {
+      let found: AuthRequestRecord | null = null;
+      const direct = new Hono();
+      direct.get("/", async (c) => {
+        found = await store.forRequest(c).get(state);
+        return c.body(null, 204);
+      });
+      await direct.request("/", { headers: cookie ? { cookie } : {} });
+      return found;
+    }
+
+    const cookie = await seal(app, [["state-1", record()]]);
+    for (const state of [
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+    ]) {
+      expect(await get(undefined, state), state).toBe(null);
+      expect(await get(cookie, state), state).toBe(null);
+    }
+    expect((await get(cookie, "state-1"))?.returnTo).toBe("/home");
+  });
+
+  it("rejects a secret shorter than 16 bytes on first use", async () => {
+    const store = new EncryptedCookieAuthRequestStorage({
+      secret: "x".repeat(15),
+      cookie: { secure: false },
+    });
+    let failure: unknown;
+    const app = new Hono();
+    app.get("/", async (c) => {
+      failure = await rejection(() =>
+        store.forRequest(c).set("state-1", record()),
+      );
+      return c.body(null, 204);
+    });
+    await app.request("/");
+    assert(failure instanceof Error);
+    expect(failure.message).toMatch(/at least 16 bytes/);
+  });
+
   it("drops records older than the ttl", async () => {
     const cookie = await seal(app, [
       ["state-1", record({ createdAt: Date.now() - 11 * 60 * 1000 })],
@@ -229,12 +322,12 @@ describe("EncryptedCookieAuthRequestStorage", () => {
   });
 
   it("starts no key derivation until a request touches the storage", async () => {
-    using digest = vi.spyOn(crypto.subtle, "digest");
+    using deriveKey = vi.spyOn(crypto.subtle, "deriveKey");
     const lazy = storageApp({ secret: SECRET, cookie: { secure: false } });
-    expect(digest).toHaveBeenCalledTimes(0);
+    expect(deriveKey).toHaveBeenCalledTimes(0);
 
     await seal(lazy, [["state-1", record()]]);
-    expect(digest).toHaveBeenCalledTimes(1);
+    expect(deriveKey).toHaveBeenCalledTimes(1);
   });
 
   it("forgets a record after delete", async () => {
@@ -531,5 +624,169 @@ describe("BFF sign-in across isolates", () => {
     const response = await signIn(false);
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe("invalid_grant");
+  });
+});
+
+const SESSION_COOKIE_NAME = "oauth2_session";
+
+function cookieValue(response: Response, name: string): string {
+  const value = cookieHeader(response, name)?.slice(name.length + 1);
+  assert(value, `expected the response to set ${name}`);
+  return value;
+}
+
+describe("one secret given to both encrypted-cookie stores", () => {
+  let fixture: Awaited<ReturnType<typeof buildFixture>>;
+
+  beforeEach(async () => {
+    fixture = await buildFixture();
+  });
+
+  async function pendingSignInCookie(): Promise<string> {
+    const login = await fixture
+      .isolate({ statelessAuthRequests: true })
+      .request("/auth/login");
+    expect(login.status).toBe(302);
+    await login.body?.cancel();
+    return cookieValue(login, COOKIE_NAME);
+  }
+
+  function sessionCookie(): Promise<string> {
+    return new EncryptedCookieSessionStore({ secret: SECRET }).create({
+      tokens: { accessToken: "access", tokenType: "Bearer" },
+      refreshToken: "refresh",
+      user: { sub: testUser.id },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  it("opens no session from a pending sign-in cookie", async () => {
+    const sessions = new EncryptedCookieSessionStore({ secret: SECRET });
+    expect(await sessions.read(await pendingSignInCookie())).toBe(null);
+  });
+
+  it("opens no pending sign-in from a session cookie", async () => {
+    const pending = storageApp({ secret: SECRET, cookie: { secure: false } });
+    const cookie = `${COOKIE_NAME}=${await sessionCookie()}`;
+    expect(await readBack(pending, cookie, "data")).toStrictEqual(null);
+    expect(await readBack(pending, cookie, "issuedAt")).toStrictEqual(null);
+  });
+
+  it("answers the session probe signed out when the session cookie carries a pending sign-in", async () => {
+    const response = await fixture
+      .isolate({ statelessAuthRequests: true })
+      .request("/auth/session", {
+        headers: {
+          cookie: `${SESSION_COOKIE_NAME}=${await pendingSignInCookie()}`,
+        },
+      });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({
+      isAuthenticated: false,
+      user: null,
+    });
+  });
+
+  it("refuses a callback whose pending sign-in cookie carries a session", async () => {
+    const isolate = fixture.isolate({ statelessAuthRequests: true });
+    const login = await isolate.request("/auth/login");
+    expect(login.status).toBe(302);
+    await login.body?.cancel();
+    const callbackUrl = new URL(
+      await followAuthorize(fixture.authServer, login.headers.get("location")!),
+    );
+    const session = await sessionCookie();
+    const cookie = login.headers
+      .getSetCookie()
+      .map((cookie) => cookie.split(";")[0])
+      .filter((pair) => !pair.endsWith("="))
+      .map((pair) =>
+        pair.startsWith(`${COOKIE_NAME}=`) ? `${COOKIE_NAME}=${session}` : pair,
+      )
+      .join("; ");
+    expect(cookie).toContain(`${COOKIE_NAME}=${session}`);
+
+    const response = await isolate.request(
+      callbackUrl.pathname + callbackUrl.search,
+      { headers: { cookie } },
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("invalid_grant");
+  });
+});
+
+describe("BFF routes given a malformed encrypted cookie", () => {
+  const malformed = [
+    "not-a-real-cookie",
+    "%E0%A4%A",
+    "!!!",
+    "AAAAAAAAAAAAAAAAAA",
+    "x".repeat(4000),
+  ];
+  let fixture: Awaited<ReturnType<typeof buildFixture>>;
+
+  beforeEach(async () => {
+    fixture = await buildFixture();
+  });
+
+  it("answers the session probe signed out", async () => {
+    const app = fixture.isolate({ statelessAuthRequests: true });
+    for (const value of malformed) {
+      const response = await app.request("/auth/session", {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${value}` },
+      });
+      expect(response.status, value).toBe(200);
+      expect(await response.json(), value).toStrictEqual({
+        isAuthenticated: false,
+        user: null,
+      });
+    }
+  });
+
+  it("signs out and clears the session cookie", async () => {
+    const app = fixture.isolate({ statelessAuthRequests: true });
+    for (const value of malformed) {
+      const response = await app.request("/auth/logout", {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${value}` },
+      });
+      expect(response.status, value).toBe(302);
+      expect(cookieHeader(response, SESSION_COOKIE_NAME), value).toBe(
+        undefined,
+      );
+      expect(response.headers.get("set-cookie"), value).toContain(
+        `${SESSION_COOKIE_NAME}=;`,
+      );
+    }
+  });
+
+  it("refuses the callback with invalid_grant", async () => {
+    const app = fixture.isolate({ statelessAuthRequests: true });
+    for (const value of malformed) {
+      const login = await app.request("/auth/login");
+      expect(login.status).toBe(302);
+      await login.body?.cancel();
+      const callbackUrl = new URL(
+        await followAuthorize(
+          fixture.authServer,
+          login.headers.get("location")!,
+        ),
+      );
+      const cookie = login.headers
+        .getSetCookie()
+        .map((cookie) => cookie.split(";")[0])
+        .filter((pair) => !pair.endsWith("="))
+        .map((pair) =>
+          pair.startsWith(`${COOKIE_NAME}=`) ? `${COOKIE_NAME}=${value}` : pair,
+        )
+        .join("; ");
+
+      const response = await app.request(
+        callbackUrl.pathname + callbackUrl.search,
+        { headers: { cookie } },
+      );
+      expect(response.status, value).toBe(400);
+      expect((await response.json()).error, value).toBe("invalid_grant");
+    }
   });
 });

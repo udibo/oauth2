@@ -2,20 +2,14 @@
  * Authenticated-encryption (AES-256-GCM) and key-derivation helpers for sealing
  * session and token data at rest or in a cookie.
  *
- * Two key-derivation paths, for two different threat models:
- *
- * - {@link deriveAesKey} hashes a single **server-held** secret (SHA-256) into
- *   an AES-256-GCM key. Use this for a stateless cookie sealed under one
- *   configured secret (see `EncryptedCookieSessionStore`), where the secret is
- *   never persisted.
- *
- * - {@link deriveSealKey} uses **HKDF** with a domain-separating `info` label so
- *   a high-entropy *per-session* secret yields an encryption key that is
- *   independent of any other value derived from the same secret. This is what
- *   makes "the cookie value is both the lookup credential **and** the decryption
- *   key" safe: a database can store `sha256(secret)` as a lookup hash while the
- *   sealing key is `HKDF(secret, info)`, and knowing the stored hash never
- *   reveals the key. Always pass a distinct `info` per purpose.
+ * {@link deriveSealKey} uses **HKDF** with a domain-separating `info` label so a
+ * high-entropy secret yields an encryption key that is independent of any other
+ * value derived from the same secret. This is what makes "the cookie value is
+ * both the lookup credential **and** the decryption key" safe: a database can
+ * store `sha256(secret)` as a lookup hash while the sealing key is
+ * `HKDF(secret, info)`, and knowing the stored hash never reveals the key. It is
+ * also what lets one secret seal two kinds of value without either opening as
+ * the other. Always pass a distinct `info` per purpose.
  *
  * {@link seal}/{@link unseal} use AES-256-GCM (an AEAD), so tampered ciphertext
  * fails to unseal (returns `null`) rather than decrypting to garbage.
@@ -84,36 +78,6 @@ export function base64urlDecode(value: string): Uint8Array {
  */
 export function randomToken(bytes = 32): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(bytes)));
-}
-
-/**
- * Derive an AES-256-GCM key from a single server-held secret via SHA-256.
- *
- * Suitable when the secret is a long-lived configuration value that is never
- * stored alongside the ciphertext. Do **not** use this when a hash of the same
- * secret is persisted (e.g. as a lookup key) — use {@link deriveSealKey} so the
- * sealing key is independent of that stored hash.
- *
- * @throws {Error} if the secret is shorter than 16 bytes. Length is all that is
- * checked; supply 32+ bytes of real entropy.
- */
-export async function deriveAesKey(
-  secret: string | Uint8Array,
-): Promise<CryptoKey> {
-  const raw = toBytes(secret);
-  if (raw.byteLength < 16) {
-    throw new Error(
-      "secret must be at least 16 bytes; 32+ bytes of entropy is recommended.",
-    );
-  }
-  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(raw));
-  return await crypto.subtle.importKey(
-    "raw",
-    digest,
-    { name: "AES-GCM" },
-    false,
-    ["encrypt", "decrypt"],
-  );
 }
 
 /**

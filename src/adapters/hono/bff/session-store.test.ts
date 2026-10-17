@@ -2,7 +2,12 @@ import { assert, describe, expect, it, vi } from "vitest";
 import { FakeTime } from "../../../_test_fake-time.ts";
 import { rejection, thrown } from "../../../_test_assert.ts";
 import { InvalidGrantError } from "../../../errors.ts";
-import { deriveAesKey, sealJson } from "../../../utils/crypto.ts";
+import { sealJson } from "../../../utils/crypto.ts";
+import {
+  AUTH_REQUEST_COOKIE_KEY_INFO,
+  deriveCookieKey,
+  SESSION_COOKIE_KEY_INFO,
+} from "./_cookie-keys.ts";
 import {
   DEFAULT_SESSION_MAX_AGE_MS,
   EncryptedCookieSessionStore,
@@ -99,6 +104,23 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
     expect(await store.read("not-a-real-cookie")).toBe(null);
   });
 
+  it("rejects a secret shorter than 16 bytes on first use", async () => {
+    const store = new EncryptedCookieSessionStore({
+      secret: new Uint8Array(15),
+    });
+    await rejection(
+      store.create(makeSessionData()),
+      Error,
+      /at least 16 bytes/,
+    );
+  });
+
+  it("accepts a secret of exactly 16 bytes", async () => {
+    const store = new EncryptedCookieSessionStore({ secret: "x".repeat(16) });
+    const data = makeSessionData();
+    expect(await store.read(await store.create(data))).toStrictEqual(data);
+  });
+
   it("throws when the secret list is empty", () => {
     thrown(
       () => new EncryptedCookieSessionStore({ secret: [] }),
@@ -108,20 +130,20 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
   });
 
   it("starts no key derivation until an operation needs the key", async () => {
-    using digest = vi.spyOn(crypto.subtle, "digest");
+    using deriveKey = vi.spyOn(crypto.subtle, "deriveKey");
     const store = new EncryptedCookieSessionStore({
       secret: [
         crypto.getRandomValues(new Uint8Array(32)),
         crypto.getRandomValues(new Uint8Array(32)),
       ],
     });
-    expect(digest).toHaveBeenCalledTimes(0);
+    expect(deriveKey).toHaveBeenCalledTimes(0);
 
     const cookie = await store.create(makeSessionData());
-    expect(digest).toHaveBeenCalledTimes(1);
+    expect(deriveKey).toHaveBeenCalledTimes(1);
 
     await store.read(cookie);
-    expect(digest).toHaveBeenCalledTimes(1);
+    expect(deriveKey).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -177,40 +199,55 @@ describe("EncryptedCookieSessionStore bounded lifetime", () => {
   });
 });
 
-describe("EncryptedCookieSessionStore legacy payload compatibility", () => {
-  it("reads a pre-rotation payload sealed without an issuedAt envelope", async () => {
+describe("EncryptedCookieSessionStore cookie shape", () => {
+  it("refuses an authentic payload sealed without the seal-time envelope", async () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
-    const data = makeSessionData();
-    const legacyCookie = await sealJson(await deriveAesKey(secret), data);
-
+    const key = await deriveCookieKey(secret, SESSION_COOKIE_KEY_INFO);
     const store = new EncryptedCookieSessionStore({ secret });
-    expect(await store.read(legacyCookie)).toStrictEqual(data);
+    const data = makeSessionData();
+    const payloads: unknown[] = [
+      data,
+      { issuedAt: String(Date.now()), data },
+      { issuedAt: Date.now(), data: null },
+      { issuedAt: Date.now() },
+      [{ issuedAt: Date.now(), data }],
+      "session",
+      42,
+      null,
+    ];
+    for (const payload of payloads) {
+      expect(
+        await store.read(await sealJson(key, payload)),
+        JSON.stringify(payload),
+      ).toBe(null);
+    }
   });
 
-  it("bounds a legacy payload by its updatedAt when a max age is set", async () => {
-    using _time = new FakeTime(1_700_000_000_000);
+  it("reads nothing sealed under the pending-sign-in key of the same secret", async () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
-    const staleData = makeSessionData({
-      createdAt: Date.now() - 120_000,
-      updatedAt: Date.now() - 120_000,
-    });
-    const legacyCookie = await sealJson(await deriveAesKey(secret), staleData);
-
-    const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
-    expect(await store.read(legacyCookie)).toBe(null);
+    const store = new EncryptedCookieSessionStore({ secret });
+    const sealed = await sealJson(
+      await deriveCookieKey(secret, AUTH_REQUEST_COOKIE_KEY_INFO),
+      { issuedAt: Date.now(), data: makeSessionData() },
+    );
+    expect(await store.read(sealed)).toBe(null);
   });
 
-  it("accepts a recent legacy payload within the max age", async () => {
-    using _time = new FakeTime(1_700_000_000_000);
+  it("reads nothing from a cookie sealed under the secret's bare SHA-256", async () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
-    const recentData = makeSessionData({
-      createdAt: Date.now() - 10_000,
-      updatedAt: Date.now() - 10_000,
+    const store = new EncryptedCookieSessionStore({ secret });
+    const bareSha256Key = await crypto.subtle.importKey(
+      "raw",
+      await crypto.subtle.digest("SHA-256", secret),
+      { name: "AES-GCM" },
+      false,
+      ["encrypt", "decrypt"],
+    );
+    const sealed = await sealJson(bareSha256Key, {
+      issuedAt: Date.now(),
+      data: makeSessionData(),
     });
-    const legacyCookie = await sealJson(await deriveAesKey(secret), recentData);
-
-    const store = new EncryptedCookieSessionStore({ secret, maxAgeMs: 60_000 });
-    expect(await store.read(legacyCookie)).toStrictEqual(recentData);
+    expect(await store.read(sealed)).toBe(null);
   });
 });
 
