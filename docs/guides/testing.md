@@ -221,11 +221,11 @@ overwrite or end a session another instance refreshed. Set
 `refreshLockNeverExpires: true` only when no holder can lose the lock while its
 refresh runs.
 
-`runTokenServiceContractTests` builds each rotation family's id with
-`crypto.randomUUID()`, so a store with a `uuid` family column runs every family
-case, and each case sees only its own families. Pass `makeFamilyId` for another
-id format, and `supportedScope` when `acceptedScope` accepts only a fixed
-vocabulary:
+`runTokenServiceContractTests` and `runTokenRotationContractTests` build each
+rotation family's id with `crypto.randomUUID()`, so a store with a `uuid` family
+column runs every family case, and each case sees only its own families. Pass
+`makeFamilyId` to either suite for another id format, and `supportedScope` when
+`acceptedScope` accepts only a fixed vocabulary:
 
 ```ts
 import type { ClientInterface } from "@udibo/oauth2/server";

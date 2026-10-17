@@ -158,7 +158,11 @@ releases and the changelog:
   and lists the change under **⚠ BREAKING CHANGES** in the release notes. The
   notes quote the subject unless a footer is present; PRs are squash-merged with
   the PR body as the commit body, so to put a migration note there, start a line
-  of the PR body with `BREAKING CHANGE:` followed by the note.
+  of the PR body with `BREAKING CHANGE:` followed by the note. Write it as one
+  paragraph in the body's `## Closes` section, directly before the
+  `Closes #<n>` lines, or last in the body when it closes nothing. The note runs
+  until the first of those lines or the end of the message, so a note placed
+  earlier carries every heading after it into the release notes.
 - `chore(deps):` / `build(deps):` dependency bumps (patch — the `deps` scope is
   required for a release to be cut)
 - Present tense, lowercase, subject under 72 characters.

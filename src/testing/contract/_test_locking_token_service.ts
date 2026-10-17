@@ -14,7 +14,8 @@ type AnyToken<C extends ClientInterface, U> =
  * claim and its insert, both become visible only when it commits, and
  * `rotate` and `revokeFamily` serialize on a per-family lock instead of a
  * revoked-family marker. It proves that `runTokenRotationContractTests`
- * holds a rotation where such a store needs it held.
+ * holds a rotation where such a store needs it held. Given `familyIdFormat`,
+ * it throws on a family id outside it, as a typed column would.
  */
 export class LockingTokenService<
   C extends ClientInterface,
@@ -28,9 +29,24 @@ export class LockingTokenService<
   readonly #revoked = new Map<string, RefreshToken<C, U, BasicScope>>();
   readonly #byCode = new Map<string, Set<string>>();
   readonly #locks = new Map<string, Promise<void>>();
+  readonly #familyIdFormat: RegExp | undefined;
 
-  constructor(barriers: TokenRotationBarriers) {
+  constructor(
+    barriers: TokenRotationBarriers,
+    options: { familyIdFormat?: RegExp } = {},
+  ) {
     this.#barriers = barriers;
+    this.#familyIdFormat = options.familyIdFormat;
+  }
+
+  protected checkFamilyId(familyId: string | undefined): void {
+    if (
+      familyId !== undefined &&
+      this.#familyIdFormat &&
+      !this.#familyIdFormat.test(familyId)
+    ) {
+      throw new TypeError(`invalid input syntax for family id: "${familyId}"`);
+    }
   }
 
   acceptedScope(
@@ -85,6 +101,7 @@ export class LockingTokenService<
   ): Promise<RefreshToken<C, U, BasicScope>>;
   save(token: Token<C, U, BasicScope>): Promise<Token<C, U, BasicScope>>;
   save(token: AnyToken<C, U>): Promise<AnyToken<C, U>> {
+    if ("refreshToken" in token) this.checkFamilyId(token.familyId);
     this.#insert({ ...token });
     return Promise.resolve(token);
   }
@@ -119,6 +136,8 @@ export class LockingTokenService<
     current: RefreshToken<C, U, BasicScope>,
     next: RefreshToken<C, U, BasicScope>,
   ): Promise<RefreshToken<C, U, BasicScope> | undefined> {
+    this.checkFamilyId(current.familyId);
+    this.checkFamilyId(next.familyId);
     return this.#withFamilyLock(current.familyId, async () => {
       const parent = this.#byRefresh.get(current.refreshToken);
       if (!parent) return undefined;
@@ -131,6 +150,7 @@ export class LockingTokenService<
   }
 
   revokeFamily(familyId: string): Promise<boolean> {
+    this.checkFamilyId(familyId);
     return this.#withFamilyLock(familyId, () => {
       let revoked = false;
       for (const token of [...this.#byRefresh.values()]) {
@@ -144,6 +164,7 @@ export class LockingTokenService<
   }
 
   hasLiveRefreshToken(familyId: string): Promise<boolean> {
+    this.checkFamilyId(familyId);
     const now = Date.now();
     return Promise.resolve(
       [...this.#byRefresh.values()].some(

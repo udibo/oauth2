@@ -346,11 +346,10 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
  * lease, unless the options declare that its lock never expires
  * ({@linkcode SessionStoreContractOptions.refreshLockNeverExpires}). They
  * prove that a lease stops acting once its call releases the lock or another
- * call holds it, not that it stops
- * when the lock expires: expire a lease in a test of your own for that. They
- * use one store object, so they prove the lock's behavior, not that separate
- * instances share it: point two store objects at one backend in a test of
- * your own for that.
+ * call holds it, not that it stops when the lock expires: expire a lease in a
+ * test of your own for that. They use one store object, so they prove the
+ * lock's behavior, not that separate instances share it: point two store
+ * objects at one backend in a test of your own for that.
  */
 export function runSessionStoreContractTests(
   options: SessionStoreContractOptions,

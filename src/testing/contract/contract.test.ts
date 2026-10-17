@@ -54,13 +54,14 @@ import {
   generateCodeVerifier,
 } from "../../utils/pkce.ts";
 
-/** The token service with `rotate` hidden, so the suite drives `revokeRotated`. */
-function withoutRotate(
+/** The token service with `hidden` methods removed, so the suite drives its fallbacks. */
+function without(
   tokenService: MemoryTokenService<TestClient, TestUser>,
+  ...hidden: (keyof MemoryTokenService<TestClient, TestUser>)[]
 ): MemoryTokenService<TestClient, TestUser> {
   return new Proxy(tokenService, {
     get(target, prop) {
-      if (prop === "rotate") return undefined;
+      if ((hidden as (string | symbol)[]).includes(prop)) return undefined;
       const value = Reflect.get(target, prop, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
@@ -124,11 +125,40 @@ runTokenServiceContractTests<TestClient, TestUser>({
     const clientService = new MemoryClientService<TestClient, TestUser>(
       userService,
     );
-    const tokenService = withoutRotate(
+    const tokenService = without(
       new MemoryTokenService<TestClient, TestUser>({
         clientService,
         userService,
       }),
+      "rotate",
+    );
+    return { userService, clientService, tokenService };
+  },
+  addUser: (svc, user, pw) =>
+    (svc as MemoryUserService<TestUser>).add(user, pw),
+  addClient: (svc, client, secret, ownerUserId) =>
+    (svc as MemoryClientService<TestClient, TestUser>).add(
+      client,
+      secret,
+      ownerUserId,
+    ),
+});
+
+runTokenServiceContractTests<TestClient, TestUser>({
+  describeName:
+    "MemoryTokenService without rotate or revokeRotated satisfies TokenServiceInterface contract",
+  makeServices: () => {
+    const userService = new MemoryUserService<TestUser>();
+    const clientService = new MemoryClientService<TestClient, TestUser>(
+      userService,
+    );
+    const tokenService = without(
+      new MemoryTokenService<TestClient, TestUser>({
+        clientService,
+        userService,
+      }),
+      "rotate",
+      "revokeRotated",
     );
     return { userService, clientService, tokenService };
   },

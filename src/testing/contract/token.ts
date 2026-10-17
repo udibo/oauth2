@@ -67,9 +67,10 @@ export interface TokenServiceContractOptions<
   /** Builds a scope from its string value. Defaults to a {@linkcode BasicScope}. */
   makeScope?(value: string): S;
   /**
-   * A scope value the service accepts unchanged for the fixture client, with
-   * or without a user. The `acceptedScope` cases request it and expect it
-   * back. Set it when `acceptedScope` refuses scopes outside a fixed
+   * A scope value the service accepts for the fixture client. The
+   * `acceptedScope` case with a user requests it and expects it back
+   * unchanged; the case with no user requests it and expects it not to be
+   * refused. Set it when `acceptedScope` refuses scopes outside a fixed
    * vocabulary, for example `"openid"`. Defaults to `"read"`.
    */
   supportedScope?: string;
@@ -77,9 +78,11 @@ export interface TokenServiceContractOptions<
    * Returns a new rotation-family id the store accepts as a
    * {@linkcode RefreshToken.familyId}, distinct on every call. The family cases
    * call it for each family they create and for a family that was never
-   * issued, so each case sees only its own rows. Set it when the store keeps
-   * family ids in a format other than a UUID. Defaults to
-   * `crypto.randomUUID()`.
+   * issued, so each case sees only its own families. Users, clients and the
+   * authorization-code and unknown-token probes keep fixed values, so a store
+   * that keeps state across cases still needs `makeServices` to isolate those.
+   * Set it when the store keeps family ids in a format other than a UUID.
+   * Defaults to `crypto.randomUUID()`.
    */
   makeFamilyId?(): string;
   /**
@@ -523,6 +526,10 @@ export function runTokenServiceContractTests<
             ? await tokenService.revokeRotated(parent)
             : await tokenService.revoke(parent);
           expect(claimed).toBe(true);
+          expect(
+            await tokenService.getRefreshToken(parent.refreshToken),
+            "the claim spends the presented refresh token",
+          ).toBe(undefined);
 
           await tokenService.revokeFamily!(family);
           await tokenService.save(successor);

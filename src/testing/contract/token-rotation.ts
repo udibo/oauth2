@@ -108,6 +108,13 @@ export interface TokenRotationContractOptions<
    * longer to reach the lock they wait on.
    */
   blockedAfterMs?: number;
+  /**
+   * Returns a new rotation-family id the store accepts as a
+   * {@linkcode RefreshToken.familyId}, distinct on every call. Each case calls
+   * it for the two families it uses. Set it when the store keeps family ids in
+   * a format other than a UUID. Defaults to `crypto.randomUUID()`.
+   */
+  makeFamilyId?(): string;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -164,6 +171,7 @@ export function runTokenRotationContractTests<
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
   const pausable = options.rotateAwaitsBarrier ?? true;
   const blockedAfterMs = options.blockedAfterMs ?? 100;
+  const makeFamilyId = options.makeFamilyId ?? (() => crypto.randomUUID());
 
   describe(
     options.describeName ?? "TokenServiceInterface.rotate contract",
@@ -188,8 +196,8 @@ export function runTokenRotationContractTests<
 
       beforeEach(async () => {
         armed = undefined;
-        family = crypto.randomUUID();
-        otherFamily = crypto.randomUUID();
+        family = makeFamilyId();
+        otherFamily = makeFamilyId();
         const services = await options.makeServices(barriers);
         clientService = services.clientService;
         tokenService = services.tokenService;
