@@ -3,7 +3,6 @@ import { thrown } from "../_test_assert.ts";
 import {
   base64urlDecode,
   base64urlEncode,
-  deriveAesKey,
   deriveSealKey,
   randomToken,
   seal,
@@ -93,16 +92,16 @@ describe("randomToken", () => {
   });
 });
 
-describe("deriveAesKey + seal/unseal", () => {
+describe("seal/unseal", () => {
   it("round-trips bytes", async () => {
-    const key = await deriveAesKey(SECRET);
+    const key = await deriveSealKey(SECRET, "seal");
     const data = new TextEncoder().encode("hello tokens");
     const opened = await unseal(key, await seal(key, data));
     expect(opened).toStrictEqual(data);
   });
 
   it("returns null on a tampered ciphertext", async () => {
-    const key = await deriveAesKey(SECRET);
+    const key = await deriveSealKey(SECRET, "seal");
     const sealed = await seal(key, new TextEncoder().encode("x"));
     const bytes = base64urlDecode(sealed);
     bytes[bytes.length - 1] ^= 0xff;
@@ -110,27 +109,28 @@ describe("deriveAesKey + seal/unseal", () => {
   });
 
   it("returns null with the wrong key", async () => {
-    const a = await deriveAesKey(SECRET);
-    const b = await deriveAesKey(`${SECRET}-different`);
+    const a = await deriveSealKey(SECRET, "seal");
+    const b = await deriveSealKey(`${SECRET}-different`, "seal");
     const sealed = await seal(a, new TextEncoder().encode("x"));
     expect(await unseal(b, sealed)).toStrictEqual(null);
   });
 
-  it("rejects a too-short secret", async () => {
-    let threw = false;
-    try {
-      await deriveAesKey("short");
-    } catch {
-      threw = true;
-    }
-    expect(threw).toStrictEqual(true);
-  });
-
   it("returns null for a value too short to hold an IV", async () => {
-    const key = await deriveAesKey(SECRET);
+    const key = await deriveSealKey(SECRET, "seal");
     expect(await unseal(key, base64urlEncode(new Uint8Array(5)))).toStrictEqual(
       null,
     );
+  });
+});
+
+describe("seal", () => {
+  it("draws a fresh IV for every seal of the same plaintext", async () => {
+    const key = await deriveSealKey(SECRET, "iv");
+    const plaintext = new TextEncoder().encode("same plaintext");
+    const first = base64urlDecode(await seal(key, plaintext));
+    const second = base64urlDecode(await seal(key, plaintext));
+    expect(first.slice(0, 12)).not.toStrictEqual(second.slice(0, 12));
+    expect(first).not.toStrictEqual(second);
   });
 });
 
@@ -144,7 +144,13 @@ describe("deriveSealKey (HKDF) domain separation", () => {
 
   it("the HKDF key is independent of the SHA-256-derived key", async () => {
     const sealKey = await deriveSealKey(SECRET, "udibo:bff-session-tokens:v1");
-    const hashKey = await deriveAesKey(SECRET);
+    const hashKey = await crypto.subtle.importKey(
+      "raw",
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(SECRET)),
+      { name: "AES-GCM" },
+      false,
+      ["encrypt", "decrypt"],
+    );
     const sealed = await seal(sealKey, new TextEncoder().encode("token"));
     expect(await unseal(hashKey, sealed)).toStrictEqual(null);
   });

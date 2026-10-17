@@ -22,7 +22,8 @@ sections apply only when you host those flows.
       the CSRF header.
 - [ ] The BFF's `sessionStore` and `authRequestStorage` work on every instance
       that serves the app: encrypted-cookie stores with secrets every instance
-      shares, a separate one per store, or stores over shared storage.
+      shares, a separate one per store instance and per app, or stores over
+      shared storage.
       `MemorySessionStore` and `MemoryAuthRequestStorageFactory` appear only in
       single-process, test and local configurations. If sign-out must revoke a
       stolen session cookie, use a shared `SessionStore`:

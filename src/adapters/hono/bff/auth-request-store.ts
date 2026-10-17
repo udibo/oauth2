@@ -104,10 +104,12 @@ export interface EncryptedCookieAuthRequestStorageOptions {
    * Secret the AES-256 key is derived from; at least 32 bytes. Reuse the
    * secret across instances so any of them can unseal a cookie another sealed.
    *
-   * Prefer a secret of its own, separate from the session store's. Sharing
-   * one with {@link EncryptedCookieSessionStore} is still safe: each store
-   * derives its key with HKDF-SHA-256 under its own label, so neither store
-   * opens the other's cookie.
+   * Give each store instance and each app a secret of its own. Nothing in a
+   * sealed cookie binds it to the app or store instance that sealed it, so two
+   * apps that share a secret can open each other's pending sign-ins. Sharing
+   * one with {@link EncryptedCookieSessionStore} does not let either store open
+   * the other's cookies: each derives its key with HKDF-SHA-256 under its own
+   * label.
    */
   secret: string;
   /** Cookie attribute overrides. */
@@ -310,8 +312,10 @@ export class EncryptedCookieAuthRequestStorage implements AuthRequestStorageFact
   /** Returns the storage bound to `c`, for the duration of that request. */
   forRequest(c: Context): AuthRequestStorage {
     return {
-      get: async (state: string): Promise<AuthRequestRecord | null> =>
-        (await this.#read(c))[state] ?? null,
+      get: async (state: string): Promise<AuthRequestRecord | null> => {
+        const pending = await this.#read(c);
+        return Object.hasOwn(pending, state) ? pending[state] : null;
+      },
       set: async (state: string, value: AuthRequestRecord): Promise<void> => {
         const pending = await this.#read(c);
         pending[state] = value;

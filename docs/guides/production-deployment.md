@@ -145,15 +145,18 @@ one process. Pick each one by where your requests can land:
 | Several instances that need revocation, listings or back-channel logout | A `SessionStore` over a database or cache every instance shares, implementing `withRefreshLock` | `EncryptedCookieAuthRequestStorage`, or an `AuthRequestStorageFactory` over shared storage |
 
 Give each encrypted-cookie store a secret every instance shares, so any of them
-can unseal a cookie another sealed. Use a separate secret per store. One secret
-given to both is still safe: each store derives its own key from the secret
-with HKDF-SHA-256 under a label of its own, so neither store opens the other's
-cookie. The memory stores keep their records in the process that wrote them: a
-restart signs everyone out, a session is unknown to every other instance, and a
-callback served by another instance fails with an unknown `state`. An
-`AuthRequestStorage` that needs no request context, such as one over your
-database, is passed as `{ forRequest: () => storage }`; the BFF never falls back
-to the `DirectClient`'s own `authRequestStorage`. Such a
+can unseal a cookie another sealed. Use a separate secret per store instance
+(each store you construct) and per app: nothing in a sealed cookie binds it to
+the app or the store instance that sealed it, so two apps that share a secret
+can open each other's session cookies. One secret given to an app's session
+store and its pending-sign-in storage does not let either open the other's
+cookies, because each derives its own key from the secret with HKDF-SHA-256
+under a label of its own. The memory stores keep their records in the process
+that wrote them: a restart signs everyone out, a session is unknown to every
+other instance, and a callback served by another instance fails with an unknown
+`state`. An `AuthRequestStorage` that needs no request context, such as one over
+your database, is passed as `{ forRequest: () => storage }`; the BFF never falls
+back to the `DirectClient`'s own `authRequestStorage`. Such a
 store must return every field of the record it was given, with its type,
 `maxAge: null` included. The login records the `max_age` the sign-in was started with, and a
 store that keeps only the fields it knows makes the callback check against its

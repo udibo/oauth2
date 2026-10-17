@@ -1,5 +1,5 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
-import { thrown } from "../../../_test_assert.ts";
+import { rejection, thrown } from "../../../_test_assert.ts";
 import { Hono } from "hono";
 
 import { AuthorizationCodeGrant } from "../../../server/grants/authorization-code.ts";
@@ -195,6 +195,56 @@ describe("EncryptedCookieAuthRequestStorage", () => {
       expect(response.status, value).toBe(200);
       expect(await response.json(), value).toBe(null);
     }
+  });
+
+  it("reads no pending sign-in under a key an object inherits", async () => {
+    const store = new EncryptedCookieAuthRequestStorage({
+      secret: SECRET,
+      cookie: { secure: false },
+    });
+    async function get(
+      cookie: string | undefined,
+      state: string,
+    ): Promise<AuthRequestRecord | null> {
+      let found: AuthRequestRecord | null = null;
+      const direct = new Hono();
+      direct.get("/", async (c) => {
+        found = await store.forRequest(c).get(state);
+        return c.body(null, 204);
+      });
+      await direct.request("/", { headers: cookie ? { cookie } : {} });
+      return found;
+    }
+
+    const cookie = await seal(app, [["state-1", record()]]);
+    for (const state of [
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+    ]) {
+      expect(await get(undefined, state), state).toBe(null);
+      expect(await get(cookie, state), state).toBe(null);
+    }
+    expect((await get(cookie, "state-1"))?.returnTo).toBe("/home");
+  });
+
+  it("rejects a secret shorter than 16 bytes on first use", async () => {
+    const store = new EncryptedCookieAuthRequestStorage({
+      secret: "x".repeat(15),
+      cookie: { secure: false },
+    });
+    let failure: unknown;
+    const app = new Hono();
+    app.get("/", async (c) => {
+      failure = await rejection(() =>
+        store.forRequest(c).set("state-1", record()),
+      );
+      return c.body(null, 204);
+    });
+    await app.request("/");
+    assert(failure instanceof Error);
+    expect(failure.message).toMatch(/at least 16 bytes/);
   });
 
   it("drops records older than the ttl", async () => {

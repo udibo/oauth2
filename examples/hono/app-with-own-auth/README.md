@@ -115,8 +115,9 @@ on a free port.
   `MemoryAuthRequestStorageFactory`**, which keep sessions and pending sign-ins
   in this one process. The stateless choices that ship are
   `EncryptedCookieSessionStore` and `EncryptedCookieAuthRequestStorage`
-  (AES-GCM cookies, in `@udibo/oauth2/hono/bff`): give each its own secret;
-  every instance that shares a store's secret can read its cookies. For
+  (AES-GCM cookies, in `@udibo/oauth2/hono/bff`): give each store instance a
+  secret of its own, used by no other app; every instance that shares a
+  store's secret can read its cookies. For
   server-side storage (Redis, Postgres, …), implement `SessionStore` and
   `AuthRequestStorageFactory` —
   `runSessionStoreContractTests` and `runAuthRequestStorageContractTests`

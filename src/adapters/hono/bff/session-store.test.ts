@@ -2,7 +2,7 @@ import { assert, describe, expect, it, vi } from "vitest";
 import { FakeTime } from "../../../_test_fake-time.ts";
 import { rejection, thrown } from "../../../_test_assert.ts";
 import { InvalidGrantError } from "../../../errors.ts";
-import { deriveAesKey, sealJson } from "../../../utils/crypto.ts";
+import { sealJson } from "../../../utils/crypto.ts";
 import {
   AUTH_REQUEST_COOKIE_KEY_INFO,
   deriveCookieKey,
@@ -102,6 +102,23 @@ describe("EncryptedCookieSessionStore secret rotation", () => {
       secret: new Uint8Array(32),
     });
     expect(await store.read("not-a-real-cookie")).toBe(null);
+  });
+
+  it("rejects a secret shorter than 16 bytes on first use", async () => {
+    const store = new EncryptedCookieSessionStore({
+      secret: new Uint8Array(15),
+    });
+    await rejection(
+      store.create(makeSessionData()),
+      Error,
+      /at least 16 bytes/,
+    );
+  });
+
+  it("accepts a secret of exactly 16 bytes", async () => {
+    const store = new EncryptedCookieSessionStore({ secret: "x".repeat(16) });
+    const data = makeSessionData();
+    expect(await store.read(await store.create(data))).toStrictEqual(data);
   });
 
   it("throws when the secret list is empty", () => {
@@ -219,7 +236,14 @@ describe("EncryptedCookieSessionStore cookie shape", () => {
   it("reads nothing from a cookie sealed under the secret's bare SHA-256", async () => {
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const store = new EncryptedCookieSessionStore({ secret });
-    const sealed = await sealJson(await deriveAesKey(secret), {
+    const bareSha256Key = await crypto.subtle.importKey(
+      "raw",
+      await crypto.subtle.digest("SHA-256", secret),
+      { name: "AES-GCM" },
+      false,
+      ["encrypt", "decrypt"],
+    );
+    const sealed = await sealJson(bareSha256Key, {
       issuedAt: Date.now(),
       data: makeSessionData(),
     });

@@ -478,10 +478,12 @@ export interface EncryptedCookieSessionStoreOptions {
    * Server-held secret(s) used to derive the AES-256 key(s). Each must have at
    * least 32 bytes of entropy; pass a base64 / hex string or raw bytes.
    *
-   * Prefer a secret of its own, separate from the one given to
-   * `EncryptedCookieAuthRequestStorage`. Sharing one is still safe: each store
-   * derives its key with HKDF-SHA-256 under its own label, so neither store
-   * opens the other's cookie.
+   * Give each store instance and each app a secret of its own. Nothing in a
+   * sealed cookie binds it to the app or store instance that sealed it, so two
+   * apps that share a secret can open each other's session cookies. Sharing one
+   * with `EncryptedCookieAuthRequestStorage` does not let either store open the
+   * other's cookies: each derives its key with HKDF-SHA-256 under its own
+   * label.
    *
    * Pass an **ordered list** to rotate the secret without signing everyone out:
    * the **first** entry is current — every cookie is sealed under it — and
