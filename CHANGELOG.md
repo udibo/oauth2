@@ -1,3 +1,25 @@
+## [0.34.0](https://github.com/udibo/oauth2/compare/0.33.0...0.34.0) (2026-10-17)
+
+### ⚠ BREAKING CHANGES
+
+* **bff:** `EncryptedCookieSessionStore` and
+`EncryptedCookieAuthRequestStorage` now derive their AES-256-GCM keys
+with HKDF-SHA-256, each under its own label, instead of
+`SHA-256(secret)`. Cookies sealed by an earlier version no longer open.
+After upgrading, each signed-in user is signed out once. A sign-in in
+flight across the upgrade fails once with `unknown state parameter` and
+succeeds when retried. On a rolling deploy, old and new instances can't
+read each other's cookies until every instance runs this version.
+`EncryptedCookieSessionStore` also refuses a cookie without its
+seal-time stamp; it no longer ages one from `updatedAt`. `deriveAesKey`
+is removed from `@udibo/oauth2/crypto`; use `deriveSealKey` with a
+distinct `info` per purpose. No configuration change is needed. Give
+each store instance and each app a secret of its own.
+
+### Bug Fixes
+
+* **bff:** derive each cookie store's key under its own label ([#146](https://github.com/udibo/oauth2/issues/146)) ([38cee6a](https://github.com/udibo/oauth2/commit/38cee6af8588231ed733a789835bebb706c7a7cf)), closes [#113](https://github.com/udibo/oauth2/issues/113)
+
 ## [0.33.0](https://github.com/udibo/oauth2/compare/0.32.1...0.33.0) (2026-10-17)
 
 ### ⚠ BREAKING CHANGES
