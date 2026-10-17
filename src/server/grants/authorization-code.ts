@@ -17,6 +17,7 @@ import {
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
+  isOAuth2Error,
   type OAuth2Error,
   ServerError,
 } from "../../errors.ts";
@@ -27,6 +28,7 @@ import {
   validateCodeVerifier,
 } from "../../utils/pkce.ts";
 import { authenticateClientCredentials } from "../client-authentication.ts";
+import { sha256Hash } from "../utils/hash.ts";
 import type { ClientServiceInterface } from "../services/client.ts";
 import type { AuthorizationCodeServiceInterface } from "../services/authorization-code.ts";
 import {
@@ -52,11 +54,18 @@ export interface AuthorizationCodeGrantServices<
  */
 export interface CodeReuseEvent<Client extends ClientInterface> {
   /**
-   * The replayed authorization code. It is spent and its tokens are revoked,
-   * but it is still a credential string: hash it before recording it.
+   * The SHA-256 digest of the replayed code, as lowercase hex — the value a
+   * store that hashes codes keys them on, so it correlates without recording
+   * the code itself.
    */
-  code: string;
-  /** The client that presented the code, which is the code's own client. */
+  codeHash: string;
+  /**
+   * The client that presented the code. It is the code's own client only when
+   * the token service's `revokeCode` honors its `client` argument. A public
+   * client, or any client the grant looks up by id because
+   * `requireClientAuthentication` is `false`, is named by `client_id` alone,
+   * so whoever holds the spent code can present it as that client.
+   */
   client: Client;
 }
 
@@ -117,10 +126,11 @@ export interface AuthorizationCodeGrantOptions<
    */
   requireClientAuthentication?: boolean;
   /**
-   * Called when a code that already issued tokens is presented again by its
-   * own client and the token service's `revokeCode` revoked those tokens —
-   * record it as a security event. A replay by any other client revokes
-   * nothing and does not fire it.
+   * Called when a code that already issued tokens is presented again and the
+   * token service's `revokeCode` revoked those tokens — record it as a
+   * security event. A `revokeCode` that honors its `client` argument revokes
+   * nothing, and so does not fire this, for a client other than the code's
+   * own; {@linkcode CodeReuseEvent.client} says who that excludes.
    *
    * Trigger point `code-reuse` (see `docs/trigger-points.md`).
    * Fire-and-forget: it is awaited, but a throw is caught and logged, never
@@ -371,8 +381,10 @@ export class AuthorizationCodeGrant<
    * during authorization, the code_verifier must be provided.
    *
    * A failed exchange still consumes the code: one that fails the
-   * client-match, verifier or `redirect_uri` check, or whose token cannot be
-   * generated, is claimed before the error is thrown. Only the caller whose
+   * client-match, verifier or `redirect_uri` check, whose token cannot be
+   * generated, or that `exchangeCode` refuses with an OAuth2 error, is claimed
+   * before the error is thrown. Any other error from `exchangeCode`, such as a
+   * lost database connection, leaves the code claimable. Only the caller whose
    * claim wins receives a token, given an atomic
    * `authorizationCodeService.revoke`.
    *
@@ -385,7 +397,8 @@ export class AuthorizationCodeGrant<
    * live.
    *
    * A code presented after it was claimed, whether it was gone when the
-   * request read it or a concurrent exchange won the claim, asks
+   * request read it or a concurrent exchange won the claim, even one that
+   * then fails its checks, asks
    * `tokenService.revokeCode` to revoke the tokens issued from it on behalf of
    * the presenting client, fires `onCodeReuse` when it did, and fails with
    * `invalid_grant` (RFC 6819 §4.4.1.1).
@@ -441,15 +454,36 @@ export class AuthorizationCodeGrant<
         authorizationCode.authenticationContext,
       );
     } catch (error) {
-      if (exchangeCode)
-        await authorizationCodeService.revoke(authorizationCode);
+      if (exchangeCode) {
+        await this.#consumeFailedExchange(
+          authorizationCodeService,
+          tokenService,
+          authorizationCode,
+          client,
+        );
+      }
       throw error;
     }
     token.code = code;
 
-    const saved = exchangeCode
-      ? await exchangeCode(authorizationCode, token)
-      : await tokenService.save(token);
+    let saved: Token<Client, User, S> | undefined;
+    if (exchangeCode) {
+      try {
+        saved = await exchangeCode(authorizationCode, token);
+      } catch (error) {
+        if (isOAuth2Error(error)) {
+          await this.#consumeFailedExchange(
+            authorizationCodeService,
+            tokenService,
+            authorizationCode,
+            client,
+          );
+        }
+        throw error;
+      }
+    } else {
+      saved = await tokenService.save(token);
+    }
     if (!saved) {
       throw await this.#refuseClaimedCode(tokenService, code, client);
     }
@@ -495,6 +529,36 @@ export class AuthorizationCodeGrant<
     }
   }
 
+  async #consumeFailedExchange(
+    authorizationCodeService: AuthorizationCodeGrantServices<
+      Client,
+      User,
+      S
+    >["authorizationCodeService"],
+    tokenService: AuthorizationCodeGrantServices<
+      Client,
+      User,
+      S
+    >["tokenService"],
+    authorizationCode: AuthorizationCode<Client, User, S>,
+    client: Client,
+  ): Promise<void> {
+    try {
+      if (!(await authorizationCodeService.revoke(authorizationCode))) {
+        await this.#refuseClaimedCode(
+          tokenService,
+          authorizationCode.code,
+          client,
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[@udibo/oauth2] could not consume the code of a failed exchange:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   async #refuseClaimedCode(
     tokenService: AuthorizationCodeGrantServices<
       Client,
@@ -508,7 +572,7 @@ export class AuthorizationCodeGrant<
     if (!(await tokenService.revokeCode(code, client))) {
       return new InvalidGrantError(unrevokedMessage);
     }
-    await this.#notifyCodeReuse({ code, client });
+    await this.#notifyCodeReuse({ codeHash: await sha256Hash(code), client });
     return new InvalidGrantError("code already used");
   }
 

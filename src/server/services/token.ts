@@ -233,11 +233,15 @@ export interface TokenServiceInterface<
    *
    * `client` is the client that presented the code. Revoke only when it is the
    * client the code's tokens were issued to; for any other client revoke
-   * nothing and resolve `false`. A different client could never have redeemed
-   * the code, since that needs the code's own client's credentials, so its
-   * replay says nothing about theft. A store that ignores `client` revokes on
-   * any client's replay, which lets a client that sees a leaked, spent code end
-   * the session it started.
+   * nothing and resolve `false`. A different confidential client could never
+   * have redeemed the code, since that needs the code's own client's
+   * credentials, so its replay says nothing about theft. The gate names a
+   * public client, or any client when the grant's
+   * `requireClientAuthentication` is `false`, by `client_id` alone, so anyone
+   * holding such a client's spent code can still present it as that client
+   * and revoke. A store that ignores `client` revokes on any client's replay,
+   * which lets a client that sees a leaked, spent code end the session it
+   * started.
    *
    * With {@linkcode exchangeCode}, make the two linearizable: a call that
    * begins once `exchangeCode` has claimed the code must find and revoke the

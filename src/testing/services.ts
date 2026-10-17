@@ -264,7 +264,8 @@ export interface MemoryTokenServiceOptions<
    * The code store the authorization code grant claims codes from. Pass it to
    * give the token service {@linkcode MemoryTokenService.exchangeCode}, so the
    * grant claims a code and saves its token in one step; without it the grant
-   * claims and saves in two.
+   * claims and saves in two. `exchangeCode` claims from the code store's own
+   * map, so a subclass that overrides the code store's `revoke` is bypassed.
    */
   authorizationCodeService?: MemoryAuthorizationCodeService<C, U, S>;
 }

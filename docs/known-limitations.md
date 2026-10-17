@@ -291,8 +291,16 @@ should not be enabled for new deployments.
   presented the code. Two optional pieces of the store decide how far it goes:
   - A `revokeCode` that ignores `client` revokes on any client's replay, so a
     client that sees a spent code, such as from a log or a shared browser, can
-    end the session it started. Honor `client` and only the code's own client's
-    replay revokes.
+    end the session it started. Honor `client` and a different confidential
+    client's replay revokes nothing.
+  - Honoring `client` does not protect a public client, or any client when
+    `requireClientAuthentication` is `false`: the grant names it by
+    `client_id` alone, and replay detection runs before the PKCE verifier is
+    checked, so anyone holding that client's spent code can present it and
+    revoke the session it started. Gating revocation on the verifier is
+    tracked in [udibo/oauth2#149](https://github.com/udibo/oauth2/issues/149).
+    `onCodeReuse` names the presenting client, which is the code's own client
+    only when `revokeCode` honors `client`.
   - Without `exchangeCode`, the grant claims the code and saves its token in
     two calls. A replay that lands between them finds the code claimed but no
     token yet, so it is refused and the token saved next stays live. With

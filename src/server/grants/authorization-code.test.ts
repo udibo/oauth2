@@ -22,6 +22,7 @@ import {
   tokenRequest,
 } from "../../testing/_test_fixtures.ts";
 import type { ChallengeMethods } from "../../utils/pkce.ts";
+import { sha256Hash } from "../utils/hash.ts";
 import {
   generateCodeChallenge,
   generateCodeVerifier,
@@ -1511,6 +1512,21 @@ describe("AuthorizationCodeGrant", () => {
       ) as Promise<RefreshToken<TestClient, TestUser, BasicScope>>;
     }
 
+    function passThrough<T extends object>(
+      target: T,
+      overrides: Record<string, unknown>,
+    ): T {
+      return new Proxy(target, {
+        get(object, prop) {
+          if (typeof prop === "string" && prop in overrides) {
+            return overrides[prop];
+          }
+          const value = Reflect.get(object, prop, object);
+          return typeof value === "function" ? value.bind(object) : value;
+        },
+      });
+    }
+
     async function isLive(
       tokenService: MemoryTokenService<TestClient, TestUser, BasicScope>,
       token: RefreshToken<TestClient, TestUser, BasicScope>,
@@ -1547,7 +1563,7 @@ describe("AuthorizationCodeGrant", () => {
 
       expect(await isLive(tokenService, issued)).toBe(false);
       expect(reuseEvents).toStrictEqual([
-        { code: "replayed-code", client: testClient },
+        { codeHash: await sha256Hash("replayed-code"), client: testClient },
       ]);
     });
 
@@ -1607,19 +1623,6 @@ describe("AuthorizationCodeGrant", () => {
         reached.resolve();
         await release.promise;
       };
-      const passThrough = <T extends object>(
-        target: T,
-        overrides: Record<string, unknown>,
-      ): T =>
-        new Proxy(target, {
-          get(object, prop) {
-            if (typeof prop === "string" && prop in overrides) {
-              return overrides[prop];
-            }
-            const value = Reflect.get(object, prop, object);
-            return typeof value === "function" ? value.bind(object) : value;
-          },
-        });
       const { exchangeCode } = tokenService;
       const heldGrant = new AuthorizationCodeGrant<
         TestClient,
@@ -1676,6 +1679,164 @@ describe("AuthorizationCodeGrant", () => {
         await isLive(tokenService, issued),
         "a replay that lands between the first exchange's claim and its " +
           "save must still leave no live token issued from the code",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("revokes the winner's tokens when a concurrent presentation that fails its checks loses the claim", async () => {
+      const { services, tokenService, reuseEvents } = await createReplayGrant();
+      const codes = services.authorizationCodeService;
+      let heldGet:
+        | {
+            reached: PromiseWithResolvers<void>;
+            release: PromiseWithResolvers<void>;
+          }
+        | undefined;
+      const grant = new AuthorizationCodeGrant<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({
+        resolve: () => ({
+          clientService: services.clientService,
+          tokenService,
+          authorizationCodeService: passThrough(codes, {
+            get: async (code: string) => {
+              const found = await codes.get(code);
+              const hold = heldGet;
+              heldGet = undefined;
+              if (hold) {
+                hold.reached.resolve();
+                await hold.release.promise;
+              }
+              return found;
+            },
+          }),
+        }),
+        requirePKCE: false,
+        onCodeReuse: (event) => {
+          reuseEvents.push(event);
+        },
+      });
+      const hold = {
+        reached: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      };
+      heldGet = hold;
+
+      const replay = exchange(grant, testClient, {
+        redirect_uri: "https://app.example/elsewhere",
+      });
+      await hold.reached.promise;
+      const issued = await exchange(grant, testClient);
+      hold.release.resolve();
+
+      await rejection(replay, InvalidGrantError, "incorrect redirect_uri");
+      expect(
+        await isLive(tokenService, issued),
+        "a presentation that read the code before the winner claimed it is " +
+          "still a second use, whichever check it then fails",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("surfaces the failed check, not the store error, when consuming the code after it throws", async () => {
+      using logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { grant, authorizationCodeService } = await createReplayGrant();
+      using _storeDown = vi
+        .spyOn(authorizationCodeService, "revoke")
+        .mockRejectedValue(new Error("code store down"));
+
+      await rejection(
+        () =>
+          exchange(grant, testClient, {
+            redirect_uri: "https://app.example/elsewhere",
+          }),
+        InvalidGrantError,
+        "incorrect redirect_uri",
+      );
+      expect(logged).toHaveBeenCalledOnce();
+    });
+
+    it("consumes the code when the token store refuses the exchange with an OAuth2 error", async () => {
+      const { grant, tokenService, authorizationCodeService } =
+        await createReplayGrant();
+      using _refused = vi
+        .spyOn(tokenService, "exchangeCode")
+        .mockRejectedValue(new InvalidGrantError("refused by policy"));
+
+      await rejection(
+        () => exchange(grant, testClient),
+        InvalidGrantError,
+        "refused by policy",
+      );
+
+      expect(await authorizationCodeService.get("replayed-code")).toBe(
+        undefined,
+      );
+    });
+
+    it("leaves the code claimable when the token store fails for another reason", async () => {
+      const { grant, tokenService, authorizationCodeService } =
+        await createReplayGrant();
+      using _storeDown = vi
+        .spyOn(tokenService, "exchangeCode")
+        .mockRejectedValueOnce(new Error("token store down"));
+
+      await rejection(
+        () => exchange(grant, testClient),
+        Error,
+        "token store down",
+      );
+
+      expect(
+        await authorizationCodeService.get("replayed-code"),
+        "an infrastructure failure must not spend the user's code",
+      ).not.toBe(undefined);
+    });
+
+    it("lets a replay that names a public client by client_id alone revoke, with no code_verifier", async () => {
+      const { grant, services, tokenService, reuseEvents } =
+        await createReplayGrant();
+      const publicApp: TestClient = { id: "public-app" };
+      await services.clientService.add(publicApp, undefined, testUser.id);
+      const verifier = generateCodeVerifier();
+      await services.authorizationCodeService.save({
+        code: "public-code",
+        expiresAt: new Date(Date.now() + 300000),
+        client: publicApp,
+        user: testUser,
+        challenge: await generateCodeChallenge(verifier),
+        challengeMethod: "S256",
+      });
+      const issued = (await exchangeToken(
+        grant,
+        tokenRequest({
+          grant_type: "authorization_code",
+          code: "public-code",
+          code_verifier: verifier,
+        }),
+        publicApp,
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
+
+      await rejection(
+        () =>
+          exchangeToken(
+            grant,
+            tokenRequest({
+              grant_type: "authorization_code",
+              code: "public-code",
+            }),
+            publicApp,
+          ),
+        InvalidGrantError,
+        "code already used",
+      );
+
+      expect(
+        await isLive(tokenService, issued),
+        "anyone holding a public client's spent code can present its " +
+          "client_id; gating on the verifier is not implemented yet",
       ).toBe(false);
       expect(reuseEvents).toHaveLength(1);
     });

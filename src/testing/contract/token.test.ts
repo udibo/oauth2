@@ -123,3 +123,36 @@ describe("runTokenServiceContractTests", () => {
     );
   });
 });
+
+describe("runTokenServiceContractTests revokeCode client check", () => {
+  it("fails a store whose revokeCode ignores the client by default, and registers an ignored case when it opts out", async () => {
+    const run = await runSuiteInChild(
+      "src/testing/contract/_test_ungated_revoke_code.ts",
+    );
+    const ungated = "a token service whose revokeCode ignores the client ";
+    const optedOut =
+      "a token service whose revokeCode ignores the client, opted out ";
+    const inSuite = (suite: string, status: string): string[] =>
+      run.tests
+        .filter(
+          (test) => test.status === status && test.fullName.startsWith(suite),
+        )
+        .map((test) => test.fullName.slice(suite.length).trim())
+        .toSorted();
+
+    expect(
+      run.exitCode,
+      `the suite must fail this store:\n${run.output}`,
+    ).not.toBe(0);
+    expect(inSuite(ungated, "failed")).toStrictEqual(
+      [
+        "revokeCode revokes for the client the code's tokens were issued to, after another client was refused",
+        "revokeCode revokes nothing for a client other than the one the code's tokens were issued to",
+      ].toSorted(),
+    );
+    expect(inSuite(optedOut, "failed")).toStrictEqual([]);
+    expect(inSuite(optedOut, "skipped")).toContain(
+      "revokeCode revokeCode ignores the presenting client — any client that presents a spent code revokes its tokens (revokeCodeChecksClient: false)",
+    );
+  });
+});

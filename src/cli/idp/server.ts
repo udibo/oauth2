@@ -127,6 +127,11 @@ async function createState(
   const clientService = new MemoryClientService<ClientInterface, DevIdpUser>(
     userService,
   );
+  const authorizationCodeService = new MemoryAuthorizationCodeService<
+    ClientInterface,
+    DevIdpUser,
+    BasicScope
+  >({ clientService, userService });
   const tokenService = new MemoryTokenService<
     ClientInterface,
     DevIdpUser,
@@ -135,12 +140,8 @@ async function createState(
     clientService,
     userService,
     accessTokenLifetime: config.accessTokenLifetime,
+    authorizationCodeService,
   });
-  const authorizationCodeService = new MemoryAuthorizationCodeService<
-    ClientInterface,
-    DevIdpUser,
-    BasicScope
-  >({ clientService, userService });
 
   const grants: AuthorizationServerOptions<
     ClientInterface,
