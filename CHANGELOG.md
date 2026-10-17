@@ -1,3 +1,25 @@
+## [0.35.0](https://github.com/udibo/oauth2/compare/0.34.0...0.35.0) (2026-10-17)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** `runTokenServiceContractTests` now checks that
+`revokeCode(code, client)` revokes nothing for a client other than the
+one the code's tokens were issued to, so a custom token store that
+ignores the new `client` argument fails it. Migration: honor `client` in
+`revokeCode`, or pass `revokeCodeChecksClient: false` to register an
+ignored case instead. A client or backend-for-frontend that exchanges
+one code twice concurrently, for example two callbacks through
+`EncryptedCookieAuthRequestStorage`, which has no atomic `take`, now
+signs the user out: the losing exchange revokes the tokens the winner
+received. Another client's replay of a spent code now fails with
+`invalid code` rather than `code already used`. The new `onCodeReuse`
+hook reports `codeHash`, the SHA-256 hex digest of the code, never the
+code itself.
+
+### Features
+
+* **server:** gate code replay on the client, add atomic exchange ([#147](https://github.com/udibo/oauth2/issues/147)) ([6cda17b](https://github.com/udibo/oauth2/commit/6cda17b1fafaae30f5172b17ba6cbe0673fdfd51)), closes [udibo/oauth2#149](https://github.com/udibo/oauth2/issues/149) [#104](https://github.com/udibo/oauth2/issues/104) [#146](https://github.com/udibo/oauth2/issues/146) [#142](https://github.com/udibo/oauth2/issues/142) [#104](https://github.com/udibo/oauth2/issues/104)
+
 ## [0.34.0](https://github.com/udibo/oauth2/compare/0.33.0...0.34.0) (2026-10-17)
 
 ### ⚠ BREAKING CHANGES
