@@ -6,7 +6,14 @@
  * @module
  */
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   OAuth2ClientBase,
@@ -16,6 +23,7 @@ import type {
 } from "../client/mod.ts";
 import { toOAuth2Error } from "../errors.ts";
 
+import { type LogoutTracker, LogoutTrackerContext } from "./_logout.ts";
 import {
   OAuth2Context,
   type OAuth2ContextValue,
@@ -53,13 +61,24 @@ const DEFAULT_STATE: OAuth2State = {
 
 const RENEW_SKEW_SECONDS = 30;
 const MIN_RENEW_MS = 5_000;
+const MAX_RENEW_BACKOFF_MS = 300_000;
 
 const RENEW_JITTER = 0.1;
 
 const isBrowser = (): boolean => typeof window !== "undefined";
 
-function renewDelayMs(expiresIn: number): number {
-  const base = Math.max(MIN_RENEW_MS, (expiresIn - RENEW_SKEW_SECONDS) * 1000);
+function msUntilRenew(expiresIn: number): number {
+  return (expiresIn - RENEW_SKEW_SECONDS) * 1000;
+}
+
+function isFreshExpiry(expiresIn: number | null): boolean {
+  return expiresIn != null && msUntilRenew(expiresIn) > MIN_RENEW_MS;
+}
+
+function renewDelayMs(expiresIn: number, staleRenewals: number): number {
+  const base = isFreshExpiry(expiresIn)
+    ? msUntilRenew(expiresIn)
+    : Math.min(MAX_RENEW_BACKOFF_MS, MIN_RENEW_MS * 2 ** staleRenewals);
   return base * (1 - RENEW_JITTER * Math.random());
 }
 
@@ -76,7 +95,13 @@ function expiresInFrom(tokens: TokenBundle): number | null {
  * state via `useOAuth2()`.
  *
  * While authenticated it renews the session on a timer shortly before the
- * access token expires, re-arming after each renew. Renewal is per tab and
+ * access token expires, re-arming after each renew. When the token is already
+ * expired or within seconds of it, as a `BffClient` session reports
+ * (`sessionExpiresIn: 0`) until a proxied call refreshes the token, it does
+ * not poll at a fixed rate: it renews after 5 seconds, then doubles the wait
+ * after each renew that still reports an expired token, up to one renew every
+ * 5 minutes. A renew or client event that reports a later expiry returns it
+ * to renewing shortly before that expiry. Renewal is per tab and
  * uncoordinated: a `DirectClient` given a refresh-token storage shared across
  * tabs (e.g. `IndexedDBRefreshTokenStorage`) against a server that
  * rotates refresh tokens can still have two tabs redeem the same token, which
@@ -91,6 +116,8 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     ...initialState,
   }));
   const [renewCount, setRenewCount] = useState(0);
+  const staleRenewals = useRef(0);
+  const [logoutsInFlight, setLogoutsInFlight] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,22 +189,31 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
 
   useEffect(() => {
     if (!isBrowser()) return;
-    if (!state.isAuthenticated) return;
+    if (!state.isAuthenticated) {
+      staleRenewals.current = 0;
+      return;
+    }
     const expiresIn = state.sessionExpiresIn;
     if (expiresIn == null || !Number.isFinite(expiresIn) || expiresIn < 0) {
       return;
     }
+    if (isFreshExpiry(expiresIn)) staleRenewals.current = 0;
     let cancelled = false;
-    const delayMs = renewDelayMs(expiresIn);
+    const delayMs = renewDelayMs(expiresIn, staleRenewals.current);
     const timer = setTimeout(() => {
       client.renewSession().then(
         (session) => {
           if (cancelled) return;
+          staleRenewals.current = isFreshExpiry(session.sessionExpiresIn)
+            ? 0
+            : staleRenewals.current + 1;
           setState((prev) => ({ ...prev, ...session }));
           setRenewCount((count) => count + 1);
         },
         () => {
-          if (!cancelled) setRenewCount((count) => count + 1);
+          if (cancelled) return;
+          staleRenewals.current += 1;
+          setRenewCount((count) => count + 1);
         },
       );
     }, delayMs);
@@ -187,6 +223,15 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     };
   }, [client, state.isAuthenticated, state.sessionExpiresIn, renewCount]);
 
+  useEffect(() => {
+    if (!isBrowser()) return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setLogoutsInFlight(0);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   const value = useMemo<OAuth2ContextValue>(
     () => ({
       client,
@@ -194,9 +239,29 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
     }),
     [client, state],
   );
+  const startLogout = useCallback(
+    () => setLogoutsInFlight((count) => count + 1),
+    [],
+  );
+  const settleLogout = useCallback(
+    () => setLogoutsInFlight((count) => Math.max(0, count - 1)),
+    [],
+  );
+  const logoutTracker = useMemo<LogoutTracker>(
+    () => ({
+      inFlight: logoutsInFlight > 0,
+      start: startLogout,
+      settle: settleLogout,
+    }),
+    [logoutsInFlight, startLogout, settleLogout],
+  );
 
   return (
-    <OAuth2Context.Provider value={value}>{children}</OAuth2Context.Provider>
+    <OAuth2Context.Provider value={value}>
+      <LogoutTrackerContext.Provider value={logoutTracker}>
+        {children}
+      </LogoutTrackerContext.Provider>
+    </OAuth2Context.Provider>
   );
 }
 

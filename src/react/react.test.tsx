@@ -3,6 +3,7 @@ import { FakeTime } from "../_test_fake-time.ts";
 import { render, screen } from "@testing-library/react";
 import { act, type ReactNode, StrictMode } from "react";
 
+import { BffClient } from "../client/bff-client.ts";
 import { DirectClient } from "../client/direct-client.ts";
 import { OAuth2Callback } from "./callback.tsx";
 import { OAuth2Provider } from "./provider.tsx";
@@ -25,6 +26,49 @@ function Probe(): ReactNode {
       <span data-testid="user">{user ? String(user.sub) : "none"}</span>
     </div>
   );
+}
+
+function stubLocation(): { assigned: string[] } & Disposable {
+  const assigned: string[] = [];
+  const realLocation = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      origin: realLocation.origin,
+      pathname: "/account",
+      search: "",
+      assign: (url: string) => assigned.push(url),
+    },
+  });
+  return {
+    assigned,
+    [Symbol.dispose]() {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: realLocation,
+      });
+    },
+  };
+}
+
+async function renewTimesOver(
+  time: FakeTime,
+  client: { renewSession(): Promise<unknown> },
+  durationMs: number,
+): Promise<number[]> {
+  const start = time.now;
+  const times: number[] = [];
+  const renewSession = client.renewSession.bind(client);
+  vi.spyOn(client, "renewSession").mockImplementation(() => {
+    times.push(time.now - start);
+    return renewSession();
+  });
+  for (let elapsed = 0; elapsed < durationMs; elapsed += 1_000) {
+    await act(async () => {
+      await time.tickAsync(1_000);
+    });
+  }
+  return times;
 }
 
 function AuthorizationProbe(): ReactNode {
@@ -561,6 +605,105 @@ describe("OAuth2Provider renew timer", () => {
     ).toBe(1);
   });
 
+  it("backs off from 5 s to a 5 min cap while renewals keep reporting an expired token", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+
+    const times = await renewTimesOver(time, client, 3_600_000);
+
+    expect(
+      times.length,
+      "a signed-in tab with an expired token must not probe every 5 s",
+    ).toBe(16);
+    expect(times).toStrictEqual(
+      [
+        5, 15, 35, 75, 155, 315, 615, 915, 1215, 1515, 1815, 2115, 2415, 2715,
+        3015, 3315,
+      ].map((seconds) => seconds * 1_000),
+    );
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+  });
+
+  it("restarts the backoff once a renewal reports a fresh expiry", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    const start = time.now;
+    const times: number[] = [];
+    const renew = client.renewSession.bind(client);
+    using _renew = vi.spyOn(client, "renewSession").mockImplementation(() => {
+      times.push((time.now - start) / 1_000);
+      if (times.length === 4) client.setSessionExpiresIn(120);
+      if (times.length === 5) client.setSessionExpiresIn(0);
+      return renew();
+    });
+    for (let elapsed = 0; elapsed < 200; elapsed++) {
+      await act(async () => {
+        await time.tickAsync(1_000);
+      });
+    }
+
+    expect(
+      times,
+      "the fresh expiry schedules a pre-expiry renew, and the next expired " +
+        "report backs off from the start again",
+    ).toStrictEqual([5, 15, 35, 75, 165, 175, 195]);
+  });
+
+  it("restarts the backoff after a token_refreshed event", async () => {
+    using time = new FakeTime();
+    using _random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const client = createMockOAuth2Client({
+      user: { sub: "u1" },
+      sessionExpiresIn: 0,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    for (let elapsed = 0; elapsed < 320; elapsed++) {
+      await act(async () => {
+        await time.tickAsync(1_000);
+      });
+    }
+    expect(client.renewCount, "probes at 5, 15, 35, 75, 155 and 315 s").toBe(6);
+
+    await act(async () => {
+      client.refreshTokens(120);
+    });
+    client.setSessionExpiresIn(0);
+    const times = await renewTimesOver(time, client, 110_000);
+
+    expect(
+      times,
+      "the refreshed token renews before expiry, then backs off from 10 s",
+    ).toStrictEqual([90_000, 100_000]);
+  });
+
   it("clears its timer on unmount", async () => {
     using time = new FakeTime();
     const client = createMockOAuth2Client({
@@ -621,6 +764,134 @@ describe("RequireAuth", () => {
       (loginStub.mock.calls[0]?.[0] as { returnTo?: string } | undefined)
         ?.returnTo,
     ).toBe("/");
+  });
+
+  function SignOut(props: { returnTo?: string }): ReactNode {
+    const { logout } = useOAuth2();
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          logout({ returnTo: props.returnTo }).catch(() => {});
+        }}
+      >
+        sign out
+      </button>
+    );
+  }
+
+  it("lets a logout from a protected page reach the logout destination", async () => {
+    using location = stubLocation();
+    const client = new BffClient({
+      endpoints: { baseUrl: "https://app.test" },
+    });
+    using loginSpy = vi.spyOn(client, "login");
+    render(
+      <OAuth2Provider
+        client={client}
+        initialState={{ isAuthenticated: true, user: { sub: "u1" } }}
+      >
+        <RequireAuth fallback={<span data-testid="fallback">bye</span>}>
+          <SignOut returnTo="/" />
+        </RequireAuth>
+      </OAuth2Provider>,
+    );
+
+    await act(async () => {
+      screen.getByRole("button", { name: "sign out" }).click();
+    });
+
+    expect(
+      loginSpy,
+      "RequireAuth must not start a login over a logout in flight",
+    ).not.toHaveBeenCalled();
+    expect(location.assigned).toStrictEqual([
+      "https://app.test/auth/logout?return_to=%2F",
+    ]);
+    expect(screen.getByTestId("fallback").textContent).toBe("bye");
+  });
+
+  it("starts a login after a logout that needs no redirect", async () => {
+    using location = stubLocation();
+    const client = createMockOAuth2Client({ user: { sub: "u1" } });
+    using loginSpy = vi.spyOn(client, "login");
+    render(
+      <OAuth2Provider
+        client={client}
+        initialState={{ isAuthenticated: true, user: { sub: "u1" } }}
+      >
+        <RequireAuth>
+          <SignOut />
+        </RequireAuth>
+      </OAuth2Provider>,
+    );
+
+    await act(async () => {
+      screen.getByRole("button", { name: "sign out" }).click();
+    });
+
+    expect(
+      loginSpy,
+      "a logout that stays on the page leaves it signed out and protected",
+    ).toHaveBeenCalledWith({ returnTo: "/account" });
+    expect(location.assigned).toStrictEqual(["mock://login"]);
+  });
+
+  it("starts a login after a logout that fails", async () => {
+    using location = stubLocation();
+    const client = createMockOAuth2Client({ user: { sub: "u1" } });
+    using _logout = vi.spyOn(client, "logout").mockImplementation(() => {
+      client.signOut();
+      return Promise.reject(new Error("end-session discovery failed"));
+    });
+    render(
+      <OAuth2Provider
+        client={client}
+        initialState={{ isAuthenticated: true, user: { sub: "u1" } }}
+      >
+        <RequireAuth>
+          <SignOut />
+        </RequireAuth>
+      </OAuth2Provider>,
+    );
+
+    await act(async () => {
+      screen.getByRole("button", { name: "sign out" }).click();
+    });
+
+    expect(location.assigned).toStrictEqual(["mock://login"]);
+  });
+
+  it("starts a login when the back-forward cache restores the page after a logout", async () => {
+    using location = stubLocation();
+    const client = new BffClient({
+      endpoints: { baseUrl: "https://app.test" },
+    });
+    render(
+      <OAuth2Provider
+        client={client}
+        initialState={{ isAuthenticated: true, user: { sub: "u1" } }}
+      >
+        <RequireAuth>
+          <SignOut />
+        </RequireAuth>
+      </OAuth2Provider>,
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "sign out" }).click();
+    });
+    expect(location.assigned).toStrictEqual(["https://app.test/auth/logout"]);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+
+    expect(location.assigned).toStrictEqual([
+      "https://app.test/auth/logout",
+      "https://app.test/auth/login?return_to=%2Faccount",
+    ]);
   });
 });
 

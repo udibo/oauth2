@@ -35,7 +35,9 @@ export function App() {
 }
 ```
 
-`RequireAuth` starts sign-in when the session is unauthenticated. Use
+`RequireAuth` starts sign-in when the session is unauthenticated. It waits while
+a `logout()` from `useOAuth2()` is signing out, so a sign-out button on a
+protected page ends at the logout destination rather than the login page. Use
 `useOAuth2()` directly when a page should stay public and offer an explicit
 sign-in button. Construct the client once per browser app, not on every render.
 For server rendering, derive any initial auth state from the current request; do
@@ -71,6 +73,15 @@ export function Root(
 its cookie. Shared mode leaves lifetime enforcement to the application and its
 session store. It sets no caching policy, so send a page rendered from its
 answer with a private or `no-store` `Cache-Control`.
+
+While signed in, the provider re-checks the session shortly before
+`sessionExpiresIn` elapses. A BFF session whose access token has expired reports
+`sessionExpiresIn: 0` until a proxied call refreshes the token, so the provider
+backs off rather than polling: it checks after 5 seconds, then doubles the wait
+after each check that still reports an expired token, up to one check every 5
+minutes per tab. A check that reports a later expiry returns it to the
+pre-expiry schedule. A `BffClient.fetch` that gets a `401` still signs the UI
+out immediately.
 
 A rendering guard does not protect data. Keep bearer/session validation,
 required scopes, and record-level authorization on the server. Use the same
