@@ -522,7 +522,9 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   they are stored, and otherwise answers `502` and keeps the session and its
   cookie. A store whose `withRefreshLock` passes no lease gets no such fence:
   the former holder's write can overwrite the new holder's tokens, or its
-  sign-out can end the session the new holder just refreshed. Two schedules
+  sign-out can end the session the new holder just refreshed.
+  `runSessionStoreContractTests` fails such a store unless its options declare
+  that the lock never expires (`refreshLockNeverExpires`). Two schedules
   still cost the session, with or without the lease. A holder that stalls
   past its lease and then spends the refresh token before the new holder
   does cannot store what it received, and the new holder's exchange is

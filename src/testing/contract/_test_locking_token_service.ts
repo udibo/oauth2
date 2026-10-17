@@ -144,9 +144,13 @@ export class LockingTokenService<
   }
 
   hasLiveRefreshToken(familyId: string): Promise<boolean> {
+    const now = Date.now();
     return Promise.resolve(
       [...this.#byRefresh.values()].some(
-        (token) => token.familyId === familyId,
+        (token) =>
+          token.familyId === familyId &&
+          (!token.refreshTokenExpiresAt ||
+            token.refreshTokenExpiresAt.getTime() > now),
       ),
     );
   }

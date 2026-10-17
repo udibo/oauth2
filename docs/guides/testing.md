@@ -215,7 +215,60 @@ callers). Register an `AuthRequestStorage` shared between users with
 `clear: "scoped"` when its `clear()` removes only expired records: the suite
 then requires `clear()` to leave every in-progress sign-in intact and to remove
 an expired record, instead of removing everything. The BFF session suite lives
-in `@udibo/oauth2/hono/bff/testing`.
+in `@udibo/oauth2/hono/bff/testing`. It fails a store whose `withRefreshLock`
+passes no `RefreshLease`, since a holder that lost an expiring lock could then
+overwrite or end a session another instance refreshed. Set
+`refreshLockNeverExpires: true` only when no holder can lose the lock while its
+refresh runs.
+
+`runTokenServiceContractTests` builds each rotation family's id with
+`crypto.randomUUID()`, so a store with a `uuid` family column runs every family
+case, and each case sees only its own families. Pass `makeFamilyId` for another
+id format, and `supportedScope` when `acceptedScope` accepts only a fixed
+vocabulary:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import { runTokenServiceContractTests } from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshTokenServices(): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runTokenServiceContractTests<AppClient, AppUser>({
+  makeServices: freshTokenServices,
+  addUser,
+  addClient,
+  supportedScope: "openid",
+});
+```
+
+A token service without `rotate` must keep a revoked family revoked: the suite
+saves a successor after `revokeFamily` and requires it to be stored already
+revoked.
 
 The identity user suite covers `IdentityUserStore`, separately from the OAuth2
 `UserServiceInterface`. Its fixture supplies your application's valid sign-up
