@@ -1,3 +1,9 @@
+## [0.32.1](https://github.com/udibo/oauth2/compare/0.32.0...0.32.1) (2026-10-17)
+
+### Bug Fixes
+
+* **react:** back off renewals and let logout beat RequireAuth ([#145](https://github.com/udibo/oauth2/issues/145)) ([36f55d3](https://github.com/udibo/oauth2/commit/36f55d3c06f138f21df33d60388a23b08844aec4)), closes [#114](https://github.com/udibo/oauth2/issues/114) [#86](https://github.com/udibo/oauth2/issues/86)
+
 ## [0.32.0](https://github.com/udibo/oauth2/compare/0.31.0...0.32.0) (2026-10-16)
 
 ### Features
