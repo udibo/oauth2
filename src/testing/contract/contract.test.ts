@@ -26,6 +26,7 @@ import { runUserServiceContractTests } from "./user.ts";
 import { runClientServiceContractTests } from "./client.ts";
 import { runTokenServiceContractTests } from "./token.ts";
 import { runTokenRotationContractTests } from "./token-rotation.ts";
+import { runCodeExchangeContractTests } from "./code-exchange.ts";
 import { runTokenReaderContractTests } from "./token-reader.ts";
 import { runAuthorizationCodeServiceContractTests } from "./authorization-code.ts";
 import { runDeviceAuthorizationServiceContractTests } from "./device-authorization.ts";
@@ -185,6 +186,37 @@ runTokenRotationContractTests<TestClient, TestUser>({
       userService,
     });
     return { userService, clientService, tokenService };
+  },
+  addUser: (svc, user, pw) =>
+    (svc as MemoryUserService<TestUser>).add(user, pw),
+  addClient: (svc, client) =>
+    (svc as MemoryClientService<TestClient, TestUser>).add(client),
+});
+
+runCodeExchangeContractTests<TestClient, TestUser>({
+  describeName:
+    "MemoryTokenService paired with its code store satisfies the exchangeCode contract",
+  exchangeAwaitsBarrier: false,
+  makeServices: () => {
+    const userService = new MemoryUserService<TestUser>();
+    const clientService = new MemoryClientService<TestClient, TestUser>(
+      userService,
+    );
+    const authorizationCodeService = new MemoryAuthorizationCodeService<
+      TestClient,
+      TestUser
+    >({ clientService, userService });
+    const tokenService = new MemoryTokenService<TestClient, TestUser>({
+      clientService,
+      userService,
+      authorizationCodeService,
+    });
+    return {
+      userService,
+      clientService,
+      authorizationCodeService,
+      tokenService,
+    };
   },
   addUser: (svc, user, pw) =>
     (svc as MemoryUserService<TestUser>).add(user, pw),

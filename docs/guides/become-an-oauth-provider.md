@@ -294,8 +294,70 @@ have no secret and continue to use PKCE. The explicit
 
 Authorization-code replay is also handled: exchanging a code twice revokes every
 token the first exchange issued (RFC 6819 §4.4.1.1), via your token service's
-`revokeCode`. See [Known Limitations](../known-limitations.md) for the full list
-of deliberate deviations.
+`revokeCode(code, client)`. Two exchanges racing each other count too: the one
+that loses the claim revokes what the winner issued. `client` is the client that
+presented the code. Revoke only when it is the client the tokens were issued to:
+a different confidential client could never have redeemed the code, so its
+replay only lets it end someone else's session. The check names a public
+client, or any client under `requireClientAuthentication: false`, by
+`client_id` alone, so anyone holding that client's spent code can still present
+it and revoke. When `revokeCode` revoked something, the grant calls your
+`onCodeReuse` hook with the SHA-256 hex digest of the code and the presenting
+client, so the replay lands in your audit log:
+
+```ts
+import {
+  AuthorizationCodeGrant,
+  type AuthorizationCodeServiceInterface,
+  type ClientServiceInterface,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import type { ClientInterface } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const clientService: ClientServiceInterface<AppClient, AppUser>;
+declare const tokenService: TokenServiceInterface<AppClient, AppUser>;
+declare const authorizationCodeService: AuthorizationCodeServiceInterface<
+  AppClient,
+  AppUser
+>;
+declare const auditLog: {
+  record(entry: Record<string, unknown>): Promise<void>;
+};
+
+const codeGrant = new AuthorizationCodeGrant<AppClient, AppUser>({
+  resolve: () => ({ clientService, tokenService, authorizationCodeService }),
+  onCodeReuse: async (event) => {
+    await auditLog.record({
+      type: "authorization_code_reuse_detected",
+      codeHash: event.codeHash,
+      clientId: event.client.id,
+    });
+  },
+});
+```
+
+Implement the optional `exchangeCode(authorizationCode, token)` on your token
+service so the grant claims the code and saves its token as one step, as a
+database transaction does. It resolves the saved token, or `undefined` with
+nothing saved when the code was already claimed. Without it, the grant claims
+the code through `authorizationCodeService.revoke` and saves the token in a
+second call, and a replay that lands between the two finds no token to revoke:
+the token saved next stays live. With it, make `revokeCode` see the token from
+the moment the code's claim is visible; committing both together does that.
+`runCodeExchangeContractTests` checks it (see
+[testing](testing.md#persistent-storage-contracts)). `MemoryTokenService`
+implements it when you pass it the `authorizationCodeService` the grant uses.
+
+See [Known Limitations](../known-limitations.md) for the full list of deliberate
+deviations.
 
 ## Consent: optional by design
 
@@ -712,9 +774,10 @@ to another client leaves that client's family alone. A token service without
 not stamp `rotatedAt`, keeps the earlier behavior: the endpoint answers `200`
 and the successor stays live until it expires. `replayGraceSeconds` excuses a
 straggling refresh only, never a revocation, and this path does not call
-`onTokenReuse`, since a sign-out is not a replay. `/revoke` on a rotated-out
-token ends the family without firing `onTokenReuse`, so any audit trail for it
-comes from your store's `revokeFamily`. `runTokenServiceContractTests`
+`onTokenReuse`, since a sign-out is not a replay. It calls the server's
+`onRotatedOutRevocation` instead, once, with the family, the client, the user
+and whether `revokeFamily` revoked anything, so you can record it next to your
+reuse events. `runTokenServiceContractTests`
 checks that a service implementing `revokeRotated` returns the family and client
 from a rotated-out token.
 

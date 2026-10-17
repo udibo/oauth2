@@ -380,6 +380,65 @@ runTokenRotationContractTests<AppClient, AppUser>({
 });
 ```
 
+`runTokenServiceContractTests` checks that `revokeCode(code, client)` revokes
+nothing for a client other than the one the code's tokens were issued to. Set
+`revokeCodeChecksClient: false` only for a store that deliberately ignores the
+client; the suite then registers an ignored case naming the gap.
+
+A token service that implements `exchangeCode` also runs
+`runCodeExchangeContractTests`. It races `exchangeCode` against itself and,
+through the authorization code grant, against a replay of the code, and fails
+an exchange partway. The same barrier rule applies: your store's test build
+awaits `barriers.afterClaim()` inside `exchangeCode`, between claiming the code
+and inserting the token, and only a store that never awaits between them sets
+`exchangeAwaitsBarrier: false`, as `MemoryTokenService` does:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  AuthorizationCodeServiceInterface,
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import {
+  type CodeExchangeBarriers,
+  runCodeExchangeContractTests,
+} from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshCodeStores(barriers: CodeExchangeBarriers): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  authorizationCodeService: AuthorizationCodeServiceInterface<
+    AppClient,
+    AppUser
+  >;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runCodeExchangeContractTests<AppClient, AppUser>({
+  makeServices: freshCodeStores,
+  addUser,
+  addClient,
+});
+```
+
 In addition to the shared contracts, test your adapter's transaction boundaries:
 
 - Two consumers of one OTP/code/refresh token cannot both succeed.

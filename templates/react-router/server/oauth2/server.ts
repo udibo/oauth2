@@ -88,14 +88,15 @@ const APP_CLIENT_SECRET = config.clientSecret;
 
 export const userService = new MemoryUserService<AppUser>();
 const clientService = new MemoryClientService<AppClient, AppUser>(userService);
-const tokenService = new MemoryTokenService<AppClient, AppUser>({
-  clientService,
-  userService,
-});
 const authorizationCodeService = new MemoryAuthorizationCodeService<
   AppClient,
   AppUser
 >({ clientService, userService });
+const tokenService = new MemoryTokenService<AppClient, AppUser>({
+  clientService,
+  userService,
+  authorizationCodeService,
+});
 
 if (!config.isProduction) {
   await userService.add(DEMO_USER, DEMO_PASSWORD);

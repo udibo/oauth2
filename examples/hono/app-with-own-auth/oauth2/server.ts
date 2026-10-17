@@ -111,14 +111,15 @@ export const userService = new MemoryUserService<DemoUser>();
 const clientService = new MemoryClientService<DemoClient, DemoUser>(
   userService,
 );
-const tokenService = new MemoryTokenService<DemoClient, DemoUser>({
-  clientService,
-  userService,
-});
 const authorizationCodeService = new MemoryAuthorizationCodeService<
   DemoClient,
   DemoUser
 >({ clientService, userService });
+const tokenService = new MemoryTokenService<DemoClient, DemoUser>({
+  clientService,
+  userService,
+  authorizationCodeService,
+});
 export const deviceService = new MemoryDeviceAuthorizationService<
   DemoClient,
   DemoUser

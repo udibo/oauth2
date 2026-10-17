@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { rejection, thrown } from "../../_test_assert.ts";
 import type { AuthorizationCode } from "../../models/authorization-code.ts";
 import type { ClientInterface } from "../../models/client.ts";
@@ -22,11 +22,15 @@ import {
   tokenRequest,
 } from "../../testing/_test_fixtures.ts";
 import type { ChallengeMethods } from "../../utils/pkce.ts";
+import { sha256Hash } from "../utils/hash.ts";
 import {
   generateCodeChallenge,
   generateCodeVerifier,
 } from "../../utils/pkce.ts";
-import { AuthorizationCodeGrant } from "./authorization-code.ts";
+import {
+  AuthorizationCodeGrant,
+  type CodeReuseEvent,
+} from "./authorization-code.ts";
 
 const INHERITED_MEMBER_NAMES = [
   "toString",
@@ -1427,6 +1431,516 @@ describe("AuthorizationCodeGrant", () => {
       assert.instanceOf(
         (refused[0] as PromiseRejectedResult).reason,
         InvalidGrantError,
+      );
+    });
+  });
+
+  describe("code replay", () => {
+    const otherClient: TestClient = { id: "other-client" };
+
+    async function createReplayGrant(
+      options: {
+        pairCodeStore?: boolean;
+        onCodeReuse?: (event: CodeReuseEvent<TestClient>) => void;
+      } = {},
+    ) {
+      const userService = new MemoryUserService();
+      const clientService = new MemoryClientService(userService);
+      const authorizationCodeService = new MemoryAuthorizationCodeService({
+        clientService,
+        userService,
+      });
+      const tokenService = new MemoryTokenService({
+        clientService,
+        userService,
+        ...(options.pairCodeStore === false
+          ? {}
+          : { authorizationCodeService }),
+      });
+      await userService.add(testUser, "password");
+      await clientService.add(testClient, "secret", testUser.id);
+      await clientService.add(otherClient);
+      const reuseEvents: CodeReuseEvent<TestClient>[] = [];
+      const services = {
+        clientService,
+        tokenService,
+        authorizationCodeService,
+      };
+      const grant = new AuthorizationCodeGrant<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({
+        resolve: () => services,
+        requirePKCE: false,
+        onCodeReuse:
+          options.onCodeReuse ??
+          ((event) => {
+            reuseEvents.push(event);
+          }),
+      });
+      await authorizationCodeService.save({
+        code: "replayed-code",
+        expiresAt: new Date(Date.now() + 300000),
+        client: testClient,
+        user: testUser,
+        redirectUri: "https://app.example/callback",
+      });
+      return {
+        grant,
+        services,
+        tokenService,
+        authorizationCodeService,
+        reuseEvents,
+      };
+    }
+
+    function exchange(
+      grant: AuthorizationCodeGrant<TestClient, TestUser, BasicScope>,
+      client: TestClient,
+      fields: Record<string, string> = {},
+    ): Promise<RefreshToken<TestClient, TestUser, BasicScope>> {
+      return exchangeToken(
+        grant,
+        tokenRequest({
+          grant_type: "authorization_code",
+          code: "replayed-code",
+          redirect_uri: "https://app.example/callback",
+          ...fields,
+        }),
+        client,
+      ) as Promise<RefreshToken<TestClient, TestUser, BasicScope>>;
+    }
+
+    function passThrough<T extends object>(
+      target: T,
+      overrides: Record<string, unknown>,
+    ): T {
+      return new Proxy(target, {
+        get(object, prop) {
+          if (typeof prop === "string" && prop in overrides) {
+            return overrides[prop];
+          }
+          const value = Reflect.get(object, prop, object);
+          return typeof value === "function" ? value.bind(object) : value;
+        },
+      });
+    }
+
+    async function isLive(
+      tokenService: MemoryTokenService<TestClient, TestUser, BasicScope>,
+      token: RefreshToken<TestClient, TestUser, BasicScope>,
+    ): Promise<boolean> {
+      return (
+        (await tokenService.getToken(token.accessToken)) !== undefined ||
+        (await tokenService.getRefreshToken(token.refreshToken)) !== undefined
+      );
+    }
+
+    it("revokes nothing when a client other than the code's own replays it", async () => {
+      const { grant, tokenService, reuseEvents } = await createReplayGrant();
+      const issued = await exchange(grant, testClient);
+
+      await rejection(() => exchange(grant, otherClient), InvalidGrantError);
+
+      expect(
+        await isLive(tokenService, issued),
+        "a client that could never have redeemed the code must not be able " +
+          "to end the session it started",
+      ).toBe(true);
+      expect(reuseEvents).toStrictEqual([]);
+    });
+
+    it("revokes the code's tokens and reports the replay once when its own client replays it", async () => {
+      const { grant, tokenService, reuseEvents } = await createReplayGrant();
+      const issued = await exchange(grant, testClient);
+
+      await rejection(
+        () => exchange(grant, testClient),
+        InvalidGrantError,
+        "code already used",
+      );
+
+      expect(await isLive(tokenService, issued)).toBe(false);
+      expect(reuseEvents).toStrictEqual([
+        { codeHash: await sha256Hash("replayed-code"), client: testClient },
+      ]);
+    });
+
+    it("still revokes on the code's own client's replay after another client's replay revoked nothing", async () => {
+      const { grant, tokenService, reuseEvents } = await createReplayGrant();
+      const issued = await exchange(grant, testClient);
+
+      await rejection(() => exchange(grant, otherClient), InvalidGrantError);
+      await rejection(() => exchange(grant, testClient), InvalidGrantError);
+
+      expect(await isLive(tokenService, issued)).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("gates revocation on the presenting client with a two-step store too", async () => {
+      const { grant, tokenService, reuseEvents } = await createReplayGrant({
+        pairCodeStore: false,
+      });
+      const issued = await exchange(grant, testClient);
+
+      await rejection(() => exchange(grant, otherClient), InvalidGrantError);
+      expect(await isLive(tokenService, issued)).toBe(true);
+
+      await rejection(() => exchange(grant, testClient), InvalidGrantError);
+      expect(await isLive(tokenService, issued)).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("keeps invalid_grant when onCodeReuse throws (fire-and-forget)", async () => {
+      using logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { grant, tokenService } = await createReplayGrant({
+        onCodeReuse: () => {
+          throw new Error("audit sink down");
+        },
+      });
+      const issued = await exchange(grant, testClient);
+
+      const error = await rejection(
+        () => exchange(grant, testClient),
+        InvalidGrantError,
+        "code already used",
+      );
+
+      expect(error.status).toBe(400);
+      expect(await isLive(tokenService, issued)).toBe(false);
+      expect(logged).toHaveBeenCalledOnce();
+    });
+
+    it("leaves no live token from a code replayed while its first exchange is between the claim and the save", async () => {
+      const { services, tokenService, reuseEvents } = await createReplayGrant();
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let held = false;
+      const holdOnce = async (): Promise<void> => {
+        if (held) return;
+        held = true;
+        reached.resolve();
+        await release.promise;
+      };
+      const { exchangeCode } = tokenService;
+      const heldGrant = new AuthorizationCodeGrant<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({
+        resolve: () => ({
+          clientService: services.clientService,
+          authorizationCodeService: passThrough(
+            services.authorizationCodeService,
+            {
+              revoke: async (
+                code: AuthorizationCode<TestClient, TestUser, BasicScope>,
+              ) => {
+                const claimed =
+                  await services.authorizationCodeService.revoke(code);
+                if (claimed) await holdOnce();
+                return claimed;
+              },
+            },
+          ),
+          tokenService: passThrough(tokenService, {
+            exchangeCode:
+              exchangeCode &&
+              (async (
+                ...args: Parameters<NonNullable<typeof exchangeCode>>
+              ) => {
+                const saved = await exchangeCode(...args);
+                if (saved) await holdOnce();
+                return saved;
+              }),
+          }),
+        }),
+        requirePKCE: false,
+        onCodeReuse: (event) => {
+          reuseEvents.push(event);
+        },
+      });
+
+      const first = exchange(heldGrant, testClient);
+      const outcome = await Promise.race([
+        reached.promise.then(() => "held" as const),
+        first.then(
+          () => "settled" as const,
+          () => "settled" as const,
+        ),
+      ]);
+      assert(outcome === "held", "the first exchange never claimed the code");
+      await rejection(() => exchange(heldGrant, testClient), InvalidGrantError);
+      release.resolve();
+      const issued = await first;
+
+      expect(
+        await isLive(tokenService, issued),
+        "a replay that lands between the first exchange's claim and its " +
+          "save must still leave no live token issued from the code",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    async function grantHoldingNextGet() {
+      const replayGrant = await createReplayGrant();
+      const { services, tokenService, reuseEvents } = replayGrant;
+      const codes = services.authorizationCodeService;
+      let heldGet:
+        | {
+            reached: PromiseWithResolvers<void>;
+            release: PromiseWithResolvers<void>;
+          }
+        | undefined;
+      const grant = new AuthorizationCodeGrant<
+        TestClient,
+        TestUser,
+        BasicScope
+      >({
+        resolve: () => ({
+          clientService: services.clientService,
+          tokenService,
+          authorizationCodeService: passThrough(codes, {
+            get: async (code: string) => {
+              const found = await codes.get(code);
+              const hold = heldGet;
+              heldGet = undefined;
+              if (hold) {
+                hold.reached.resolve();
+                await hold.release.promise;
+              }
+              return found;
+            },
+          }),
+        }),
+        requirePKCE: false,
+        onCodeReuse: (event) => {
+          reuseEvents.push(event);
+        },
+      });
+      const holdNextGet = () => {
+        const hold = {
+          reached: Promise.withResolvers<void>(),
+          release: Promise.withResolvers<void>(),
+        };
+        heldGet = hold;
+        return hold;
+      };
+      return { ...replayGrant, grant, holdNextGet };
+    }
+
+    it("revokes the winner's tokens when a concurrent presentation that fails its checks loses the claim", async () => {
+      const { grant, tokenService, reuseEvents, holdNextGet } =
+        await grantHoldingNextGet();
+      const hold = holdNextGet();
+
+      const replay = exchange(grant, testClient, {
+        redirect_uri: "https://app.example/elsewhere",
+      });
+      await hold.reached.promise;
+      const issued = await exchange(grant, testClient);
+      hold.release.resolve();
+
+      await rejection(replay, InvalidGrantError, "incorrect redirect_uri");
+      expect(
+        await isLive(tokenService, issued),
+        "a presentation that read the code before the winner claimed it is " +
+          "still a second use, whichever check it then fails",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("revokes nothing when another client's concurrent presentation fails its checks and loses the claim", async () => {
+      const { grant, tokenService, reuseEvents, holdNextGet } =
+        await grantHoldingNextGet();
+      const hold = holdNextGet();
+
+      const foreign = exchange(grant, otherClient);
+      await hold.reached.promise;
+      const issued = await exchange(grant, testClient);
+      hold.release.resolve();
+
+      await rejection(
+        foreign,
+        InvalidClientError,
+        "code was issued to another client",
+      );
+      expect(
+        await isLive(tokenService, issued),
+        "the replay check after a failed presentation must ask about the " +
+          "client that presented the code, not the code's own client",
+      ).toBe(true);
+      expect(reuseEvents).toStrictEqual([]);
+    });
+
+    it("surfaces the failed check, not the store error, when consuming the code after it throws", async () => {
+      using logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { grant, authorizationCodeService } = await createReplayGrant();
+      using _storeDown = vi
+        .spyOn(authorizationCodeService, "revoke")
+        .mockRejectedValue(new Error("code store down"));
+
+      await rejection(
+        () =>
+          exchange(grant, testClient, {
+            redirect_uri: "https://app.example/elsewhere",
+          }),
+        InvalidGrantError,
+        "incorrect redirect_uri",
+      );
+      expect(logged).toHaveBeenCalledOnce();
+    });
+
+    it("consumes the code when the token store refuses the exchange with an OAuth2 error", async () => {
+      const { grant, tokenService, authorizationCodeService } =
+        await createReplayGrant();
+      using _refused = vi
+        .spyOn(tokenService, "exchangeCode")
+        .mockRejectedValue(new InvalidGrantError("refused by policy"));
+
+      await rejection(
+        () => exchange(grant, testClient),
+        InvalidGrantError,
+        "refused by policy",
+      );
+
+      expect(await authorizationCodeService.get("replayed-code")).toBe(
+        undefined,
+      );
+    });
+
+    it("leaves the code claimable when the token store fails for another reason", async () => {
+      const { grant, tokenService, authorizationCodeService } =
+        await createReplayGrant();
+      using _storeDown = vi
+        .spyOn(tokenService, "exchangeCode")
+        .mockRejectedValueOnce(new Error("token store down"));
+
+      await rejection(
+        () => exchange(grant, testClient),
+        Error,
+        "token store down",
+      );
+
+      expect(
+        await authorizationCodeService.get("replayed-code"),
+        "an infrastructure failure must not spend the user's code",
+      ).not.toBe(undefined);
+    });
+
+    it("lets a replay that names a public client by client_id alone revoke, with no code_verifier", async () => {
+      const { grant, services, tokenService, reuseEvents } =
+        await createReplayGrant();
+      const publicApp: TestClient = { id: "public-app" };
+      await services.clientService.add(publicApp, undefined, testUser.id);
+      const verifier = generateCodeVerifier();
+      await services.authorizationCodeService.save({
+        code: "public-code",
+        expiresAt: new Date(Date.now() + 300000),
+        client: publicApp,
+        user: testUser,
+        challenge: await generateCodeChallenge(verifier),
+        challengeMethod: "S256",
+      });
+      const issued = (await exchangeToken(
+        grant,
+        tokenRequest({
+          grant_type: "authorization_code",
+          code: "public-code",
+          code_verifier: verifier,
+        }),
+        publicApp,
+      )) as RefreshToken<TestClient, TestUser, BasicScope>;
+
+      await rejection(
+        () =>
+          exchangeToken(
+            grant,
+            tokenRequest({
+              grant_type: "authorization_code",
+              code: "public-code",
+            }),
+            publicApp,
+          ),
+        InvalidGrantError,
+        "code already used",
+      );
+
+      expect(
+        await isLive(tokenService, issued),
+        "anyone holding a public client's spent code can present its " +
+          "client_id; gating on the verifier is not implemented yet",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("revokes the winner's tokens when a concurrent exchange of the same code loses the claim", async () => {
+      const { grant, tokenService, reuseEvents } = await createReplayGrant();
+
+      const results = await Promise.allSettled([
+        exchange(grant, testClient),
+        exchange(grant, testClient),
+      ]);
+
+      const issued = results.filter((result) => result.status === "fulfilled");
+      const refused = results.filter((result) => result.status === "rejected");
+      expect(issued.length).toBe(1);
+      expect(refused.length).toBe(1);
+      assert.instanceOf(
+        (refused[0] as PromiseRejectedResult).reason,
+        InvalidGrantError,
+      );
+      expect(
+        await isLive(
+          tokenService,
+          (
+            issued[0] as PromiseFulfilledResult<
+              RefreshToken<TestClient, TestUser, BasicScope>
+            >
+          ).value,
+        ),
+        "a code presented twice is a replay however close together the " +
+          "two presentations land",
+      ).toBe(false);
+      expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("consumes the code when an exchange fails its checks, so a later correct exchange is refused", async () => {
+      const { grant, authorizationCodeService, reuseEvents } =
+        await createReplayGrant();
+
+      await rejection(
+        () =>
+          exchange(grant, testClient, {
+            redirect_uri: "https://app.example/elsewhere",
+          }),
+        InvalidGrantError,
+        "incorrect redirect_uri",
+      );
+
+      expect(await authorizationCodeService.get("replayed-code")).toBe(
+        undefined,
+      );
+      await rejection(
+        () => exchange(grant, testClient),
+        InvalidGrantError,
+        "invalid code",
+      );
+      expect(reuseEvents).toStrictEqual([]);
+    });
+
+    it("consumes the code when issuing its token fails", async () => {
+      const { grant, tokenService, authorizationCodeService } =
+        await createReplayGrant();
+      using _signerDown = vi
+        .spyOn(tokenService, "generateAccessToken")
+        .mockRejectedValue(new Error("signer down"));
+
+      await rejection(() => exchange(grant, testClient), Error, "signer down");
+
+      expect(await authorizationCodeService.get("replayed-code")).toBe(
+        undefined,
       );
     });
   });

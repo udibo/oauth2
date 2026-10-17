@@ -245,6 +245,7 @@ export class MemoryClientService<
 export interface MemoryTokenServiceOptions<
   C extends ClientInterface,
   U extends MemoryUserShape,
+  S extends AbstractScope = BasicScope,
 > {
   /** Resolves clients when hydrating stored tokens back into full records. */
   clientService: ClientServiceInterface<C, U>;
@@ -259,6 +260,14 @@ export interface MemoryTokenServiceOptions<
    * leave rotation uncapped.
    */
   refreshTokenMaxLifetime?: number;
+  /**
+   * The code store the authorization code grant claims codes from. Pass it to
+   * give the token service {@linkcode MemoryTokenService.exchangeCode}, so the
+   * grant claims a code and saves its token in one step; without it the grant
+   * claims and saves in two. `exchangeCode` claims from the code store's own
+   * map, so a subclass that overrides the code store's `revoke` is bypassed.
+   */
+  authorizationCodeService?: MemoryAuthorizationCodeService<C, U, S>;
 }
 
 interface StoredToken<S extends AbstractScope> {
@@ -304,23 +313,58 @@ export class MemoryTokenService<
   #userService: UserServiceInterface<U>;
   #tokensByAccessHash = new Map<string, StoredToken<S>>();
   #tokensByRefreshHash = new Map<string, StoredToken<S>>();
-  #tokensByCodeHash = new Map<string, Set<string>>();
+  #tokensByCodeHash = new Map<
+    string,
+    { clientId: string; accessTokenHashes: Set<string> }
+  >();
   #revokedByRefreshHash = new Map<string, StoredToken<S>>();
   #revokedFamilies = new Set<string>();
 
   /**
+   * Claims a code from the paired `authorizationCodeService` and saves the
+   * token issued from it in one step, or does neither, resolving `undefined`
+   * when the code was already claimed. Present only when the service was
+   * constructed with `authorizationCodeService`, so the grant falls back to
+   * two calls for a token service that has no code store to claim from.
+   */
+  readonly exchangeCode?: (
+    authorizationCode: AuthorizationCode<C, U, S>,
+    token: Token<C, U, S>,
+  ) => Promise<Token<C, U, S> | undefined>;
+
+  /**
    * Creates an empty token store.
    *
-   * @param options Backing client/user services and optional default token
-   * lifetimes.
+   * @param options Backing client/user services, optional default token
+   * lifetimes, and the code store that enables `exchangeCode`.
    */
-  constructor(options: MemoryTokenServiceOptions<C, U>) {
+  constructor(options: MemoryTokenServiceOptions<C, U, S>) {
     this.#clientService = options.clientService;
     this.#userService = options.userService;
     this.accessTokenLifetime = options.accessTokenLifetime ?? 60 * 60;
     this.refreshTokenLifetime =
       options.refreshTokenLifetime ?? 14 * 24 * 60 * 60;
     this.refreshTokenMaxLifetime = options.refreshTokenMaxLifetime;
+    const codes = options.authorizationCodeService;
+    if (codes) {
+      this.exchangeCode = (authorizationCode, token) =>
+        this.#exchangeCode(codes, authorizationCode, token);
+    }
+  }
+
+  async #exchangeCode(
+    codes: MemoryAuthorizationCodeService<C, U, S>,
+    authorizationCode: AuthorizationCode<C, U, S>,
+    token: Token<C, U, S>,
+  ): Promise<Token<C, U, S> | undefined> {
+    const codeHash = await sha256Hash(authorizationCode.code);
+    const stored = await this.#prepare({
+      ...token,
+      code: authorizationCode.code,
+    });
+    if (!claimStoredCode(codes, codeHash)) return undefined;
+    this.#store(stored);
+    return token;
   }
 
   /**
@@ -510,10 +554,10 @@ export class MemoryTokenService<
     if (stored.codeHash) {
       let bucket = this.#tokensByCodeHash.get(stored.codeHash);
       if (!bucket) {
-        bucket = new Set();
+        bucket = { clientId: stored.clientId, accessTokenHashes: new Set() };
         this.#tokensByCodeHash.set(stored.codeHash, bucket);
       }
-      bucket.add(stored.accessTokenHash);
+      bucket.accessTokenHashes.add(stored.accessTokenHash);
     }
     if (stored.refreshTokenHash) {
       if (stored.familyId && this.#revokedFamilies.has(stored.familyId)) {
@@ -693,12 +737,17 @@ export class MemoryTokenService<
   /**
    * Removes every token issued from the given authorization code, used when a
    * code is replayed. Resolves `true` when at least one token was removed.
+   * Removes nothing and resolves `false` when `client` is given and is not the
+   * client the code's tokens were issued to.
    */
-  async revokeCode(code: string): Promise<boolean> {
+  async revokeCode(code: string, client?: C): Promise<boolean> {
     const codeHash = await sha256Hash(code);
-    const tokenHashes = this.#tokensByCodeHash.get(codeHash);
-    if (!tokenHashes || tokenHashes.size === 0) return false;
-    for (const accessTokenHash of tokenHashes) {
+    const bucket = this.#tokensByCodeHash.get(codeHash);
+    if (!bucket || bucket.accessTokenHashes.size === 0) return false;
+    if (client && client.id.toString() !== bucket.clientId.toString()) {
+      return false;
+    }
+    for (const accessTokenHash of bucket.accessTokenHashes) {
       const stored = this.#tokensByAccessHash.get(accessTokenHash);
       if (stored) {
         this.#tokensByAccessHash.delete(accessTokenHash);
@@ -738,6 +787,15 @@ interface StoredAuthorizationCode<S extends AbstractScope> {
   nonce?: string;
 }
 
+let claimStoredCode: <
+  C extends ClientInterface,
+  U extends MemoryUserShape,
+  S extends AbstractScope,
+>(
+  service: MemoryAuthorizationCodeService<C, U, S>,
+  codeHash: string,
+) => boolean;
+
 /** In-memory `AuthorizationCodeServiceInterface` implementation. */
 export class MemoryAuthorizationCodeService<
   C extends ClientInterface,
@@ -749,6 +807,10 @@ export class MemoryAuthorizationCodeService<
   #clientService: ClientServiceInterface<C, U>;
   #userService: UserServiceInterface<U>;
   #codes = new Map<string, StoredAuthorizationCode<S>>();
+
+  static {
+    claimStoredCode = (service, codeHash) => service.#codes.delete(codeHash);
+  }
 
   /**
    * Creates an empty authorization-code store.

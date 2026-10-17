@@ -285,6 +285,31 @@ should not be enabled for new deployments.
   only when `token_type` names a bearer token, so an authorization server that
   omits `token_type` from active responses cannot be read by it.
 
+- **How completely a code replay revokes depends on the token store.** RFC 6819
+  §4.4.1.1 has a replayed authorization code revoke the tokens issued from it.
+  The grant asks `revokeCode(code, client)` to do that, passing the client that
+  presented the code. Two optional pieces of the store decide how far it goes:
+  - A `revokeCode` that ignores `client` revokes on any client's replay, so a
+    client that sees a spent code, such as from a log or a shared browser, can
+    end the session it started. Honor `client` and a different confidential
+    client's replay revokes nothing.
+  - Honoring `client` does not protect a public client, or any client when
+    `requireClientAuthentication` is `false`: the grant names it by
+    `client_id` alone, and replay detection runs before the PKCE verifier is
+    checked, so anyone holding that client's spent code can present it and
+    revoke the session it started. Gating revocation on the verifier is
+    tracked in [udibo/oauth2#149](https://github.com/udibo/oauth2/issues/149).
+    `onCodeReuse` names the presenting client, which is the code's own client
+    only when `revokeCode` honors `client`.
+  - Without `exchangeCode`, the grant claims the code and saves its token in
+    two calls. A replay that lands between them finds the code claimed but no
+    token yet, so it is refused and the token saved next stays live. With
+    `exchangeCode`, the claim and the save are one step and a replay always
+    finds the token to revoke.
+
+  `MemoryTokenService` honors `client`, and implements `exchangeCode` when
+  constructed with the `authorizationCodeService` it shares with the grant.
+
 ## Resource servers (`@udibo/oauth2/server/resource`)
 
 - Offline JWT validation does not consult token revocation state. A revoked

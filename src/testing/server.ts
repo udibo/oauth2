@@ -267,13 +267,14 @@ export async function createMemoryAuthorizationServer<
 
   const userService = new MemoryUserService<U>();
   const clientService = new MemoryClientService<C, U>(userService);
-  const tokenService = new MemoryTokenService<C, U, S>({
-    clientService,
-    userService,
-  });
   const authorizationCodeService = new MemoryAuthorizationCodeService<C, U, S>({
     clientService,
     userService,
+  });
+  const tokenService = new MemoryTokenService<C, U, S>({
+    clientService,
+    userService,
+    authorizationCodeService,
   });
   const deviceAuthorizationService = new MemoryDeviceAuthorizationService<
     C,

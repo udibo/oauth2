@@ -189,7 +189,10 @@ export interface AuthRequestStorageFactory {
  *
  * It has no `take`: the record travels with the browser and cannot be claimed
  * atomically, so a replayed callback is bounded by the authorization server's
- * single-use code and PKCE.
+ * single-use code and PKCE. Two concurrent callbacks for one sign-in both reach
+ * the token endpoint, and an authorization server that revokes on code replay,
+ * as `@udibo/oauth2`'s does, revokes the tokens the winner received, so the
+ * user is signed out and has to sign in again.
  *
  * @example
  * ```ts
