@@ -5,9 +5,9 @@
  * Two key-derivation paths, for two different threat models:
  *
  * - {@link deriveAesKey} hashes a single **server-held** secret (SHA-256) into
- *   an AES-256-GCM key. Use this for a stateless cookie sealed under one
- *   configured secret (see `EncryptedCookieSessionStore`), where the secret is
- *   never persisted.
+ *   an AES-256-GCM key, where the secret is never persisted. Every caller that
+ *   hashes the same secret gets the same key, so give each use its own secret,
+ *   or derive with {@link deriveSealKey} and a distinct `info` instead.
  *
  * - {@link deriveSealKey} uses **HKDF** with a domain-separating `info` label so
  *   a high-entropy *per-session* secret yields an encryption key that is
@@ -91,8 +91,9 @@ export function randomToken(bytes = 32): string {
  *
  * Suitable when the secret is a long-lived configuration value that is never
  * stored alongside the ciphertext. Do **not** use this when a hash of the same
- * secret is persisted (e.g. as a lookup key) — use {@link deriveSealKey} so the
- * sealing key is independent of that stored hash.
+ * secret is persisted (e.g. as a lookup key), or when the same secret seals
+ * more than one kind of value — use {@link deriveSealKey} with a distinct
+ * `info` per purpose so the keys are independent.
  *
  * @throws {Error} if the secret is shorter than 16 bytes. Length is all that is
  * checked; supply 32+ bytes of real entropy.
