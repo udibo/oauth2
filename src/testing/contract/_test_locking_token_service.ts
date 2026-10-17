@@ -28,6 +28,7 @@ export class LockingTokenService<
   readonly #byRefresh = new Map<string, RefreshToken<C, U, BasicScope>>();
   readonly #revoked = new Map<string, RefreshToken<C, U, BasicScope>>();
   readonly #byCode = new Map<string, Set<string>>();
+  readonly #codeClients = new Map<string, string>();
   readonly #locks = new Map<string, Promise<void>>();
   readonly #familyIdFormat: RegExp | undefined;
 
@@ -176,8 +177,11 @@ export class LockingTokenService<
     );
   }
 
-  revokeCode(code: string): Promise<boolean> {
+  revokeCode(code: string, client?: C): Promise<boolean> {
     const accessTokens = this.#byCode.get(code);
+    if (client && this.#codeClients.get(code) !== client.id.toString()) {
+      return Promise.resolve(false);
+    }
     if (!accessTokens?.size) return Promise.resolve(false);
     for (const accessToken of accessTokens) {
       const found = this.#byAccess.get(accessToken);
@@ -194,6 +198,7 @@ export class LockingTokenService<
       const bucket = this.#byCode.get(token.code) ?? new Set();
       bucket.add(token.accessToken);
       this.#byCode.set(token.code, bucket);
+      this.#codeClients.set(token.code, token.client.id.toString());
     }
   }
 

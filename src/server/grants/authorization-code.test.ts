@@ -1683,8 +1683,9 @@ describe("AuthorizationCodeGrant", () => {
       expect(reuseEvents).toHaveLength(1);
     });
 
-    it("revokes the winner's tokens when a concurrent presentation that fails its checks loses the claim", async () => {
-      const { services, tokenService, reuseEvents } = await createReplayGrant();
+    async function grantHoldingNextGet() {
+      const replayGrant = await createReplayGrant();
+      const { services, tokenService, reuseEvents } = replayGrant;
       const codes = services.authorizationCodeService;
       let heldGet:
         | {
@@ -1718,11 +1719,21 @@ describe("AuthorizationCodeGrant", () => {
           reuseEvents.push(event);
         },
       });
-      const hold = {
-        reached: Promise.withResolvers<void>(),
-        release: Promise.withResolvers<void>(),
+      const holdNextGet = () => {
+        const hold = {
+          reached: Promise.withResolvers<void>(),
+          release: Promise.withResolvers<void>(),
+        };
+        heldGet = hold;
+        return hold;
       };
-      heldGet = hold;
+      return { ...replayGrant, grant, holdNextGet };
+    }
+
+    it("revokes the winner's tokens when a concurrent presentation that fails its checks loses the claim", async () => {
+      const { grant, tokenService, reuseEvents, holdNextGet } =
+        await grantHoldingNextGet();
+      const hold = holdNextGet();
 
       const replay = exchange(grant, testClient, {
         redirect_uri: "https://app.example/elsewhere",
@@ -1738,6 +1749,29 @@ describe("AuthorizationCodeGrant", () => {
           "still a second use, whichever check it then fails",
       ).toBe(false);
       expect(reuseEvents).toHaveLength(1);
+    });
+
+    it("revokes nothing when another client's concurrent presentation fails its checks and loses the claim", async () => {
+      const { grant, tokenService, reuseEvents, holdNextGet } =
+        await grantHoldingNextGet();
+      const hold = holdNextGet();
+
+      const foreign = exchange(grant, otherClient);
+      await hold.reached.promise;
+      const issued = await exchange(grant, testClient);
+      hold.release.resolve();
+
+      await rejection(
+        foreign,
+        InvalidClientError,
+        "code was issued to another client",
+      );
+      expect(
+        await isLive(tokenService, issued),
+        "the replay check after a failed presentation must ask about the " +
+          "client that presented the code, not the code's own client",
+      ).toBe(true);
+      expect(reuseEvents).toStrictEqual([]);
     });
 
     it("surfaces the failed check, not the store error, when consuming the code after it throws", async () => {
