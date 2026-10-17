@@ -120,7 +120,8 @@ export interface RefreshLockStore {
    *   longer overwrite or end the session that instance refreshed. A store
    *   that calls `refresh()` with no lease still works, but a lock that
    *   expires mid-refresh then lets the former holder's write or sign-out
-   *   land on top of the new holder's.
+   *   land on top of the new holder's. `runSessionStoreContractTests` fails
+   *   such a store unless its options declare that the lock never expires.
    * - Reject when the lock cannot be acquired within a bound you choose.
    *   `HonoBff` then answers `502` `temporarily_unavailable` and keeps the
    *   session.

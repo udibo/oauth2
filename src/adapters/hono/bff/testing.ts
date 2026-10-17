@@ -276,6 +276,20 @@ export interface SessionStoreContractOptions {
    * supplying this factory.
    */
   makeBoundedStore?(maxAgeMs: number): Promise<SessionStore> | SessionStore;
+  /**
+   * Set to `true` when the store's refresh lock never expires, so a holder
+   * keeps it until its `refresh` settles, as `MemorySessionStore` does by
+   * default. The suite then skips the lease checks for a store whose
+   * `withRefreshLock` passes no {@link RefreshLease}, instead of failing it.
+   *
+   * Without a lease, nothing stops a holder that lost an expiring lock from
+   * writing or destroying the session, and the suite cannot tell a lock that
+   * never expires from one that does. Declare it only when no holder can lose
+   * the lock while its refresh runs, as when the lock lives in the one process
+   * that runs every refresh. Then a holder that hangs holds the session's
+   * refresh until it settles. Defaults to `false`.
+   */
+  refreshLockNeverExpires?: boolean;
 }
 
 const BOUND_MS = 1000;
@@ -328,19 +342,21 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
  *
  * A store that implements `withRefreshLock` ({@link RefreshLockStore}) also
  * runs the lock checks; they are skipped for a store without it. The lease
- * checks ({@link RefreshLease}) are skipped for a store whose
- * `withRefreshLock` passes no lease. They prove that a lease stops acting once
- * its call releases the lock or another call holds it, not that it stops
- * when the lock expires: expire a lease in a test of your own for that. They
- * use one store object, so they prove the lock's behavior, not that separate
- * instances share it: point two store objects at one backend in a test of
- * your own for that.
+ * checks ({@link RefreshLease}) fail a store whose `withRefreshLock` passes no
+ * lease, unless the options declare that its lock never expires
+ * ({@linkcode SessionStoreContractOptions.refreshLockNeverExpires}). They
+ * prove that a lease stops acting once its call releases the lock or another
+ * call holds it, not that it stops when the lock expires: expire a lease in a
+ * test of your own for that. They use one store object, so they prove the
+ * lock's behavior, not that separate instances share it: point two store
+ * objects at one backend in a test of your own for that.
  */
 export function runSessionStoreContractTests(
   options: SessionStoreContractOptions,
 ): void {
   const destroyClearsRead = options.destroyClearsRead ?? true;
   const makeBoundedStore = options.makeBoundedStore;
+  const refreshLockNeverExpires = options.refreshLockNeverExpires ?? false;
 
   describe(options.describeName ?? "SessionStore contract", () => {
     let store: SessionStore;
@@ -595,11 +611,18 @@ export function runSessionStoreContractTests(
         Promise.resolve(given),
       );
       skip(
-        lease === undefined,
-        "withRefreshLock passes the refresh no lease, so a holder that lost " +
-          "the lock can still write and destroy the session",
+        lease === undefined && refreshLockNeverExpires,
+        "withRefreshLock passes the refresh no lease, and the store declares " +
+          "that its lock never expires",
       );
-      return required(lease);
+      assert(
+        lease !== undefined,
+        "withRefreshLock passed the refresh no lease, so a holder that " +
+          "stalls past an expiring lock can still write and destroy the " +
+          "session another holder refreshed. Pass a RefreshLease, or set " +
+          "refreshLockNeverExpires: true if the lock never expires.",
+      );
+      return lease;
     }
 
     function refreshedSession(): SessionData {

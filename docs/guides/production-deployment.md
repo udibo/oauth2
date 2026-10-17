@@ -184,7 +184,11 @@ past the expiry from overwriting or ending a session another instance has
 since refreshed. Keep the lease on the session record itself, so its
 conditional write is one compare-and-set, and never hold a database
 transaction open across the refresh: the refresh waits on the authorization
-server.
+server. `runSessionStoreContractTests` fails a lock store that passes no lease.
+Set its `refreshLockNeverExpires: true` option only for a lock no holder can
+lose while its refresh runs, such as one held in the single process that runs
+every refresh; a holder that hangs then holds that session's refresh until it
+settles.
 
 Keep the session lifetime consistent between the store and
 `HonoBff.sessionMaxAgeMs`. A stateful store's update must reject revoked,

@@ -67,6 +67,25 @@ export interface TokenServiceContractOptions<
   /** Builds a scope from its string value. Defaults to a {@linkcode BasicScope}. */
   makeScope?(value: string): S;
   /**
+   * A scope value the service accepts for the fixture client. The
+   * `acceptedScope` case with a user requests it and expects it back
+   * unchanged; the case with no user requests it and expects it not to be
+   * refused. Set it when `acceptedScope` refuses scopes outside a fixed
+   * vocabulary, for example `"openid"`. Defaults to `"read"`.
+   */
+  supportedScope?: string;
+  /**
+   * Returns a new rotation-family id the store accepts as a
+   * {@linkcode RefreshToken.familyId}, distinct on every call. The family cases
+   * call it for each family they create and for a family that was never
+   * issued, so each case sees only its own families. Users, clients and the
+   * authorization-code and unknown-token probes keep fixed values, so a store
+   * that keeps state across cases still needs `makeServices` to isolate those.
+   * Set it when the store keeps family ids in a format other than a UUID.
+   * Defaults to `crypto.randomUUID()`.
+   */
+  makeFamilyId?(): string;
+  /**
    * Set to `false` when the service deliberately omits the optional
    * reuse-detection pair, {@linkcode TokenServiceInterface.getRevokedRefreshToken}
    * and {@linkcode TokenServiceInterface.revokeFamily}. The suite then
@@ -92,6 +111,7 @@ const defaultMakeClient = <C extends ClientInterface>(seq: number): C =>
   }) as C;
 const defaultMakeScope = <S extends AbstractScope>(value: string): S =>
   new BasicScope(value) as unknown as S;
+const defaultMakeFamilyId = (): string => crypto.randomUUID();
 
 /** Runs the {@link TokenServiceInterface} contract suite. */
 export function runTokenServiceContractTests<
@@ -102,6 +122,8 @@ export function runTokenServiceContractTests<
   const makeUser = options.makeUser ?? defaultMakeUser<U>;
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
   const makeScope = options.makeScope ?? defaultMakeScope<S>;
+  const supportedScope = options.supportedScope ?? "read";
+  const makeFamilyId = options.makeFamilyId ?? defaultMakeFamilyId;
   const expectReuseDetection = options.refreshTokenReuseDetection ?? true;
 
   describe(options.describeName ?? "TokenServiceInterface contract", () => {
@@ -142,13 +164,13 @@ export function runTokenServiceContractTests<
 
     describe("acceptedScope", () => {
       it("returns the requested scope unchanged for the simple case", async () => {
-        const requested = makeScope("read");
+        const requested = makeScope(supportedScope);
         const result = await tokenService.acceptedScope(
           client,
           user,
           requested,
         );
-        expect(result?.toString()).toStrictEqual("read");
+        expect(result?.toString()).toStrictEqual(supportedScope);
       });
     });
 
@@ -194,7 +216,7 @@ export function runTokenServiceContractTests<
         const result = await tokenService.acceptedScope(
           client,
           undefined,
-          makeScope("read"),
+          makeScope(supportedScope),
         );
         assert(
           result !== false,
@@ -368,8 +390,13 @@ export function runTokenServiceContractTests<
 
     if (expectReuseDetection) {
       describe("refresh-token rotation family", () => {
-        const FAMILY = "family-1";
-        const OTHER_FAMILY = "family-2";
+        let family: string;
+        let otherFamily: string;
+
+        beforeEach(() => {
+          family = makeFamilyId();
+          otherFamily = makeFamilyId();
+        });
 
         async function familyMember(
           familyId: string,
@@ -417,7 +444,7 @@ export function runTokenServiceContractTests<
         });
 
         it("keeps a rotated-out refresh token findable, with its family", async () => {
-          const token = await saveFamilyMember(FAMILY);
+          const token = await saveFamilyMember(family);
           await tokenService.revoke(token.refreshToken, "refresh_token");
           expect(
             await tokenService.getRefreshToken(token.refreshToken),
@@ -431,11 +458,11 @@ export function runTokenServiceContractTests<
             "a revoked refresh token must stay findable — deleting the row " +
               "is what turns a replay into an ordinary unknown token",
           );
-          expect(revoked.familyId).toBe(FAMILY);
+          expect(revoked.familyId).toBe(family);
         });
 
         it("does not report a live refresh token as revoked", async () => {
-          const token = await saveFamilyMember(FAMILY);
+          const token = await saveFamilyMember(family);
           expect(
             await tokenService.getRevokedRefreshToken!(token.refreshToken),
             "reporting a live token as revoked turns every legitimate " +
@@ -450,9 +477,9 @@ export function runTokenServiceContractTests<
         });
 
         it("revokes every live member of a replayed token's family", async () => {
-          const first = await saveFamilyMember(FAMILY);
-          const second = await saveFamilyMember(FAMILY);
-          expect(await tokenService.revokeFamily!(FAMILY)).toBe(true);
+          const first = await saveFamilyMember(family);
+          const second = await saveFamilyMember(family);
+          expect(await tokenService.revokeFamily!(family)).toBe(true);
           expect(await tokenService.getRefreshToken(first.refreshToken)).toBe(
             undefined,
           );
@@ -467,9 +494,9 @@ export function runTokenServiceContractTests<
         });
 
         it("leaves other families untouched", async () => {
-          const mine = await saveFamilyMember(FAMILY);
-          const theirs = await saveFamilyMember(OTHER_FAMILY);
-          await tokenService.revokeFamily!(FAMILY);
+          const mine = await saveFamilyMember(family);
+          const theirs = await saveFamilyMember(otherFamily);
+          await tokenService.revokeFamily!(family);
           expect(await tokenService.getRefreshToken(mine.refreshToken)).toBe(
             undefined,
           );
@@ -481,7 +508,51 @@ export function runTokenServiceContractTests<
         });
 
         it("returns false when the family has no live tokens", async () => {
-          expect(await tokenService.revokeFamily!("never-issued")).toBe(false);
+          expect(await tokenService.revokeFamily!(makeFamilyId())).toBe(false);
+        });
+
+        it("keeps a revoked family revoked: a successor saved after revokeFamily is not live", async ({
+          skip,
+        }) => {
+          skip(
+            typeof tokenService.rotate === "function",
+            "the service implements rotate, so the refresh grant never saves " +
+              "a successor separately; runTokenRotationContractTests checks " +
+              "revokeFamily against rotate",
+          );
+          const parent = await saveFamilyMember(family);
+          const successor = await familyMember(family);
+          const claimed = tokenService.revokeRotated
+            ? await tokenService.revokeRotated(parent)
+            : await tokenService.revoke(parent);
+          expect(claimed).toBe(true);
+          expect(
+            await tokenService.getRefreshToken(parent.refreshToken),
+            "the claim spends the presented refresh token",
+          ).toBe(undefined);
+
+          await tokenService.revokeFamily!(family);
+          await tokenService.save(successor);
+
+          expect(
+            await tokenService.getRefreshToken(successor.refreshToken),
+            "a successor saved after its family was revoked must be stored " +
+              "already revoked: the refresh grant claims a token and saves " +
+              "its successor in two calls, and a revokeFamily that lands " +
+              "between them otherwise leaves the successor live",
+          ).toBe(undefined);
+          expect(
+            await tokenService.getToken(successor.accessToken),
+            "a successor saved after its family was revoked must be stored " +
+              "already revoked, its access token included",
+          ).toBe(undefined);
+          if (tokenService.hasLiveRefreshToken) {
+            expect(
+              await tokenService.hasLiveRefreshToken(family),
+              "a successor saved after its family was revoked must be stored " +
+                "already revoked, so the family has no live member",
+            ).toBe(false);
+          }
         });
 
         it("stamps a token revokeRotated revoked with its rotation time", async ({
@@ -491,7 +562,7 @@ export function runTokenServiceContractTests<
             typeof tokenService.revokeRotated !== "function",
             "the service does not implement revokeRotated",
           );
-          const token = await saveFamilyMember(FAMILY);
+          const token = await saveFamilyMember(family);
           const before = Date.now();
           expect(await tokenService.revokeRotated!(token)).toBe(true);
           const revoked = await tokenService.getRevokedRefreshToken!(
@@ -514,8 +585,8 @@ export function runTokenServiceContractTests<
             typeof tokenService.rotate !== "function",
             "the service does not implement rotate",
           );
-          const parent = await saveFamilyMember(FAMILY);
-          const next = await familyMember(FAMILY);
+          const parent = await saveFamilyMember(family);
+          const next = await familyMember(family);
           const before = Date.now();
 
           const rotated = await tokenService.rotate!(parent, next);
@@ -523,7 +594,7 @@ export function runTokenServiceContractTests<
           expect(rotated?.refreshToken).toBe(next.refreshToken);
           expect(
             (await tokenService.getRefreshToken(next.refreshToken))?.familyId,
-          ).toBe(FAMILY);
+          ).toBe(family);
           expect(await tokenService.getToken(next.accessToken)).not.toBe(
             undefined,
           );
@@ -537,7 +608,7 @@ export function runTokenServiceContractTests<
           const tombstone = await tokenService.getRevokedRefreshToken!(
             parent.refreshToken,
           );
-          expect(tombstone?.familyId).toBe(FAMILY);
+          expect(tombstone?.familyId).toBe(family);
           assert(
             tombstone?.rotatedAt instanceof Date &&
               tombstone.rotatedAt.getTime() >= before - 1000 &&
@@ -555,11 +626,11 @@ export function runTokenServiceContractTests<
             typeof tokenService.rotate !== "function",
             "the service does not implement rotate",
           );
-          const parent = await saveFamilyMember(FAMILY);
-          const first = await familyMember(FAMILY);
-          const second = await familyMember(FAMILY);
-          const revokedParent = await saveFamilyMember(FAMILY);
-          const third = await familyMember(FAMILY);
+          const parent = await saveFamilyMember(family);
+          const first = await familyMember(family);
+          const second = await familyMember(family);
+          const revokedParent = await saveFamilyMember(family);
+          const third = await familyMember(family);
           await tokenService.revoke(
             revokedParent.refreshToken,
             "refresh_token",
@@ -593,16 +664,16 @@ export function runTokenServiceContractTests<
             typeof tokenService.revokeRotated !== "function",
             "the service does not implement revokeRotated",
           );
-          const rotatedOut = await saveFamilyMember(FAMILY);
+          const rotatedOut = await saveFamilyMember(family);
           expect(await tokenService.revokeRotated!(rotatedOut)).toBe(true);
-          const successor = await saveFamilyMember(FAMILY);
-          const unrelated = await saveFamilyMember(OTHER_FAMILY);
+          const successor = await saveFamilyMember(family);
+          const unrelated = await saveFamilyMember(otherFamily);
 
           const tombstone = await tokenService.getRevokedRefreshToken!(
             rotatedOut.refreshToken,
           );
           assert(
-            tombstone?.familyId === FAMILY && tombstone.rotatedAt,
+            tombstone?.familyId === family && tombstone.rotatedAt,
             "the revocation endpoint finds the family to end from the " +
               "rotated-out token's record; without its familyId and " +
               "rotatedAt, a sign-out racing a refresh leaves the successor live",
@@ -628,7 +699,7 @@ export function runTokenServiceContractTests<
         });
 
         it("leaves rotatedAt unset on a token revoked other than by rotation", async () => {
-          const token = await saveFamilyMember(FAMILY);
+          const token = await saveFamilyMember(family);
           await tokenService.revoke(token.refreshToken, "refresh_token");
           const revoked = await tokenService.getRevokedRefreshToken!(
             token.refreshToken,
@@ -647,18 +718,18 @@ export function runTokenServiceContractTests<
             typeof tokenService.hasLiveRefreshToken !== "function",
             "the service does not implement hasLiveRefreshToken",
           );
-          const token = await saveFamilyMember(FAMILY);
-          await saveFamilyMember(OTHER_FAMILY);
-          expect(await tokenService.hasLiveRefreshToken!(FAMILY)).toBe(true);
+          const token = await saveFamilyMember(family);
+          await saveFamilyMember(otherFamily);
+          expect(await tokenService.hasLiveRefreshToken!(family)).toBe(true);
           await tokenService.revoke(token.refreshToken, "refresh_token");
           expect(
-            await tokenService.hasLiveRefreshToken!(FAMILY),
+            await tokenService.hasLiveRefreshToken!(family),
             "a family whose last token was revoked has no successor to protect",
           ).toBe(false);
-          expect(await tokenService.hasLiveRefreshToken!(OTHER_FAMILY)).toBe(
+          expect(await tokenService.hasLiveRefreshToken!(otherFamily)).toBe(
             true,
           );
-          expect(await tokenService.hasLiveRefreshToken!("never-issued")).toBe(
+          expect(await tokenService.hasLiveRefreshToken!(makeFamilyId())).toBe(
             false,
           );
         });
@@ -670,9 +741,9 @@ export function runTokenServiceContractTests<
             typeof tokenService.hasLiveRefreshToken !== "function",
             "the service does not implement hasLiveRefreshToken",
           );
-          await saveFamilyMember(FAMILY, new Date(Date.now() - 1000));
+          await saveFamilyMember(family, new Date(Date.now() - 1000));
           expect(
-            await tokenService.hasLiveRefreshToken!(FAMILY),
+            await tokenService.hasLiveRefreshToken!(family),
             "an expired successor cannot be used, so a replay of its " +
               "predecessor must not be excused as a straggler",
           ).toBe(false);
@@ -693,8 +764,8 @@ export function runTokenServiceContractTests<
               typeof tokenService.revokeRotated !== "function",
             "the service implements neither rotate nor revokeRotated",
           );
-          const parent = await saveFamilyMember(FAMILY);
-          const successor = await familyMember(FAMILY);
+          const parent = await saveFamilyMember(family);
+          const successor = await familyMember(family);
           if (tokenService.rotate) {
             assert(await tokenService.rotate(parent, successor));
           } else {
@@ -705,7 +776,7 @@ export function runTokenServiceContractTests<
             parent.refreshToken,
           );
           assert(
-            tombstone?.familyId === FAMILY && tombstone.rotatedAt,
+            tombstone?.familyId === family && tombstone.rotatedAt,
             "a store that judges the replay grace must still return every " +
               "rotated-out tombstone, with its family and rotatedAt; hiding " +
               "one inside the window hides the family from a sign-out " +

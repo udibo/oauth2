@@ -1397,7 +1397,8 @@ presented token, as two storage calls. A revocation that lands between them
 finds no live successor to revoke. To close that gap, `revokeFamily` must record
 the revoked family and `save` must store any later member of it already revoked.
 `MemoryTokenService` does; a custom store needs the same, and reuse detection
-relies on it too. A store that implements
+relies on it too. `runTokenServiceContractTests` checks it for a service without
+`rotate`. A store that implements
 [`rotate`](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md#atomic-rotation) has no such gap, provided `revokeFamily` is
 linearizable with it.
 
@@ -3784,7 +3785,60 @@ callers). Register an `AuthRequestStorage` shared between users with
 `clear: "scoped"` when its `clear()` removes only expired records: the suite
 then requires `clear()` to leave every in-progress sign-in intact and to remove
 an expired record, instead of removing everything. The BFF session suite lives
-in `@udibo/oauth2/hono/bff/testing`.
+in `@udibo/oauth2/hono/bff/testing`. It fails a store whose `withRefreshLock`
+passes no `RefreshLease`, since a holder that lost an expiring lock could then
+overwrite or end a session another instance refreshed. Set
+`refreshLockNeverExpires: true` only when no holder can lose the lock while its
+refresh runs.
+
+`runTokenServiceContractTests` and `runTokenRotationContractTests` build each
+rotation family's id with `crypto.randomUUID()`, so a store with a `uuid` family
+column runs every family case, and each case sees only its own families. Pass
+`makeFamilyId` to either suite for another id format, and `supportedScope` when
+`acceptedScope` accepts only a fixed vocabulary:
+
+```ts
+import type { ClientInterface } from "@udibo/oauth2/server";
+import type {
+  ClientServiceInterface,
+  TokenServiceInterface,
+  UserServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+import { runTokenServiceContractTests } from "@udibo/oauth2/testing/contract";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+interface AppUser {
+  id: string;
+  username: string;
+}
+declare function freshTokenServices(): Promise<{
+  userService: UserServiceInterface<AppUser>;
+  clientService: ClientServiceInterface<AppClient, AppUser>;
+  tokenService: TokenServiceInterface<AppClient, AppUser>;
+}>;
+declare function addUser(
+  service: UserServiceInterface<AppUser>,
+  user: AppUser,
+  password: string,
+): Promise<void>;
+declare function addClient(
+  service: ClientServiceInterface<AppClient, AppUser>,
+  client: AppClient,
+): Promise<void>;
+
+runTokenServiceContractTests<AppClient, AppUser>({
+  makeServices: freshTokenServices,
+  addUser,
+  addClient,
+  supportedScope: "openid",
+});
+```
+
+A token service without `rotate` must keep a revoked family revoked: the suite
+saves a successor after `revokeFamily` and requires it to be stored already
+revoked.
 
 The identity user suite covers `IdentityUserStore`, separately from the OAuth2
 `UserServiceInterface`. Its fixture supplies your application's valid sign-up
@@ -5816,7 +5870,11 @@ past the expiry from overwriting or ending a session another instance has
 since refreshed. Keep the lease on the session record itself, so its
 conditional write is one compare-and-set, and never hold a database
 transaction open across the refresh: the refresh waits on the authorization
-server.
+server. `runSessionStoreContractTests` fails a lock store that passes no lease.
+Set its `refreshLockNeverExpires: true` option only for a lock no holder can
+lose while its refresh runs, such as one held in the single process that runs
+every refresh; a holder that hangs then holds that session's refresh until it
+settles.
 
 Keep the session lifetime consistent between the store and
 `HonoBff.sessionMaxAgeMs`. A stateful store's update must reject revoked,
@@ -7210,7 +7268,9 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   they are stored, and otherwise answers `502` and keeps the session and its
   cookie. A store whose `withRefreshLock` passes no lease gets no such fence:
   the former holder's write can overwrite the new holder's tokens, or its
-  sign-out can end the session the new holder just refreshed. Two schedules
+  sign-out can end the session the new holder just refreshed.
+  `runSessionStoreContractTests` fails such a store unless its options declare
+  that the lock never expires (`refreshLockNeverExpires`). Two schedules
   still cost the session, with or without the lease. A holder that stalls
   past its lease and then spends the refresh token before the new holder
   does cannot store what it received, and the new holder's exchange is

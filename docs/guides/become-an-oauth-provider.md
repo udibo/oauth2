@@ -729,7 +729,8 @@ presented token, as two storage calls. A revocation that lands between them
 finds no live successor to revoke. To close that gap, `revokeFamily` must record
 the revoked family and `save` must store any later member of it already revoked.
 `MemoryTokenService` does; a custom store needs the same, and reuse detection
-relies on it too. A store that implements
+relies on it too. `runTokenServiceContractTests` checks it for a service without
+`rotate`. A store that implements
 [`rotate`](#atomic-rotation) has no such gap, provided `revokeFamily` is
 linearizable with it.
 

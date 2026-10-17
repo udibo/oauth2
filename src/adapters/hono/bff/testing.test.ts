@@ -5,7 +5,9 @@ import { DirectClient } from "../../../client/mod.ts";
 import { HonoResourceServer } from "../resource-server.ts";
 import { createMemoryAuthorizationServer } from "../../../testing/server.ts";
 import type { TestClient, TestUser } from "../../../testing/_test_fixtures.ts";
+import { runSuiteInChild } from "../../../testing/contract/_test_child.ts";
 
+import { LeaselessLockStore } from "./_test_leaseless_lock_store.ts";
 import { MemoryAuthRequestStorageFactory } from "./auth-request-store.ts";
 import { HonoBff } from "./bff.ts";
 import {
@@ -215,4 +217,47 @@ runSessionStoreContractTests({
       secret: crypto.getRandomValues(new Uint8Array(32)),
       maxAgeMs,
     }),
+});
+
+runSessionStoreContractTests({
+  describeName:
+    "a store whose lock never expires satisfies SessionStore contract without a lease",
+  makeStore: () => new LeaselessLockStore(),
+  refreshLockNeverExpires: true,
+});
+
+describe("runSessionStoreContractTests with default options", () => {
+  it("fails every lease case for a store whose expiring lock passes no lease", async () => {
+    const run = await runSuiteInChild(
+      "src/adapters/hono/bff/_test_leaseless_lock_suite.ts",
+    );
+    const failed = run.tests.filter((test) => test.status === "failed");
+    const leaseCases = [
+      "withRefreshLock passes a lease that writes the session while the lock is held",
+      "withRefreshLock's lease refuses to write or destroy once its call has settled",
+      "withRefreshLock's lease cannot act while a later call holds the lock",
+      "withRefreshLock's lease destroys the session only while it stores the given refresh token",
+      "withRefreshLock's lease never restores a destroyed session",
+    ];
+
+    expect(
+      run.exitCode,
+      `the suite must fail this store:\n${run.output}`,
+    ).not.toBe(0);
+    expect(
+      failed.map((test) =>
+        leaseCases.find((name) => test.fullName.endsWith(name)),
+      ),
+    ).toStrictEqual(leaseCases);
+    for (const test of failed) {
+      expect(test.failureMessages.join("\n")).toContain(
+        "withRefreshLock passed the refresh no lease",
+      );
+    }
+    expect(
+      run.tests.filter((test) => test.status === "skipped"),
+      "a lease case must fail, never skip, when the store does not declare " +
+        "that its lock never expires",
+    ).toStrictEqual([]);
+  });
 });
