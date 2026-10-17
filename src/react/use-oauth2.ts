@@ -18,6 +18,7 @@ import {
   type UserInfoClaims,
 } from "../client/mod.ts";
 
+import { LogoutTrackerContext } from "./_logout.ts";
 import { OAuth2Context, type OAuth2ContextValue } from "./context.ts";
 
 /** Return value of {@link useOAuth2}. */
@@ -54,6 +55,11 @@ export interface UseOAuth2Result {
    * navigates to the returned URL if the flow needs a redirect (the BFF
    * logout endpoint, or the IDP end-session URL). Returns `{ url }` for
    * SSR callers.
+   *
+   * Under an `<OAuth2Provider>`, a mounted {@link RequireAuth} starts no
+   * login while this runs or navigates, so signing out from a protected page
+   * ends at the logout destination. Calling `client.logout()` directly skips
+   * that guard.
    */
   logout(opts?: LogoutOptions): Promise<{ url?: string }>;
   /** Bound `client.fetch` — the request-with-auth helper. */
@@ -110,15 +116,27 @@ export function useOAuth2(): UseOAuth2Result {
     },
     [client],
   );
+  const logoutTracker = useContext(LogoutTrackerContext);
+  const startLogout = logoutTracker?.start;
+  const settleLogout = logoutTracker?.settle;
   const logout = useCallback(
     async (opts?: LogoutOptions): Promise<{ url?: string }> => {
-      const result = await client.logout(opts);
+      startLogout?.();
+      let result: { url?: string };
+      try {
+        result = await client.logout(opts);
+      } catch (error) {
+        settleLogout?.();
+        throw error;
+      }
       if (result.url && typeof window !== "undefined") {
         window.location.assign(result.url);
+      } else {
+        settleLogout?.();
       }
       return result;
     },
-    [client],
+    [client, startLogout, settleLogout],
   );
   const boundFetch = useCallback<typeof fetch>(
     (input, init) => client.fetch(input, init),
