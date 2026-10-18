@@ -962,16 +962,18 @@ have no secret and continue to use PKCE. The explicit
 
 Authorization-code replay is also handled: exchanging a code twice revokes every
 token the first exchange issued (RFC 6819 §4.4.1.1), via your token service's
-`revokeCode(code, client)`. Two exchanges racing each other count too: the one
-that loses the claim revokes what the winner issued. `client` is the client that
-presented the code. Revoke only when it is the client the tokens were issued to:
-a different confidential client could never have redeemed the code, so its
-replay only lets it end someone else's session. The check names a public
-client, or any client under `requireClientAuthentication: false`, by
-`client_id` alone, so anyone holding that client's spent code can still present
-it and revoke. When `revokeCode` revoked something, the grant calls your
-`onCodeReuse` hook with the SHA-256 hex digest of the code and the presenting
-client, so the replay lands in your audit log:
+`revokeCode(code, client)`. That includes every refresh token rotated from them:
+once the client check passes, `revokeCode` revokes each live member of their
+rotation families. Two exchanges racing each other count too: the one that loses
+the claim revokes what the winner issued. `client` is the client that presented
+the code. Revoke only when it is the client the tokens were issued to: a
+different confidential client could never have redeemed the code, so its replay
+only lets it end someone else's session. The check names a public client, or any
+client under `requireClientAuthentication: false`, by `client_id` alone, so
+anyone holding that client's spent code can still present it and revoke. When
+`revokeCode` revoked something, the grant calls your `onCodeReuse` hook with the
+SHA-256 hex digest of the code and the presenting client, so the replay lands in
+your audit log:
 
 ```ts
 import {
@@ -4014,9 +4016,13 @@ runTokenRotationContractTests<AppClient, AppUser>({
 ```
 
 `runTokenServiceContractTests` checks that `revokeCode(code, client)` revokes
-nothing for a client other than the one the code's tokens were issued to. Set
-`revokeCodeChecksClient: false` only for a store that deliberately ignores the
-client; the suite then registers an ignored case naming the gap.
+nothing for a client other than the one the code's tokens were issued to, and
+that it ends the refresh tokens rotated from the code's tokens while leaving
+other families live and keeping those families revoked, so a successor saved
+afterwards is not live; `runTokenRotationContractTests` checks the same against
+a rotation in flight. Set `revokeCodeChecksClient: false` only for a store that
+deliberately ignores the client; the suite then registers an ignored case naming
+the gap.
 
 A token service that implements `exchangeCode` also runs
 `runCodeExchangeContractTests`. It races `exchangeCode` against itself and,

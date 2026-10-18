@@ -294,16 +294,18 @@ have no secret and continue to use PKCE. The explicit
 
 Authorization-code replay is also handled: exchanging a code twice revokes every
 token the first exchange issued (RFC 6819 §4.4.1.1), via your token service's
-`revokeCode(code, client)`. Two exchanges racing each other count too: the one
-that loses the claim revokes what the winner issued. `client` is the client that
-presented the code. Revoke only when it is the client the tokens were issued to:
-a different confidential client could never have redeemed the code, so its
-replay only lets it end someone else's session. The check names a public
-client, or any client under `requireClientAuthentication: false`, by
-`client_id` alone, so anyone holding that client's spent code can still present
-it and revoke. When `revokeCode` revoked something, the grant calls your
-`onCodeReuse` hook with the SHA-256 hex digest of the code and the presenting
-client, so the replay lands in your audit log:
+`revokeCode(code, client)`. That includes every refresh token rotated from them:
+once the client check passes, `revokeCode` revokes each live member of their
+rotation families. Two exchanges racing each other count too: the one that loses
+the claim revokes what the winner issued. `client` is the client that presented
+the code. Revoke only when it is the client the tokens were issued to: a
+different confidential client could never have redeemed the code, so its replay
+only lets it end someone else's session. The check names a public client, or any
+client under `requireClientAuthentication: false`, by `client_id` alone, so
+anyone holding that client's spent code can still present it and revoke. When
+`revokeCode` revoked something, the grant calls your `onCodeReuse` hook with the
+SHA-256 hex digest of the code and the presenting client, so the replay lands in
+your audit log:
 
 ```ts
 import {

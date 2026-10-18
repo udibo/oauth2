@@ -427,6 +427,29 @@ export function runTokenRotationContractTests<
         ).toStrictEqual([]);
       });
 
+      it("leaves no live member when the code that issued the family is replayed while a rotation is in flight", async () => {
+        const code = "replayed-while-rotating";
+        const parent = { ...(await member(family)), code };
+        await tokenService.save(parent);
+        const next = await member(family);
+
+        const [rotated, revoked] = await whileRotating(parent, next, () =>
+          tokenService.revokeCode(code, client),
+        );
+
+        assert(revoked.status === "fulfilled");
+        assert(rotated.status === "fulfilled");
+        expect([undefined, next.refreshToken]).toContain(
+          rotated.value?.refreshToken,
+        );
+        expect(
+          await live([parent, next]),
+          "revokeCode must revoke the code's families as revokeFamily does, " +
+            "waiting for a rotation holding one, or the successor that " +
+            "rotation commits afterwards stays live after the code's replay",
+        ).toStrictEqual([]);
+      });
+
       it("revokes the successor of a rotation that committed before the family was revoked", async () => {
         const parent = await savedMember(family);
         const next = await member(family);

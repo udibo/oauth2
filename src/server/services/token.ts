@@ -231,6 +231,13 @@ export interface TokenServiceInterface<
    * Returns true if any tokens were revoked, which the grant reports as a code
    * replay (RFC 6819 §4.4.1.1).
    *
+   * After the client check below passes, revoke every live member of the
+   * rotation families of those tokens too, as {@linkcode revokeFamily} does,
+   * keeping them revoked against a rotation in flight. A refresh token rotated
+   * from the code's token carries no `code`, so revoking only the tokens saved
+   * with the code leaves the stolen code's session refreshing once it has
+   * rotated.
+   *
    * `client` is the client that presented the code. Revoke only when it is the
    * client the code's tokens were issued to; for any other client revoke
    * nothing and resolve `false`. A different confidential client could never

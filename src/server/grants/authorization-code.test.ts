@@ -31,6 +31,7 @@ import {
   AuthorizationCodeGrant,
   type CodeReuseEvent,
 } from "./authorization-code.ts";
+import { RefreshTokenGrant } from "./refresh-token.ts";
 
 const INHERITED_MEMBER_NAMES = [
   "toString",
@@ -1566,6 +1567,41 @@ describe("AuthorizationCodeGrant", () => {
         { codeHash: await sha256Hash("replayed-code"), client: testClient },
       ]);
     });
+
+    for (const pairCodeStore of [true, false]) {
+      it(`ends the refresh tokens rotated from the code's token when its own client replays it${pairCodeStore ? "" : ", with a two-step store"}`, async () => {
+        const { grant, services, tokenService } = await createReplayGrant({
+          pairCodeStore,
+        });
+        const refreshGrant = new RefreshTokenGrant<
+          TestClient,
+          TestUser,
+          BasicScope
+        >({ resolve: () => services });
+        const issued = await exchange(grant, testClient);
+        const rotated = (await exchangeToken(
+          refreshGrant,
+          tokenRequest({
+            grant_type: "refresh_token",
+            refresh_token: issued.refreshToken,
+          }),
+          testClient,
+        )) as RefreshToken<TestClient, TestUser, BasicScope>;
+        expect(await isLive(tokenService, rotated)).toBe(true);
+
+        await rejection(
+          () => exchange(grant, testClient),
+          InvalidGrantError,
+          "code already used",
+        );
+
+        expect(
+          await isLive(tokenService, rotated),
+          "a replayed code ends the session it started, including the " +
+            "refresh tokens rotated from it",
+        ).toBe(false);
+      });
+    }
 
     it("still revokes on the code's own client's replay after another client's replay revoked nothing", async () => {
       const { grant, tokenService, reuseEvents } = await createReplayGrant();
