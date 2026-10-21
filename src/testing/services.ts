@@ -315,7 +315,7 @@ export class MemoryTokenService<
   #tokensByRefreshHash = new Map<string, StoredToken<S>>();
   #tokensByCodeHash = new Map<
     string,
-    { clientId: string; accessTokenHashes: Set<string> }
+    { clientId: string; accessTokenHashes: Set<string>; familyIds: Set<string> }
   >();
   #revokedByRefreshHash = new Map<string, StoredToken<S>>();
   #revokedFamilies = new Set<string>();
@@ -554,10 +554,15 @@ export class MemoryTokenService<
     if (stored.codeHash) {
       let bucket = this.#tokensByCodeHash.get(stored.codeHash);
       if (!bucket) {
-        bucket = { clientId: stored.clientId, accessTokenHashes: new Set() };
+        bucket = {
+          clientId: stored.clientId,
+          accessTokenHashes: new Set(),
+          familyIds: new Set(),
+        };
         this.#tokensByCodeHash.set(stored.codeHash, bucket);
       }
       bucket.accessTokenHashes.add(stored.accessTokenHash);
+      if (stored.familyId) bucket.familyIds.add(stored.familyId);
     }
     if (stored.refreshTokenHash) {
       if (stored.familyId && this.#revokedFamilies.has(stored.familyId)) {
@@ -715,6 +720,10 @@ export class MemoryTokenService<
    * live token was removed.
    */
   revokeFamily(familyId: string): Promise<boolean> {
+    return Promise.resolve(this.#revokeFamily(familyId));
+  }
+
+  #revokeFamily(familyId: string): boolean {
     this.#revokedFamilies.add(familyId);
     let revoked = false;
     for (const [hash, stored] of this.#tokensByRefreshHash) {
@@ -731,12 +740,14 @@ export class MemoryTokenService<
         revoked = true;
       }
     }
-    return Promise.resolve(revoked);
+    return revoked;
   }
 
   /**
    * Removes every token issued from the given authorization code, used when a
-   * code is replayed. Resolves `true` when at least one token was removed.
+   * code is replayed, and revokes the rotation families of those tokens as
+   * {@linkcode revokeFamily} does, so their rotated successors end with them.
+   * Resolves `true` when tokens were issued from the code.
    * Removes nothing and resolves `false` when `client` is given and is not the
    * client the code's tokens were issued to.
    */
@@ -747,6 +758,7 @@ export class MemoryTokenService<
     if (client && client.id.toString() !== bucket.clientId.toString()) {
       return false;
     }
+    for (const familyId of bucket.familyIds) this.#revokeFamily(familyId);
     for (const accessTokenHash of bucket.accessTokenHashes) {
       const stored = this.#tokensByAccessHash.get(accessTokenHash);
       if (stored) {

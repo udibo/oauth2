@@ -29,6 +29,7 @@ export class LockingTokenService<
   readonly #revoked = new Map<string, RefreshToken<C, U, BasicScope>>();
   readonly #byCode = new Map<string, Set<string>>();
   readonly #codeClients = new Map<string, string>();
+  readonly #codeFamilies = new Map<string, Set<string>>();
   readonly #locks = new Map<string, Promise<void>>();
   readonly #familyIdFormat: RegExp | undefined;
 
@@ -177,18 +178,22 @@ export class LockingTokenService<
     );
   }
 
-  revokeCode(code: string, client?: C): Promise<boolean> {
+  async revokeCode(code: string, client?: C): Promise<boolean> {
     const accessTokens = this.#byCode.get(code);
     if (client && this.#codeClients.get(code) !== client.id.toString()) {
-      return Promise.resolve(false);
+      return false;
     }
-    if (!accessTokens?.size) return Promise.resolve(false);
+    if (!accessTokens?.size) return false;
+    for (const familyId of this.#codeFamilies.get(code) ?? []) {
+      await this.revokeFamily(familyId);
+    }
     for (const accessToken of accessTokens) {
       const found = this.#byAccess.get(accessToken);
       if (found) this.#remove(found);
     }
     this.#byCode.delete(code);
-    return Promise.resolve(true);
+    this.#codeFamilies.delete(code);
+    return true;
   }
 
   #insert(token: AnyToken<C, U>): void {
@@ -199,6 +204,11 @@ export class LockingTokenService<
       bucket.add(token.accessToken);
       this.#byCode.set(token.code, bucket);
       this.#codeClients.set(token.code, token.client.id.toString());
+      if ("refreshToken" in token && token.familyId) {
+        const families = this.#codeFamilies.get(token.code) ?? new Set();
+        families.add(token.familyId);
+        this.#codeFamilies.set(token.code, families);
+      }
     }
   }
 

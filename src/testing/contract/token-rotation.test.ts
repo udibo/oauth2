@@ -54,6 +54,7 @@ describe("runTokenRotationContractTests with makeFamilyId", () => {
     const failed = run.tests.filter((test) => test.status === "failed");
     const unlocked = [
       "leaves no live member when the family is revoked while a rotation is in flight",
+      "leaves no live member when the code that issued the family is replayed while a rotation is in flight",
       "answers a replay that arrives while a rotation is held after its claim with invalid_grant, without revoking the family",
       "leaves the parent live and persists nothing when the successor cannot be persisted",
       "rolls the claim back when the insert fails after it",
@@ -86,6 +87,7 @@ describe("runTokenRotationContractTests with default options", () => {
     const failed = run.tests.filter((test) => test.status === "failed");
     const held = [
       "leaves no live member when the family is revoked while a rotation is in flight",
+      "leaves no live member when the code that issued the family is replayed while a rotation is in flight",
       "refuses a second rotation that starts while the first is held after its claim",
       "answers a replay that arrives while a rotation is held after its claim with invalid_grant, without revoking the family",
       "does not hold a rotation in another family behind a held one",

@@ -381,9 +381,13 @@ runTokenRotationContractTests<AppClient, AppUser>({
 ```
 
 `runTokenServiceContractTests` checks that `revokeCode(code, client)` revokes
-nothing for a client other than the one the code's tokens were issued to. Set
-`revokeCodeChecksClient: false` only for a store that deliberately ignores the
-client; the suite then registers an ignored case naming the gap.
+nothing for a client other than the one the code's tokens were issued to, and
+that it ends the refresh tokens rotated from the code's tokens while leaving
+other families live and keeping those families revoked, so a successor saved
+afterwards is not live; `runTokenRotationContractTests` checks the same against
+a rotation in flight. Set `revokeCodeChecksClient: false` only for a store that
+deliberately ignores the client; the suite then registers an ignored case naming
+the gap.
 
 A token service that implements `exchangeCode` also runs
 `runCodeExchangeContractTests`. It races `exchangeCode` against itself and,

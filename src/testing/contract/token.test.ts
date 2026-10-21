@@ -117,9 +117,13 @@ describe("runTokenServiceContractTests", () => {
     ).not.toBe(0);
     expect(failed.map((test) => test.fullName)).toStrictEqual([
       `${FORGETS_REVOKED_FAMILY} refresh-token rotation family keeps a revoked family revoked: a successor saved after revokeFamily is not live`,
+      `${FORGETS_REVOKED_FAMILY} refresh-token rotation family keeps a replayed code's family revoked: a successor saved after revokeCode is not live`,
     ]);
     expect(failed[0].failureMessages.join("\n")).toContain(
       "a successor saved after its family was revoked must be stored already revoked",
+    );
+    expect(failed[1].failureMessages.join("\n")).toContain(
+      "a successor saved after its code was replayed must be stored already revoked",
     );
   });
 });
@@ -148,6 +152,7 @@ describe("runTokenServiceContractTests revokeCode client check", () => {
       [
         "revokeCode revokes for the client the code's tokens were issued to, after another client was refused",
         "revokeCode revokes nothing for a client other than the one the code's tokens were issued to",
+        "revokeCode revokes nothing in a rotated family for a client other than the one the code's tokens were issued to",
       ].toSorted(),
     );
     expect(inSuite(optedOut, "failed")).toStrictEqual([]);
