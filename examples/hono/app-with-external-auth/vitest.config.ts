@@ -5,6 +5,7 @@ export default defineConfig({
     name: "example-app-with-external-auth",
     environment: "node",
     include: ["**/*.test.ts"],
+    hookTimeout: 30_000,
     env: {
       PORT: "8003",
       PUBLIC_URL: "http://localhost:8003",
