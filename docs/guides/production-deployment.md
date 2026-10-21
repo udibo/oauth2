@@ -119,8 +119,9 @@ credential, your adapter must account for competing writes and failures, and
 it.
 
 For authorization codes, implement `exchangeCode` so the claim of the code and
-the save of its token are one atomic step, and have `revokeCode` honor the
-client it is given; `runCodeExchangeContractTests` and
+the save of its token are one atomic step, persist `codeVerifierHash` with
+the token, and have `revokeCode` honor the client and the `codeVerifierHash` it
+is given; `runCodeExchangeContractTests` and
 `runTokenServiceContractTests` check them. Without `exchangeCode`, a code
 replayed between the claim and the save leaves the token saved next live.
 

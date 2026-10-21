@@ -63,8 +63,10 @@ export interface CodeReuseEvent<Client extends ClientInterface> {
    * The client that presented the code. It is the code's own client only when
    * the token service's `revokeCode` honors its `client` argument. A public
    * client, or any client the grant looks up by id because
-   * `requireClientAuthentication` is `false`, is named by `client_id` alone,
-   * so whoever holds the spent code can present it as that client.
+   * `requireClientAuthentication` is `false`, is named by `client_id` alone;
+   * its replay revokes, and so reaches this event, only when it presented the
+   * `code_verifier` that redeemed the code and `revokeCode` honors its
+   * `codeVerifierHash` argument.
    */
   client: Client;
 }
@@ -130,7 +132,9 @@ export interface AuthorizationCodeGrantOptions<
    * token service's `revokeCode` revoked those tokens — record it as a
    * security event. A `revokeCode` that honors its `client` argument revokes
    * nothing, and so does not fire this, for a client other than the code's
-   * own; {@linkcode CodeReuseEvent.client} says who that excludes.
+   * own; {@linkcode CodeReuseEvent.client} says who that excludes. A client
+   * that did not authenticate with its secret fires it only by presenting the
+   * `code_verifier` that redeemed the code.
    *
    * Trigger point `code-reuse` (see `docs/trigger-points.md`).
    * Fire-and-forget: it is awaited, but a throw is caught and logged, never
@@ -138,6 +142,13 @@ export interface AuthorizationCodeGrantOptions<
    * client-facing `invalid_grant` a replayed code always yields.
    */
   onCodeReuse?: (event: CodeReuseEvent<Client>) => void | Promise<void>;
+}
+
+interface CodeReplay<Client extends ClientInterface> {
+  code: string;
+  client: Client;
+  request: Request;
+  body: FormData;
 }
 
 /** Client credentials extended with optional PKCE code_verifier. */
@@ -401,7 +412,14 @@ export class AuthorizationCodeGrant<
    * then fails its checks, asks
    * `tokenService.revokeCode` to revoke the tokens issued from it on behalf of
    * the presenting client, fires `onCodeReuse` when it did, and fails with
-   * `invalid_grant` (RFC 6819 §4.4.1.1).
+   * `invalid_grant` (RFC 6819 §4.4.1.1). The replay must prove it could have
+   * redeemed the code: a client that authenticated with a `client_secret` in
+   * `request` asks with the client alone, and any other client asks with the
+   * SHA-256 hex digest of the `code_verifier` it presented, which `revokeCode`
+   * matches against {@linkcode Token.codeVerifierHash}. Without a verifier,
+   * such a client's replay revokes nothing. Pass the `client` that
+   * {@linkcode getAuthenticatedClient} resolved from this same `request`.
+   * A code redeemed with PKCE issues its token with `codeVerifierHash` set.
    *
    * @throws {InvalidRequestError} When `code` is missing, a required `code_verifier` is absent, or the verifier is malformed.
    * @throws {InvalidGrantError} When the code is unknown, expired, already claimed, or its verifier or `redirect_uri` does not match.
@@ -422,14 +440,10 @@ export class AuthorizationCodeGrant<
       throw new InvalidRequestError("code parameter required");
     }
 
+    const replay: CodeReplay<Client> = { code, client, request, body };
     const authorizationCode = await authorizationCodeService.get(code);
     if (!authorizationCode) {
-      throw await this.#refuseClaimedCode(
-        tokenService,
-        code,
-        client,
-        "invalid code",
-      );
+      throw await this.#refuseClaimedCode(tokenService, replay, "invalid code");
     }
     if (authorizationCode.expiresAt < new Date()) {
       throw new InvalidGrantError("invalid code");
@@ -440,7 +454,7 @@ export class AuthorizationCodeGrant<
       !exchangeCode &&
       !(await authorizationCodeService.revoke(authorizationCode))
     ) {
-      throw await this.#refuseClaimedCode(tokenService, code, client);
+      throw await this.#refuseClaimedCode(tokenService, replay);
     }
 
     let token: Token<Client, User, S>;
@@ -459,12 +473,16 @@ export class AuthorizationCodeGrant<
           authorizationCodeService,
           tokenService,
           authorizationCode,
-          client,
+          replay,
         );
       }
       throw error;
     }
     token.code = code;
+    const codeVerifier = body.get("code_verifier");
+    if (typeof codeVerifier === "string") {
+      token.codeVerifierHash = await sha256Hash(codeVerifier);
+    }
 
     let saved: Token<Client, User, S> | undefined;
     if (exchangeCode) {
@@ -476,7 +494,7 @@ export class AuthorizationCodeGrant<
             authorizationCodeService,
             tokenService,
             authorizationCode,
-            client,
+            replay,
           );
         }
         throw error;
@@ -485,7 +503,7 @@ export class AuthorizationCodeGrant<
       saved = await tokenService.save(token);
     }
     if (!saved) {
-      throw await this.#refuseClaimedCode(tokenService, code, client);
+      throw await this.#refuseClaimedCode(tokenService, replay);
     }
     if (authorizationCode.nonce) saved.nonce = authorizationCode.nonce;
     return saved;
@@ -541,15 +559,11 @@ export class AuthorizationCodeGrant<
       S
     >["tokenService"],
     authorizationCode: AuthorizationCode<Client, User, S>,
-    client: Client,
+    replay: CodeReplay<Client>,
   ): Promise<void> {
     try {
       if (!(await authorizationCodeService.revoke(authorizationCode))) {
-        await this.#refuseClaimedCode(
-          tokenService,
-          authorizationCode.code,
-          client,
-        );
+        await this.#refuseClaimedCode(tokenService, replay);
       }
     } catch (error) {
       console.error(
@@ -565,15 +579,31 @@ export class AuthorizationCodeGrant<
       User,
       S
     >["tokenService"],
-    code: string,
-    client: Client,
+    { code, client, request, body }: CodeReplay<Client>,
     unrevokedMessage = "code already used",
   ): Promise<OAuth2Error> {
-    if (!(await tokenService.revokeCode(code, client))) {
-      return new InvalidGrantError(unrevokedMessage);
+    const codeVerifier = body.get("code_verifier");
+    let revoked = false;
+    if (this.#authenticatedBySecret(request, body)) {
+      revoked = await tokenService.revokeCode(code, client);
+    } else if (typeof codeVerifier === "string") {
+      revoked = await tokenService.revokeCode(
+        code,
+        client,
+        await sha256Hash(codeVerifier),
+      );
     }
+    if (!revoked) return new InvalidGrantError(unrevokedMessage);
     await this.#notifyCodeReuse({ codeHash: await sha256Hash(code), client });
     return new InvalidGrantError("code already used");
+  }
+
+  #authenticatedBySecret(request: Request, body: FormData): boolean {
+    try {
+      return !!this.getClientCredentials(request, body).clientSecret;
+    } catch {
+      return false;
+    }
   }
 
   async #notifyCodeReuse(event: CodeReuseEvent<Client>): Promise<void> {

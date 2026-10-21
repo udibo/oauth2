@@ -385,9 +385,13 @@ nothing for a client other than the one the code's tokens were issued to, and
 that it ends the refresh tokens rotated from the code's tokens while leaving
 other families live and keeping those families revoked, so a successor saved
 afterwards is not live; `runTokenRotationContractTests` checks the same against
-a rotation in flight. Set `revokeCodeChecksClient: false` only for a store that
-deliberately ignores the client; the suite then registers an ignored case naming
-the gap.
+a rotation in flight. It also checks that `revokeCode(code, client,
+codeVerifierHash)` revokes nothing for a hash other than the
+`codeVerifierHash` the code's tokens were saved with, or for tokens saved
+without one, and revokes for the matching hash. Set `revokeCodeChecksClient:
+false` or `revokeCodeChecksVerifier: false` only for a store that deliberately
+ignores that argument; the suite then registers an ignored case naming the
+gap.
 
 A token service that implements `exchangeCode` also runs
 `runCodeExchangeContractTests`. It races `exchangeCode` against itself and,

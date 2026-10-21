@@ -29,6 +29,7 @@ export class LockingTokenService<
   readonly #revoked = new Map<string, RefreshToken<C, U, BasicScope>>();
   readonly #byCode = new Map<string, Set<string>>();
   readonly #codeClients = new Map<string, string>();
+  readonly #codeVerifierHashes = new Map<string, string | undefined>();
   readonly #codeFamilies = new Map<string, Set<string>>();
   readonly #locks = new Map<string, Promise<void>>();
   readonly #familyIdFormat: RegExp | undefined;
@@ -178,9 +179,19 @@ export class LockingTokenService<
     );
   }
 
-  async revokeCode(code: string, client?: C): Promise<boolean> {
+  async revokeCode(
+    code: string,
+    client?: C,
+    codeVerifierHash?: string,
+  ): Promise<boolean> {
     const accessTokens = this.#byCode.get(code);
     if (client && this.#codeClients.get(code) !== client.id.toString()) {
+      return false;
+    }
+    if (
+      codeVerifierHash !== undefined &&
+      this.#codeVerifierHashes.get(code) !== codeVerifierHash
+    ) {
       return false;
     }
     if (!accessTokens?.size) return false;
@@ -204,6 +215,7 @@ export class LockingTokenService<
       bucket.add(token.accessToken);
       this.#byCode.set(token.code, bucket);
       this.#codeClients.set(token.code, token.client.id.toString());
+      this.#codeVerifierHashes.set(token.code, token.codeVerifierHash);
       if ("refreshToken" in token && token.familyId) {
         const families = this.#codeFamilies.get(token.code) ?? new Set();
         families.add(token.familyId);

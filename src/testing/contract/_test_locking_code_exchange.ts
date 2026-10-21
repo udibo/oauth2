@@ -119,8 +119,14 @@ class LockingCodeExchangeTokenService extends MemoryTokenService<
       return token;
     });
 
-  override revokeCode(code: string, client?: TestClient): Promise<boolean> {
-    return this.#locked(code, () => super.revokeCode(code, client));
+  override revokeCode(
+    code: string,
+    client?: TestClient,
+    codeVerifierHash?: string,
+  ): Promise<boolean> {
+    return this.#locked(code, () =>
+      super.revokeCode(code, client, codeVerifierHash),
+    );
   }
 
   #locked<T>(code: string, critical: () => Promise<T>): Promise<T> {

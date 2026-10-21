@@ -287,18 +287,24 @@ should not be enabled for new deployments.
 
 - **How completely a code replay revokes depends on the token store.** RFC 6819
   §4.4.1.1 has a replayed authorization code revoke the tokens issued from it.
-  The grant asks `revokeCode(code, client)` to do that, passing the client that
-  presented the code. Two optional pieces of the store decide how far it goes:
+  The grant asks `revokeCode(code, client, codeVerifierHash)` to do that,
+  passing the client that presented the code and, unless that client
+  authenticated with its secret, the SHA-256 hex digest of the `code_verifier`
+  it presented. The store decides how far it goes:
   - A `revokeCode` that ignores `client` revokes on any client's replay, so a
     client that sees a spent code, such as from a log or a shared browser, can
     end the session it started. Honor `client` and a different confidential
     client's replay revokes nothing.
-  - Honoring `client` does not protect a public client, or any client when
-    `requireClientAuthentication` is `false`: the grant names it by
-    `client_id` alone, and replay detection runs before the PKCE verifier is
-    checked, so anyone holding that client's spent code can present it and
-    revoke the session it started. Gating revocation on the verifier is
-    tracked in [udibo/oauth2#149](https://github.com/udibo/oauth2/issues/149).
+  - A public client, or any client when `requireClientAuthentication` is
+    `false`, is named by `client_id` alone. Its replay revokes only with the
+    verifier that redeemed the code, and only when the store persisted
+    `Token.codeVerifierHash` and compares it in `revokeCode`. A store that
+    ignores `codeVerifierHash` lets anyone holding such a client's spent code
+    end the session it started. A replay of such a client's code that presents
+    no verifier revokes nothing, so a code it redeemed without PKCE
+    (`requirePKCE: false`) has no replay detection. Tokens saved before the
+    store recorded `codeVerifierHash` carry none, so a replay of their code by
+    such a client revokes nothing either.
     `onCodeReuse` names the presenting client, which is the code's own client
     only when `revokeCode` honors `client`.
   - Without `exchangeCode`, the grant claims the code and saves its token in
@@ -307,8 +313,9 @@ should not be enabled for new deployments.
     `exchangeCode`, the claim and the save are one step and a replay always
     finds the token to revoke.
 
-  `MemoryTokenService` honors `client`, and implements `exchangeCode` when
-  constructed with the `authorizationCodeService` it shares with the grant.
+  `MemoryTokenService` honors `client` and `codeVerifierHash`, and implements
+  `exchangeCode` when constructed with the `authorizationCodeService` it shares
+  with the grant.
 
 ## Resource servers (`@udibo/oauth2/server/resource`)
 

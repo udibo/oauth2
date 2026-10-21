@@ -128,6 +128,41 @@ describe("runTokenServiceContractTests", () => {
   });
 });
 
+describe("runTokenServiceContractTests revokeCode verifier check", () => {
+  it("fails a store whose revokeCode ignores the verifier by default, and registers an ignored case when it opts out", async () => {
+    const run = await runSuiteInChild(
+      "src/testing/contract/_test_unbound_revoke_code.ts",
+    );
+    const unbound = "a token service whose revokeCode ignores the verifier ";
+    const optedOut =
+      "a token service whose revokeCode ignores the verifier, opted out ";
+    const inSuite = (suite: string, status: string): string[] =>
+      run.tests
+        .filter(
+          (test) => test.status === status && test.fullName.startsWith(suite),
+        )
+        .map((test) => test.fullName.slice(suite.length).trim())
+        .toSorted();
+
+    expect(
+      run.exitCode,
+      `the suite must fail this store:\n${run.output}`,
+    ).not.toBe(0);
+    expect(inSuite(unbound, "failed")).toStrictEqual(
+      [
+        "revokeCode revokes for the codeVerifierHash the code's tokens were saved with, after another was refused",
+        "revokeCode revokes nothing for a codeVerifierHash other than the one the code's tokens were saved with",
+        "revokeCode revokes nothing for a codeVerifierHash when the code's tokens were saved without one",
+        "revokeCode revokes nothing in a rotated family for a codeVerifierHash other than the one the code's tokens were saved with",
+      ].toSorted(),
+    );
+    expect(inSuite(optedOut, "failed")).toStrictEqual([]);
+    expect(inSuite(optedOut, "skipped")).toContain(
+      "revokeCode revokeCode ignores the presented verifier — a replay that names a public client, with any verifier, revokes its spent code's tokens (revokeCodeChecksVerifier: false)",
+    );
+  });
+});
+
 describe("runTokenServiceContractTests revokeCode client check", () => {
   it("fails a store whose revokeCode ignores the client by default, and registers an ignored case when it opts out", async () => {
     const run = await runSuiteInChild(

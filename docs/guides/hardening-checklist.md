@@ -76,7 +76,8 @@ sections apply only when you host those flows.
 - [ ] The token store implements `exchangeCode`, claiming a code and saving
       its token in one step, and passes `runCodeExchangeContractTests` with its
       barrier wired; its `revokeCode` revokes nothing for a client other than
-      the code's own.
+      the code's own, or for a `codeVerifierHash` other than the one saved
+      with the code's tokens.
 - [ ] Without `rotate`, family revocation, from a replay or from revoking a
       rotated-out token, cannot be undone by a concurrent token save:
       `revokeFamily` records the family and `save` stores any later member of

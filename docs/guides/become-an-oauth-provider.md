@@ -294,15 +294,28 @@ have no secret and continue to use PKCE. The explicit
 
 Authorization-code replay is also handled: exchanging a code twice revokes every
 token the first exchange issued (RFC 6819 §4.4.1.1), via your token service's
-`revokeCode(code, client)`. That includes every refresh token rotated from them:
-once the client check passes, `revokeCode` revokes each live member of their
-rotation families. Two exchanges racing each other count too: the one that loses
-the claim revokes what the winner issued. `client` is the client that presented
-the code. Revoke only when it is the client the tokens were issued to: a
-different confidential client could never have redeemed the code, so its replay
-only lets it end someone else's session. The check names a public client, or any
-client under `requireClientAuthentication: false`, by `client_id` alone, so
-anyone holding that client's spent code can still present it and revoke. When
+`revokeCode(code, client, codeVerifierHash)`. That includes every refresh token
+rotated from them: once the checks below pass, `revokeCode` revokes each live
+member of their rotation families. Two exchanges racing each other count too:
+the one that loses the claim revokes what the winner issued.
+
+The replay has to prove it could have redeemed the code:
+
+- `client` is the client that presented the code. Revoke only when it is the
+  client the tokens were issued to: a different confidential client could never
+  have redeemed the code, so its replay only lets it end someone else's session.
+- A client that authenticated with its `client_secret` has proved that much. The
+  grant passes no `codeVerifierHash` for it, and the client check suffices.
+- A public client, or any client under `requireClientAuthentication: false`, is
+  named by `client_id` alone, which anyone holding its spent code can send. Its
+  replay revokes only when it presents the `code_verifier` that redeemed the
+  code: the grant passes the verifier's SHA-256 hex digest as
+  `codeVerifierHash`, and `revokeCode` compares it with the
+  `Token.codeVerifierHash` the grant set on the tokens it issued. Without a
+  verifier the grant does not call `revokeCode` at all, so a code issued to such
+  a client without PKCE cannot be revoked by a replay.
+
+Persist `codeVerifierHash` with the code in `save` and `exchangeCode`. When
 `revokeCode` revoked something, the grant calls your `onCodeReuse` hook with the
 SHA-256 hex digest of the code and the presenting client, so the replay lands in
 your audit log:
@@ -352,8 +365,9 @@ database transaction does. It resolves the saved token, or `undefined` with
 nothing saved when the code was already claimed. Without it, the grant claims
 the code through `authorizationCodeService.revoke` and saves the token in a
 second call, and a replay that lands between the two finds no token to revoke:
-the token saved next stays live. With it, make `revokeCode` see the token from
-the moment the code's claim is visible; committing both together does that.
+the token saved next stays live. With it, make `revokeCode` see the token, with
+its `codeVerifierHash`, from the moment the code's claim is visible; committing
+both together does that.
 `runCodeExchangeContractTests` checks it (see
 [testing](testing.md#persistent-storage-contracts)). `MemoryTokenService`
 implements it when you pass it the `authorizationCodeService` the grant uses.

@@ -242,13 +242,25 @@ export interface TokenServiceInterface<
    * client the code's tokens were issued to; for any other client revoke
    * nothing and resolve `false`. A different confidential client could never
    * have redeemed the code, since that needs the code's own client's
-   * credentials, so its replay says nothing about theft. The gate names a
-   * public client, or any client when the grant's
-   * `requireClientAuthentication` is `false`, by `client_id` alone, so anyone
-   * holding such a client's spent code can still present it as that client
-   * and revoke. A store that ignores `client` revokes on any client's replay,
-   * which lets a client that sees a leaked, spent code end the session it
-   * started.
+   * credentials, so its replay says nothing about theft. A store that ignores
+   * `client` revokes on any client's replay, which lets a client that sees a
+   * leaked, spent code end the session it started.
+   *
+   * `codeVerifierHash` is the SHA-256 hex digest of the `code_verifier` the
+   * replay presented. When it is given, revoke only when it equals the
+   * {@linkcode Token.codeVerifierHash} the code's tokens were saved with; for
+   * a different one, or for tokens saved without one, revoke nothing and
+   * resolve `false`. Persist `codeVerifierHash` from {@linkcode save} and
+   * {@linkcode exchangeCode} to make this possible. The grant passes it
+   * whenever the presenting client did not authenticate with a secret — a
+   * public client, or any client when `requireClientAuthentication` is
+   * `false` — since `client_id` alone is no proof that the replay comes from
+   * the party that redeemed the code. Without a verifier, such a replay
+   * revokes nothing and the grant does not call this method. The grant omits
+   * `codeVerifierHash` only for a client that authenticated with its secret,
+   * for which the client check suffices. A store that ignores
+   * `codeVerifierHash` lets anyone holding a public client's leaked, spent
+   * code end the session it started.
    *
    * With {@linkcode exchangeCode}, make the two linearizable: a call that
    * begins once `exchangeCode` has claimed the code must find and revoke the
@@ -257,7 +269,11 @@ export interface TokenServiceInterface<
    *
    * @see https://datatracker.ietf.org/doc/html/rfc6819#section-4.4.1.1
    */
-  revokeCode(code: string, client?: Client): Promise<boolean>;
+  revokeCode(
+    code: string,
+    client?: Client,
+    codeVerifierHash?: string,
+  ): Promise<boolean>;
 
   /**
    * Exchanges an authorization code in one atomic step: claims
@@ -277,8 +293,9 @@ export interface TokenServiceInterface<
    *
    * After a successful call the code service's `get` must resolve `undefined`
    * for the code, as after `revoke`. A failed insert must leave the code
-   * claimable. Store the token so `revokeCode` finds it by the code, and make
-   * the two linearizable, as `revokeCode` requires.
+   * claimable. Store the token so `revokeCode` finds it by the code, with its
+   * {@linkcode Token.codeVerifierHash}, and make the two linearizable, as
+   * `revokeCode` requires.
    * `runCodeExchangeContractTests` checks it under concurrent callers, with
    * the store's barrier wired between its claim and its insert.
    */
@@ -556,8 +573,13 @@ export abstract class AbstractTokenService<
   /**
    * Revokes every token issued from the given authorization code, returning
    * true if any were revoked (signaling code replay per RFC 6819 §4.4.1.1).
-   * Revoke nothing when `client` is not the client the tokens were issued to
-   * ({@linkcode TokenServiceInterface.revokeCode} explains why).
+   * Revoke nothing when `client` is not the client the tokens were issued to,
+   * or when `codeVerifierHash` is given and is not the one they were saved
+   * with ({@linkcode TokenServiceInterface.revokeCode} explains why).
    */
-  abstract revokeCode(code: string, client?: Client): Promise<boolean>;
+  abstract revokeCode(
+    code: string,
+    client?: Client,
+    codeVerifierHash?: string,
+  ): Promise<boolean>;
 }

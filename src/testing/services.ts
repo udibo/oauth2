@@ -280,6 +280,7 @@ interface StoredToken<S extends AbstractScope> {
   refreshTokenHash?: string;
   refreshTokenExpiresAt?: Date;
   codeHash?: string;
+  codeVerifierHash?: string;
   familyId?: string;
   familyCreatedAt?: Date;
   rotatedAt?: Date;
@@ -315,7 +316,12 @@ export class MemoryTokenService<
   #tokensByRefreshHash = new Map<string, StoredToken<S>>();
   #tokensByCodeHash = new Map<
     string,
-    { clientId: string; accessTokenHashes: Set<string>; familyIds: Set<string> }
+    {
+      clientId: string;
+      codeVerifierHash?: string;
+      accessTokenHashes: Set<string>;
+      familyIds: Set<string>;
+    }
   >();
   #revokedByRefreshHash = new Map<string, StoredToken<S>>();
   #revokedFamilies = new Set<string>();
@@ -540,6 +546,9 @@ export class MemoryTokenService<
       ),
     };
     if (token.code) stored.codeHash = await sha256Hash(token.code);
+    if (token.codeVerifierHash) {
+      stored.codeVerifierHash = token.codeVerifierHash;
+    }
     if ("refreshToken" in token) {
       const rt = token as RefreshToken<C, U, S>;
       stored.refreshTokenHash = await sha256Hash(rt.refreshToken);
@@ -556,6 +565,7 @@ export class MemoryTokenService<
       if (!bucket) {
         bucket = {
           clientId: stored.clientId,
+          codeVerifierHash: stored.codeVerifierHash,
           accessTokenHashes: new Set(),
           familyIds: new Set(),
         };
@@ -749,13 +759,24 @@ export class MemoryTokenService<
    * {@linkcode revokeFamily} does, so their rotated successors end with them.
    * Resolves `true` when tokens were issued from the code.
    * Removes nothing and resolves `false` when `client` is given and is not the
-   * client the code's tokens were issued to.
+   * client the code's tokens were issued to, or when `codeVerifierHash` is
+   * given and is not the one they were saved with.
    */
-  async revokeCode(code: string, client?: C): Promise<boolean> {
+  async revokeCode(
+    code: string,
+    client?: C,
+    codeVerifierHash?: string,
+  ): Promise<boolean> {
     const codeHash = await sha256Hash(code);
     const bucket = this.#tokensByCodeHash.get(codeHash);
     if (!bucket || bucket.accessTokenHashes.size === 0) return false;
     if (client && client.id.toString() !== bucket.clientId.toString()) {
+      return false;
+    }
+    if (
+      codeVerifierHash !== undefined &&
+      codeVerifierHash !== bucket.codeVerifierHash
+    ) {
       return false;
     }
     for (const familyId of bucket.familyIds) this.#revokeFamily(familyId);
