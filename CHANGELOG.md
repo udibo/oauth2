@@ -1,3 +1,20 @@
+## [0.36.0](https://github.com/udibo/oauth2/compare/0.35.0...0.36.0) (2026-10-21)
+
+### ⚠ BREAKING CHANGES
+
+* **testing:** `runTokenServiceContractTests` now fails a token store
+whose `revokeCode(code, client)` revokes only the tokens saved with the
+code. A refresh token rotated from them carries no code, so a replayed
+code left the rotated session live. Migration: in `revokeCode`, also
+revoke every live member of the rotation families of the code's tokens,
+as `revokeFamily` does, after the client check.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Bug Fixes
+
+* **testing:** revoke a replayed code's rotation families ([#152](https://github.com/udibo/oauth2/issues/152)) ([0739f64](https://github.com/udibo/oauth2/commit/0739f6491905d840d853ea6ffa86a411c4231dc3)), closes [#150](https://github.com/udibo/oauth2/issues/150)
+
 ## [0.35.0](https://github.com/udibo/oauth2/compare/0.34.0...0.35.0) (2026-10-17)
 
 ### ⚠ BREAKING CHANGES
