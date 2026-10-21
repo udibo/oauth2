@@ -392,8 +392,8 @@ without one, and revokes for the matching hash. Set `revokeCodeChecksClient:
 false` or `revokeCodeChecksVerifier: false` only for a store that deliberately
 ignores that argument; the suite then registers an ignored case naming the
 gap. Pass the same `revokeCodeChecksVerifier: false` to
-`runCodeExchangeContractTests`, which still checks that `exchangeCode`
-persists the hash.
+`runCodeExchangeContractTests`, which still checks that `exchangeCode`'s token
+revokes for its own verifier.
 
 A token service that implements `exchangeCode` also runs
 `runCodeExchangeContractTests`. It races `exchangeCode` against itself and,
