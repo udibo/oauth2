@@ -1,3 +1,32 @@
+## [0.37.0](https://github.com/udibo/oauth2/compare/0.36.0...0.37.0) (2026-10-21)
+
+### ⚠ BREAKING CHANGES
+
+* **server:** `TokenServiceInterface.revokeCode` takes a third
+argument, `codeVerifierHash`, and `runTokenServiceContractTests` and
+`runCodeExchangeContractTests` now fail a store that ignores it.
+Migration: persist `Token.codeVerifierHash` with the code in `save` and
+`exchangeCode`, for example as a nullable column beside the code hash.
+In `revokeCode`, when `codeVerifierHash` is given, revoke only the
+code's tokens saved with that same value, after the client check. A
+token saved without one never matches. Or pass
+`revokeCodeChecksVerifier: false` to register an ignored case instead.
+Tokens issued before the upgrade carry no hash: a replay by a client
+that authenticates with its secret still revokes them, but a replay by a
+public client, or by any client under `requireClientAuthentication:
+false`, no longer does, so those tokens stay live until they expire. A
+public client's replay that sends no `code_verifier` now revokes
+nothing, and a code issued to such a client without PKCE can no longer
+be revoked by a replay. Direct callers of `grant.token()` and subclasses
+that override `getAuthenticatedClient` (for example for
+`client_assertion`) must pass the client resolved from the same request.
+A confidential client that authenticates without a `client_secret` now
+needs the `code_verifier` for its replay to revoke.
+
+### Bug Fixes
+
+* **server:** gate code-replay revocation on the pkce verifier ([#154](https://github.com/udibo/oauth2/issues/154)) ([bbbf2d6](https://github.com/udibo/oauth2/commit/bbbf2d6e3f8571f934a387673d78295b9f94fa44)), closes [#149](https://github.com/udibo/oauth2/issues/149)
+
 ## [0.36.0](https://github.com/udibo/oauth2/compare/0.35.0...0.36.0) (2026-10-21)
 
 ### ⚠ BREAKING CHANGES
