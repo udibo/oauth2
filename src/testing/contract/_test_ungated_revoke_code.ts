@@ -7,8 +7,12 @@ import {
 import { runTokenServiceContractTests } from "./token.ts";
 
 class UngatedTokenService extends MemoryTokenService<TestClient, TestUser> {
-  override revokeCode(code: string): Promise<boolean> {
-    return super.revokeCode(code);
+  override revokeCode(
+    code: string,
+    _client?: TestClient,
+    codeVerifierHash?: string,
+  ): Promise<boolean> {
+    return super.revokeCode(code, undefined, codeVerifierHash);
   }
 }
 

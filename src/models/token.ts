@@ -36,6 +36,14 @@ export interface Token<
   /** The authorization code used to generate this token, for replay detection per RFC 6819. */
   code?: string;
   /**
+   * The SHA-256 digest, as lowercase hex, of the PKCE `code_verifier` that
+   * redeemed {@linkcode Token.code}. The authorization code grant sets it on a
+   * code redeemed with PKCE. A token service persists it with the code, so
+   * `revokeCode` can tell a replay that presents that verifier from one that
+   * only names the client.
+   */
+  codeVerifierHash?: string;
+  /**
    * OIDC nonce carried transiently from the authorization code so the token
    * endpoint can echo it in the id_token. Not persisted by token stores.
    */

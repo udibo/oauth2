@@ -106,6 +106,15 @@ export interface TokenServiceContractOptions<
    * started — instead of passing in silence. Defaults to `true`.
    */
   revokeCodeChecksClient?: boolean;
+  /**
+   * Set to `false` when the service's `revokeCode` deliberately ignores its
+   * `codeVerifierHash` argument. The suite then registers an ignored case
+   * naming what is not covered — a replay that names a public client by
+   * `client_id`, with any verifier, revokes the tokens issued from its spent
+   * code, so anyone who holds a leaked code can end the session it started —
+   * instead of passing in silence. Defaults to `true`.
+   */
+  revokeCodeChecksVerifier?: boolean;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -120,6 +129,10 @@ const defaultMakeClient = <C extends ClientInterface>(seq: number): C =>
 const defaultMakeScope = <S extends AbstractScope>(value: string): S =>
   new BasicScope(value) as unknown as S;
 const defaultMakeFamilyId = (): string => crypto.randomUUID();
+const randomVerifierHash = (): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 
 /** Runs the {@link TokenServiceInterface} contract suite. */
 export function runTokenServiceContractTests<
@@ -134,6 +147,7 @@ export function runTokenServiceContractTests<
   const makeFamilyId = options.makeFamilyId ?? defaultMakeFamilyId;
   const expectReuseDetection = options.refreshTokenReuseDetection ?? true;
   const expectCodeClientCheck = options.revokeCodeChecksClient ?? true;
+  const expectCodeVerifierCheck = options.revokeCodeChecksVerifier ?? true;
 
   describe(options.describeName ?? "TokenServiceInterface contract", () => {
     let userService: UserServiceInterface<U>;
@@ -508,6 +522,147 @@ export function runTokenServiceContractTests<
         });
       } else {
         it.skip("revokeCode ignores the presenting client — any client that presents a spent code revokes its tokens (revokeCodeChecksClient: false)", () => {});
+      }
+
+      if (expectCodeVerifierCheck) {
+        async function issueBoundCode(
+          code: string,
+          codeVerifierHash?: string,
+        ): Promise<string> {
+          const accessToken = await tokenService.generateAccessToken(
+            client,
+            user,
+          );
+          await tokenService.save({
+            accessToken,
+            code,
+            codeVerifierHash,
+            client,
+            user,
+          });
+          return accessToken;
+        }
+
+        it("revokes nothing for a codeVerifierHash other than the one the code's tokens were saved with", async () => {
+          const accessToken = await issueBoundCode(
+            "bound-code",
+            randomVerifierHash(),
+          );
+
+          expect(
+            await tokenService.revokeCode(
+              "bound-code",
+              client,
+              randomVerifierHash(),
+            ),
+            "a replay without the verifier that redeemed the code proves " +
+              "nothing, so it must not revoke what the code issued",
+          ).toBe(false);
+          expect(await tokenService.getToken(accessToken)).not.toBe(undefined);
+        });
+
+        it("revokes for the codeVerifierHash the code's tokens were saved with, after another was refused", async () => {
+          const codeVerifierHash = randomVerifierHash();
+          const accessToken = await issueBoundCode(
+            "bound-code",
+            codeVerifierHash,
+          );
+          await tokenService.revokeCode(
+            "bound-code",
+            client,
+            randomVerifierHash(),
+          );
+
+          expect(
+            await tokenService.revokeCode(
+              "bound-code",
+              client,
+              codeVerifierHash,
+            ),
+          ).toBe(true);
+          expect(await tokenService.getToken(accessToken)).toBe(undefined);
+        });
+
+        if (expectCodeClientCheck) {
+          it("revokes nothing for another client that presents the codeVerifierHash the code's tokens were saved with", async () => {
+            const other = makeClient(2);
+            await options.addClient(clientService, other);
+            const codeVerifierHash = randomVerifierHash();
+            const accessToken = await issueBoundCode(
+              "bound-code",
+              codeVerifierHash,
+            );
+
+            expect(
+              await tokenService.revokeCode(
+                "bound-code",
+                other,
+                codeVerifierHash,
+              ),
+              "a matching verifier does not lift the client check",
+            ).toBe(false);
+            expect(await tokenService.getToken(accessToken)).not.toBe(
+              undefined,
+            );
+          });
+        }
+
+        it("revokes nothing for a codeVerifierHash when the code's tokens were saved without one", async () => {
+          const accessToken = await issueBoundCode("unbound-code");
+
+          expect(
+            await tokenService.revokeCode(
+              "unbound-code",
+              client,
+              randomVerifierHash(),
+            ),
+            "a code redeemed without PKCE binds no verifier, so no verifier " +
+              "a replay presents can match it",
+          ).toBe(false);
+          expect(await tokenService.getToken(accessToken)).not.toBe(undefined);
+        });
+
+        it("revokes a code saved with a codeVerifierHash when none is passed, for a client that authenticated", async () => {
+          const accessToken = await issueBoundCode(
+            "bound-code",
+            randomVerifierHash(),
+          );
+
+          expect(
+            await tokenService.revokeCode("bound-code", client),
+            "the grant omits codeVerifierHash for a client that " +
+              "authenticated with its secret, where the client check suffices",
+          ).toBe(true);
+          expect(await tokenService.getToken(accessToken)).toBe(undefined);
+        });
+
+        it("revokes nothing in a rotated family for a codeVerifierHash other than the one the code's tokens were saved with", async () => {
+          const family = makeFamilyId();
+          const issued = {
+            ...(await familyMember(family)),
+            code: "rotated-bound-code",
+            codeVerifierHash: randomVerifierHash(),
+          };
+          await tokenService.save(issued);
+          const rotated = await familyMember(family);
+          await rotateTo(issued, rotated);
+
+          expect(
+            await tokenService.revokeCode(
+              "rotated-bound-code",
+              client,
+              randomVerifierHash(),
+            ),
+          ).toBe(false);
+          expect(
+            await isLive(rotated),
+            "the verifier check comes before any family is revoked — a " +
+              "replay without the redeeming verifier must not end the " +
+              "session rotated from the code",
+          ).toBe(true);
+        });
+      } else {
+        it.skip("revokeCode ignores the presented verifier — a replay that names a public client, with any verifier, revokes its spent code's tokens (revokeCodeChecksVerifier: false)", () => {});
       }
     });
 

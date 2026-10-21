@@ -36,6 +36,11 @@ import type { AuthorizationCodeServiceInterface } from "../../server/services/au
 import type { ClientServiceInterface } from "../../server/services/client.ts";
 import type { TokenServiceInterface } from "../../server/services/token.ts";
 import type { UserServiceInterface } from "../../server/services/user.ts";
+import { sha256Hash } from "../../server/utils/hash.ts";
+import {
+  generateCodeChallenge,
+  generateCodeVerifier,
+} from "../../utils/pkce.ts";
 import type { MemoryUserShape } from "../services.ts";
 import { race } from "./_race.ts";
 
@@ -116,6 +121,15 @@ export interface CodeExchangeContractOptions<
    * longer to reach the lock they wait on.
    */
   blockedAfterMs?: number;
+  /**
+   * Set to `false` when the service's `revokeCode` deliberately ignores its
+   * `codeVerifierHash` argument, as `runTokenServiceContractTests` allows. The
+   * suite still checks that a token `exchangeCode` saved revokes for its own
+   * verifier, and registers an ignored case naming what is not covered — a
+   * replay that names a public client, with any verifier, revokes the token
+   * `exchangeCode` saved. Defaults to `true`.
+   */
+  revokeCodeChecksVerifier?: boolean;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -170,6 +184,7 @@ export function runCodeExchangeContractTests<
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
   const pausable = options.exchangeAwaitsBarrier ?? true;
   const blockedAfterMs = options.blockedAfterMs ?? 100;
+  const expectCodeVerifierCheck = options.revokeCodeChecksVerifier ?? true;
 
   describe(
     options.describeName ?? "TokenServiceInterface.exchangeCode contract",
@@ -180,6 +195,7 @@ export function runCodeExchangeContractTests<
       let user: U;
       let client: C;
       let armed: Hold | undefined;
+      let verifiers: Map<string, string>;
 
       const barriers: CodeExchangeBarriers = {
         async afterClaim() {
@@ -193,6 +209,7 @@ export function runCodeExchangeContractTests<
 
       beforeEach(async () => {
         armed = undefined;
+        verifiers = new Map();
         services = await options.makeServices(barriers);
         codeService = services.authorizationCodeService;
         tokenService = services.tokenService;
@@ -213,13 +230,25 @@ export function runCodeExchangeContractTests<
         return tokenService.exchangeCode(authorizationCode, token);
       }
 
+      function verifierOf(
+        authorizationCode: AuthorizationCode<C, U, S>,
+      ): string {
+        const verifier = verifiers.get(authorizationCode.code);
+        assert(verifier, "the suite saved no verifier for this code");
+        return verifier;
+      }
+
       async function savedCode(): Promise<AuthorizationCode<C, U, S>> {
+        const verifier = generateCodeVerifier();
         const authorizationCode: AuthorizationCode<C, U, S> = {
           code: await codeService.generateCode(client, user),
           expiresAt: await codeService.expiresAt(client, user),
           client,
           user,
+          challenge: await generateCodeChallenge(verifier),
+          challengeMethod: "S256",
         };
+        verifiers.set(authorizationCode.code, verifier);
         await codeService.save(authorizationCode);
         return authorizationCode;
       }
@@ -227,13 +256,16 @@ export function runCodeExchangeContractTests<
       async function tokenFor(
         authorizationCode: AuthorizationCode<C, U, S>,
       ): Promise<Token<C, U, S>> {
-        return {
+        const token: Token<C, U, S> = {
           accessToken: await tokenService.generateAccessToken(client, user),
           accessTokenExpiresAt: new Date(Date.now() + 60_000),
           client,
           user,
           code: authorizationCode.code,
         };
+        const verifier = verifiers.get(authorizationCode.code);
+        if (verifier) token.codeVerifierHash = await sha256Hash(verifier);
+        return token;
       }
 
       async function live(tokens: Token<C, U, S>[]): Promise<string[]> {
@@ -304,6 +336,8 @@ export function runCodeExchangeContractTests<
         const body = new FormData();
         body.set("grant_type", "authorization_code");
         body.set("code", authorizationCode.code);
+        body.set("client_id", client.id.toString());
+        body.set("code_verifier", verifierOf(authorizationCode));
         return grant.token(
           new Request("https://as.test/token", { method: "POST" }),
           client,
@@ -337,6 +371,54 @@ export function runCodeExchangeContractTests<
         ).toBe(true);
         expect(await live([token])).toStrictEqual([]);
       });
+
+      it("revokes the token it saved for the codeVerifierHash it was saved with", async () => {
+        const authorizationCode = await savedCode();
+        const token = await tokenFor(authorizationCode);
+        await exchangeCode(authorizationCode, token);
+
+        expect(
+          await tokenService.revokeCode(
+            authorizationCode.code,
+            client,
+            token.codeVerifierHash,
+          ),
+          "exchangeCode must persist codeVerifierHash with the token, or a " +
+            "replay with the redeeming verifier cannot revoke it",
+        ).toBe(true);
+        expect(await live([token])).toStrictEqual([]);
+      });
+
+      if (expectCodeVerifierCheck) {
+        it("keeps the token's codeVerifierHash, so revokeCode refuses another verifier and revokes for its own", async () => {
+          const authorizationCode = await savedCode();
+          const token = await tokenFor(authorizationCode);
+          await exchangeCode(authorizationCode, token);
+
+          expect(
+            await tokenService.revokeCode(
+              authorizationCode.code,
+              client,
+              await sha256Hash(generateCodeVerifier()),
+            ),
+            "a replay that does not present the redeeming verifier must " +
+              "revoke nothing",
+          ).toBe(false);
+          expect(await live([token])).toStrictEqual([token.accessToken]);
+          expect(
+            await tokenService.revokeCode(
+              authorizationCode.code,
+              client,
+              token.codeVerifierHash,
+            ),
+            "exchangeCode must persist codeVerifierHash with the token, or a " +
+              "replay with the redeeming verifier cannot revoke it",
+          ).toBe(true);
+          expect(await live([token])).toStrictEqual([]);
+        });
+      } else {
+        it.skip("revokeCode ignores the presented verifier — a replay that names a public client, with any verifier, revokes the token exchangeCode saved (revokeCodeChecksVerifier: false)", () => {});
+      }
 
       it("refuses a code that was already claimed or never stored, persisting nothing", async () => {
         const claimed = await savedCode();
