@@ -583,6 +583,30 @@ export function runTokenServiceContractTests<
           expect(await tokenService.getToken(accessToken)).toBe(undefined);
         });
 
+        if (expectCodeClientCheck) {
+          it("revokes nothing for another client that presents the codeVerifierHash the code's tokens were saved with", async () => {
+            const other = makeClient(2);
+            await options.addClient(clientService, other);
+            const codeVerifierHash = randomVerifierHash();
+            const accessToken = await issueBoundCode(
+              "bound-code",
+              codeVerifierHash,
+            );
+
+            expect(
+              await tokenService.revokeCode(
+                "bound-code",
+                other,
+                codeVerifierHash,
+              ),
+              "a matching verifier does not lift the client check",
+            ).toBe(false);
+            expect(await tokenService.getToken(accessToken)).not.toBe(
+              undefined,
+            );
+          });
+        }
+
         it("revokes nothing for a codeVerifierHash when the code's tokens were saved without one", async () => {
           const accessToken = await issueBoundCode("unbound-code");
 

@@ -246,21 +246,13 @@ export interface TokenServiceInterface<
    * `client` revokes on any client's replay, which lets a client that sees a
    * leaked, spent code end the session it started.
    *
-   * `codeVerifierHash` is the SHA-256 hex digest of the `code_verifier` the
-   * replay presented. When it is given, revoke only when it equals the
-   * {@linkcode Token.codeVerifierHash} the code's tokens were saved with; for
-   * a different one, or for tokens saved without one, revoke nothing and
-   * resolve `false`. Persist `codeVerifierHash` from {@linkcode save} and
-   * {@linkcode exchangeCode} to make this possible. The grant passes it
-   * whenever the presenting client did not authenticate with a secret — a
-   * public client, or any client when `requireClientAuthentication` is
-   * `false` — since `client_id` alone is no proof that the replay comes from
-   * the party that redeemed the code. Without a verifier, such a replay
-   * revokes nothing and the grant does not call this method. The grant omits
-   * `codeVerifierHash` only for a client that authenticated with its secret,
-   * for which the client check suffices. A store that ignores
-   * `codeVerifierHash` lets anyone holding a public client's leaked, spent
-   * code end the session it started.
+   * `codeVerifierHash`, the SHA-256 hex digest of the `code_verifier` the
+   * replay presented, is passed for a client that did not authenticate with a
+   * secret. When it is given, also revoke only when it equals the
+   * {@linkcode Token.codeVerifierHash} persisted with the code's tokens;
+   * tokens saved without one never match. Omitted, the client check alone
+   * applies. A store that ignores it lets anyone holding a public client's
+   * spent code end the session it started.
    *
    * With {@linkcode exchangeCode}, make the two linearizable: a call that
    * begins once `exchangeCode` has claimed the code must find and revoke the

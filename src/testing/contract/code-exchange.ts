@@ -121,6 +121,15 @@ export interface CodeExchangeContractOptions<
    * longer to reach the lock they wait on.
    */
   blockedAfterMs?: number;
+  /**
+   * Set to `false` when the service's `revokeCode` deliberately ignores its
+   * `codeVerifierHash` argument, as `runTokenServiceContractTests` allows. The
+   * suite still checks that a token `exchangeCode` saved revokes for its own
+   * verifier, and registers an ignored case naming what is not covered — a
+   * replay that names a public client, with any verifier, revokes the token
+   * `exchangeCode` saved. Defaults to `true`.
+   */
+  revokeCodeChecksVerifier?: boolean;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -175,6 +184,7 @@ export function runCodeExchangeContractTests<
   const makeClient = options.makeClient ?? defaultMakeClient<C>;
   const pausable = options.exchangeAwaitsBarrier ?? true;
   const blockedAfterMs = options.blockedAfterMs ?? 100;
+  const expectCodeVerifierCheck = options.revokeCodeChecksVerifier ?? true;
 
   describe(
     options.describeName ?? "TokenServiceInterface.exchangeCode contract",
@@ -362,21 +372,11 @@ export function runCodeExchangeContractTests<
         expect(await live([token])).toStrictEqual([]);
       });
 
-      it("keeps the token's codeVerifierHash, so revokeCode refuses another verifier and revokes for its own", async () => {
+      it("revokes the token it saved for the codeVerifierHash it was saved with", async () => {
         const authorizationCode = await savedCode();
         const token = await tokenFor(authorizationCode);
         await exchangeCode(authorizationCode, token);
 
-        expect(
-          await tokenService.revokeCode(
-            authorizationCode.code,
-            client,
-            await sha256Hash(generateCodeVerifier()),
-          ),
-          "a replay that does not present the redeeming verifier must " +
-            "revoke nothing",
-        ).toBe(false);
-        expect(await live([token])).toStrictEqual([token.accessToken]);
         expect(
           await tokenService.revokeCode(
             authorizationCode.code,
@@ -388,6 +388,37 @@ export function runCodeExchangeContractTests<
         ).toBe(true);
         expect(await live([token])).toStrictEqual([]);
       });
+
+      if (expectCodeVerifierCheck) {
+        it("keeps the token's codeVerifierHash, so revokeCode refuses another verifier and revokes for its own", async () => {
+          const authorizationCode = await savedCode();
+          const token = await tokenFor(authorizationCode);
+          await exchangeCode(authorizationCode, token);
+
+          expect(
+            await tokenService.revokeCode(
+              authorizationCode.code,
+              client,
+              await sha256Hash(generateCodeVerifier()),
+            ),
+            "a replay that does not present the redeeming verifier must " +
+              "revoke nothing",
+          ).toBe(false);
+          expect(await live([token])).toStrictEqual([token.accessToken]);
+          expect(
+            await tokenService.revokeCode(
+              authorizationCode.code,
+              client,
+              token.codeVerifierHash,
+            ),
+            "exchangeCode must persist codeVerifierHash with the token, or a " +
+              "replay with the redeeming verifier cannot revoke it",
+          ).toBe(true);
+          expect(await live([token])).toStrictEqual([]);
+        });
+      } else {
+        it.skip("revokeCode ignores the presented verifier — a replay that names a public client, with any verifier, revokes the token exchangeCode saved (revokeCodeChecksVerifier: false)", () => {});
+      }
 
       it("refuses a code that was already claimed or never stored, persisting nothing", async () => {
         const claimed = await savedCode();

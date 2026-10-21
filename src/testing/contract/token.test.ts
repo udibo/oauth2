@@ -186,6 +186,7 @@ describe("runTokenServiceContractTests revokeCode client check", () => {
     expect(inSuite(ungated, "failed")).toStrictEqual(
       [
         "revokeCode revokes for the client the code's tokens were issued to, after another client was refused",
+        "revokeCode revokes nothing for another client that presents the codeVerifierHash the code's tokens were saved with",
         "revokeCode revokes nothing for a client other than the one the code's tokens were issued to",
         "revokeCode revokes nothing in a rotated family for a client other than the one the code's tokens were issued to",
       ].toSorted(),

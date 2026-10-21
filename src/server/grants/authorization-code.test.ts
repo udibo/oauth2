@@ -1443,6 +1443,7 @@ describe("AuthorizationCodeGrant", () => {
     const OTHER_CLIENT_SECRET = "other-secret";
     const otherClient: TestClient = { id: "other-client", confidential: true };
     const publicApp: TestClient = { id: "public-app" };
+    const otherPublicApp: TestClient = { id: "other-public-app" };
     const secrets: Record<string, string> = {
       [testClient.id]: "secret",
       [otherClient.id]: OTHER_CLIENT_SECRET,
@@ -1471,6 +1472,7 @@ describe("AuthorizationCodeGrant", () => {
       await clientService.add(testClient, "secret", testUser.id);
       await clientService.add(otherClient, OTHER_CLIENT_SECRET);
       await clientService.add(publicApp, undefined, testUser.id);
+      await clientService.add(otherPublicApp, undefined, testUser.id);
       const reuseEvents: CodeReuseEvent<TestClient>[] = [];
       const services = {
         clientService,
@@ -1949,6 +1951,79 @@ describe("AuthorizationCodeGrant", () => {
           await isLive(tokenService, issued),
           "a public client is named by client_id alone, so a leaked spent " +
             "code without its verifier must not end the session it started",
+        ).toBe(true);
+        expect(reuseEvents).toStrictEqual([]);
+      });
+
+      for (const [credentials, headers, fields] of [
+        ["an empty Basic secret", basicAuthHeader(publicApp.id, ""), {}],
+        [
+          "an empty client_secret",
+          {},
+          { client_id: publicApp.id, client_secret: "" },
+        ],
+      ] as const) {
+        it(`revokes nothing when a public client's replay presents ${credentials} and no code_verifier${store}`, async () => {
+          const { grant, authorizationCodeService, tokenService, reuseEvents } =
+            await createReplayGrant({ pairCodeStore });
+          const issued = await issuePublicCode(
+            grant,
+            authorizationCodeService,
+            generateCodeVerifier(),
+          );
+          const request = tokenRequest(
+            {
+              grant_type: "authorization_code",
+              code: "public-code",
+              ...fields,
+            },
+            headers,
+          );
+          const body = await request.clone().formData();
+          const client = await grant.getAuthenticatedClient(request, body);
+
+          await rejection(
+            () => grant.token(request, client, body),
+            InvalidGrantError,
+          );
+
+          expect(
+            await isLive(tokenService, issued),
+            "an empty secret carries no credential, so it must not stand in " +
+              "for the verifier",
+          ).toBe(true);
+          expect(reuseEvents).toStrictEqual([]);
+        });
+      }
+
+      it(`revokes nothing when another public client presents the code with the verifier that redeemed it${store}`, async () => {
+        const { grant, authorizationCodeService, tokenService, reuseEvents } =
+          await createReplayGrant({ pairCodeStore });
+        const verifier = generateCodeVerifier();
+        const issued = await issuePublicCode(
+          grant,
+          authorizationCodeService,
+          verifier,
+        );
+
+        await rejection(
+          () =>
+            exchangeToken(
+              grant,
+              tokenRequest({
+                grant_type: "authorization_code",
+                code: "public-code",
+                client_id: otherPublicApp.id,
+                code_verifier: verifier,
+              }),
+              otherPublicApp,
+            ),
+          InvalidGrantError,
+        );
+
+        expect(
+          await isLive(tokenService, issued),
+          "a matching verifier does not lift the client check",
         ).toBe(true);
         expect(reuseEvents).toStrictEqual([]);
       });
