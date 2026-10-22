@@ -38,6 +38,17 @@ export interface IdentityUserStoreContractFixture<User extends IdentityUser> {
   isEmailVerified?(userId: string): Promise<boolean>;
   /** Seed an imported hash. Required for legacyCredentials. */
   setLegacyCredential?(userId: string, hash: string): Promise<void>;
+  /** Start a live session for the user and return its id. Required for resetCredential. */
+  startSession?(userId: string): Promise<string>;
+  /** Whether the application would still accept the session. Required for resetCredential. */
+  isSessionLive?(sessionId: string): Promise<boolean>;
+  /**
+   * Make the next resetCredential call throw at `step`, after the other
+   * step has had its chance to write. Required for resetCredential: the suite
+   * calls it once for each step to prove that neither write survives the other
+   * failing, whichever order your transaction runs them in.
+   */
+  failNextReset?(step: "credential" | "sessions"): Promise<void> | void;
   /** Release resources and remove this test's records after all calls finish. */
   dispose?(): Promise<void> | void;
 }
@@ -56,6 +67,12 @@ export interface IdentityUserStoreContractOptions<User extends IdentityUser> {
   emailVerification?: boolean;
   /** Require imported credential lookup and clearing, plus its setup helper. */
   legacyCredentials?: boolean;
+  /**
+   * Require the transactional password-reset capability and its session and
+   * fault-injection helpers. With legacyCredentials, also checks that the
+   * reset drops the imported hash.
+   */
+  resetCredential?: boolean;
 }
 
 const ORIGINAL: PasswordCredential = {
@@ -260,6 +277,108 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
         );
         expect(await store.getCredential(other.id)).toStrictEqual(ORIGINAL);
       });
+    }
+    if (options.resetCredential) {
+      async function resetSetup(): Promise<{
+        user: User;
+        other: User;
+        sessions: string[];
+        otherSession: string;
+      }> {
+        assert.exists(
+          store.resetCredential,
+          "resetCredential capability is required",
+        );
+        assert.exists(
+          fixture.startSession,
+          "startSession setup helper is required",
+        );
+        assert.exists(
+          fixture.isSessionLive,
+          "isSessionLive setup helper is required",
+        );
+        const user = await create();
+        const other = await create(2);
+        if (options.legacyCredentials) {
+          assert.exists(fixture.setLegacyCredential);
+          await fixture.setLegacyCredential(user.id, "imported-hash-one");
+        }
+        return {
+          user,
+          other,
+          sessions: [
+            await fixture.startSession(user.id),
+            await fixture.startSession(user.id),
+          ],
+          otherSession: await fixture.startSession(other.id),
+        };
+      }
+      async function liveness(ids: string[]): Promise<boolean[]> {
+        return await Promise.all(ids.map((id) => fixture.isSessionLive!(id)));
+      }
+
+      it("resets the credential and revokes every session of the user, and only that user", async () => {
+        const { user, other, sessions, otherSession } = await resetSetup();
+        expect(
+          await store.resetCredential!(user.id, structuredClone(REPLACEMENT)),
+          "resetCredential must report the sessions it revoked",
+        ).toStrictEqual(2);
+        expect(await store.getCredential(user.id)).toStrictEqual(REPLACEMENT);
+        expect(
+          await liveness(sessions),
+          "resetCredential revokes every session of the user",
+        ).toStrictEqual([false, false]);
+        if (options.legacyCredentials) {
+          expect(
+            await store.getLegacyCredential!(user.id),
+            "resetCredential drops the imported hash",
+          ).toBe(null);
+        }
+        expect(await store.getCredential(other.id)).toStrictEqual(ORIGINAL);
+        expect(
+          await fixture.isSessionLive!(otherSession),
+          "resetCredential must not revoke another user's sessions",
+        ).toBe(true);
+        expect(
+          await store.resetCredential!(user.id, structuredClone(REPLACEMENT)),
+        ).toStrictEqual(0);
+      });
+      for (const step of ["credential", "sessions"] as const) {
+        it(`changes nothing when the reset fails at the ${step} step`, async () => {
+          const { user, sessions } = await resetSetup();
+          assert.exists(
+            fixture.failNextReset,
+            "failNextReset fault-injection helper is required",
+          );
+          await fixture.failNextReset(step);
+          const outcome = await store.resetCredential!(
+            user.id,
+            structuredClone(REPLACEMENT),
+          ).then(
+            () => "resolved",
+            () => "rejected",
+          );
+          expect(
+            outcome,
+            "resetCredential must reject when failNextReset injected a failure",
+          ).toStrictEqual("rejected");
+          const unchanged =
+            "a failed reset must leave the credential, imported hash and sessions unchanged";
+          expect(await store.getCredential(user.id), unchanged).toStrictEqual(
+            ORIGINAL,
+          );
+          expect(await liveness(sessions), unchanged).toStrictEqual([
+            true,
+            true,
+          ]);
+          if (options.legacyCredentials) {
+            expect(
+              await store.getLegacyCredential!(user.id),
+              unchanged,
+            ).toStrictEqual("imported-hash-one");
+          }
+        });
+      }
     }
     if (options.emailVerification) {
       it("verifies only the issued-for email and is idempotent", async () => {

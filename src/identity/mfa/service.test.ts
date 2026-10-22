@@ -653,6 +653,66 @@ describe("MfaService", () => {
     });
   }
 
+  it("never burns a recovery code it cannot report on, so a failing count read leaves the code usable", async () => {
+    using time = new FakeTime(START);
+    class FailingCountStore extends MemoryMfaStore {
+      fail = false;
+      override getRecoveryHashes(userId: string): Promise<string[]> {
+        if (this.fail) return Promise.reject(new Error("db down"));
+        return super.getRecoveryHashes(userId);
+      }
+    }
+    const store = new FailingCountStore();
+    const mfa = new MfaService({ store });
+    const { recoveryCodes } = await enroll(mfa, "u1");
+    time.tick(PERIOD_MS);
+    store.fail = true;
+
+    await rejection(
+      () => mfa.verify("u1", recoveryCodes[0], { method: "recovery" }),
+      Error,
+      "db down",
+    );
+    store.fail = false;
+
+    expect(
+      await mfa.verify("u1", recoveryCodes[0], { method: "recovery" }),
+    ).toStrictEqual({
+      valid: true,
+      method: "recovery",
+      remainingRecoveryCodes: 9,
+    });
+  });
+
+  it("keeps the old recovery codes when regenerating them fails", async () => {
+    using time = new FakeTime(START);
+    class FailingReplaceStore extends MemoryMfaStore {
+      fail = false;
+      override setRecoveryHashes(
+        userId: string,
+        hashes: string[],
+      ): Promise<void> {
+        if (this.fail) return Promise.reject(new Error("db down"));
+        return super.setRecoveryHashes(userId, hashes);
+      }
+    }
+    const store = new FailingReplaceStore();
+    const mfa = new MfaService({ store });
+    const { recoveryCodes } = await enroll(mfa, "u1");
+    time.tick(PERIOD_MS);
+    store.fail = true;
+
+    await rejection(() => mfa.regenerateRecoveryCodes("u1"), Error, "db down");
+
+    expect(
+      await mfa.verify("u1", recoveryCodes[0], { method: "recovery" }),
+    ).toStrictEqual({
+      valid: true,
+      method: "recovery",
+      remainingRecoveryCodes: 9,
+    });
+  });
+
   it("rolls back activation when storing recovery codes fails, so enrollment can be retried", async () => {
     using time = new FakeTime(START);
     class FailingRecoveryStore extends MemoryMfaStore {

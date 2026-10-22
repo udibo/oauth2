@@ -53,6 +53,8 @@ package's documentation.
 - [Deployment checklist](guides/hardening-checklist.md): review the boundaries
   your chosen integration uses.
 - [Extension reference](trigger-points.md): callback and storage contracts.
+- [Partial-failure recovery](guides/recover-from-partial-failures.md): what a
+  failing store leaves behind in each identity flow, and how to finish it.
 - [Known limitations](known-limitations.md): supported behavior and constraints.
 - [API reference](https://jsr.io/@udibo/oauth2/doc): exported types and methods.
 - [Versioning and runtime support](stability.md).

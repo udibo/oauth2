@@ -30,7 +30,24 @@ export function userFixture(
   const verified = new Set<string>();
   const stale = new Map<string, PasswordCredential>();
   const legacy = new Map<string, string>();
+  const sessions = new Map<string, { userId: string; live: boolean }>();
+  let failReset: "credential" | "sessions" | undefined;
   let sequence = 0;
+  let sessionSequence = 0;
+  function revokeSessions(id: string): number {
+    let revoked = 0;
+    for (const session of sessions.values()) {
+      if (session.userId !== id || !session.live) continue;
+      if (fault !== "reset-sessions") session.live = false;
+      revoked++;
+    }
+    return revoked;
+  }
+  function takeResetFault(step: "credential" | "sessions"): void {
+    if (failReset !== step) return;
+    failReset = undefined;
+    throw new Error(`injected ${step} failure`);
+  }
   const store: IdentityUserStore<User> = {
     create(profile, credential) {
       const user = { id: uuid(++sequence), email: String(profile.email) };
@@ -98,8 +115,25 @@ export function userFixture(
       if (fault !== "legacy-clear") legacy.delete(id);
       return Promise.resolve();
     },
+    async resetCredential(id, credential) {
+      await Promise.resolve();
+      if (fault === "reset-not-atomic") {
+        credentials.set(id, structuredClone(credential));
+        legacy.delete(id);
+        takeResetFault("credential");
+        const revoked = revokeSessions(id);
+        takeResetFault("sessions");
+        return revoked;
+      }
+      takeResetFault("credential");
+      takeResetFault("sessions");
+      credentials.set(id, structuredClone(credential));
+      legacy.delete(id);
+      return revokeSessions(id);
+    },
   };
   if (fault === "cas-missing") delete store.replaceCredential;
+  if (fault === "reset-missing") delete store.resetCredential;
   return {
     store,
     unknownUserId: uuid(999),
@@ -122,6 +156,17 @@ export function userFixture(
     setLegacyCredential(id, hash) {
       legacy.set(id, hash);
       return Promise.resolve();
+    },
+    startSession(userId) {
+      const id = uuid(++sessionSequence + 500);
+      sessions.set(id, { userId, live: true });
+      return Promise.resolve(id);
+    },
+    isSessionLive(id) {
+      return Promise.resolve(sessions.get(id)?.live === true);
+    },
+    failNextReset(step) {
+      failReset = step;
     },
   };
 }

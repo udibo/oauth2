@@ -22,5 +22,6 @@ if (fault?.startsWith("revoke-")) {
     replaceCredential: true,
     emailVerification: true,
     legacyCredentials: true,
+    resetCredential: true,
   });
 }

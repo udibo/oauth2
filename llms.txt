@@ -73,6 +73,7 @@
 - [Deployment checklist](docs/guides/hardening-checklist.md): review the boundaries your integration enables
 - [Local identity provider](docs/guides/run-a-local-identity-provider.md): local OAuth2/OIDC development and CI without a hosted account
 - [Extension reference](docs/trigger-points.md): callbacks and stores, when they run, failure semantics
+- [Partial-failure recovery](docs/guides/recover-from-partial-failures.md): what a failing store leaves behind in each identity flow, and how to finish it
 - [Known limitations](docs/known-limitations.md): constraints and responsibilities that affect integration choices
 - [Stability](docs/stability.md): versioning and runtime support
 - [Issue triage](docs/triage.md): package issue handling
