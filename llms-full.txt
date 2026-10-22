@@ -6968,9 +6968,13 @@ first; the rest run in that order.
 | `RevocableSessionService.revokeAllByUser` | Password changed, passwordless credentials voided   | `password_reset.failed` with `session_revocation_failed` and `userId`, error rethrown | Call `revokeAllByUser(userId)` again until it succeeds. Until then, every session the user had before the reset stays signed in                |
 | `AccountLockoutLike.reset`               | Password changed, sessions revoked                  | `password_reset.failed` with `lockout_reset_failed` and `userId`, error rethrown      | Call `reset(userId)` on your lockout, or let the lock lapse. Until then a locked account cannot sign in with the new password                 |
 
-A failed reset never emits `password_reset.completed`. Show the user a generic
-error and invite them to request a new link. That is the correct next step for
-every row whose error reaches them.
+A failed reset never emits `password_reset.completed`, and the error reaches
+your route without saying how far the reset got. The new password is already in
+effect after `session_revocation_failed` and `lockout_reset_failed`, but not
+after `credential_write_failed`. So the message to the user should say that the
+password may have changed, and suggest signing in with the new password before
+requesting a new link. A locked account may still refuse it until the lock
+lapses.
 
 ### Make the password write and the revocation one transaction
 

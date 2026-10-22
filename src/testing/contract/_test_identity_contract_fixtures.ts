@@ -129,6 +129,7 @@ export function userFixture(
       }
       if (fault === "reset-sessions-early") {
         const revoked = revokeSessions(id);
+        takeResetFault("sessions");
         takeResetFault("credential");
         takeResetFault("legacy");
         credentials.set(id, structuredClone(credential));
@@ -137,26 +138,33 @@ export function userFixture(
       }
       if (fault === "reset-legacy-early") {
         legacy.delete(id);
+        takeResetFault("legacy");
         takeResetFault("credential");
         takeResetFault("sessions");
         credentials.set(id, structuredClone(credential));
         return revokeSessions(id);
       }
-      const staged = {
-        credential: structuredClone(credential),
-        sessions: [...sessions.values()].filter(
-          (session) => session.userId === id && session.live,
-        ),
-      };
+      const stagedCredentials = new Map(credentials);
+      const stagedLegacy = new Map(legacy);
+      const stagedSessions = structuredClone(sessions);
+      stagedCredentials.set(id, structuredClone(credential));
+      stagedLegacy.delete(id);
+      let revoked = 0;
+      for (const session of stagedSessions.values()) {
+        if (session.userId !== id || !session.live) continue;
+        if (fault !== "reset-sessions") session.live = false;
+        revoked++;
+      }
       takeResetFault("credential");
       takeResetFault("legacy");
       takeResetFault("sessions");
-      credentials.set(id, staged.credential);
-      legacy.delete(id);
-      if (fault !== "reset-sessions") {
-        for (const session of staged.sessions) session.live = false;
-      }
-      return staged.sessions.length;
+      credentials.clear();
+      for (const [key, value] of stagedCredentials) credentials.set(key, value);
+      legacy.clear();
+      for (const [key, value] of stagedLegacy) legacy.set(key, value);
+      sessions.clear();
+      for (const [key, value] of stagedSessions) sessions.set(key, value);
+      return revoked;
     },
   };
   if (fault === "cas-missing") delete store.replaceCredential;

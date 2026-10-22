@@ -431,6 +431,21 @@ describe("password reset partial failures", () => {
   });
 });
 
+describe("password reset completion event", () => {
+  it("omits sessionsRevoked when neither a store transaction nor a sessions service revoked anything", async () => {
+    const h = harness({ withoutSessions: true });
+    const user = await h.signUp();
+    const token = await h.resetLink();
+
+    expect(
+      await h.service.resetPassword({ token, password: NEW_PASSWORD }),
+    ).toStrictEqual({ userId: user.id });
+    expect(h.completed()).toStrictEqual([
+      { type: "password_reset.completed", userId: user.id },
+    ]);
+  });
+});
+
 describe("password reset with an atomic resetCredential store", () => {
   it("writes the credential, clears the imported hash and revokes sessions in the store call, then asks the sessions service too", async () => {
     const h = harness({ atomicReset: true });
