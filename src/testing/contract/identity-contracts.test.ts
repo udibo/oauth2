@@ -15,6 +15,12 @@ runIdentityUserStoreContractTests({
   replaceCredential: true,
   emailVerification: true,
   legacyCredentials: true,
+  resetCredential: true,
+});
+runIdentityUserStoreContractTests({
+  describeName: "IdentityUserStore resetCredential without imported hashes",
+  makeFixture: () => userFixture(),
+  resetCredential: true,
 });
 runIdentityUserStoreContractTests({
   describeName: "IdentityUserStore without optional capabilities",
@@ -24,6 +30,7 @@ runIdentityUserStoreContractTests({
     delete fixture.store.markEmailVerified;
     delete fixture.store.getLegacyCredential;
     delete fixture.store.clearLegacyCredential;
+    delete fixture.store.resetCredential;
     return fixture;
   },
 });
@@ -43,6 +50,14 @@ describe("identity contracts reject faulty stores", () => {
     ["cas-race", "exactly one concurrent replacement may win"],
     ["email-guard", "a token for an old email must not verify the new email"],
     ["legacy-clear", "clears the selected imported credential"],
+    ["reset-missing", "resetCredential capability is required"],
+    ["reset-sessions", "resetCredential revokes every session of the user"],
+    ["reset-not-atomic", "a failed reset must leave the credential unchanged"],
+    ["reset-sessions-early", "a failed reset must leave the sessions live"],
+    [
+      "reset-legacy-early",
+      "a failed reset must leave the imported hash in place",
+    ],
     ["revoke-owner", "revokes all of the selected user's sessions immediately"],
     [
       "revoke-advisory",

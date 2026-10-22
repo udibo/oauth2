@@ -299,6 +299,7 @@ runIdentityUserStoreContractTests({
   replaceCredential: true,
   emailVerification: true,
   legacyCredentials: true,
+  resetCredential: true,
 });
 runRevocableSessionServiceContractTests({ makeFixture: freshSessions });
 runListableSessionServiceContractTests({ makeFixture: freshSessions });
@@ -312,7 +313,13 @@ Each fixture is fresh for each test and may provide `dispose()` to close its
 connections and delete its records. For credential replacement, supply
 `removeCredential` to seed a user without a native credential. For email
 verification, supply `setEmail` and `isEmailVerified`; for imported credentials,
-supply `setLegacyCredential`. These setup helpers manipulate your own store, not
+supply `setLegacyCredential`. For the transactional password reset, supply
+`startSession`, `isSessionLive` and `failNextReset`. The suite injects a failure
+at the credential step, at the session step and, with `legacyCredentials`, at
+the imported-hash step in turn, and requires that no write survives any of them.
+Make `failNextReset` throw after the transaction's other writes have run, not
+before them, or the check cannot tell an atomic store from one that writes
+nothing before failing. These setup helpers manipulate your own store, not
 an in-memory substitute for the implementation being verified. The suite checks
 all stored credential fields, a read after a lost compare-and-set, and
 concurrent replacement winners. Email verification must not mark the current

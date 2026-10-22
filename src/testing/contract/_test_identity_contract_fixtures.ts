@@ -30,7 +30,25 @@ export function userFixture(
   const verified = new Set<string>();
   const stale = new Map<string, PasswordCredential>();
   const legacy = new Map<string, string>();
+  const sessions = new Map<string, { userId: string; live: boolean }>();
+  type ResetStep = "credential" | "legacy" | "sessions";
+  let failReset: ResetStep | undefined;
   let sequence = 0;
+  let sessionSequence = 0;
+  function revokeSessions(id: string): number {
+    let revoked = 0;
+    for (const session of sessions.values()) {
+      if (session.userId !== id || !session.live) continue;
+      if (fault !== "reset-sessions") session.live = false;
+      revoked++;
+    }
+    return revoked;
+  }
+  function takeResetFault(step: ResetStep): void {
+    if (failReset !== step) return;
+    failReset = undefined;
+    throw new Error(`injected ${step} failure`);
+  }
   const store: IdentityUserStore<User> = {
     create(profile, credential) {
       const user = { id: uuid(++sequence), email: String(profile.email) };
@@ -98,8 +116,59 @@ export function userFixture(
       if (fault !== "legacy-clear") legacy.delete(id);
       return Promise.resolve();
     },
+    async resetCredential(id, credential) {
+      await Promise.resolve();
+      if (fault === "reset-not-atomic") {
+        credentials.set(id, structuredClone(credential));
+        takeResetFault("credential");
+        legacy.delete(id);
+        takeResetFault("legacy");
+        const revoked = revokeSessions(id);
+        takeResetFault("sessions");
+        return revoked;
+      }
+      if (fault === "reset-sessions-early") {
+        const revoked = revokeSessions(id);
+        takeResetFault("sessions");
+        takeResetFault("credential");
+        takeResetFault("legacy");
+        credentials.set(id, structuredClone(credential));
+        legacy.delete(id);
+        return revoked;
+      }
+      if (fault === "reset-legacy-early") {
+        legacy.delete(id);
+        takeResetFault("legacy");
+        takeResetFault("credential");
+        takeResetFault("sessions");
+        credentials.set(id, structuredClone(credential));
+        return revokeSessions(id);
+      }
+      const stagedCredentials = new Map(credentials);
+      const stagedLegacy = new Map(legacy);
+      const stagedSessions = structuredClone(sessions);
+      stagedCredentials.set(id, structuredClone(credential));
+      stagedLegacy.delete(id);
+      let revoked = 0;
+      for (const session of stagedSessions.values()) {
+        if (session.userId !== id || !session.live) continue;
+        if (fault !== "reset-sessions") session.live = false;
+        revoked++;
+      }
+      takeResetFault("credential");
+      takeResetFault("legacy");
+      takeResetFault("sessions");
+      credentials.clear();
+      for (const [key, value] of stagedCredentials) credentials.set(key, value);
+      legacy.clear();
+      for (const [key, value] of stagedLegacy) legacy.set(key, value);
+      sessions.clear();
+      for (const [key, value] of stagedSessions) sessions.set(key, value);
+      return revoked;
+    },
   };
   if (fault === "cas-missing") delete store.replaceCredential;
+  if (fault === "reset-missing") delete store.resetCredential;
   return {
     store,
     unknownUserId: uuid(999),
@@ -122,6 +191,17 @@ export function userFixture(
     setLegacyCredential(id, hash) {
       legacy.set(id, hash);
       return Promise.resolve();
+    },
+    startSession(userId) {
+      const id = uuid(++sessionSequence + 500);
+      sessions.set(id, { userId, live: true });
+      return Promise.resolve(id);
+    },
+    isSessionLive(id) {
+      return Promise.resolve(sessions.get(id)?.live === true);
+    },
+    failNextReset(step) {
+      failReset = step;
     },
   };
 }

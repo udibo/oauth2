@@ -356,6 +356,8 @@ package's documentation.
 - [Deployment checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md): review the boundaries
   your chosen integration uses.
 - [Extension reference](https://github.com/udibo/oauth2/blob/main/docs/trigger-points.md): callback and storage contracts.
+- [Partial-failure recovery](https://github.com/udibo/oauth2/blob/main/docs/guides/recover-from-partial-failures.md): what a
+  failing store leaves behind in each identity flow, and how to finish it.
 - [Known limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md): supported behavior and constraints.
 - [API reference](https://jsr.io/@udibo/oauth2/doc): exported types and methods.
 - [Versioning and runtime support](https://github.com/udibo/oauth2/blob/main/docs/stability.md).
@@ -2228,10 +2230,16 @@ rest, which is what someone who has just changed their password expects.
 The reset token is consumed before the password is written, so two concurrent
 submissions of one link resolve to exactly one success and only that password is
 set. `revokeAllByUser` runs after the write; if it throws, `resetPassword` emits
-`password_reset.failed` (`session_revocation_failed`) and rethrows. The link is
-spent and the new password is in effect by then, so handle that event: call
-`revokeAllByUser` again yourself once the session store is back, or have the
-user complete a fresh link.
+`password_reset.failed` (`session_revocation_failed`, with the `userId`) and
+rethrows. The link is spent and the new password is in effect by then, so handle
+that event: call `revokeAllByUser(userId)` again once the session store is back.
+When your users and sessions share a database, implement the optional
+`IdentityUserStore.resetCredential` as well. It writes the password and revokes
+the stored sessions in one transaction, so a database failure cannot split them.
+A configured `sessions` service still runs after the commit, for session state
+outside the database.
+[Recover from partial failures](https://github.com/udibo/oauth2/blob/main/docs/guides/recover-from-partial-failures.md) lists every
+state a failing store can leave behind and how to finish each one.
 
 `resetPassword` also voids the subject's outstanding **passwordless**
 credentials — a pending sign-in link and a pending sign-in code — so a magic
@@ -3948,6 +3956,7 @@ runIdentityUserStoreContractTests({
   replaceCredential: true,
   emailVerification: true,
   legacyCredentials: true,
+  resetCredential: true,
 });
 runRevocableSessionServiceContractTests({ makeFixture: freshSessions });
 runListableSessionServiceContractTests({ makeFixture: freshSessions });
@@ -3961,7 +3970,13 @@ Each fixture is fresh for each test and may provide `dispose()` to close its
 connections and delete its records. For credential replacement, supply
 `removeCredential` to seed a user without a native credential. For email
 verification, supply `setEmail` and `isEmailVerified`; for imported credentials,
-supply `setLegacyCredential`. These setup helpers manipulate your own store, not
+supply `setLegacyCredential`. For the transactional password reset, supply
+`startSession`, `isSessionLive` and `failNextReset`. The suite injects a failure
+at the credential step, at the session step and, with `legacyCredentials`, at
+the imported-hash step in turn, and requires that no write survives any of them.
+Make `failNextReset` throw after the transaction's other writes have run, not
+before them, or the check cannot tell an atomic store from one that writes
+nothing before failing. These setup helpers manipulate your own store, not
 an in-memory substitute for the implementation being verified. The suite checks
 all stored credential fields, a read after a lost compare-and-set, and
 concurrent replacement winners. Email verification must not mark the current
@@ -6796,7 +6811,7 @@ unless the row says otherwise.
 | lockout-store      | `LockoutStore`                                            | Backs the built-in `AccountLockout`                                                  | yes, for the built-in `AccountLockout` | blocks                   | Propagates through the `AccountLockoutLike` call sites                                                                                                                                                                                                                                                                                   |
 | token-flow-store   | `TokenFlowStore` (via `tokens`)                           | All `request*` / `verify*` / `reset*` / `unlock*` / `consume*` flows                 | required for those flows                  | blocks                   | Propagates and aborts the flow — except while minting in `requestPasswordReset` / `requestSignInLink`, where a throw is trapped like a delivery failure: the call resolves `void`, nothing is sent, and `credential_mint.failed` is the only signal (a store outage is not an enumeration oracle)                                        |
 | otp-store          | `OtpStore` (`otp.store`)                                  | `requestSignInCode` / `verifySignInCode`                                             | required for the code flow                | blocks                   | Propagates and aborts the flow — except while minting in `requestSignInCode`, trapped as for token-flow-store (`credential_mint.failed`)                                                                                                                                                                                                 |
-| session-revocation | `RevocableSessionService` (`sessions`)                    | `resetPassword`, after the new credential is set                                     | no                                        | blocks (side-effect)     | A throw (after the password change) emits `password_reset.failed` (`session_revocation_failed`), suppresses `password_reset.completed`, and rethrows — the reset is reported failed, not silently half-complete. The token is already spent, so re-run `revokeAllByUser` from the event or have the user complete a fresh link           |
+| session-revocation | `RevocableSessionService` (`sessions`)                    | `resetPassword`, after the new credential is set (after the `resetCredential` transaction commits, when the user store implements it) | no | blocks (side-effect) | A throw (after the password change; with `resetCredential`, after the stored sessions were revoked too) emits `password_reset.failed` (`session_revocation_failed`, with `userId`), suppresses `password_reset.completed`, and rethrows — the reset is reported failed, not silently half-complete. The token is already spent, so re-run `revokeAllByUser(userId)` from the event. See [partial-failure recovery](https://github.com/udibo/oauth2/blob/main/docs/guides/recover-from-partial-failures.md) |
 | session-listing    | `ListableSessionService`                                  | App-driven (a "where you're signed in" screen)                                       | no                                        | n/a (app calls it)       | Propagates to your caller                                                                                                                                                                                                                                                                                                                |
 | captcha            | `CaptchaProvider` (via `verifyCaptcha`)                   | App-driven, in your route before `signUp` / `signIn` / the email-sending requests    | no (no provider → unchallenged pass)      | blocks (you enforce it)  | **Never propagates.** `verifyCaptcha` traps a provider throw and returns a decision: `failOpen: true` (default) → `"pass"`, `false` → `"fail"`, both with `degraded: true`. A `{ success: false }` return is a real rejection (`"fail"`, `degraded: false`); reject it with `IdentityError` `captcha_failed` (403)                       |
 | identifier-lookup  | `IdentifierLookups<User>` (`createIdentifierResolver`)    | When you call the resolver to classify + look up an identifier                       | each kind optional                        | blocks                   | Propagates to your caller                                                                                                                                                                                                                                                                                                                |
@@ -6909,6 +6924,150 @@ These responsibilities stay in the application or use a separate API.
   because it sits inside the exchange `try`/`catch`.
 - **BFF `onCallbackError` is unguarded.** A throw from the error handler itself
   propagates to Hono (500).
+
+---
+
+<!-- llms-full:source=docs/guides/recover-from-partial-failures.md -->
+
+# Recover from partial failures in the identity flows
+
+The identity flows write to several app-owned stores in sequence: a token or
+code store, your user store, your session store, the lockout store and the rate
+limiter. A store can fail between two of those writes. This guide lists every
+state such a failure can leave behind in password reset, email verification,
+passwordless sign-in and MFA recovery codes. For each state it gives the signal
+your app receives and the steps that finish or undo the change.
+
+Single-use credentials are spent **before** the change they authorize, with
+one exception. Two concurrent submissions of one link or code therefore resolve
+to exactly one success, and the loser writes nothing. The cost of that ordering
+is that a failure after the spend leaves the credential used up. The user then
+asks for a new one. No state below leaves a spent credential usable.
+
+The exception is email verification: `markEmailVerified` runs before the link is
+spent. Marking an address verified twice is harmless, while spending the link
+first would cost the user a new link whenever the write failed. That is why
+`markEmailVerified` must be idempotent.
+
+Subscribe to `onEvent` and alert on the events named here. The flows also log
+the best-effort failures with `console.error`, prefixed `[@udibo/oauth2]`.
+
+## Password reset
+
+`resetPassword` spends the reset link, then writes the new password, clears an
+imported hash, voids pending sign-in links and codes, revokes the user's
+sessions and clears the failed-attempt lockout. Only the link spend comes
+first; the rest run in that order.
+
+| Failing step                             | Already changed                                     | Signal                                                                                | Recovery                                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hashing or `setCredential`               | Link spent                                          | `password_reset.failed` with `credential_write_failed` and `userId`, error rethrown   | None needed. The old password still works and no session was touched. The user requests a fresh link                                          |
+| `clearLegacyCredential`                  | Password changed                                    | Logged; the reset succeeds                                                            | Clear the imported hash for the user. It is ignored while a native credential exists, but it would work again if that credential were removed |
+| `TokenFlowStore.deleteBySubject`         | Password changed                                    | Logged; the reset succeeds                                                            | Pending sign-in links stay redeemable until they expire (15 minutes by default). Delete them from your token store to close that window      |
+| `OtpStore.invalidate`                    | Password changed, links voided                      | Logged; the reset succeeds                                                            | The pending sign-in code stays usable until it expires (10 minutes by default). Invalidate it in your code store                               |
+| `RevocableSessionService.revokeAllByUser` | Password changed, passwordless credentials voided   | `password_reset.failed` with `session_revocation_failed` and `userId`, error rethrown | Call `revokeAllByUser(userId)` again until it succeeds. Until then, every session the user had before the reset stays signed in                |
+| `AccountLockoutLike.reset`               | Password changed, sessions revoked                  | `password_reset.failed` with `lockout_reset_failed` and `userId`, error rethrown      | Call `reset(userId)` on your lockout, or let the lock lapse. Until then a locked account cannot sign in with the new password                 |
+
+A failed reset never emits `password_reset.completed`, and the error reaches
+your route without saying how far the reset got. The new password is already in
+effect after `session_revocation_failed` and `lockout_reset_failed`, but not
+after `credential_write_failed`. So the message to the user should say that the
+password may have changed, and suggest signing in with the new password before
+requesting a new link. A locked account may still refuse it until the lock
+lapses.
+
+### Make the password write and the revocation one transaction
+
+The `session_revocation_failed` row is the dangerous one: the user reset the
+password to lock someone out, and that person's session is still live. When
+your users and sessions share a database, implement the optional
+`IdentityUserStore.resetCredential`. It replaces the credential, drops any
+imported hash and revokes every session of the user in one transaction, and
+returns the number of sessions revoked. `resetPassword` then calls it instead
+of `setCredential` and `clearLegacyCredential`. A failure inside it rolls
+everything back, so it reports `credential_write_failed` with the old password
+and sessions intact. `password_reset.completed` carries `sessionsRevoked`, the
+number of sessions the reset revoked.
+
+```ts
+import type {
+  IdentityUserStore,
+  PasswordCredential,
+} from "@udibo/oauth2/identity";
+
+interface AppUser {
+  id: string;
+}
+interface Transaction {
+  updateCredential(userId: string, credential: PasswordCredential): Promise<void>;
+  clearImportedHash(userId: string): Promise<void>;
+  revokeSessions(userId: string): Promise<number>;
+}
+declare const users: IdentityUserStore<AppUser>;
+declare function transaction<T>(
+  work: (tx: Transaction) => Promise<T>,
+): Promise<T>;
+
+const store: IdentityUserStore<AppUser> = {
+  ...users,
+  resetCredential: (userId, credential) =>
+    transaction(async (tx) => {
+      await tx.updateCredential(userId, credential);
+      await tx.clearImportedHash(userId);
+      return await tx.revokeSessions(userId);
+    }),
+};
+```
+
+Session state that lives outside that database, such as a cache of accepted
+session ids, is outside the transaction. If you also configure a `sessions`
+service, `resetPassword` calls its `revokeAllByUser` after the transaction
+commits, so that state is revoked too. The sessions already revoked in the
+database are not revoked again, and a failure there reports
+`session_revocation_failed` with the password changed and the stored sessions
+already revoked. Leave `sessions` unset only when the transaction covers every
+place a session lives. Verify the implementation with the `resetCredential` option of
+`runIdentityUserStoreContractTests` ([Integration testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md)).
+
+## Email verification
+
+`verifyEmail` marks the address verified **before** it spends the link, so the
+link stays usable whenever the flag did not change. `markEmailVerified` must be
+idempotent for this to be safe.
+
+| Failing step                    | Already changed                    | Signal                                                         | Recovery                                                                                                                                   |
+| ------------------------------- | ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `markEmailVerified`             | Nothing                            | Error rethrown                                                 | The user opens the same link again                                                                                                         |
+| Spending the link               | Address verified                   | Error rethrown; no `email_verification.completed`              | The user opens the same link again, which verifies idempotently and spends it. Left alone, the link expires. Until then it can verify only the address it was issued for, provided the token carries that email and your `markEmailVerified` filters on it |
+| Spending the link loses a race  | Address verified                   | Result `invalid` for this caller, `completed` for the winner   | None needed                                                                                                                                |
+
+## Passwordless sign-in
+
+The request half never surfaces a store or mailer failure, so that an outage is
+not an account-enumeration oracle. The events are the only signal.
+
+| Failing step                                   | Already changed                         | Signal                                     | Recovery                                                                                         |
+| ---------------------------------------------- | --------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Minting a link or code                         | Nothing                                 | `credential_mint.failed`                   | The user requests again once the store is back                                                   |
+| Delivery, then invalidating the minted credential | Nothing usable                       | `delivery.failed` with `invalidated: true` | The user requests again once the mailer is back                                                  |
+| Delivery, and invalidation also fails          | A link or code nobody received is live  | `delivery.failed` with `invalidated: false` | Invalidate it in your token or code store, or let it expire. Nobody holds it, so this is a window, not a leak |
+| Throttle reset after a verified code           | Code spent                              | Logged; the result is still `success`      | None needed. The throttle window stays filled until it lapses                                    |
+| Your session start after `success`             | Link or code spent                      | Your own error handling                    | The user requests a fresh link or code. The flow cannot replay a spent one                       |
+
+## MFA recovery codes
+
+`MfaService.verify` reads the user's remaining recovery codes before it burns
+the submitted one. A read failure therefore fails the attempt with the code
+still unspent, and the reported `remainingRecoveryCodes` comes from that read.
+
+| Failing step                              | Already changed                    | Signal                    | Recovery                                                                                                   |
+| ----------------------------------------- | ---------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Reading the remaining codes               | Nothing                            | Error rethrown            | The user submits the same code again                                                                       |
+| `consumeRecoveryHash`                     | Nothing, if the store is atomic    | Error rethrown            | The user submits the same code again                                                                       |
+| Throttle reset after a burned code        | Code spent                         | Logged; verification succeeds | None needed                                                                                            |
+| `setRecoveryHashes` in `regenerateRecoveryCodes` | Nothing; the old codes still work | Error rethrown        | The user regenerates again. A store must replace the set in one write for this to hold                    |
+| Recovery codes stored after enrollment activates | Activation rolled back       | Error rethrown            | The user enrolls again. If the rollback also fails, MFA stays active without recovery codes: have the user regenerate them |
+| `clearTotp` in `disable`, after the codes were cleared | Recovery codes removed     | Error rethrown            | MFA stays on with TOTP only. Call `disable` again                                                          |
 
 ---
 

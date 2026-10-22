@@ -116,19 +116,47 @@ export type IdentityEvent =
       retryAfterMs: number;
       enforced: boolean;
     }
-  | { type: "password_reset.completed"; userId: string }
+  | {
+      type: "password_reset.completed";
+      userId: string;
+      /**
+       * Sessions the reset revoked: the sum of what
+       * `IdentityUserStore.resetCredential` and the `sessions` service
+       * reported. Absent when neither ran.
+       */
+      sessionsRevoked?: number;
+    }
   | {
       type: "password_reset.failed";
       /**
        * `"invalid_token"` — the reset link was unknown, expired, or already used.
-       * `"session_revocation_failed"` — the new password was set but the
-       * configured {@link RevocableSessionService} threw before the user's other
-       * sessions could be revoked, so the reset is reported failed (and rethrown)
-       * rather than trusted. The reset token is already spent, so clear the
-       * still-live sessions by calling `revokeAllByUser` again from this event,
-       * or have the user complete a fresh reset link.
+       * Nothing changed.
+       *
+       * The other reasons fire after the link was spent, and the error is
+       * rethrown:
+       *
+       * - `"credential_write_failed"` — hashing or storing the new password
+       *   threw. The old password still works and no session was revoked; the
+       *   user requests a fresh link.
+       * - `"session_revocation_failed"` — the new password was set but the
+       *   configured `RevocableSessionService` threw before the user's other
+       *   sessions could be revoked. Call `revokeAllByUser(userId)` again.
+       * - `"lockout_reset_failed"` — the password changed and the sessions were
+       *   revoked, but clearing the failed-attempt lockout threw. Call
+       *   `reset(userId)` on the lockout, or let the lock lapse.
+       *
+       * A store that implements `IdentityUserStore.resetCredential` writes the
+       * password and revokes the sessions it holds together. A
+       * `"session_revocation_failed"` after that means the stored sessions
+       * were revoked and only the `sessions` service's own state was not.
        */
-      reason: "invalid_token" | "session_revocation_failed";
+      reason:
+        | "invalid_token"
+        | "credential_write_failed"
+        | "session_revocation_failed"
+        | "lockout_reset_failed";
+      /** The account the spent link belonged to; absent for `"invalid_token"`. */
+      userId?: string;
     }
   | {
       type: "credential_mint.failed";

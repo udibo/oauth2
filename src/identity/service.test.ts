@@ -1157,6 +1157,7 @@ describe("IdentityService events", () => {
     expect(lastEventOfType(events, "password_reset.completed")).toStrictEqual({
       type: "password_reset.completed",
       userId: user.id,
+      sessionsRevoked: 1,
     });
   });
 

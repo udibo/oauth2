@@ -332,10 +332,16 @@ rest, which is what someone who has just changed their password expects.
 The reset token is consumed before the password is written, so two concurrent
 submissions of one link resolve to exactly one success and only that password is
 set. `revokeAllByUser` runs after the write; if it throws, `resetPassword` emits
-`password_reset.failed` (`session_revocation_failed`) and rethrows. The link is
-spent and the new password is in effect by then, so handle that event: call
-`revokeAllByUser` again yourself once the session store is back, or have the
-user complete a fresh link.
+`password_reset.failed` (`session_revocation_failed`, with the `userId`) and
+rethrows. The link is spent and the new password is in effect by then, so handle
+that event: call `revokeAllByUser(userId)` again once the session store is back.
+When your users and sessions share a database, implement the optional
+`IdentityUserStore.resetCredential` as well. It writes the password and revokes
+the stored sessions in one transaction, so a database failure cannot split them.
+A configured `sessions` service still runs after the commit, for session state
+outside the database.
+[Recover from partial failures](recover-from-partial-failures.md) lists every
+state a failing store can leave behind and how to finish each one.
 
 `resetPassword` also voids the subject's outstanding **passwordless**
 credentials — a pending sign-in link and a pending sign-in code — so a magic

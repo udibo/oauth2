@@ -94,6 +94,25 @@ export interface IdentityUserStore<User extends IdentityUser> {
   /** Replace the user's password credential (reset / change). */
   setCredential(userId: string, credential: PasswordCredential): Promise<void>;
   /**
+   * Complete a password reset in one transaction: replace the credential,
+   * drop any imported hash, and revoke **every** session of the user. Return
+   * the number of sessions revoked. On a throw, none of the three may have
+   * happened.
+   *
+   * Optional. Implement it when the credential and the sessions share a
+   * database, so a session-store outage cannot leave a reset with the new
+   * password set and the old sessions live. When present,
+   * {@link IdentityService.resetPassword} calls it instead of
+   * {@link setCredential} and {@link clearLegacyCredential}. The reset link is
+   * still spent first. A configured `sessions` service is still called after
+   * this commits, for session state outside the transaction, such as a cache.
+   * Its `revokeAllByUser` then finds nothing left in the shared database.
+   */
+  resetCredential?(
+    userId: string,
+    credential: PasswordCredential,
+  ): Promise<number>;
+  /**
    * Atomically replace the credential only if it still equals `expected`.
    * `undefined` expects no native credential, for an imported-password upgrade.
    * Return `false` without writing if anything changed. Compare all stored
@@ -227,7 +246,13 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * Successful sign-ins are never delayed.
    */
   failedSignInFloorMs?: number;
-  /** Session revocation, called on a successful password reset. Optional. */
+  /**
+   * Session revocation, called on a successful password reset. Optional. When
+   * the user store implements {@link IdentityUserStore.resetCredential}, the
+   * reset still calls `revokeAllByUser` after that transaction commits, so
+   * session state the transaction cannot reach is revoked too. Omit it when
+   * the store's transaction already covers every place a session lives.
+   */
   sessions?: RevocableSessionService;
   /** Delivery transports for the emailed links and sign-in codes. Optional. */
   delivery?: DeliveryHooks;
@@ -684,19 +709,27 @@ export class IdentityService<User extends IdentityUser> {
    * redeemable until they expire) and, when an `otp` service is configured, the
    * pending sign-in code. Neither can fail the reset: a store that throws is
    * logged and the reset still completes, since the password has already
-   * changed by then.
+   * changed by then. Each is voided independently, so one store failing does
+   * not keep the other credential alive.
    *
    * The token is consumed **first**, before the password is written, so two
    * concurrent submissions of one link resolve to exactly one `{ userId }` and
    * only that call's password is set — the loser gets `null` and writes
-   * nothing. Sessions are revoked **after** the password is changed. If that
-   * revocation throws, the reset is reported failed — a `password_reset.failed`
-   * (`session_revocation_failed`) event fires, no `password_reset.completed`
-   * fires, and the error rethrows — rather than silently returning success
-   * with the user's old sessions still live. The token is already spent and
-   * the new password already set by then, so the operator clears the still-live
-   * sessions by calling `revokeAllByUser` again (subscribe to the event), or
-   * the user completes a fresh reset link.
+   * nothing. Any failure after that point is reported, never swallowed: a
+   * `password_reset.failed` event carrying the `userId` and a reason
+   * (`credential_write_failed`, `session_revocation_failed` or
+   * `lockout_reset_failed`) fires, no `password_reset.completed` fires, and the
+   * error rethrows. Each reason names what already changed and how to finish
+   * the reset; see the event's documentation.
+   *
+   * Without {@link IdentityUserStore.resetCredential}, sessions are revoked
+   * **after** the password is changed, in a separate call, so a session-store
+   * outage leaves the new password set and the old sessions live. A store
+   * that implements it makes the password write and the revocation one
+   * transaction; a configured `sessions` service then runs after the commit
+   * and can still report `session_revocation_failed` for the state outside
+   * it. `password_reset.completed` carries `sessionsRevoked`, the sum of the
+   * counts the store and the `sessions` service reported.
    *
    * @throws {IdentityError} `weak_password` when `password` fails the password
    * policy — including the 8–256 character defaults that apply when
@@ -721,41 +754,81 @@ export class IdentityService<User extends IdentityUser> {
       }),
     });
     if (consumed.status !== "success") return null;
-    const { resolved } = consumed;
-    await this.#users.setCredential(
-      resolved.subject,
-      await this.#passwords.hash(input.password),
+    const userId = consumed.resolved.subject;
+    const resetCredential = this.#users.resetCredential;
+    let sessionsRevoked: number | undefined;
+    await this.#failResetOnThrow(
+      userId,
+      "credential_write_failed",
+      async () => {
+        const credential = await this.#passwords.hash(input.password);
+        if (resetCredential) {
+          sessionsRevoked = await resetCredential.call(
+            this.#users,
+            userId,
+            credential,
+          );
+        } else {
+          await this.#users.setCredential(userId, credential);
+        }
+      },
     );
+    if (!resetCredential) await this.#clearLegacyAfterReset(userId);
+    await this.#voidPasswordlessCredentials(
+      tokens,
+      userId,
+      emailFromData(consumed.resolved.data),
+    );
+    const sessions = this.#sessions;
+    if (sessions) {
+      await this.#failResetOnThrow(
+        userId,
+        "session_revocation_failed",
+        async () => {
+          sessionsRevoked =
+            (sessionsRevoked ?? 0) + (await sessions.revokeAllByUser(userId));
+        },
+      );
+    }
+    const lockout = this.#lockout;
+    if (lockout) {
+      await this.#failResetOnThrow(userId, "lockout_reset_failed", () =>
+        lockout.reset(userId),
+      );
+    }
+    await this.#emit({
+      type: "password_reset.completed",
+      userId,
+      ...(sessionsRevoked === undefined ? {} : { sessionsRevoked }),
+    });
+    return { userId };
+  }
+
+  async #failResetOnThrow(
+    userId: string,
+    reason: Exclude<
+      Extract<IdentityEvent, { type: "password_reset.failed" }>["reason"],
+      "invalid_token"
+    >,
+    step: () => Promise<unknown>,
+  ): Promise<void> {
     try {
-      await this.#users.clearLegacyCredential?.(resolved.subject);
+      await step();
+    } catch (error) {
+      await this.#emit({ type: "password_reset.failed", reason, userId });
+      throw error;
+    }
+  }
+
+  async #clearLegacyAfterReset(userId: string): Promise<void> {
+    try {
+      await this.#users.clearLegacyCredential?.(userId);
     } catch (error) {
       console.error(
         "[@udibo/oauth2] resetPassword legacy-credential clear failed:",
         error instanceof Error ? error.message : error,
       );
     }
-    await this.#voidPasswordlessCredentials(
-      tokens,
-      resolved.subject,
-      emailFromData(resolved.data),
-    );
-    if (this.#sessions) {
-      try {
-        await this.#sessions.revokeAllByUser(resolved.subject);
-      } catch (error) {
-        await this.#emit({
-          type: "password_reset.failed",
-          reason: "session_revocation_failed",
-        });
-        throw error;
-      }
-    }
-    await this.#lockout?.reset(resolved.subject);
-    await this.#emit({
-      type: "password_reset.completed",
-      userId: resolved.subject,
-    });
-    return { userId: resolved.subject };
   }
 
   /**
@@ -1044,7 +1117,9 @@ export class IdentityService<User extends IdentityUser> {
    * the `signin_code.failed` event carries `locked`. Success consumes the code
    * (single-use), resets the flow's throttle window, and carries the `userId`
    * to sign in — session creation and your MFA gate stay your app's job, as
-   * does treating a since-deleted/disabled user as a failed sign-in.
+   * does treating a since-deleted/disabled user as a failed sign-in. A
+   * throttle reset that throws is logged and the result is still `success`,
+   * since the code is already spent.
    */
   async verifySignInCode(input: {
     email: string;
@@ -1080,7 +1155,11 @@ export class IdentityService<User extends IdentityUser> {
       });
       return { status: "invalid" };
     }
-    await this.#resetThrottle("signInCode", email);
+    try {
+      await this.#resetThrottle("signInCode", email);
+    } catch (error) {
+      this.#logPersistFailure("sign-in code throttle reset", error);
+    }
     await this.#emit({ type: "signin_code.verified", userId: user.id });
     return { status: "success", userId: user.id };
   }
@@ -1252,14 +1331,13 @@ export class IdentityService<User extends IdentityUser> {
     subject: string,
     email: string | undefined,
   ): Promise<void> {
-    try {
-      await tokens.invalidate(TokenPurpose.SignIn, subject);
-      if (email) await this.#otp?.invalidate(email, TokenPurpose.SignIn);
-    } catch (error) {
-      console.error(
-        "[@udibo/oauth2] resetPassword could not void the outstanding " +
-          "passwordless credentials; they stay usable until they expire:",
-        error instanceof Error ? error.message : error,
+    await logVoidFailure("sign-in links", () =>
+      tokens.invalidate(TokenPurpose.SignIn, subject),
+    );
+    const otp = this.#otp;
+    if (email && otp) {
+      await logVoidFailure("sign-in code", () =>
+        otp.invalidate(email, TokenPurpose.SignIn),
       );
     }
   }
@@ -1460,6 +1538,21 @@ const DELIVERY_PURPOSES = {
   sendEmailVerification: TokenPurpose.EmailVerification,
   sendSignInLink: TokenPurpose.SignIn,
 } as const;
+
+async function logVoidFailure(
+  credential: string,
+  invalidate: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await invalidate();
+  } catch (error) {
+    console.error(
+      `[@udibo/oauth2] resetPassword could not void the outstanding ` +
+        `${credential}, usable until expiry:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
 
 function emailFromData(
   data: Record<string, unknown> | undefined,

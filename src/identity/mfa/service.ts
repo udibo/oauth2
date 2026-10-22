@@ -221,7 +221,9 @@ export type MfaVerification =
       method: "recovery";
       /**
        * How many unused recovery codes remain — surface it so the UI can
-       * prompt regeneration when low.
+       * prompt regeneration when low. Counted from the set read just before
+       * this code was burned, so a code burned concurrently is not yet
+       * subtracted.
        */
       remainingRecoveryCodes: number;
     };
@@ -391,7 +393,9 @@ export class MfaService {
    * accepted TOTP code advances the stored last step through
    * {@link MfaStore.advanceLastStep}, so the same code is rejected on replay;
    * an accepted recovery code is burned through
-   * {@link MfaStore.consumeRecoveryHash}, so it is single-use. Both hold under
+   * {@link MfaStore.consumeRecoveryHash}, so it is single-use. The remaining
+   * codes are read before the burn, so a store failure never spends a code
+   * without signing the user in. Both hold under
    * concurrent submission only if the store implements those methods
    * atomically. Without an
    * active credential every code is rejected — recovery codes are a fallback
@@ -513,13 +517,14 @@ export class MfaService {
     if (normalizeRecoveryCode(code).length !== RECOVERY_CODE_LENGTH) {
       return undefined;
     }
-    const consumed = await this.#store.consumeRecoveryHash(
-      userId,
-      await hashRecoveryCode(code),
-    );
-    if (!consumed) return undefined;
-    const remainingRecoveryCodes = (await this.#store.getRecoveryHashes(userId))
-      .length;
+    const hash = await hashRecoveryCode(code);
+    const stored = await this.#store.getRecoveryHashes(userId);
+    if (!(await this.#store.consumeRecoveryHash(userId, hash))) {
+      return undefined;
+    }
+    const remainingRecoveryCodes = stored.filter(
+      (candidate) => candidate !== hash,
+    ).length;
     await this.#resetThrottle(userId);
     await this.#emit({
       type: "mfa.verify.succeeded",
