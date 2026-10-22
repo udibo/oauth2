@@ -1,3 +1,9 @@
+## [0.38.0](https://github.com/udibo/oauth2/compare/0.37.0...0.38.0) (2026-10-22)
+
+### Features
+
+* **identity:** make password reset atomic through an optional store capability ([#158](https://github.com/udibo/oauth2/issues/158)) ([67b8375](https://github.com/udibo/oauth2/commit/67b83754483c691706d2a0d4ec2e6e43291884b1)), closes [#50](https://github.com/udibo/oauth2/issues/50) [#50](https://github.com/udibo/oauth2/issues/50)
+
 ## [0.37.0](https://github.com/udibo/oauth2/compare/0.36.0...0.37.0) (2026-10-21)
 
 ### ⚠ BREAKING CHANGES
