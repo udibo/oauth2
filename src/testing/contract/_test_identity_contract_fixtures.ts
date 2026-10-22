@@ -31,7 +31,8 @@ export function userFixture(
   const stale = new Map<string, PasswordCredential>();
   const legacy = new Map<string, string>();
   const sessions = new Map<string, { userId: string; live: boolean }>();
-  let failReset: "credential" | "sessions" | undefined;
+  type ResetStep = "credential" | "legacy" | "sessions";
+  let failReset: ResetStep | undefined;
   let sequence = 0;
   let sessionSequence = 0;
   function revokeSessions(id: string): number {
@@ -43,7 +44,7 @@ export function userFixture(
     }
     return revoked;
   }
-  function takeResetFault(step: "credential" | "sessions"): void {
+  function takeResetFault(step: ResetStep): void {
     if (failReset !== step) return;
     failReset = undefined;
     throw new Error(`injected ${step} failure`);
@@ -119,17 +120,43 @@ export function userFixture(
       await Promise.resolve();
       if (fault === "reset-not-atomic") {
         credentials.set(id, structuredClone(credential));
-        legacy.delete(id);
         takeResetFault("credential");
+        legacy.delete(id);
+        takeResetFault("legacy");
         const revoked = revokeSessions(id);
         takeResetFault("sessions");
         return revoked;
       }
+      if (fault === "reset-sessions-early") {
+        const revoked = revokeSessions(id);
+        takeResetFault("credential");
+        takeResetFault("legacy");
+        credentials.set(id, structuredClone(credential));
+        legacy.delete(id);
+        return revoked;
+      }
+      if (fault === "reset-legacy-early") {
+        legacy.delete(id);
+        takeResetFault("credential");
+        takeResetFault("sessions");
+        credentials.set(id, structuredClone(credential));
+        return revokeSessions(id);
+      }
+      const staged = {
+        credential: structuredClone(credential),
+        sessions: [...sessions.values()].filter(
+          (session) => session.userId === id && session.live,
+        ),
+      };
       takeResetFault("credential");
+      takeResetFault("legacy");
       takeResetFault("sessions");
-      credentials.set(id, structuredClone(credential));
+      credentials.set(id, staged.credential);
       legacy.delete(id);
-      return revokeSessions(id);
+      if (fault !== "reset-sessions") {
+        for (const session of staged.sessions) session.live = false;
+      }
+      return staged.sessions.length;
     },
   };
   if (fault === "cas-missing") delete store.replaceCredential;

@@ -315,8 +315,11 @@ connections and delete its records. For credential replacement, supply
 verification, supply `setEmail` and `isEmailVerified`; for imported credentials,
 supply `setLegacyCredential`. For the transactional password reset, supply
 `startSession`, `isSessionLive` and `failNextReset`. The suite injects a failure
-at the credential step and at the session step in turn, and requires that
-neither write survives either one. These setup helpers manipulate your own store, not
+at the credential step, at the session step and, with `legacyCredentials`, at
+the imported-hash step in turn, and requires that no write survives any of them.
+Make `failNextReset` throw after the transaction's other writes have run, not
+before them, or the check cannot tell an atomic store from one that writes
+nothing before failing. These setup helpers manipulate your own store, not
 an in-memory substitute for the implementation being verified. The suite checks
 all stored credential fields, a read after a lost compare-and-set, and
 concurrent replacement winners. Email verification must not mark the current

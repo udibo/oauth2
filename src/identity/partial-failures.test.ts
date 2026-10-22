@@ -39,7 +39,10 @@ const EMAIL = "a@b.co";
 const OLD_PASSWORD = "hunter2hunter2";
 const NEW_PASSWORD = "newpassword1";
 
-function harness(options?: { atomicReset?: boolean }) {
+function harness(options?: {
+  atomicReset?: boolean;
+  withoutSessions?: boolean;
+}) {
   const faults = new Set<Fault>();
   const fail = (fault: Fault): Promise<never> =>
     Promise.reject(new Error(`${fault} failed`));
@@ -165,14 +168,16 @@ function harness(options?: { atomicReset?: boolean }) {
         faults.has("hash") ? fail("hash") : hasher.hash(password),
       verify: (password, credential) => hasher.verify(password, credential),
     },
-    sessions: {
-      revokeAllByUser(userId) {
-        calls.push("revokeAllByUser");
-        if (faults.has("revokeAllByUser")) return fail("revokeAllByUser");
-        return Promise.resolve(revokeAll(userId));
-      },
-      revokeOthers: () => Promise.resolve(0),
-    },
+    sessions: options?.withoutSessions
+      ? undefined
+      : {
+          revokeAllByUser(userId) {
+            calls.push("revokeAllByUser");
+            if (faults.has("revokeAllByUser")) return fail("revokeAllByUser");
+            return Promise.resolve(revokeAll(userId));
+          },
+          revokeOthers: () => Promise.resolve(0),
+        },
     lockout: {
       status: (userId) => lockout.status(userId),
       recordFailure: (userId) => lockout.recordFailure(userId),
@@ -427,7 +432,7 @@ describe("password reset partial failures", () => {
 });
 
 describe("password reset with an atomic resetCredential store", () => {
-  it("writes the credential, clears the imported hash and revokes sessions in the one store call", async () => {
+  it("writes the credential, clears the imported hash and revokes sessions in the store call, then asks the sessions service too", async () => {
     const h = harness({ atomicReset: true });
     const user = await h.signUp();
     await h.service.requestSignInLink(EMAIL);
@@ -437,12 +442,12 @@ describe("password reset with an atomic resetCredential store", () => {
       await h.service.resetPassword({ token, password: NEW_PASSWORD }),
     ).toStrictEqual({ userId: user.id });
 
-    expect(h.calls).toStrictEqual(["resetCredential"]);
+    expect(h.calls).toStrictEqual(["resetCredential", "revokeAllByUser"]);
     expect(h.sessionsOf(user.id)).toStrictEqual([]);
     expect(h.sessionsOf("someone-else")).toStrictEqual(["other"]);
     expect(h.legacy.has(user.id)).toBe(false);
     expect(h.completed()).toStrictEqual([
-      { type: "password_reset.completed", userId: user.id },
+      { type: "password_reset.completed", userId: user.id, sessionsRevoked: 2 },
     ]);
     expect(await h.signsInWith(NEW_PASSWORD)).toBe(true);
     expect(
@@ -518,17 +523,47 @@ describe("password reset with an atomic resetCredential store", () => {
     expect(h.sessionsOf(user.id)).toStrictEqual(["s1", "s2"]);
   });
 
-  it("never reaches the separate sessions service, so its outage cannot split the reset", async () => {
+  it("reports session_revocation_failed when the sessions service fails after the store committed", async () => {
     const h = harness({ atomicReset: true });
     const user = await h.signUp();
     const token = await h.resetLink();
     h.faults.add("revokeAllByUser");
+
+    await rejection(
+      () => h.service.resetPassword({ token, password: NEW_PASSWORD }),
+      Error,
+      "revokeAllByUser failed",
+    );
+
+    expect(h.calls).toStrictEqual(["resetCredential", "revokeAllByUser"]);
+    expect(h.failed()).toStrictEqual([
+      {
+        type: "password_reset.failed",
+        reason: "session_revocation_failed",
+        userId: user.id,
+      },
+    ]);
+    expect(h.completed()).toStrictEqual([]);
+    expect(
+      h.sessionsOf(user.id),
+      "the store's own revocation committed",
+    ).toStrictEqual([]);
+    expect(await h.signsInWith(NEW_PASSWORD)).toBe(true);
+  });
+
+  it("revokes through the store alone when no sessions service is configured", async () => {
+    const h = harness({ atomicReset: true, withoutSessions: true });
+    const user = await h.signUp();
+    const token = await h.resetLink();
 
     expect(
       await h.service.resetPassword({ token, password: NEW_PASSWORD }),
     ).toStrictEqual({ userId: user.id });
     expect(h.calls).toStrictEqual(["resetCredential"]);
     expect(h.sessionsOf(user.id)).toStrictEqual([]);
+    expect(h.completed()).toStrictEqual([
+      { type: "password_reset.completed", userId: user.id, sessionsRevoked: 2 },
+    ]);
   });
 });
 

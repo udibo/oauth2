@@ -336,8 +336,10 @@ set. `revokeAllByUser` runs after the write; if it throws, `resetPassword` emits
 rethrows. The link is spent and the new password is in effect by then, so handle
 that event: call `revokeAllByUser(userId)` again once the session store is back.
 When your users and sessions share a database, implement the optional
-`IdentityUserStore.resetCredential` instead. It writes the password and revokes
-the sessions in one transaction, so that state cannot occur.
+`IdentityUserStore.resetCredential` as well. It writes the password and revokes
+the stored sessions in one transaction, so a database failure cannot split them.
+A configured `sessions` service still runs after the commit, for session state
+outside the database.
 [Recover from partial failures](recover-from-partial-failures.md) lists every
 state a failing store can leave behind and how to finish each one.
 

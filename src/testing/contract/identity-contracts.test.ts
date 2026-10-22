@@ -52,9 +52,11 @@ describe("identity contracts reject faulty stores", () => {
     ["legacy-clear", "clears the selected imported credential"],
     ["reset-missing", "resetCredential capability is required"],
     ["reset-sessions", "resetCredential revokes every session of the user"],
+    ["reset-not-atomic", "a failed reset must leave the credential unchanged"],
+    ["reset-sessions-early", "a failed reset must leave the sessions live"],
     [
-      "reset-not-atomic",
-      "a failed reset must leave the credential, imported hash and sessions unchanged",
+      "reset-legacy-early",
+      "a failed reset must leave the imported hash in place",
     ],
     ["revoke-owner", "revokes all of the selected user's sessions immediately"],
     [

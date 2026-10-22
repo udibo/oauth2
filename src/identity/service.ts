@@ -103,8 +103,10 @@ export interface IdentityUserStore<User extends IdentityUser> {
    * database, so a session-store outage cannot leave a reset with the new
    * password set and the old sessions live. When present,
    * {@link IdentityService.resetPassword} calls it instead of
-   * {@link setCredential}, {@link clearLegacyCredential} and the `sessions`
-   * service's `revokeAllByUser`. The reset link is still spent first.
+   * {@link setCredential} and {@link clearLegacyCredential}. The reset link is
+   * still spent first. A configured `sessions` service is still called after
+   * this commits, for session state outside the transaction, such as a cache.
+   * Its `revokeAllByUser` then finds nothing left in the shared database.
    */
   resetCredential?(
     userId: string,
@@ -245,10 +247,11 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    */
   failedSignInFloorMs?: number;
   /**
-   * Session revocation, called on a successful password reset. Optional. Not
-   * called by the reset when the user store implements
-   * {@link IdentityUserStore.resetCredential}, which revokes the sessions
-   * itself.
+   * Session revocation, called on a successful password reset. Optional. When
+   * the user store implements {@link IdentityUserStore.resetCredential}, the
+   * reset still calls `revokeAllByUser` after that transaction commits, so
+   * session state the transaction cannot reach is revoked too. Omit it when
+   * the store's transaction already covers every place a session lives.
    */
   sessions?: RevocableSessionService;
   /** Delivery transports for the emailed links and sign-in codes. Optional. */
@@ -723,7 +726,10 @@ export class IdentityService<User extends IdentityUser> {
    * **after** the password is changed, in a separate call, so a session-store
    * outage leaves the new password set and the old sessions live. A store
    * that implements it makes the password write and the revocation one
-   * transaction.
+   * transaction; a configured `sessions` service then runs after the commit
+   * and can still report `session_revocation_failed` for the state outside
+   * it. `password_reset.completed` carries `sessionsRevoked`, the sum of the
+   * counts the store and the `sessions` service reported.
    *
    * @throws {IdentityError} `weak_password` when `password` fails the password
    * policy — including the 8–256 character defaults that apply when
@@ -750,13 +756,18 @@ export class IdentityService<User extends IdentityUser> {
     if (consumed.status !== "success") return null;
     const userId = consumed.resolved.subject;
     const resetCredential = this.#users.resetCredential;
+    let sessionsRevoked: number | undefined;
     await this.#failResetOnThrow(
       userId,
       "credential_write_failed",
       async () => {
         const credential = await this.#passwords.hash(input.password);
         if (resetCredential) {
-          await resetCredential.call(this.#users, userId, credential);
+          sessionsRevoked = await resetCredential.call(
+            this.#users,
+            userId,
+            credential,
+          );
         } else {
           await this.#users.setCredential(userId, credential);
         }
@@ -769,9 +780,14 @@ export class IdentityService<User extends IdentityUser> {
       emailFromData(consumed.resolved.data),
     );
     const sessions = this.#sessions;
-    if (sessions && !resetCredential) {
-      await this.#failResetOnThrow(userId, "session_revocation_failed", () =>
-        sessions.revokeAllByUser(userId),
+    if (sessions) {
+      await this.#failResetOnThrow(
+        userId,
+        "session_revocation_failed",
+        async () => {
+          sessionsRevoked =
+            (sessionsRevoked ?? 0) + (await sessions.revokeAllByUser(userId));
+        },
       );
     }
     const lockout = this.#lockout;
@@ -780,7 +796,11 @@ export class IdentityService<User extends IdentityUser> {
         lockout.reset(userId),
       );
     }
-    await this.#emit({ type: "password_reset.completed", userId });
+    await this.#emit({
+      type: "password_reset.completed",
+      userId,
+      ...(sessionsRevoked === undefined ? {} : { sessionsRevoked }),
+    });
     return { userId };
   }
 

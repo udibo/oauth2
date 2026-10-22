@@ -684,6 +684,36 @@ describe("MfaService", () => {
     });
   });
 
+  it("accepts one of two concurrent redemptions of a recovery code even though both read the set before either burns", async () => {
+    using time = new FakeTime(START);
+    const bothRead = Promise.withResolvers<void>();
+    class BarrierReadStore extends MemoryMfaStore {
+      slow = false;
+      reads = 0;
+      override async getRecoveryHashes(userId: string): Promise<string[]> {
+        const hashes = await super.getRecoveryHashes(userId);
+        if (this.slow && ++this.reads === 2) bothRead.resolve();
+        if (this.slow) await bothRead.promise;
+        return hashes;
+      }
+    }
+    const store = new BarrierReadStore();
+    const mfa = new MfaService({ store });
+    const { recoveryCodes } = await enroll(mfa, "u1");
+    time.tick(PERIOD_MS);
+    store.slow = true;
+
+    const results = await Promise.all([
+      mfa.verify("u1", recoveryCodes[0], { method: "recovery" }),
+      mfa.verify("u1", recoveryCodes[0], { method: "recovery" }),
+    ]);
+
+    expect(
+      results.filter((result) => result.valid).length,
+      "a recovery code is single-use under concurrent redemption",
+    ).toStrictEqual(1);
+  });
+
   it("keeps the old recovery codes when regenerating them fails", async () => {
     using time = new FakeTime(START);
     class FailingReplaceStore extends MemoryMfaStore {

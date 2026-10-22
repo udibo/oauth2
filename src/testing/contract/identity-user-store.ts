@@ -44,11 +44,14 @@ export interface IdentityUserStoreContractFixture<User extends IdentityUser> {
   isSessionLive?(sessionId: string): Promise<boolean>;
   /**
    * Make the next resetCredential call throw at `step`, after the other
-   * step has had its chance to write. Required for resetCredential: the suite
-   * calls it once for each step to prove that neither write survives the other
-   * failing, whichever order your transaction runs them in.
+   * writes have had their chance to run inside the transaction. Required for
+   * resetCredential: the suite calls it once for each step (`"legacy"` only
+   * with legacyCredentials) to prove that no write survives another failing,
+   * whichever order your transaction runs them in.
    */
-  failNextReset?(step: "credential" | "sessions"): Promise<void> | void;
+  failNextReset?(
+    step: "credential" | "legacy" | "sessions",
+  ): Promise<void> | void;
   /** Release resources and remove this test's records after all calls finish. */
   dispose?(): Promise<void> | void;
 }
@@ -343,7 +346,10 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
           await store.resetCredential!(user.id, structuredClone(REPLACEMENT)),
         ).toStrictEqual(0);
       });
-      for (const step of ["credential", "sessions"] as const) {
+      const steps = options.legacyCredentials
+        ? (["credential", "legacy", "sessions"] as const)
+        : (["credential", "sessions"] as const);
+      for (const step of steps) {
         it(`changes nothing when the reset fails at the ${step} step`, async () => {
           const { user, sessions } = await resetSetup();
           assert.exists(
@@ -362,19 +368,18 @@ export function runIdentityUserStoreContractTests<User extends IdentityUser>(
             outcome,
             "resetCredential must reject when failNextReset injected a failure",
           ).toStrictEqual("rejected");
-          const unchanged =
-            "a failed reset must leave the credential, imported hash and sessions unchanged";
-          expect(await store.getCredential(user.id), unchanged).toStrictEqual(
-            ORIGINAL,
-          );
-          expect(await liveness(sessions), unchanged).toStrictEqual([
-            true,
-            true,
-          ]);
+          expect(
+            await store.getCredential(user.id),
+            "a failed reset must leave the credential unchanged",
+          ).toStrictEqual(ORIGINAL);
+          expect(
+            await liveness(sessions),
+            "a failed reset must leave the sessions live",
+          ).toStrictEqual([true, true]);
           if (options.legacyCredentials) {
             expect(
               await store.getLegacyCredential!(user.id),
-              unchanged,
+              "a failed reset must leave the imported hash in place",
             ).toStrictEqual("imported-hash-one");
           }
         });

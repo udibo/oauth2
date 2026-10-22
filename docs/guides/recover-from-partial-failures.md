@@ -7,11 +7,16 @@ state such a failure can leave behind in password reset, email verification,
 passwordless sign-in and MFA recovery codes. For each state it gives the signal
 your app receives and the steps that finish or undo the change.
 
-Single-use credentials are always spent **before** the change they authorize.
-Two concurrent submissions of one link or code therefore resolve to exactly one
-success, and the loser writes nothing. The cost of that ordering is that a
-failure after the spend leaves the credential used up. The user then asks for
-a new one. No state below leaves a spent credential usable.
+Single-use credentials are spent **before** the change they authorize, with
+one exception. Two concurrent submissions of one link or code therefore resolve
+to exactly one success, and the loser writes nothing. The cost of that ordering
+is that a failure after the spend leaves the credential used up. The user then
+asks for a new one. No state below leaves a spent credential usable.
+
+The exception is email verification: `markEmailVerified` runs before the link is
+spent. Marking an address verified twice is harmless, while spending the link
+first would cost the user a new link whenever the write failed. That is why
+`markEmailVerified` must be idempotent.
 
 Subscribe to `onEvent` and alert on the events named here. The flows also log
 the best-effort failures with `console.error`, prefixed `[@udibo/oauth2]`.
@@ -44,9 +49,10 @@ your users and sessions share a database, implement the optional
 `IdentityUserStore.resetCredential`. It replaces the credential, drops any
 imported hash and revokes every session of the user in one transaction, and
 returns the number of sessions revoked. `resetPassword` then calls it instead
-of `setCredential`, `clearLegacyCredential` and the `sessions` service. A
-failure inside it rolls everything back, so it reports `credential_write_failed`
-with the old password and sessions intact.
+of `setCredential` and `clearLegacyCredential`. A failure inside it rolls
+everything back, so it reports `credential_write_failed` with the old password
+and sessions intact. `password_reset.completed` carries `sessionsRevoked`, the
+number of sessions the reset revoked.
 
 ```ts
 import type {
@@ -79,8 +85,13 @@ const store: IdentityUserStore<AppUser> = {
 ```
 
 Session state that lives outside that database, such as a cache of accepted
-session ids, is outside the transaction. Revoke it after the commit or keep it
-short-lived. Verify the implementation with the `resetCredential` option of
+session ids, is outside the transaction. If you also configure a `sessions`
+service, `resetPassword` calls its `revokeAllByUser` after the transaction
+commits, so that state is revoked too. The sessions already revoked in the
+database are not revoked again, and a failure there reports
+`session_revocation_failed` with the password changed and the stored sessions
+already revoked. Leave `sessions` unset only when the transaction covers every
+place a session lives. Verify the implementation with the `resetCredential` option of
 `runIdentityUserStoreContractTests` ([Integration testing](testing.md)).
 
 ## Email verification
@@ -92,7 +103,7 @@ idempotent for this to be safe.
 | Failing step                    | Already changed                    | Signal                                                         | Recovery                                                                                                                                   |
 | ------------------------------- | ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `markEmailVerified`             | Nothing                            | Error rethrown                                                 | The user opens the same link again                                                                                                         |
-| Spending the link               | Address verified                   | Error rethrown; no `email_verification.completed`              | The user opens the same link again, which verifies idempotently and spends it. Left alone, the link expires; it can only verify the same address |
+| Spending the link               | Address verified                   | Error rethrown; no `email_verification.completed`              | The user opens the same link again, which verifies idempotently and spends it. Left alone, the link expires. Until then it can verify only the address it was issued for, provided the token carries that email and your `markEmailVerified` filters on it |
 | Spending the link loses a race  | Address verified                   | Result `invalid` for this caller, `completed` for the winner   | None needed                                                                                                                                |
 
 ## Passwordless sign-in

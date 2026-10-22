@@ -116,7 +116,16 @@ export type IdentityEvent =
       retryAfterMs: number;
       enforced: boolean;
     }
-  | { type: "password_reset.completed"; userId: string }
+  | {
+      type: "password_reset.completed";
+      userId: string;
+      /**
+       * Sessions the reset revoked: the sum of what
+       * `IdentityUserStore.resetCredential` and the `sessions` service
+       * reported. Absent when neither ran.
+       */
+      sessionsRevoked?: number;
+    }
   | {
       type: "password_reset.failed";
       /**
@@ -137,8 +146,9 @@ export type IdentityEvent =
        *   `reset(userId)` on the lockout, or let the lock lapse.
        *
        * A store that implements `IdentityUserStore.resetCredential` writes the
-       * password and revokes the sessions together, so it never reports
-       * `"session_revocation_failed"`.
+       * password and revokes the sessions it holds together. A
+       * `"session_revocation_failed"` after that means the stored sessions
+       * were revoked and only the `sessions` service's own state was not.
        */
       reason:
         | "invalid_token"
