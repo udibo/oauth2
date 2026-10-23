@@ -1,3 +1,22 @@
+## [0.40.0](https://github.com/udibo/oauth2/compare/0.39.0...0.40.0) (2026-10-23)
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** runOtpStoreContractTests now fails an OtpStore whose
+consume leaves the pair's older codes active. Migration: in consume,
+when the claim succeeds, deactivate every other active record for the
+claimed record's (email, purpose) whose createdAt is no later than its
+own, in the same statement (the passwordless guide has a PostgreSQL
+example). Leave newer records and other pairs alone, and change nothing
+when the claim fails. A store that keeps one active code per (email,
+purpose) already satisfies this; register it with oneActiveCode: true.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Bug Fixes
+
+* **identity:** retire older codes when a one-time code is consumed ([#162](https://github.com/udibo/oauth2/issues/162)) ([f98d0d2](https://github.com/udibo/oauth2/commit/f98d0d29d7130fdcacf685e6d193467e7a954b2f)), closes [udibo/oauth2#160](https://github.com/udibo/oauth2/issues/160)
+
 ## [0.39.0](https://github.com/udibo/oauth2/compare/0.38.0...0.39.0) (2026-10-23)
 
 ### Features
