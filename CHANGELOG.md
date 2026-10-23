@@ -1,3 +1,9 @@
+## [0.39.0](https://github.com/udibo/oauth2/compare/0.38.0...0.39.0) (2026-10-23)
+
+### Features
+
+* **testing:** let store contract suites take app ids ([#160](https://github.com/udibo/oauth2/issues/160)) ([932fb47](https://github.com/udibo/oauth2/commit/932fb475cce1bf117528ad9da7915a18ec3959a7))
+
 ## [0.38.0](https://github.com/udibo/oauth2/compare/0.37.0...0.38.0) (2026-10-22)
 
 ### Features
