@@ -37,14 +37,23 @@ export interface MfaStoreContractOptions {
    */
   makeStore(): Promise<MfaStore> | MfaStore;
   /**
+   * The user the cases act on, in your application's id format. A store whose
+   * rows reference a users table needs it to name a user that exists. Defaults
+   * to `"user-1"`.
+   */
+  userId?: string;
+  /**
+   * A second user, distinct from {@link MfaStoreContractOptions.userId}, whose
+   * records must stay apart from the first. Defaults to `"user-2"`.
+   */
+  otherUserId?: string;
+  /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"MfaStore contract"`.
    */
   describeName?: string;
 }
 
-const USER = "user-1";
-const OTHER_USER = "user-2";
 const SECRET_A = "AAAAAAAAAAAAAAAA";
 const SECRET_B = "BBBBBBBBBBBBBBBB";
 
@@ -65,6 +74,9 @@ function countTrue(results: boolean[]): number {
 export function runMfaStoreContractTests(
   options: MfaStoreContractOptions,
 ): void {
+  const USER = options.userId ?? "user-1";
+  const OTHER_USER = options.otherUserId ?? "user-2";
+
   describe(options.describeName ?? "MfaStore contract", () => {
     let store: MfaStore;
 
@@ -223,6 +235,13 @@ export function runMfaStoreContractTests(
     });
 
     describe("recovery hashes", () => {
+      beforeEach(async () => {
+        for (const user of [USER, OTHER_USER]) {
+          await store.setPendingTotp(user, SECRET_A);
+          await store.activateTotp(user, SECRET_A, 1);
+        }
+      });
+
       it("returns an empty list for a user with none", async () => {
         expect(await store.getRecoveryHashes(USER)).toStrictEqual([]);
       });

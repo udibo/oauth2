@@ -47,12 +47,10 @@ const OTHER_EMAIL = "other@example.com";
 const PURPOSE = "signin";
 const OTHER_PURPOSE = "step-up";
 
-let sequence = 0;
-
 function record(overrides: Partial<OtpRecord> = {}): OtpRecord {
   const now = Date.now();
   return {
-    id: `otp-${++sequence}`,
+    id: crypto.randomUUID(),
     email: EMAIL,
     purpose: PURPOSE,
     codeHash: "hash",
@@ -67,6 +65,9 @@ function record(overrides: Partial<OtpRecord> = {}): OtpRecord {
 /**
  * Runs the {@link OtpStore} contract suite. Call it from your own test file —
  * it registers `describe` / `it` blocks the test runner picks up.
+ *
+ * Record ids, known and unknown alike, are UUIDs — the ids `EmailOtpService`
+ * issues — so a store with a `uuid` id column accepts every one.
  *
  * The concurrency case fires overlapping `recordAttempt` calls and requires
  * each to see a distinct count; a store that reads, awaits, then writes hands
@@ -139,7 +140,7 @@ export function runOtpStoreContractTests(
           "a code is single-use — consumers racing one code must not each " +
             "be told they claimed it",
         ).toBe(1);
-        expect(await store.consume("missing-code")).toBe(false);
+        expect(await store.consume(crypto.randomUUID())).toBe(false);
       });
       it("takes the record out of the active set", async () => {
         const created = record();
@@ -161,7 +162,7 @@ export function runOtpStoreContractTests(
       it("is a no-op for an unknown id", async () => {
         const created = record();
         await store.create(created);
-        await store.consume("no-such-id");
+        await store.consume(crypto.randomUUID());
         expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(created.id);
       });
     });
@@ -184,7 +185,7 @@ export function runOtpStoreContractTests(
       it("is a no-op for an unknown id", async () => {
         const created = record();
         await store.create(created);
-        await store.invalidateById("no-such-id");
+        await store.invalidateById(crypto.randomUUID());
         expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(created.id);
       });
     });
@@ -222,7 +223,7 @@ export function runOtpStoreContractTests(
       });
 
       it("returns 0 for an unknown id", async () => {
-        expect(await store.recordAttempt("no-such-id")).toBe(0);
+        expect(await store.recordAttempt(crypto.randomUUID())).toBe(0);
       });
 
       it("counts each record separately", async () => {

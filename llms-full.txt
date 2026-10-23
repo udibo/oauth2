@@ -3878,6 +3878,15 @@ overwrite or end a session another instance refreshed. Set
 `refreshLockNeverExpires: true` only when no holder can lose the lock while its
 refresh runs.
 
+The MFA and lockout suites act on users `user-1` and `user-2` unless you pass
+`userId` and `otherUserId`. The token-flow suite issues tokens for `subject`
+and `otherSubject` the same way. When your rows reference a users table, pass
+the ids of two users that exist. Token hashes are unique to each test, and OTP
+record ids are `crypto.randomUUID()` values, unknown ones included, so a unique
+hash column or a `uuid` id column accepts them. The MFA suite checks recovery
+codes only for a user with an active credential, the only user `MfaService`
+issues them to.
+
 `runTokenServiceContractTests` and `runTokenRotationContractTests` build each
 rotation family's id with `crypto.randomUUID()`, so a store with a `uuid` family
 column runs every family case, and each case sees only its own families. Pass
