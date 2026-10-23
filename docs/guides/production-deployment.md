@@ -34,7 +34,7 @@ cookie.
 | Tokens                       | `TokenServiceInterface`                            | Protect stored token material; atomic revocation/rotation claims                                                                          |
 | App credentials              | `IdentityUserStore`                                | Persist the complete credential, including `params`; unique identifiers                                                                   |
 | Reset and verification links | `TokenFlowStore`                                   | Expiring, single-use records; implement invalidation capabilities your app needs                                                          |
-| Email codes                  | `OtpStore`                                         | Atomic attempt increments and boolean `consume`; protect low-entropy code hashes                                                          |
+| Email codes                  | `OtpStore`                                         | Atomic attempt increments; boolean `consume` that retires the pair's older codes; protect low-entropy code hashes                                                          |
 | MFA                          | `MfaStore`                                         | Protect TOTP secrets; atomically consume recovery codes                                                                                   |
 | Rate limits and lockout      | `RateLimitStore` / `LockoutStore`                  | Shared counters and expiry across instances                                                                                               |
 

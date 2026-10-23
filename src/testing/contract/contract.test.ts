@@ -38,6 +38,7 @@ import { MemoryLockoutStore } from "../../identity/lockout.ts";
 import { runMfaStoreContractTests } from "./mfa-store.ts";
 import { runTokenFlowStoreContractTests } from "./token-flow-store.ts";
 import { runOtpStoreContractTests } from "./otp-store.ts";
+import { OneCodeOtpStore } from "./_test_otp_store_fixtures.ts";
 import { runRateLimitStoreContractTests } from "./rate-limit-store.ts";
 import { runLockoutStoreContractTests } from "./lockout-store.ts";
 import { runTenantContractTests } from "./tenant.ts";
@@ -431,6 +432,13 @@ runTokenFlowStoreContractTests({
 runOtpStoreContractTests({
   describeName: "MemoryOtpStore satisfies OtpStore contract",
   makeStore: () => new MemoryOtpStore(),
+});
+
+runOtpStoreContractTests({
+  describeName:
+    "A store keeping one code per (email, purpose) satisfies OtpStore contract with oneActiveCode",
+  makeStore: () => new OneCodeOtpStore(),
+  oneActiveCode: true,
 });
 
 runRateLimitStoreContractTests({

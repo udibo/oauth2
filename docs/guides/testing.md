@@ -207,8 +207,14 @@ runOtpStoreContractTests({
 });
 ```
 
-Each `makeStore` must provide fresh state. Follow the suite's options for the
-other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
+Each `makeStore` must provide fresh state. The OTP suite requires a successful
+`consume` to retire the pair's older codes, and checks it through
+`EmailOtpService`: after two overlapping requests, signing in with the newest
+code must leave the older one invalid. Register a store that keeps one code per
+`(email, purpose)`, where `create` replaces the pair's code, with
+`oneActiveCode: true`. The suite then requires that replacement and skips the
+cases that need two codes active at once. A store that keeps several codes and
+sets the option fails. Follow the suite's options for the other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
 lockout, token flows, token readers, and pending login requests
 (`AuthRequestStorage`, whose optional `take` is raced by eight concurrent
 callers). Register an `AuthRequestStorage` shared between users with
