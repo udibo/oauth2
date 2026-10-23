@@ -234,6 +234,13 @@ export function runMfaStoreContractTests(
       });
     });
 
+    describe("recovery hashes for a user without a credential", () => {
+      it("reads none and redeems none", async () => {
+        expect(await store.getRecoveryHashes(OTHER_USER)).toStrictEqual([]);
+        expect(await store.consumeRecoveryHash(OTHER_USER, "h1")).toBe(false);
+      });
+    });
+
     describe("recovery hashes", () => {
       beforeEach(async () => {
         for (const user of [USER, OTHER_USER]) {
