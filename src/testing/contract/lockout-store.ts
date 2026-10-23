@@ -35,14 +35,22 @@ export interface LockoutStoreContractOptions {
    */
   makeStore(): Promise<LockoutStore> | LockoutStore;
   /**
+   * The account the cases act on, in your application's id format. A store
+   * that keeps the count on the user's own row needs it to name a user that
+   * exists. Defaults to `"user-1"`.
+   */
+  userId?: string;
+  /**
+   * A second account, distinct from {@link LockoutStoreContractOptions.userId},
+   * whose count must stay apart from the first. Defaults to `"user-2"`.
+   */
+  otherUserId?: string;
+  /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"LockoutStore contract"`.
    */
   describeName?: string;
 }
-
-const USER = "user-1";
-const OTHER_USER = "user-2";
 
 /**
  * Runs the {@link LockoutStore} contract suite. Call it from your own test
@@ -54,6 +62,9 @@ const OTHER_USER = "user-2";
 export function runLockoutStoreContractTests(
   options: LockoutStoreContractOptions,
 ): void {
+  const USER = options.userId ?? "user-1";
+  const OTHER_USER = options.otherUserId ?? "user-2";
+
   describe(options.describeName ?? "LockoutStore contract", () => {
     let store: LockoutStore;
     let now: number;

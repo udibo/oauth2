@@ -93,7 +93,9 @@ export interface MfaStore {
   getRecoveryHashes(userId: string): Promise<string[]>;
   /**
    * Replace the user's recovery-code hashes with exactly this set — used for
-   * initial issue, regeneration, and disable (`[]`).
+   * initial issue, regeneration, and disable (`[]`). `MfaService` issues codes
+   * only once the TOTP credential is active, so a store may keep recovery
+   * hashes on the credential's record and drop a write for a user without one.
    */
   setRecoveryHashes(userId: string, hashes: string[]): Promise<void>;
   /**
