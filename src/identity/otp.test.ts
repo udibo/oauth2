@@ -288,6 +288,47 @@ describe("EmailOtpService", () => {
     expect(second.id === first.id).toStrictEqual(false);
   });
 
+  it("a successful verify retires an older code that overlapping requests left live", async () => {
+    const store = new MemoryOtpStore();
+    const overlapping = new EmailOtpService({
+      store: {
+        create: (record) => store.create(record),
+        findActive: (email, purpose) => store.findActive(email, purpose),
+        recordAttempt: (id) => store.recordAttempt(id),
+        consume: (id) => store.consume(id),
+        invalidateById: (id) => store.invalidateById(id),
+        invalidate: () => Promise.resolve(),
+      },
+    });
+    const codes: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      await overlapping.request({
+        email: "a@b.co",
+        purpose: "signin",
+        onDeliver: (code) => {
+          codes.push(code);
+        },
+      });
+    }
+    const service = new EmailOtpService({ store });
+
+    expect(
+      await service.verify({
+        email: "a@b.co",
+        purpose: "signin",
+        code: codes[1],
+      }),
+    ).toStrictEqual({ status: "success" });
+    expect(
+      await service.verify({
+        email: "a@b.co",
+        purpose: "signin",
+        code: codes[0],
+      }),
+      "signing in with the newest code ends the older code's window",
+    ).toStrictEqual({ status: "invalid" });
+  });
+
   it("invalidateCode resolves for an unknown id", async () => {
     const { service } = makeService();
     expect(await service.invalidateCode(crypto.randomUUID())).toStrictEqual(
@@ -486,6 +527,44 @@ describe("MemoryOtpStore", () => {
     await store.create(record);
     await store.consume(record.id);
     expect(await store.findActive("a@b.co", "signin")).toStrictEqual(null);
+  });
+
+  it("consume retires the older records for the pair, not newer ones or other pairs", async () => {
+    const store: OtpStore = new MemoryOtpStore();
+    const oldest = makeRecord({ createdAt: 1 });
+    const claimed = makeRecord({ createdAt: 2 });
+    const newer = makeRecord({ createdAt: 3 });
+    const otherEmail = makeRecord({ email: "x@b.co", createdAt: 1 });
+    const otherPurpose = makeRecord({ purpose: "step-up", createdAt: 1 });
+    for (const record of [oldest, claimed, newer, otherEmail, otherPurpose]) {
+      await store.create(record);
+    }
+
+    expect(await store.consume(claimed.id)).toStrictEqual(true);
+    expect(await store.consume(oldest.id)).toStrictEqual(false);
+    expect((await store.findActive("a@b.co", "signin"))?.id).toStrictEqual(
+      newer.id,
+    );
+    expect((await store.findActive("x@b.co", "signin"))?.id).toStrictEqual(
+      otherEmail.id,
+    );
+    expect((await store.findActive("a@b.co", "step-up"))?.id).toStrictEqual(
+      otherPurpose.id,
+    );
+  });
+
+  it("a consume that claims nothing retires nothing", async () => {
+    const store: OtpStore = new MemoryOtpStore();
+    const older = makeRecord({ createdAt: 1 });
+    const discarded = makeRecord({ createdAt: 2 });
+    await store.create(older);
+    await store.create(discarded);
+    await store.invalidateById(discarded.id);
+
+    expect(await store.consume(discarded.id)).toStrictEqual(false);
+    expect((await store.findActive("a@b.co", "signin"))?.id).toStrictEqual(
+      older.id,
+    );
   });
 
   it("invalidateById deactivates one record, leaving the rest active", async () => {

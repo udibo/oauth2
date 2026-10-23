@@ -5,7 +5,9 @@
  * A six-digit code is guessable online, so the attempt budget is the only thing
  * standing between an attacker and a one-in-a-million draw. `recordAttempt` is
  * what enforces it, and it only enforces it when concurrent guesses cannot
- * share a count — which is what this suite checks.
+ * share a count — which is what this suite checks. It also checks that a
+ * successful `consume` retires the pair's older codes, so a sign-in with the
+ * newest code leaves no earlier one redeemable.
  *
  * @example Verify a database-backed store
  * ```ts
@@ -24,7 +26,11 @@
  */
 
 import { assert, beforeEach, describe, expect, it } from "vitest";
-import type { OtpRecord, OtpStore } from "../../identity/otp.ts";
+import {
+  EmailOtpService,
+  type OtpRecord,
+  type OtpStore,
+} from "../../identity/otp.ts";
 import { CONCURRENT_CALLERS, race } from "./_race.ts";
 
 /** Options for {@link runOtpStoreContractTests}. */
@@ -35,6 +41,19 @@ export interface OtpStoreContractOptions {
    * meaningless.
    */
   makeStore(): Promise<OtpStore> | OtpStore;
+  /**
+   * Set to `true` for a store that keeps at most one active code per
+   * `(email, purpose)`, where `create` replaces the pair's code — for example
+   * an upsert on a unique `(email, purpose)` index. Such a store conforms: the
+   * suite then requires `create` to replace the code, so the replaced code's
+   * id no longer consumes, and drops the cases that need two codes active at
+   * once. The trade-off is availability: when overlapping requests each send a
+   * code and the later send fails, discarding the later code leaves no code
+   * the user can enter, where a store keeping several codes leaves the one
+   * already delivered. Defaults to `false`; a store that keeps several codes
+   * and sets it fails the replacement case.
+   */
+  oneActiveCode?: boolean;
   /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"OtpStore contract"`.
@@ -71,11 +90,18 @@ function record(overrides: Partial<OtpRecord> = {}): OtpRecord {
  *
  * The concurrency case fires overlapping `recordAttempt` calls and requires
  * each to see a distinct count; a store that reads, awaits, then writes hands
- * the same count to every guess and fails it.
+ * the same count to every guess and fails it. The `consume` cases require a
+ * successful claim to retire every older active code for the pair, and to
+ * leave newer codes, other pairs and — when the claim fails — everything else
+ * active. Register a store that keeps one code per pair with
+ * `oneActiveCode: true`.
  */
 export function runOtpStoreContractTests(
   options: OtpStoreContractOptions,
 ): void {
+  const oneActiveCode = options.oneActiveCode ?? false;
+  const manyActiveCodes = !oneActiveCode;
+
   describe(options.describeName ?? "OtpStore contract", () => {
     let store: OtpStore;
 
@@ -114,6 +140,37 @@ export function runOtpStoreContractTests(
         ).toBe(newer.id);
       });
 
+      if (oneActiveCode) {
+        it("replaces the pair's active code (oneActiveCode)", async () => {
+          const now = Date.now();
+          const older = record({ createdAt: now - 1000, codeHash: "old" });
+          const newer = record({ createdAt: now, codeHash: "new" });
+          await store.create(older);
+          await store.create(newer);
+          expect(
+            await store.consume(older.id),
+            "`oneActiveCode: true` declares that a new code replaces the " +
+              "pair's code; this store kept the older one active",
+          ).toBe(false);
+          expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(newer.id);
+        });
+        it.skip("a store keeping one code per pair returns the code created last, whatever its createdAt — there is no other code to order it against (oneActiveCode: true)", () => {});
+      } else {
+        it("returns the greatest createdAt, not the last inserted", async () => {
+          const now = Date.now();
+          const higher = record({ createdAt: now });
+          const lower = record({ createdAt: now - 1000 });
+          await store.create(higher);
+          await store.create(lower);
+          expect(
+            (await store.findActive(EMAIL, PURPOSE))?.id,
+            "verify consumes the record findActive returns and consume " +
+              "retires records created no later than it; ordering by " +
+              "insertion under clock drift leaves the other code redeemable",
+          ).toBe(higher.id);
+        });
+      }
+
       it("returns an expired record rather than hiding it", async () => {
         await store.create(record({ expiresAt: Date.now() - 1000 }));
         assert(
@@ -149,14 +206,71 @@ export function runOtpStoreContractTests(
         expect(await store.findActive(EMAIL, PURPOSE)).toBe(null);
       });
 
-      it("leaves an older active code findable", async () => {
+      it("retires every older active code for the pair", async () => {
         const now = Date.now();
+        const oldest = record({ createdAt: now - 2000 });
         const older = record({ createdAt: now - 1000 });
-        const newer = record({ createdAt: now });
+        const newest = record({ createdAt: now });
+        await store.create(oldest);
         await store.create(older);
-        await store.create(newer);
-        await store.consume(newer.id);
-        expect((await store.findActive(EMAIL, PURPOSE))?.id).toBe(older.id);
+        await store.create(newest);
+        expect(await store.consume(newest.id)).toBe(true);
+        expect(
+          await store.findActive(EMAIL, PURPOSE),
+          "a sign-in with the newest code must end the older codes' window; " +
+            "otherwise each stays redeemable until it expires",
+        ).toBe(null);
+        expect(await store.consume(older.id)).toBe(false);
+        expect(await store.consume(oldest.id)).toBe(false);
+      });
+
+      if (manyActiveCodes) {
+        it("leaves a code newer than the claimed one active", async () => {
+          const now = Date.now();
+          const claimed = record({ createdAt: now - 1000 });
+          const newer = record({ createdAt: now });
+          await store.create(claimed);
+          await store.create(newer);
+          expect(await store.consume(claimed.id)).toBe(true);
+          expect(
+            (await store.findActive(EMAIL, PURPOSE))?.id,
+            "a code a concurrent request minted after the claimed one " +
+              "is not older than it and must survive",
+          ).toBe(newer.id);
+        });
+
+        it("retires nothing when the claim fails", async () => {
+          const now = Date.now();
+          const older = record({ createdAt: now - 1000 });
+          const discarded = record({ createdAt: now });
+          await store.create(older);
+          await store.create(discarded);
+          await store.invalidateById(discarded.id);
+          expect(await store.consume(discarded.id)).toBe(false);
+          expect(
+            (await store.findActive(EMAIL, PURPOSE))?.id,
+            "only a successful claim retires older codes; a stale or " +
+              "repeated consume must leave the delivered code usable",
+          ).toBe(older.id);
+        });
+      } else {
+        it.skip("a store keeping one code per pair has no newer or older code beside the claimed one — a re-send replaces the code a sign-in is verifying, so that sign-in reports invalid and the user enters the new code (oneActiveCode: true)", () => {});
+      }
+
+      it("leaves other emails and other purposes active", async () => {
+        const claimed = record();
+        const otherEmail = record({ email: OTHER_EMAIL });
+        const otherPurpose = record({ purpose: OTHER_PURPOSE });
+        await store.create(claimed);
+        await store.create(otherEmail);
+        await store.create(otherPurpose);
+        expect(await store.consume(claimed.id)).toBe(true);
+        expect((await store.findActive(OTHER_EMAIL, PURPOSE))?.id).toBe(
+          otherEmail.id,
+        );
+        expect((await store.findActive(EMAIL, OTHER_PURPOSE))?.id).toBe(
+          otherPurpose.id,
+        );
       });
 
       it("is a no-op for an unknown id", async () => {
@@ -168,18 +282,36 @@ export function runOtpStoreContractTests(
     });
 
     describe("invalidateById", () => {
-      it("deactivates only the named record", async () => {
+      if (manyActiveCodes) {
+        it("deactivates only the named record", async () => {
+          const now = Date.now();
+          const undelivered = record({ createdAt: now });
+          const previous = record({ createdAt: now - 1000 });
+          await store.create(previous);
+          await store.create(undelivered);
+          await store.invalidateById(undelivered.id);
+          expect(
+            (await store.findActive(EMAIL, PURPOSE))?.id,
+            "discarding an undeliverable code must not take a concurrent " +
+              "request's code with it",
+          ).toBe(previous.id);
+        });
+      } else {
+        it.skip("a store keeping one code per pair has no older code to keep — when overlapping requests each send a code and the later send fails, discarding it leaves no code the user can enter (oneActiveCode: true)", () => {});
+      }
+
+      it("leaves a newer code active", async () => {
         const now = Date.now();
-        const undelivered = record({ createdAt: now });
-        const previous = record({ createdAt: now - 1000 });
-        await store.create(previous);
-        await store.create(undelivered);
-        await store.invalidateById(undelivered.id);
+        const older = record({ createdAt: now - 1000 });
+        const newer = record({ createdAt: now });
+        await store.create(older);
+        await store.create(newer);
+        await store.invalidateById(older.id);
         expect(
           (await store.findActive(EMAIL, PURPOSE))?.id,
-          "discarding an undeliverable code must not take a concurrent " +
-            "request's code with it",
-        ).toBe(previous.id);
+          "a slow failed send discards its own code, never the code a " +
+            "retry has since delivered",
+        ).toBe(newer.id);
       });
 
       it("is a no-op for an unknown id", async () => {
@@ -248,6 +380,54 @@ export function runOtpStoreContractTests(
             "guesses sharing one count spend the budget once and let the " +
             "rest through",
         ).toStrictEqual([1, 2, 3, 4, 5]);
+      });
+    });
+
+    describe("EmailOtpService over the store", () => {
+      it("leaves no older code redeemable after a successful verify", async () => {
+        const overlapping = new EmailOtpService({
+          store: {
+            create: (created) => store.create(created),
+            findActive: (email, purpose) => store.findActive(email, purpose),
+            recordAttempt: (id) => store.recordAttempt(id),
+            consume: (id) => store.consume(id),
+            invalidateById: (id) => store.invalidateById(id),
+            invalidate: () => Promise.resolve(),
+          },
+        });
+        const codes = new Map<string, string>();
+        for (let i = 0; i < 2; i++) {
+          await overlapping.request({
+            email: EMAIL,
+            purpose: PURPOSE,
+            onDeliver: (code, _expiresAt, codeId) => {
+              codes.set(codeId, code);
+            },
+          });
+        }
+        const newest = await store.findActive(EMAIL, PURPOSE);
+        assert(newest !== null, "a requested code must be findable");
+        const newestCode = codes.get(newest.id);
+        const olderCode = [...codes].find(([id]) => id !== newest.id)?.[1];
+        assert(newestCode !== undefined && olderCode !== undefined);
+        const service = new EmailOtpService({ store });
+
+        expect(
+          await service.verify({
+            email: EMAIL,
+            purpose: PURPOSE,
+            code: newestCode,
+          }),
+        ).toStrictEqual({ status: "success" });
+        expect(
+          await service.verify({
+            email: EMAIL,
+            purpose: PURPOSE,
+            code: olderCode,
+          }),
+          "two overlapping requests left two codes; signing in with the " +
+            "newest must not leave the older one redeemable",
+        ).toStrictEqual({ status: "invalid" });
       });
     });
   });

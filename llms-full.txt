@@ -3864,8 +3864,14 @@ runOtpStoreContractTests({
 });
 ```
 
-Each `makeStore` must provide fresh state. Follow the suite's options for the
-other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
+Each `makeStore` must provide fresh state. The OTP suite requires a successful
+`consume` to retire the pair's older codes, and checks it through
+`EmailOtpService`: after two overlapping requests, signing in with the newest
+code must leave the older one invalid. Register a store that keeps one code per
+`(email, purpose)`, where `create` replaces the pair's code, with
+`oneActiveCode: true`. The suite then requires that replacement and skips the
+cases that need two codes active at once. A store that keeps several codes and
+sets the option fails. Follow the suite's options for the other interfaces: tokens, authorization codes, device codes, MFA, rate limits,
 lockout, token flows, token readers, and pending login requests
 (`AuthRequestStorage`, whose optional `take` is raced by eight concurrent
 callers). Register an `AuthRequestStorage` shared between users with
@@ -4715,18 +4721,50 @@ Contract details a working implementation depends on:
 - **`consume` atomically claims an active code and returns `true` only once.**
   Concurrent and repeated claims return `false`; a read followed by a write is
   insufficient. Use a conditional delete/update with `RETURNING`.
+- **A successful `consume` also retires the pair's older codes.** In the same
+  statement, deactivate every other active record for the claimed code's
+  `(email, purpose)` whose `createdAt` is no later than its own. A sign-in with
+  the newest code then leaves no older code redeemable. Leave newer records and
+  other pairs alone, and retire nothing when the claim fails. In PostgreSQL:
+
+  ```sql
+  WITH claimed AS (
+    DELETE FROM otp_codes WHERE id = $1
+    RETURNING email, purpose, created_at
+  ), retired AS (
+    DELETE FROM otp_codes AS o USING claimed AS c
+    WHERE o.email = c.email AND o.purpose = c.purpose
+      AND o.created_at <= c.created_at AND o.id <> $1
+  )
+  SELECT count(*) > 0 AS claimed FROM claimed;
+  ```
+
+- **`invalidateById` deactivates only the named record.** It discards a code
+  whose send failed, so a code another request delivered survives, older or
+  newer.
 
 - **`recordAttempt` must be atomic and return the new count** —
   `UPDATE … SET attempts = attempts + 1 … RETURNING attempts`. The service
   reserves the attempt _before_ comparing the code, so at most `maxAttempts`
   guesses ever reach the comparison. A read-then-write lets concurrent verifies
   each test a guess against a stale count and blow straight through the budget.
+- **`findActive` returns the active record with the greatest `createdAt`,**
+  ordered by that field rather than by insertion: `consume` retires records by
+  `createdAt`, so ordering by insertion under clock drift leaves the other code
+  redeemable.
 - **`findActive` must still return expired records.** Expiry is the service's
   concern — it needs to see the row to report `expired` distinctly from
   `invalid`.
 - **"Active" means neither consumed nor invalidated.** Deleting the row on
   consume/invalidate is the simplest way to satisfy that; reap expired rows on a
   schedule or opportunistically on insert.
+
+A store may instead keep one active code per `(email, purpose)`, with `create`
+replacing the pair's code, for example as an upsert on a unique index. It
+satisfies the contract with `oneActiveCode: true` (see
+[Testing](https://github.com/udibo/oauth2/blob/main/docs/guides/testing.md#persistent-storage-contracts)). The cost is availability:
+when overlapping requests each send a code and the later send fails, discarding
+the later code leaves no code the user can enter.
 
 `MemoryOtpStore` implements the contract for development and tests.
 
@@ -4878,9 +4916,13 @@ export async function confirmPayout(
 Used standalone it takes its own `rateLimiter`; used through `IdentityService`
 it does not, because the service throttles for it. Sequential requests for a
 `(email, purpose)` pair invalidate earlier codes. Invalidation and creation are
-separate operations, so concurrent requests can leave multiple live codes.
-Serialize issuance across instances if your app requires only one outstanding
-code. Atomic `consume` ensures each individual code can succeed only once.
+separate operations, so concurrent requests can leave multiple live codes. A
+successful verify ends that: `consume` of the newest code retires the older
+ones. Until then only the newest can be entered; an older one becomes
+enterable only if the newer is discarded. Serialize issuance
+across instances, or keep one code per pair in the store, if your app requires
+only one outstanding code. Atomic `consume` ensures each individual code can
+succeed only once.
 
 A six-digit code has only one million possible values. Hash it at rest, restrict
 access to the store, and retain it briefly, but do not treat the hash as
@@ -5892,7 +5934,7 @@ cookie.
 | Tokens                       | `TokenServiceInterface`                            | Protect stored token material; atomic revocation/rotation claims                                                                          |
 | App credentials              | `IdentityUserStore`                                | Persist the complete credential, including `params`; unique identifiers                                                                   |
 | Reset and verification links | `TokenFlowStore`                                   | Expiring, single-use records; implement invalidation capabilities your app needs                                                          |
-| Email codes                  | `OtpStore`                                         | Atomic attempt increments and boolean `consume`; protect low-entropy code hashes                                                          |
+| Email codes                  | `OtpStore`                                         | Atomic attempt increments; boolean `consume` that retires the pair's older codes; protect low-entropy code hashes                                                          |
 | MFA                          | `MfaStore`                                         | Protect TOTP secrets; atomically consume recovery codes                                                                                   |
 | Rate limits and lockout      | `RateLimitStore` / `LockoutStore`                  | Shared counters and expiry across instances                                                                                               |
 
@@ -7512,9 +7554,12 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   failed comparison re-verifies the password against the credential now stored:
   a login that raced with a reset to a different password is rejected, one that
   raced with another correct login is not.
-- OTP `consume` must atomically return whether this caller consumed the record.
+- OTP `consume` must atomically return whether this caller consumed the record,
+  and a successful claim retires the pair's older codes in the same operation.
   Concurrent issuance is separate: invalidate/create are not one transaction, so
-  serialize requests when only one code may remain outstanding.
+  overlapping requests can leave several codes live until one is verified.
+  Serialize requests, or keep one code per pair in the store, when only one code
+  may remain outstanding.
 - Uniform response bodies do not by themselves make request timing uniform.
   Account lookup, persistence, and email delivery can still expose differences.
   Throttle requests and avoid synchronously waiting for network mail delivery.

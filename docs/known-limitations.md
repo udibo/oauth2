@@ -428,9 +428,12 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   failed comparison re-verifies the password against the credential now stored:
   a login that raced with a reset to a different password is rejected, one that
   raced with another correct login is not.
-- OTP `consume` must atomically return whether this caller consumed the record.
+- OTP `consume` must atomically return whether this caller consumed the record,
+  and a successful claim retires the pair's older codes in the same operation.
   Concurrent issuance is separate: invalidate/create are not one transaction, so
-  serialize requests when only one code may remain outstanding.
+  overlapping requests can leave several codes live until one is verified.
+  Serialize requests, or keep one code per pair in the store, when only one code
+  may remain outstanding.
 - Uniform response bodies do not by themselves make request timing uniform.
   Account lookup, persistence, and email delivery can still expose differences.
   Throttle requests and avoid synchronously waiting for network mail delivery.

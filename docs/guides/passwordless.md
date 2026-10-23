@@ -135,18 +135,50 @@ Contract details a working implementation depends on:
 - **`consume` atomically claims an active code and returns `true` only once.**
   Concurrent and repeated claims return `false`; a read followed by a write is
   insufficient. Use a conditional delete/update with `RETURNING`.
+- **A successful `consume` also retires the pair's older codes.** In the same
+  statement, deactivate every other active record for the claimed code's
+  `(email, purpose)` whose `createdAt` is no later than its own. A sign-in with
+  the newest code then leaves no older code redeemable. Leave newer records and
+  other pairs alone, and retire nothing when the claim fails. In PostgreSQL:
+
+  ```sql
+  WITH claimed AS (
+    DELETE FROM otp_codes WHERE id = $1
+    RETURNING email, purpose, created_at
+  ), retired AS (
+    DELETE FROM otp_codes AS o USING claimed AS c
+    WHERE o.email = c.email AND o.purpose = c.purpose
+      AND o.created_at <= c.created_at AND o.id <> $1
+  )
+  SELECT count(*) > 0 AS claimed FROM claimed;
+  ```
+
+- **`invalidateById` deactivates only the named record.** It discards a code
+  whose send failed, so a code another request delivered survives, older or
+  newer.
 
 - **`recordAttempt` must be atomic and return the new count** —
   `UPDATE … SET attempts = attempts + 1 … RETURNING attempts`. The service
   reserves the attempt _before_ comparing the code, so at most `maxAttempts`
   guesses ever reach the comparison. A read-then-write lets concurrent verifies
   each test a guess against a stale count and blow straight through the budget.
+- **`findActive` returns the active record with the greatest `createdAt`,**
+  ordered by that field rather than by insertion: `consume` retires records by
+  `createdAt`, so ordering by insertion under clock drift leaves the other code
+  redeemable.
 - **`findActive` must still return expired records.** Expiry is the service's
   concern — it needs to see the row to report `expired` distinctly from
   `invalid`.
 - **"Active" means neither consumed nor invalidated.** Deleting the row on
   consume/invalidate is the simplest way to satisfy that; reap expired rows on a
   schedule or opportunistically on insert.
+
+A store may instead keep one active code per `(email, purpose)`, with `create`
+replacing the pair's code, for example as an upsert on a unique index. It
+satisfies the contract with `oneActiveCode: true` (see
+[Testing](testing.md#persistent-storage-contracts)). The cost is availability:
+when overlapping requests each send a code and the later send fails, discarding
+the later code leaves no code the user can enter.
 
 `MemoryOtpStore` implements the contract for development and tests.
 
@@ -298,9 +330,13 @@ export async function confirmPayout(
 Used standalone it takes its own `rateLimiter`; used through `IdentityService`
 it does not, because the service throttles for it. Sequential requests for a
 `(email, purpose)` pair invalidate earlier codes. Invalidation and creation are
-separate operations, so concurrent requests can leave multiple live codes.
-Serialize issuance across instances if your app requires only one outstanding
-code. Atomic `consume` ensures each individual code can succeed only once.
+separate operations, so concurrent requests can leave multiple live codes. A
+successful verify ends that: `consume` of the newest code retires the older
+ones. Until then only the newest can be entered; an older one becomes
+enterable only if the newer is discarded. Serialize issuance
+across instances, or keep one code per pair in the store, if your app requires
+only one outstanding code. Atomic `consume` ensures each individual code can
+succeed only once.
 
 A six-digit code has only one million possible values. Hash it at rest, restrict
 access to the store, and retain it briefly, but do not treat the hash as

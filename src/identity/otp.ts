@@ -79,8 +79,10 @@ export interface OtpStore {
   /** Persist a new active record. */
   create(record: OtpRecord): Promise<void>;
   /**
-   * The most recently created active record for `(email, purpose)`, or `null`.
-   * Must still return an expired record — the service reports expiry itself.
+   * The active record with the greatest `createdAt` for `(email, purpose)`, or
+   * `null` — ordered by `createdAt`, never by insertion, since `consume`
+   * retires records by the same field. Must still return an expired record —
+   * the service reports expiry itself.
    */
   findActive(email: string, purpose: string): Promise<OtpRecord | null>;
   /**
@@ -96,6 +98,13 @@ export interface OtpStore {
    * Atomically consume an active code. Return `true` only to the caller that
    * removed it from the active set; concurrent or repeated claims return
    * `false`. Use a conditional delete/update with RETURNING in persistent stores.
+   *
+   * A successful claim also deactivates every other active record for the same
+   * `(email, purpose)` created no later than the claimed one, in the same
+   * atomic operation, so a sign-in with the newest code leaves no older code
+   * redeemable. Records created after it, other pairs, and — when the claim
+   * fails — every record stay active. A store that keeps one active code per
+   * pair already satisfies this.
    */
   consume(id: string): Promise<boolean>;
   /**
@@ -103,7 +112,8 @@ export interface OtpStore {
    * the send carrying it failed. Separate from {@link OtpStore.consume} so a
    * store that records *why* a code left the active set can tell a redeemed
    * code from a discarded one, and from {@link OtpStore.invalidate} so a
-   * concurrent request's newer code survives. A no-op for an unknown id.
+   * concurrent request's code survives, older or newer. Unlike `consume`, it
+   * deactivates no other record. A no-op for an unknown id.
    */
   invalidateById(id: string): Promise<void>;
   /** Deactivate every active record for `(email, purpose)`. */
@@ -328,7 +338,9 @@ export class EmailOtpService {
    * value — **before** the compare, so concurrent verifies of one live code
    * can't each test a guess against a stale pre-increment count: at most
    * `maxAttempts` guesses ever reach the comparison. Spending the budget
-   * invalidates the code (`locked`); success consumes it (single-use).
+   * invalidates the code (`locked`); success consumes it (single-use) and,
+   * through {@link OtpStore.consume}, retires any older code for the pair that
+   * overlapping requests left active.
    */
   async verify(options: VerifyOtpOptions): Promise<VerifyOtpResult> {
     const { purpose } = options;
@@ -375,7 +387,10 @@ export class MemoryOtpStore implements OtpStore {
     return Promise.resolve();
   }
 
-  /** The newest active record for `(email, purpose)`, expired or not; else `null`. */
+  /**
+   * The active record with the greatest `createdAt` for `(email, purpose)`,
+   * expired or not; else `null`.
+   */
   findActive(email: string, purpose: string): Promise<OtpRecord | null> {
     let latest: OtpRecord | null = null;
     for (const id of this.#active) {
@@ -400,9 +415,26 @@ export class MemoryOtpStore implements OtpStore {
     return Promise.resolve(record.attempts);
   }
 
-  /** Atomically deactivate one active record; return whether it was claimed. */
+  /**
+   * Atomically deactivate one active record and, when it was claimed, the
+   * older active records for its `(email, purpose)`; return whether it was
+   * claimed.
+   */
   consume(id: string): Promise<boolean> {
-    return Promise.resolve(this.#active.delete(id));
+    const claimed = this.#records.get(id);
+    if (!claimed || !this.#active.delete(id)) return Promise.resolve(false);
+    for (const activeId of [...this.#active]) {
+      const record = this.#records.get(activeId);
+      if (
+        record &&
+        record.email === claimed.email &&
+        record.purpose === claimed.purpose &&
+        record.createdAt <= claimed.createdAt
+      ) {
+        this.#active.delete(activeId);
+      }
+    }
+    return Promise.resolve(true);
   }
 
   /** Deactivate one undelivered record; a no-op if the id is unknown. */
