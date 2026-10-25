@@ -3,6 +3,8 @@
  *
  * @module hono/log
  */
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { MiddlewareHandler } from "hono";
 
 /**
@@ -35,15 +37,39 @@ export function redactedRequestTarget(url: string | URL): string {
   return `${pathname}?${query}`;
 }
 
+interface OuterRequest {
+  calls: string[];
+  answered: boolean;
+}
+
+const outerRequest = new AsyncLocalStorage<OuterRequest>();
+
+function summary(
+  method: string,
+  url: string,
+  status: number,
+  started: number,
+): string {
+  return `${method} ${redactedRequestTarget(url)} ${status} ${
+    Date.now() - started
+  }ms`;
+}
+
 /**
- * Logs Hono requests and responses without any query values. Mount before
- * authentication routes so OAuth callback codes and state stay out of logs.
- * Logs method, redacted target, response status, and elapsed milliseconds;
- * does not log headers or bodies. Paths and parameter names remain visible.
+ * Logs each Hono request as one line, written when the response is ready,
+ * without any query values. Mount before authentication routes so OAuth
+ * callback codes and state stay out of logs. Logs method, redacted target,
+ * response status and elapsed milliseconds; does not log headers or bodies.
+ * Paths and parameter names remain visible.
+ *
+ * A request the app dispatches to itself while handling another one (calling
+ * `app.fetch` from a handler or a server-rendered page's loader) is folded into
+ * the outer request's line, in brackets, in completion order, instead of
+ * writing its own. One that completes after the outer response was ready gets
+ * its own line, marked `(in-process)`.
  *
  * @param print Receives each log line; defaults to `console.log`, resolved per line.
- * @returns Middleware emitting a request line and, after downstream completion,
- * a response line.
+ * @returns Middleware emitting one line per request after downstream completion.
  *
  * @example
  * ```ts
@@ -53,6 +79,7 @@ export function redactedRequestTarget(url: string | URL): string {
  * const app = new Hono();
  * app.use(requestLogger());
  * app.get("/", (c) => c.text("Hello"));
+ * // --> GET /?code=[redacted] 200 3ms
  * ```
  */
 export function requestLogger(
@@ -60,12 +87,22 @@ export function requestLogger(
 ): MiddlewareHandler {
   const emit = print ?? ((line: string) => console.log(line));
   return async (c, next) => {
-    const target = redactedRequestTarget(c.req.url);
-    emit(`<-- ${c.req.method} ${target}`);
-    const start = Date.now();
-    await next();
+    const started = Date.now();
+    const outer = outerRequest.getStore();
+    if (outer) {
+      await next();
+      const call = summary(c.req.method, c.req.url, c.res.status, started);
+      if (outer.answered) emit(`--> (in-process) ${call}`);
+      else outer.calls.push(call);
+      return;
+    }
+    const request: OuterRequest = { calls: [], answered: false };
+    await outerRequest.run(request, next);
+    request.answered = true;
+    const calls =
+      request.calls.length === 0 ? "" : ` [${request.calls.join(", ")}]`;
     emit(
-      `--> ${c.req.method} ${target} ${c.res.status} ${Date.now() - start}ms`,
+      `--> ${summary(c.req.method, c.req.url, c.res.status, started)}${calls}`,
     );
   };
 }

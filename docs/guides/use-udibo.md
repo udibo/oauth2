@@ -130,7 +130,7 @@ Behind a TLS-terminating proxy, the BFF sees `http:` request URLs. It builds
 the SSO-logout `post_logout_redirect_uri` from `AUTH_CALLBACK_URL`'s origin, so
 that URI matches the `https` one you registered.
 
-`requestLogger()` redacts every query value on both log lines, including
+`requestLogger()` redacts every query value in its one line per request, including
 callback `code` and `state`. Configure reverse proxies and tracing separately;
 this middleware cannot redact logs emitted by other systems.
 
