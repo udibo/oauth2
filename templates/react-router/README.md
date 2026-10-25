@@ -94,7 +94,8 @@ change.
 
 ```
 server/
-  index.ts               # the server entry: mounts the auth layer, hands the rest to React Router
+  index.ts               # the server entry: logs requests (query values redacted), mounts the auth
+                         #   layer, hands the rest to React Router
   auth.ts                # /oauth2, /auth, /identity, /api as one Hono app (tested with app.request)
   api.ts                 # your protected API (/api/*), guarded by bff.protect()
   config.ts              # zod-validated environment (see below)
@@ -111,7 +112,7 @@ app/
   routes/                # one module per page, each with a colocated *.test.tsx
   lib/identity.ts        # posts the login/signup forms to /identity/*
   oauth2/browser-client.ts  # browser-safe BffClient for the React adapter
-test/                    # shared test setup, MSW server, route-stub renderer
+test/                    # shared test setup, MSW server, route-stub renderer, server-build stub
 ```
 
 ### How a sign-in flows
@@ -199,6 +200,12 @@ The demo shortcuts to replace before shipping:
   `RateLimiter` and `AccountLockout` require a `store`: give them a
   `RateLimitStore` and a `LockoutStore` that every instance shares, or the
   memory stores for a single process only.
+- Keep request logs free of credentials. `server/index.ts` turns off
+  `react-router-hono-server`'s default logger, which prints each raw query
+  string — reset and verification tokens, callback codes — and mounts
+  `requestLogger()` from `@udibo/oauth2/hono/log`, which logs every query value
+  as `[redacted]`. If you switch to your own logger, record the target from
+  `redactedRequestTarget(c.req.url)` instead of the raw URL.
 - Serve over HTTPS (cookies become `Secure` automatically via `ORIGIN`).
 - Decide how long a sign-in lasts. `sessionMaxAgeMs` in
   `server/oauth2/server.ts` is the single place that says so: it stamps the
