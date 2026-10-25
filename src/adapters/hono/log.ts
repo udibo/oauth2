@@ -42,8 +42,6 @@ interface OuterRequest {
   answered: boolean;
 }
 
-const outerRequest = new AsyncLocalStorage<OuterRequest>();
-
 function summary(
   method: string,
   url: string,
@@ -60,13 +58,17 @@ function summary(
  * without any query values. Mount before authentication routes so OAuth
  * callback codes and state stay out of logs. Logs method, redacted target,
  * response status and elapsed milliseconds; does not log headers or bodies.
- * Paths and parameter names remain visible.
+ * Paths and parameter names remain visible. A request whose handler throws
+ * something Hono does not answer (a non-`Error`) is still logged, as `500`.
  *
- * A request the app dispatches to itself while handling another one (calling
- * `app.fetch` from a handler or a server-rendered page's loader) is folded into
- * the outer request's line, in brackets, in completion order, instead of
- * writing its own. One that completes after the outer response was ready gets
- * its own line, marked `(in-process)`.
+ * A request this middleware sees while it is handling another one (the app
+ * calling its own `fetch` from a handler or a server-rendered page's loader) is
+ * folded into the outer request's line, in brackets, in completion order,
+ * instead of writing its own. One that completes after the outer response was
+ * ready gets its own line, marked `(in-process)`; that includes a request
+ * started later from a timer or promise the outer request created. Each
+ * `requestLogger()` call folds only the requests it sees itself, so a sub-app
+ * with its own logger writes to its own sink.
  *
  * @param print Receives each log line; defaults to `console.log`, resolved per line.
  * @returns Middleware emitting one line per request after downstream completion.
@@ -86,23 +88,31 @@ export function requestLogger(
   print?: (line: string) => void,
 ): MiddlewareHandler {
   const emit = print ?? ((line: string) => console.log(line));
+  const outerRequest = new AsyncLocalStorage<OuterRequest>();
   return async (c, next) => {
     const started = Date.now();
     const outer = outerRequest.getStore();
+    let status = 500;
     if (outer) {
-      await next();
-      const call = summary(c.req.method, c.req.url, c.res.status, started);
-      if (outer.answered) emit(`--> (in-process) ${call}`);
-      else outer.calls.push(call);
+      try {
+        await next();
+        status = c.res.status;
+      } finally {
+        const call = summary(c.req.method, c.req.url, status, started);
+        if (outer.answered) emit(`--> (in-process) ${call}`);
+        else outer.calls.push(call);
+      }
       return;
     }
     const request: OuterRequest = { calls: [], answered: false };
-    await outerRequest.run(request, next);
-    request.answered = true;
-    const calls =
-      request.calls.length === 0 ? "" : ` [${request.calls.join(", ")}]`;
-    emit(
-      `--> ${summary(c.req.method, c.req.url, c.res.status, started)}${calls}`,
-    );
+    try {
+      await outerRequest.run(request, next);
+      status = c.res.status;
+    } finally {
+      request.answered = true;
+      const calls =
+        request.calls.length === 0 ? "" : ` [${request.calls.join(", ")}]`;
+      emit(`--> ${summary(c.req.method, c.req.url, status, started)}${calls}`);
+    }
   };
 }

@@ -249,4 +249,67 @@ describe("requestLogger", () => {
       /\[GET \/api\/two 200 \d+ms\]$/,
     );
   });
+
+  it("keeps separate requestLogger instances apart, each writing to its own sink", async () => {
+    const parentLines: string[] = [];
+    const childLines: string[] = [];
+    const child = new Hono();
+    child.use(requestLogger((line) => childLines.push(line)));
+    child.get("/x", (c) => c.text("child"));
+    const parent = new Hono();
+    parent.use(requestLogger((line) => parentLines.push(line)));
+    parent.route("/routed", child);
+    parent.get("/dispatched", async (c) => {
+      await (
+        await child.fetch(new Request("https://app.example.com/x"))
+      ).text();
+      return c.text("parent");
+    });
+
+    await (await parent.request("https://app.example.com/routed/x")).text();
+    await (await parent.request("https://app.example.com/dispatched")).text();
+
+    expect(parentLines).toHaveLength(2);
+    expect(parentLines[0]).toMatch(/^--> GET \/routed\/x 200 \d+ms$/);
+    expect(parentLines[1]).toMatch(/^--> GET \/dispatched 200 \d+ms$/);
+    expect(childLines).toHaveLength(2);
+    expect(childLines[0]).toMatch(/^--> GET \/routed\/x 200 \d+ms$/);
+    expect(childLines[1]).toMatch(/^--> GET \/x 200 \d+ms$/);
+  });
+
+  it("writes a 500 line for a request whose handler throws something other than an Error", async () => {
+    const { lines, app } = captured();
+    app.get("/throws", () => {
+      throw "not an Error";
+    });
+
+    await expect(
+      app.request("https://app.example.com/throws?token=secret"),
+    ).rejects.toBe("not an Error");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/throws\?token=\[redacted\] 500 \d+ms$/,
+    );
+  });
+
+  it("folds an in-process request that rejects as a 500", async () => {
+    const { lines, app } = captured();
+    app.get("/api/throws", () => {
+      throw "not an Error";
+    });
+    app.get("/page", async (c) => {
+      await Promise.resolve(
+        app.fetch(new Request("https://app.example.com/api/throws")),
+      ).catch(() => undefined);
+      return c.text("page");
+    });
+
+    await (await app.request("https://app.example.com/page")).text();
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/page 200 \d+ms \[GET \/api\/throws 500 \d+ms\]$/,
+    );
+  });
 });
