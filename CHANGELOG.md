@@ -1,3 +1,9 @@
+## [0.40.1](https://github.com/udibo/oauth2/compare/0.40.0...0.40.1) (2026-10-25)
+
+### Bug Fixes
+
+* **templates:** redact query values in starter request logs ([#165](https://github.com/udibo/oauth2/issues/165)) ([b7fd93f](https://github.com/udibo/oauth2/commit/b7fd93f726cfaf7bcd8fe70051329a32bdb25169)), closes [#164](https://github.com/udibo/oauth2/issues/164)
+
 ## [0.40.0](https://github.com/udibo/oauth2/compare/0.39.0...0.40.0) (2026-10-23)
 
 ### ⚠ BREAKING CHANGES
