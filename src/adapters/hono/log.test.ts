@@ -203,7 +203,8 @@ describe("requestLogger", () => {
     );
   });
 
-  it("gives an in-process request that outlives the outer response a line of its own", async () => {
+  it("gives an in-process request that outlives the outer response a redacted line of its own", async () => {
+    const secret = crypto.randomUUID();
     const { lines, app } = captured();
     app.get("/api/slow", async (c) => {
       await setTimeout(20);
@@ -212,7 +213,9 @@ describe("requestLogger", () => {
     let streamed: Promise<Response> | undefined;
     app.get("/page", (c) => {
       streamed = Promise.resolve(
-        app.fetch(new Request("https://app.example.com/api/slow")),
+        app.fetch(
+          new Request(`https://app.example.com/api/slow?token=${secret}`),
+        ),
       );
       return c.text("shell");
     });
@@ -222,7 +225,10 @@ describe("requestLogger", () => {
 
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^--> GET \/page 200 \d+ms$/);
-    expect(lines[1]).toMatch(/^--> \(in-process\) GET \/api\/slow 200 \d+ms$/);
+    expect(lines.join("\n")).not.toContain(secret);
+    expect(lines[1]).toMatch(
+      /^--> \(in-process\) GET \/api\/slow\?token=\[redacted\] 200 \d+ms$/,
+    );
   });
 
   it("keeps concurrent requests' in-process calls apart", async () => {
