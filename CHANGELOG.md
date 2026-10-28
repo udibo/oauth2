@@ -1,3 +1,19 @@
+## [0.41.0](https://github.com/udibo/oauth2/compare/0.40.1...0.41.0) (2026-10-28)
+
+### ⚠ BREAKING CHANGES
+
+* **hono:** `requestLogger()` writes one line per request, `-->
+METHOD target STATUS Nms`, when the response is ready, instead of a
+`<--` request line followed by a `-->` response line. Requests the app
+dispatches to itself while handling another are folded into the outer
+request's line in brackets. Anything that parses `<--` lines must read
+the `-->` line instead, which carries the same method and redacted
+target plus the status and duration.
+
+### Features
+
+* **hono:** log each request as one line ([#163](https://github.com/udibo/oauth2/issues/163)) ([5da00c1](https://github.com/udibo/oauth2/commit/5da00c13d3cbd4308a1de7239b1245a3cace2acf))
+
 ## [0.40.1](https://github.com/udibo/oauth2/compare/0.40.0...0.40.1) (2026-10-25)
 
 ### Bug Fixes
