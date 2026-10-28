@@ -8,7 +8,9 @@ application-owned responsibilities.
 
 OAuth callbacks carry authorization codes and state in query parameters. Mount
 `requestLogger()` from `@udibo/oauth2/hono/log` before authentication routes. It
-replaces every query value with `[redacted]` in request and response lines. For
+writes one line per request with every query value replaced by `[redacted]`,
+including the requests a handler dispatches to the app in process, which it
+folds into the outer request's line. For
 other loggers or telemetry, use `redactedRequestTarget(url)` before recording
 the URL.
 

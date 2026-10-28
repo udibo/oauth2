@@ -1,4 +1,6 @@
-import { assert, describe, expect, it, vi } from "vitest";
+import { setTimeout } from "node:timers/promises";
+
+import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { redactedRequestTarget, requestLogger } from "./log.ts";
@@ -84,7 +86,7 @@ describe("requestLogger", () => {
     return { lines, app };
   }
 
-  it("logs the request and the response without the reset token", async () => {
+  it("logs one line per request, without the reset token", async () => {
     const secret = crypto.randomUUID();
     const { lines, app } = captured();
 
@@ -98,14 +100,13 @@ describe("requestLogger", () => {
       lines.some((line) => line.includes(secret)),
       `the reset token reached the log: ${lines.join(" | ")}`,
     ).toBeFalsy();
-    expect(lines[0]).toStrictEqual("<-- GET /reset-password?token=[redacted]");
-    assert(
-      lines[1]?.startsWith("--> GET /reset-password?token=[redacted] 200 "),
-      `the response line must carry the same redacted target: ${lines[1]}`,
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/reset-password\?token=\[redacted\] 200 \d+ms$/,
     );
   });
 
-  it("logs the request and the response without the verification token", async () => {
+  it("logs the response status without the verification token", async () => {
     const secret = crypto.randomUUID();
     const { lines, app } = captured();
 
@@ -119,10 +120,9 @@ describe("requestLogger", () => {
       lines.some((line) => line.includes(secret)),
       `the verification token reached the log: ${lines.join(" | ")}`,
     ).toBeFalsy();
-    expect(lines[0]).toStrictEqual("<-- GET /verify-email?token=[redacted]");
-    assert(
-      lines[1]?.startsWith("--> GET /verify-email?token=[redacted] 302 "),
-      `the response line must carry the same redacted target: ${lines[1]}`,
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/verify-email\?token=\[redacted\] 302 \d+ms$/,
     );
   });
 
@@ -137,7 +137,7 @@ describe("requestLogger", () => {
     });
     await res.text();
 
-    expect(lines[0]).toStrictEqual("<-- POST /reset-password");
+    expect(lines[0]).toMatch(/^--> POST \/reset-password 200 \d+ms$/);
   });
 
   it("defaults to console.log, resolved per line so a stub still sees it", async () => {
@@ -158,6 +158,164 @@ describe("requestLogger", () => {
     );
     await res.text();
 
-    expect(lines[0]).toStrictEqual("<-- GET /reset-password?token=[redacted]");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^--> GET \/reset-password\?token=\[redacted\] /);
+  });
+
+  it("folds the requests a handler dispatches in process into its own line, in completion order", async () => {
+    const { lines, app } = captured();
+    app.get("/api/shell", (c) => c.json({}));
+    app.get("/api/missing", (c) => c.json({}, 404));
+    app.get("/page", async (c) => {
+      await app.fetch(new Request("https://app.example.com/api/shell"));
+      await app.fetch(new Request("https://app.example.com/api/missing"));
+      return c.html("<p>page</p>");
+    });
+
+    await (await app.request("https://app.example.com/page")).text();
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/page 200 \d+ms \[GET \/api\/shell 200 \d+ms, GET \/api\/missing 404 \d+ms\]$/,
+    );
+  });
+
+  it("redacts the query values of every request folded into a line", async () => {
+    const secret = crypto.randomUUID();
+    const { lines, app } = captured();
+    app.get("/api/verify", (c) => c.json({}));
+    app.get("/confirm", async (c) => {
+      await app.fetch(
+        new Request(
+          `https://app.example.com/api/verify?token=${secret}&token=again`,
+        ),
+      );
+      return c.text("confirmed");
+    });
+
+    await (
+      await app.request(`https://app.example.com/confirm?token=${secret}`)
+    ).text();
+
+    expect(lines.join("\n")).not.toContain(secret);
+    expect(lines[0]).toMatch(
+      /^--> GET \/confirm\?token=\[redacted\] 200 \d+ms \[GET \/api\/verify\?token=\[redacted\]&token=\[redacted\] 200 \d+ms\]$/,
+    );
+  });
+
+  it("gives an in-process request that outlives the outer response a redacted line of its own", async () => {
+    const secret = crypto.randomUUID();
+    const { lines, app } = captured();
+    app.get("/api/slow", async (c) => {
+      await setTimeout(20);
+      return c.json({});
+    });
+    let streamed: Promise<Response> | undefined;
+    app.get("/page", (c) => {
+      streamed = Promise.resolve(
+        app.fetch(
+          new Request(`https://app.example.com/api/slow?token=${secret}`),
+        ),
+      );
+      return c.text("shell");
+    });
+
+    await (await app.request("https://app.example.com/page")).text();
+    await (await streamed)?.text();
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^--> GET \/page 200 \d+ms$/);
+    expect(lines.join("\n")).not.toContain(secret);
+    expect(lines[1]).toMatch(
+      /^--> \(in-process\) GET \/api\/slow\?token=\[redacted\] 200 \d+ms$/,
+    );
+  });
+
+  it("keeps concurrent requests' in-process calls apart", async () => {
+    const { lines, app } = captured();
+    app.get("/api/:name", (c) => c.json({}));
+    app.get("/page/:name", async (c) => {
+      await setTimeout(5);
+      await app.fetch(
+        new Request(`https://app.example.com/api/${c.req.param("name")}`),
+      );
+      return c.text("page");
+    });
+
+    await Promise.all([
+      app.request("https://app.example.com/page/one"),
+      app.request("https://app.example.com/page/two"),
+    ]);
+
+    expect(lines).toHaveLength(2);
+    expect(lines.find((line) => line.startsWith("--> GET /page/one "))).toMatch(
+      /\[GET \/api\/one 200 \d+ms\]$/,
+    );
+    expect(lines.find((line) => line.startsWith("--> GET /page/two "))).toMatch(
+      /\[GET \/api\/two 200 \d+ms\]$/,
+    );
+  });
+
+  it("keeps separate requestLogger instances apart, each writing to its own sink", async () => {
+    const parentLines: string[] = [];
+    const childLines: string[] = [];
+    const child = new Hono();
+    child.use(requestLogger((line) => childLines.push(line)));
+    child.get("/x", (c) => c.text("child"));
+    const parent = new Hono();
+    parent.use(requestLogger((line) => parentLines.push(line)));
+    parent.route("/routed", child);
+    parent.get("/dispatched", async (c) => {
+      await (
+        await child.fetch(new Request("https://app.example.com/x"))
+      ).text();
+      return c.text("parent");
+    });
+
+    await (await parent.request("https://app.example.com/routed/x")).text();
+    await (await parent.request("https://app.example.com/dispatched")).text();
+
+    expect(parentLines).toHaveLength(2);
+    expect(parentLines[0]).toMatch(/^--> GET \/routed\/x 200 \d+ms$/);
+    expect(parentLines[1]).toMatch(/^--> GET \/dispatched 200 \d+ms$/);
+    expect(childLines).toHaveLength(2);
+    expect(childLines[0]).toMatch(/^--> GET \/routed\/x 200 \d+ms$/);
+    expect(childLines[1]).toMatch(/^--> GET \/x 200 \d+ms$/);
+  });
+
+  it("writes a 500 line for a request whose handler throws something other than an Error", async () => {
+    const { lines, app } = captured();
+    app.get("/throws", () => {
+      throw "not an Error";
+    });
+
+    await expect(
+      app.request("https://app.example.com/throws?token=secret"),
+    ).rejects.toBe("not an Error");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/throws\?token=\[redacted\] 500 \d+ms$/,
+    );
+  });
+
+  it("folds an in-process request that rejects as a 500", async () => {
+    const { lines, app } = captured();
+    app.get("/api/throws", () => {
+      throw "not an Error";
+    });
+    app.get("/page", async (c) => {
+      await Promise.resolve(
+        app.fetch(new Request("https://app.example.com/api/throws")),
+      ).catch(() => undefined);
+      return c.text("page");
+    });
+
+    await (await app.request("https://app.example.com/page")).text();
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^--> GET \/page 200 \d+ms \[GET \/api\/throws 500 \d+ms\]$/,
+    );
   });
 });
