@@ -293,6 +293,17 @@ export const UnsupportedResponseTypeError: OAuth2ErrorClass =
   });
 
 /**
+ * The requested resource is missing, malformed or not allowed by the server's
+ * resource policy (RFC 8707 section 2). Descriptions should not echo targets.
+ */
+export const InvalidTargetError: OAuth2ErrorClass =
+  createHttpErrorClass<OAuth2ProblemDetailsExtensions>({
+    name: "Invalid Target",
+    status: 400,
+    extensions: { error: "invalid_target" },
+  });
+
+/**
  * The requested scope is invalid, unknown, or malformed.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6749#section-5.2

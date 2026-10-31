@@ -323,6 +323,8 @@ export function createJwtAccessTokenGenerator(options: {
    * The `aud` claim — per RFC 9068 an identifier of the resource server(s)
    * the token is intended for (e.g. `https://api.example.com`). Defaults to
    * the client id, which single-resource validators must then accept.
+   * An accepted resource passed as the returned function's sixth argument
+   * overrides this default, restricting the JWT to that exact target.
    */
   audience?: string;
   /**
@@ -360,10 +362,18 @@ export function createJwtAccessTokenGenerator(options: {
   scope?: { toString(): string } | null,
   authenticationContext?: AuthenticationContext,
   expiresAt?: Date,
+  resource?: string,
 ) => Promise<string> {
   const lifetime = options.lifetimeSeconds ?? 3600;
   const subjectOf = options.subjectOf ?? defaultSubjectOf;
-  return async (client, user, scope, authenticationContext, expiresAt) => {
+  return async (
+    client,
+    user,
+    scope,
+    authenticationContext,
+    expiresAt,
+    resource,
+  ) => {
     const event = user
       ? snapshotAuthenticationContext(authenticationContext)
       : undefined;
@@ -381,7 +391,7 @@ export function createJwtAccessTokenGenerator(options: {
       iss: options.issuer,
       sub: user ? subjectOf(user) : client.id,
       client_id: client.id,
-      aud: options.audience ?? client.id,
+      aud: resource ?? options.audience ?? client.id,
       iat: now,
       exp: Math.min(now + lifetime, storedExp),
       jti: crypto.randomUUID(),

@@ -69,6 +69,25 @@ export interface TokenServiceInterface<
   ): Promise<Scope | null | undefined | false>;
 
   /**
+   * Opts client-credentials issuance into one RFC 8707 resource per token.
+   * Called after client authentication and scope acceptance, even when no
+   * resource was supplied. Only `true` accepts; other results refuse with
+   * `invalid_target`. The URI is validated and passed unchanged; decide
+   * resource availability, client authority and scope compatibility here.
+   *
+   * Leave this method absent to preserve legacy extension-parameter behavior.
+   * Enabling it requires persisting `Token.resource` and forwarding the sixth
+   * `generateAccessToken` argument to signed-token generation. Other grants
+   * do not support resource indicators yet.
+   */
+  acceptedResource?(
+    client: Client,
+    user: User | undefined,
+    resource: string | undefined,
+    scope?: Scope | null,
+  ): Promise<boolean>;
+
+  /**
    * Generates an access token string. `user` is `undefined` for a client
    * acting as its own resource owner (client credentials) — a signed-token
    * generator names the client as the subject then, per RFC 9068 §2.2.
@@ -79,6 +98,9 @@ export interface TokenServiceInterface<
    * a signed token's `exp` never outlives what the server itself honors; the
    * grants always pass it, and a wrapper that drops it leaves offline
    * verifiers accepting the token past its stored expiry.
+   * `resource`, when supplied by an opted-in machine grant, is the accepted
+   * target URI. A signed token must restrict its audience to this value;
+   * dropping it can issue a token for a different API.
    */
   generateAccessToken(
     client: Client,
@@ -86,6 +108,7 @@ export interface TokenServiceInterface<
     scope?: Scope | null,
     authenticationContext?: AuthenticationContext,
     expiresAt?: Date,
+    resource?: string,
   ): Promise<string>;
 
   /** Generates a refresh token string. */
@@ -151,6 +174,8 @@ export interface TokenServiceInterface<
    * Persists either token kind and returns the saved record. Preserve
    * `authenticationContext` on save and every read, including refresh and
    * revoked records; never reconstruct it from a user's current session.
+   * Preserve `resource` exactly too when resource policy is enabled. The
+   * client-credentials grant refuses a saved result that loses its binding.
    */
   save(
     token: Token<Client, User, Scope> | RefreshToken<Client, User, Scope>,
@@ -466,6 +491,7 @@ export abstract class AbstractTokenService<
     _scope?: Scope | null,
     _authenticationContext?: AuthenticationContext,
     _expiresAt?: Date,
+    _resource?: string,
   ): Promise<string> {
     return Promise.resolve(crypto.randomUUID());
   }

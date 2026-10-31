@@ -12,6 +12,7 @@ import {
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
+  InvalidTargetError,
 } from "../../errors.ts";
 import {
   AbstractGrant,
@@ -167,6 +168,8 @@ export class RefreshTokenGrant<
    * claimed it.
    * @throws {InvalidClientError} If the token was issued to another client.
    * @throws {InvalidScopeError} If the requested scope exceeds the original grant.
+   * @throws {InvalidTargetError} If a stored parent is resource-bound; refreshing
+   * such a grant is unsupported and refuses before spending the parent.
    */
   async token(
     request: Request,
@@ -218,6 +221,12 @@ export class RefreshTokenGrant<
       throw new InvalidClientError(
         "refresh_token was issued to another client",
       );
+    }
+
+    if (currentToken.resource !== undefined) {
+      // Resource-bound refresh is not implemented. Never spend the parent or
+      // issue a successor that silently loses its audience restriction.
+      throw new InvalidTargetError("resource-bound refresh is not supported");
     }
 
     // RFC 6749 §6: a requested scope may only narrow, never exceed, the original grant.

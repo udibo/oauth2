@@ -245,7 +245,9 @@ export abstract class AbstractGrant<
    * for tokens with no user. `familyExpiresAt` is the ceiling of an existing
    * rotation family the token joins (the refresh grant passes it); the
    * expiries are clamped to it before the access token string is generated,
-   * so a signed token's `exp` matches the stored expiry.
+   * so a signed token's `exp` matches the stored expiry. `resource` is the
+   * exact URI accepted by the client-credentials resource policy; it is
+   * retained in the token and passed to audience-aware generation.
    */
   async generateToken(
     client: Client,
@@ -254,12 +256,14 @@ export abstract class AbstractGrant<
     tokenService: TokenServiceInterface<Client, User, Scope>,
     authenticationContext?: AuthenticationContext,
     familyExpiresAt?: Date,
+    resource?: string,
   ): Promise<Token<Client, User, Scope>> {
     const event =
       user === undefined
         ? undefined
         : snapshotAuthenticationContext(authenticationContext);
     const token: Token<Client, User, Scope> = { accessToken: "", client };
+    if (resource !== undefined) token.resource = resource;
 
     if (event) token.authenticationContext = event;
 
@@ -318,13 +322,17 @@ export abstract class AbstractGrant<
 
     if (ceiling) this.capAtFamilyExpiry(result, ceiling);
 
-    result.accessToken = await tokenService.generateAccessToken(
+    const generation = [
       client,
       user,
       scope,
       event,
       result.accessTokenExpiresAt,
-    );
+    ] as const;
+    result.accessToken =
+      resource === undefined
+        ? await tokenService.generateAccessToken(...generation)
+        : await tokenService.generateAccessToken(...generation, resource);
 
     return result;
   }

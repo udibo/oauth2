@@ -90,6 +90,7 @@ runTokenServiceContractTests<TestClient, TestUser>({
   addClient: (svc, client) =>
     (svc as MemoryClientService<TestClient, TestUser>).add(client),
   supportedScope: "openid",
+  supportedResource: "https://api.example.com/inventory",
 });
 
 let serial = 0;

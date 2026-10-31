@@ -220,6 +220,15 @@ has these limits:
 
 ## Deliberate deviations (stricter than spec)
 
+- **Resource indicators are opt-in and machine-only.** Implement
+  `TokenServiceInterface.acceptedResource` for single-resource
+  `client_credentials` issuance. Without it, `resource` remains an ignored
+  extension. Multiple resources and resource-bound authorization codes, device
+  flows, password grants and refreshes are unsupported. A stored bound refresh
+  parent is refused before rotation. See
+  [resource-bound machine tokens](guides/become-an-oauth-provider.md#restrict-machine-tokens-to-one-resource)
+  for policy, token-store and audience requirements.
+
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists
   `state` as RECOMMENDED; this server rejects authorize requests without it
   (`invalid_request`). This is a deliberate CSRF-hardening choice. PKCE also
