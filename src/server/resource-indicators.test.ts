@@ -156,6 +156,23 @@ for (const transport of ["core", "hono"] as const) {
       ["Unicode IRI", [`${RESOURCE}/é`]],
       ["raw brackets in path", [`${RESOURCE}/[private]`]],
       ["invalid IPv6", ["https://[invalid]/inventory"]],
+      ["unclosed IP literal", ["https://[2001:db8::1/inventory"]],
+      [
+        "non-numeric IP literal port",
+        ["https://[2001:db8::1]:https/inventory"],
+      ],
+      ["trailing IP literal text", ["https://[2001:db8::1]suffix/inventory"]],
+      [
+        "malformed userinfo escape",
+        ["https://user%ZZ@api.example.com/inventory"],
+      ],
+      ["raw userinfo bracket", ["https://user[one]@api.example.com/inventory"]],
+      ["malformed host escape", ["https://api%ZZ.example.com:8443/inventory"]],
+      [
+        "non-numeric named-host port",
+        ["https://api.example.com:https/inventory"],
+      ],
+      ["malformed query escape", [`${RESOURCE}?filter=%ZZ`]],
       [
         "repeated userinfo separator",
         ["https://one@two@api.example.com/inventory"],
@@ -254,6 +271,13 @@ describe("resource policy and persisted authority", () => {
   for (const target of [
     "https://api.example.com/a%2Fb?version=1&filter=a/b?c",
     "https://[2001:db8::1]:8443/inventory",
+    "https://[v1.fe80:inventory]:8443/inventory",
+    "https://api.example.com",
+    "https://api.example.com?version=1",
+    "https://api.example.com:8443/inventory",
+    "https://api.example.com:/inventory",
+    "https://user:pass@api.example.com/inventory",
+    "https://user%40example.com@api.example.com/inventory",
     "https://api.example.com/%C3%A9",
     "urn:example:inventory?version=1",
   ]) {
@@ -268,6 +292,14 @@ describe("resource policy and persisted authority", () => {
         ((await f.tokenService.getToken(body.access_token)) as BoundToken)
           ?.resource,
       ).toBe(target);
+      expect(f.policy).toHaveBeenCalledExactlyOnceWith(
+        CLIENT,
+        undefined,
+        target,
+        expect.any(BasicScope),
+      );
+      expect(f.generated.mock.calls[0]?.at(5)).toBe(target);
+      expect(f.saved.mock.calls[0]?.[0].resource).toBe(target);
     });
   }
 
