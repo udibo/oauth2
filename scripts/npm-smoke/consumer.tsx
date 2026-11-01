@@ -50,8 +50,17 @@ import {
   createMockBffClient,
   MockOAuth2Provider,
 } from "@udibo/oauth2/react/testing";
-import { BasicScope, isOAuth2Error } from "@udibo/oauth2/server";
-import { AuthorizationServer } from "@udibo/oauth2/server/authorization";
+import {
+  BasicScope,
+  InvalidTargetError,
+  isOAuth2Error,
+  type Token,
+} from "@udibo/oauth2/server";
+import {
+  AuthorizationServer,
+  createJwtAccessTokenGenerator,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
 import { isPublicSuffix } from "@udibo/oauth2/server/public-suffix";
 import { BEARER_TOKEN, ResourceServer } from "@udibo/oauth2/server/resource";
 import { loginContinuation, safeReturnTo } from "@udibo/oauth2/url";
@@ -142,3 +151,14 @@ export const returnTo: typeof safeReturnTo = safeReturnTo;
 export const fakeTenantFactory: typeof createFakeTenant = createFakeTenant;
 export const lockoutContract: typeof runLockoutStoreContractTests =
   runLockoutStoreContractTests;
+
+/** Public resource error and optional policy/storage/generator types resolve from the packed entrypoints. */
+export const invalidTargetErrorCtor: typeof InvalidTargetError =
+  InvalidTargetError;
+export type StoredResource = Token<{ id: string }, unknown>["resource"];
+export type ResourcePolicy = NonNullable<
+  TokenServiceInterface<{ id: string }, unknown>["acceptedResource"]
+>;
+export type SignedResourceArgument = Parameters<
+  ReturnType<typeof createJwtAccessTokenGenerator>
+>[5];

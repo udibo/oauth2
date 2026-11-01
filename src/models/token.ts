@@ -23,6 +23,13 @@ export interface Token<
   client: Client;
   /** The user this token was issued for (if applicable). */
   user?: User;
+  /**
+   * Exact resource URI accepted by an opted-in client-credentials policy
+   * (RFC 8707). Persist and restore it on every token read; never derive it
+   * from a later request or the client's current configuration. Absent for
+   * legacy issuance. Resource authority still belongs to the application.
+   */
+  resource?: string;
   /** The scope granted to this token. */
   scope?: Scope | null;
   /**

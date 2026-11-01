@@ -47,6 +47,7 @@ export {
   InvalidRequestError,
   InvalidScopeError,
   InvalidTokenError,
+  InvalidTargetError,
   isOAuth2Error,
   LoginRequiredError,
   OAuth2Error,

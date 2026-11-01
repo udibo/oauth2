@@ -75,6 +75,13 @@ export interface TokenServiceContractOptions<
    */
   supportedScope?: string;
   /**
+   * A resource URI whose exact token save/read round trip to check. Supply it
+   * when this store supports opted-in resource-bound machine issuance; leave
+   * absent for stores that only support legacy issuance. This tests storage,
+   * not the application's resource authorization policy.
+   */
+  supportedResource?: string;
+  /**
    * Returns a new rotation-family id the store accepts as a
    * {@linkcode RefreshToken.familyId}, distinct on every call. The family cases
    * call it for each family they create and for a family that was never
@@ -218,6 +225,30 @@ export function runTokenServiceContractTests<
         : await tokenService.revoke(current);
       assert(claimed);
       await tokenService.save(next);
+    }
+
+    if (options.supportedResource !== undefined) {
+      for (const withUser of [false, true]) {
+        it(`preserves the exact resource through save and lookup with${withUser ? "" : "out"} a user`, async () => {
+          const resource = options.supportedResource!;
+          const token: Token<C, U, S> = {
+            accessToken: await tokenService.generateAccessToken(
+              client,
+              withUser ? user : undefined,
+            ),
+            client,
+            scope: makeScope(supportedScope),
+            resource,
+            ...(withUser ? { user } : {}),
+          };
+          expect((await tokenService.save(token)).resource).toBe(resource);
+          const read = await tokenService.getToken(token.accessToken);
+          expect(
+            read?.resource,
+            "a store must retain the accepted target, not just return its input from save",
+          ).toBe(resource);
+        });
+      }
     }
 
     describe("generateAccessToken / generateRefreshToken", () => {

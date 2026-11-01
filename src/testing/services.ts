@@ -271,6 +271,7 @@ export interface MemoryTokenServiceOptions<
 }
 
 interface StoredToken<S extends AbstractScope> {
+  resource?: string;
   authenticationContext?: AuthenticationContext;
   accessTokenHash: string;
   accessTokenExpiresAt?: Date;
@@ -475,6 +476,7 @@ export class MemoryTokenService<
         stored.authenticationContext,
       ),
     };
+    if (stored.resource !== undefined) token.resource = stored.resource;
     if (stored.refreshTokenHash) {
       return {
         ...token,
@@ -545,6 +547,7 @@ export class MemoryTokenService<
         token.authenticationContext,
       ),
     };
+    if (token.resource !== undefined) stored.resource = token.resource;
     if (token.code) stored.codeHash = await sha256Hash(token.code);
     if (token.codeVerifierHash) {
       stored.codeVerifierHash = token.codeVerifierHash;

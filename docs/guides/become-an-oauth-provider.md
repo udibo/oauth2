@@ -141,6 +141,61 @@ const authServer = new HonoAuthorizationServer<AppClient, AppUser>({
 
 For machine-to-machine callers, add
 `client_credentials: new ClientCredentialsGrant({ resolve: () => ({ clientService, tokenService }) })`.
+
+### Restrict machine tokens to one resource
+
+Implement the optional `tokenService.acceptedResource` method to opt the
+client-credentials grant into single-resource issuance from
+[RFC 8707](https://www.rfc-editor.org/rfc/rfc8707.html). After authenticating the
+client and accepting its scope, the grant validates the form's `resource` as
+one absolute URI without a fragment, preserves its spelling, and calls the
+policy with the final accepted scope. Only `true` accepts. It calls the policy
+with `undefined` when no resource was supplied, so you can require a target
+for selected clients or scopes.
+
+```ts
+import type { TokenServiceInterface } from "@udibo/oauth2/server/authorization";
+
+interface InventoryClient { id: string }
+interface ServiceAccount { id: string }
+declare const tokenService: TokenServiceInterface<InventoryClient, ServiceAccount>;
+declare function currentResourceAccess(
+  clientId: string,
+  serviceAccountId: string | undefined,
+  resource: string,
+  scopes: readonly string[],
+): Promise<boolean>;
+
+tokenService.acceptedResource = async (client, user, resource, scope) =>
+  resource !== undefined &&
+  await currentResourceAccess(client.id, user?.id, resource, [...(scope ?? [])]);
+```
+
+`currentResourceAccess` is your policy: check the client's current authority,
+resource availability and allowed scopes together. A resource URI is an
+identifier, never a URL the library fetches. A multi-tenant API should use a
+resource specific to the destination tenant, for example
+`https://api.example.com/workspaces/one`. Multiple values, even equal repeats,
+and malformed values are refused with `invalid_target`. With no policy method,
+`resource` remains an ignored extension as before; such issuance does not
+claim a resource binding. The token endpoint still accepts only form-encoded
+requests.
+
+The token store must persist `Token.resource` exactly and restore it on every
+read. The grant checks the saved result, and the token-service contract suite's
+`supportedResource` option checks the actual save/lookup round trip. A custom
+`generateAccessToken` wrapper must forward its optional sixth `resource`
+argument. `createJwtAccessTokenGenerator` uses it as `aud` ahead of the configured
+default audience. Introspection emits the persisted target as `aud`, ahead of
+extension claims. An opaque-token API must compare the stored resource; a JWT
+API must validate issuer and audience. Both still enforce current grants and
+scope: binding a token does not itself authorize a resource.
+
+This support is for the client-credentials grant only. It issues no refresh
+token. A refresh parent that already carries a resource is refused before
+rotation, rather than issuing a successor that loses the binding. Other grants,
+multiple-resource issuance and assistant authorization are outside this feature.
+
 RFC 6749 §4.4 limits that grant to confidential clients, so it refuses any
 request that presents no client secret with `401 invalid_client` — a public
 client, or a confidential client that left its secret out. Register each machine

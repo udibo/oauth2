@@ -2091,6 +2091,7 @@ export class AuthorizationServer<
         if (tokenType === "access_token") {
           response.token_type = "Bearer";
         }
+        if (token.resource !== undefined) response.aud = token.resource;
 
         if (token.scope) {
           response.scope = token.scope.toString();

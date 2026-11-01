@@ -7,7 +7,12 @@
 import type { ClientInterface } from "../../models/client.ts";
 import type { Token } from "../../models/token.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
-import { InvalidClientError } from "../../errors.ts";
+import {
+  InvalidClientError,
+  InvalidTargetError,
+  ServerError,
+} from "../../errors.ts";
+import { resourceIndicatorOf } from "../_resource-indicator.ts";
 import { authenticateClientCredentials } from "../client-authentication.ts";
 import {
   AbstractGrant,
@@ -120,7 +125,13 @@ export class ClientCredentialsGrant<
    * `ClientServiceInterface.getUser` resolves for the client, and is left
    * unset when it resolves nothing — a user-less machine token, not a failure.
    *
+   * Resource indicators are opt-in through `tokenService.acceptedResource`:
+   * its presence validates one absolute resource URI and requires explicit
+   * policy acceptance. Its absence preserves legacy extension handling.
+   *
    * @throws {InvalidScopeError} If the requested scope is rejected.
+   * @throws {InvalidTargetError} If opted-in resource validation or policy refuses.
+   * @throws {ServerError} If storage drops or changes an accepted target.
    */
   async token(
     request: Request,
@@ -144,7 +155,36 @@ export class ClientCredentialsGrant<
     );
     scope = acceptedScope ?? undefined;
 
-    const token = await this.generateToken(client, user, scope, tokenService);
-    return await tokenService.save(token);
+    let resource: string | undefined;
+    const resourcePolicy = tokenService.acceptedResource;
+    if (resourcePolicy !== undefined) {
+      resource = resourceIndicatorOf(body);
+      if (
+        (await resourcePolicy.call(
+          tokenService,
+          client,
+          user,
+          resource,
+          scope,
+        )) !== true
+      ) {
+        throw new InvalidTargetError("invalid resource");
+      }
+    }
+
+    const token = await this.generateToken(
+      client,
+      user,
+      scope,
+      tokenService,
+      undefined,
+      undefined,
+      resource,
+    );
+    const saved = await tokenService.save(token);
+    if (resourcePolicy !== undefined && saved.resource !== resource) {
+      throw new ServerError("token storage did not preserve resource");
+    }
+    return saved;
   }
 }
