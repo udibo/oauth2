@@ -1,3 +1,9 @@
+## [0.43.0](https://github.com/udibo/oauth2/compare/0.42.0...0.43.0) (2026-11-01)
+
+### Features
+
+* **identity:** add passkeys as a first and second factor ([#167](https://github.com/udibo/oauth2/issues/167)) ([67062dc](https://github.com/udibo/oauth2/commit/67062dc8af89d81eacdf0468704d7f9a2315128c))
+
 ## [0.42.0](https://github.com/udibo/oauth2/compare/0.41.0...0.42.0) (2026-11-01)
 
 ### Features
