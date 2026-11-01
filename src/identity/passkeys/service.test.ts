@@ -1,7 +1,8 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { FakeTime } from "../../_test_fake-time.ts";
 import { rejection, thrown } from "../../_test_assert.ts";
 import { TestPasskeyAuthenticator } from "../../testing/passkey-authenticator.ts";
+import { base64urlDecode, base64urlEncode } from "../../utils/crypto.ts";
 import { IdentityError } from "../errors.ts";
 import type { IdentityEvent } from "../events.ts";
 import { MemoryRateLimitStore, RateLimiter } from "../rate-limit.ts";
@@ -280,6 +281,22 @@ describe("PasskeyService registration", () => {
     expect(result).toStrictEqual({ registered: false, reason: "invalid" });
   });
 
+  it("rejects a relying party with no origins", async () => {
+    const { passkeys } = setup();
+    await rejection(
+      () =>
+        passkeys.startRegistration({
+          relyingParty: { ...RP, origins: [] },
+          user: ADA,
+        }),
+      TypeError,
+    );
+    await rejection(
+      () => passkeys.startAuthentication({ relyingParty: { ...RP, id: "" } }),
+      TypeError,
+    );
+  });
+
   it("rejects user ids that cannot be a user handle", async () => {
     const { passkeys } = setup();
     const error = await rejection(
@@ -404,6 +421,49 @@ describe("PasskeyService authentication", () => {
         response,
       }),
     ).toStrictEqual({ valid: false, reason: "expired_challenge" });
+  });
+
+  it("refuses an assertion whose signature does not verify", async () => {
+    const { passkeys } = setup();
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    const { ceremonyId, options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+    });
+    const response = await authenticator.authenticate(options);
+    const signature = base64urlDecode(response.response.signature);
+    signature[signature.length - 1] =
+      (signature[signature.length - 1] ?? 0) ^ 0xff;
+    response.response.signature = base64urlEncode(signature);
+    expect(
+      await passkeys.finishAuthentication({
+        relyingParty: RP,
+        ceremonyId,
+        response,
+      }),
+    ).toStrictEqual({ valid: false, reason: "invalid" });
+  });
+
+  it("still signs in when resetting the rate-limit window fails", async () => {
+    const limiter = new RateLimiter({
+      limit: 5,
+      windowMs: 60_000,
+      store: new MemoryRateLimitStore(),
+    });
+    using reset = vi
+      .spyOn(limiter, "reset")
+      .mockRejectedValue(new Error("down"));
+    using logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { passkeys } = setup({ rateLimiter: limiter });
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    expect((await signIn(passkeys, authenticator, {}, ADA.id)).valid).toBe(
+      true,
+    );
+    expect(reset).toHaveBeenCalledOnce();
+    expect(String(logged.mock.calls[0]?.[0])).toContain(
+      "rate-limit reset failed",
+    );
   });
 
   it("refuses an assertion signed over a different challenge", async () => {
