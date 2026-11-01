@@ -223,7 +223,8 @@ export interface PasskeyServiceOptions {
    * Throttles {@link PasskeyService.finishAuthentication}: per user for a
    * ceremony bound to one, and per the caller's `rateLimitKey` for passkey
    * sign-in (unthrottled here without one — put your own per-IP limit in
-   * front). Only a live ceremony counts. Excess attempts emit
+   * front). Every finish counts, including one naming no live ceremony, so a
+   * caller cannot flood `passkey.verify.failed` events. Excess attempts emit
    * `passkey.verify.rate_limited` and, under `protectionMode: "enforce"`,
    * throw `IdentityError` `rate_limited`.
    */
@@ -656,6 +657,17 @@ export class PasskeyService {
     const challenge = await this.#takeChallenge(options.ceremonyId);
     const credentialId = credentialIdOf(response);
     const expectedUserId = options.userId;
+    const boundUserId = challenge?.userId;
+    const throttledUserId = expectedUserId ?? boundUserId;
+    const rateKey =
+      throttledUserId !== undefined
+        ? `passkey:verify:${throttledUserId}`
+        : options.rateLimitKey !== undefined
+          ? `passkey:verify:anonymous:${options.rateLimitKey}`
+          : undefined;
+    if (rateKey !== undefined) {
+      await this.#throttle(rateKey, throttledUserId, credentialId);
+    }
     if (!challenge) {
       return await this.#verifyFailed(
         "expired_challenge",
@@ -663,26 +675,12 @@ export class PasskeyService {
         expectedUserId,
       );
     }
-    const boundUserId = challenge.userId;
     if (
       challenge.ceremony !== "authentication" ||
       challenge.rpId !== relyingParty.id ||
       (expectedUserId !== undefined && boundUserId !== expectedUserId)
     ) {
-      return await this.#verifyFailed(
-        "invalid",
-        credentialId,
-        expectedUserId ?? boundUserId,
-      );
-    }
-    const rateKey =
-      boundUserId !== undefined
-        ? `passkey:verify:${boundUserId}`
-        : options.rateLimitKey !== undefined
-          ? `passkey:verify:anonymous:${options.rateLimitKey}`
-          : undefined;
-    if (rateKey !== undefined) {
-      await this.#throttle(rateKey, boundUserId, credentialId);
+      return await this.#verifyFailed("invalid", credentialId, throttledUserId);
     }
     const passkey = credentialId
       ? await this.#store.findPasskey(credentialId)

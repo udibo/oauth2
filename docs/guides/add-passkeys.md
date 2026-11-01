@@ -263,7 +263,7 @@ Pass `passkey` to `SignInForm` and the identifier field becomes
 loads, and the browser offers saved passkeys in that field's autofill:
 
 ```tsx
-import { startAuthentication } from "@simplewebauthn/browser";
+import { startAuthentication, WebAuthnError } from "@simplewebauthn/browser";
 import { SignInForm } from "@udibo/oauth2/react/components";
 
 declare function passkeyOptions(): Promise<
@@ -272,11 +272,18 @@ declare function passkeyOptions(): Promise<
 declare function finishPasskeySignIn(response: unknown): Promise<void>;
 
 async function signInWithPasskey(autofill: boolean): Promise<void> {
-  const response = await startAuthentication({
-    optionsJSON: await passkeyOptions(),
-    useBrowserAutofill: autofill,
-  });
-  await finishPasskeySignIn(response);
+  try {
+    const response = await startAuthentication({
+      optionsJSON: await passkeyOptions(),
+      useBrowserAutofill: autofill,
+    });
+    await finishPasskeySignIn(response);
+  } catch (error) {
+    if (error instanceof WebAuthnError && error.code === "ERROR_CEREMONY_ABORTED") {
+      return;
+    }
+    throw error;
+  }
 }
 
 function SignIn() {
@@ -290,7 +297,9 @@ function SignIn() {
 ```
 
 Call `signInWithPasskey(true)` once after the form mounts. Starting the button
-flow cancels a pending autofill request, so each needs its own ceremony.
+flow cancels a pending autofill request, which rejects with
+`ERROR_CEREMONY_ABORTED`; ignore that one error. Each flow needs its own
+ceremony.
 
 ## Use a passkey as the second factor
 

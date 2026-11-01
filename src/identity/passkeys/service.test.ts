@@ -535,8 +535,8 @@ describe("PasskeyService authentication", () => {
     });
   });
 
-  it("does not let requests without a live ceremony exhaust a passkey's sign-in budget", async () => {
-    const { passkeys } = setup({
+  it("throttles finishes without a live ceremony by the caller's key, not the passkey's", async () => {
+    const { passkeys, events } = setup({
       rateLimiter: new RateLimiter({
         limit: 1,
         windowMs: 60_000,
@@ -549,17 +549,39 @@ describe("PasskeyService authentication", () => {
       relyingParty: RP,
     });
     const forged = await authenticator.authenticate(options);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(
-        await passkeys.finishAuthentication({
+    expect(
+      await passkeys.finishAuthentication({
+        relyingParty: RP,
+        ceremonyId: "forged-0",
+        response: forged,
+        rateLimitKey: "203.0.113.9",
+      }),
+    ).toStrictEqual({ valid: false, reason: "expired_challenge" });
+    const error = await rejection(
+      () =>
+        passkeys.finishAuthentication({
           relyingParty: RP,
-          ceremonyId: `forged-${attempt}`,
+          ceremonyId: "forged-1",
           response: forged,
           rateLimitKey: "203.0.113.9",
         }),
-      ).toStrictEqual({ valid: false, reason: "expired_challenge" });
-    }
-    expect((await signIn(passkeys, authenticator)).valid).toBe(true);
+      IdentityError,
+    );
+    expect(error.code).toBe("rate_limited");
+    expect(
+      events.filter((event) => event.type === "passkey.verify.failed"),
+    ).toHaveLength(1);
+
+    const signInFromElsewhere = await passkeys.startAuthentication({
+      relyingParty: RP,
+    });
+    const result = await passkeys.finishAuthentication({
+      relyingParty: RP,
+      ceremonyId: signInFromElsewhere.ceremonyId,
+      response: await authenticator.authenticate(signInFromElsewhere.options),
+      rateLimitKey: "198.51.100.7",
+    });
+    expect(result.valid).toBe(true);
   });
 
   it("throttles passkey sign-in by the caller's key", async () => {
