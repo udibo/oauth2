@@ -10,11 +10,12 @@
  * fixtures and shipped token readers internally, so consumers and the
  * library are tested by the exact same checks.
  *
- * The identity layer's storage seams — `MfaStore`, `TokenFlowStore`,
- * `OtpStore`, `RateLimitStore`, `LockoutStore` — and the client's
+ * The identity layer's storage seams — `MfaStore`, `PasskeyStore`,
+ * `PasskeyChallengeStore`, `TokenFlowStore`, `OtpStore`, `RateLimitStore`,
+ * `LockoutStore` — and the client's
  * `AuthRequestStorage` have runners of their own. Those interfaces document
  * methods that **must be atomic** (single-use recovery codes, single-use
- * links, the TOTP replay guard, the guess and failure budgets, the
+ * links and passkey challenges, the passkey cap and sign count, the TOTP replay guard, the guess and failure budgets, the
  * single-use claim of a login's `state`), and each suite checks that claim
  * with overlapping calls: a read-modify-write implementation passes every
  * sequential case and fails the concurrent one, which is the whole
@@ -83,6 +84,12 @@ export {
   type MfaStoreContractOptions,
   runMfaStoreContractTests,
 } from "./mfa-store.ts";
+export {
+  type PasskeyChallengeStoreContractOptions,
+  type PasskeyStoreContractOptions,
+  runPasskeyChallengeStoreContractTests,
+  runPasskeyStoreContractTests,
+} from "./passkey-store.ts";
 export {
   runTokenFlowStoreContractTests,
   type TokenFlowStoreContractOptions,

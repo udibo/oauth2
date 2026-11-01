@@ -36,6 +36,14 @@ import { MemoryOtpStore } from "../../identity/otp.ts";
 import { MemoryRateLimitStore } from "../../identity/rate-limit.ts";
 import { MemoryLockoutStore } from "../../identity/lockout.ts";
 import { runMfaStoreContractTests } from "./mfa-store.ts";
+import {
+  MemoryPasskeyChallengeStore,
+  MemoryPasskeyStore,
+} from "../../identity/passkeys/service.ts";
+import {
+  runPasskeyChallengeStoreContractTests,
+  runPasskeyStoreContractTests,
+} from "./passkey-store.ts";
 import { runTokenFlowStoreContractTests } from "./token-flow-store.ts";
 import { runOtpStoreContractTests } from "./otp-store.ts";
 import { OneCodeOtpStore } from "./_test_otp_store_fixtures.ts";
@@ -574,4 +582,15 @@ runTenantContractTests({
       cleanup: () => server.shutdown(),
     };
   },
+});
+
+runPasskeyStoreContractTests({
+  describeName: "MemoryPasskeyStore satisfies PasskeyStore contract",
+  makeStore: () => new MemoryPasskeyStore(),
+});
+
+runPasskeyChallengeStoreContractTests({
+  describeName:
+    "MemoryPasskeyChallengeStore satisfies PasskeyChallengeStore contract",
+  makeStore: () => new MemoryPasskeyChallengeStore(),
 });

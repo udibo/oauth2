@@ -23,6 +23,11 @@ import {
 } from "@udibo/oauth2/identity/external";
 import { MemoryMfaStore, type MfaService } from "@udibo/oauth2/identity/mfa";
 import {
+  MemoryPasskeyChallengeStore,
+  MemoryPasskeyStore,
+  PasskeyService,
+} from "@udibo/oauth2/identity/passkeys";
+import {
   findLegacyVerifier,
   parsePhc,
   type PhcHash,
@@ -126,6 +131,10 @@ export const discoveryTtlMs: number = DEFAULT_DISCOVERY_TTL_MS;
 export const discoveryCache: MemoryDiscoveryCache = new MemoryDiscoveryCache();
 
 export const mfaStoreCtor: typeof MemoryMfaStore = MemoryMfaStore;
+export const passkeyService: PasskeyService = new PasskeyService({
+  store: new MemoryPasskeyStore(),
+  challenges: new MemoryPasskeyChallengeStore(),
+});
 export type Mfa = MfaService;
 
 export const parsed: PhcHash | null = parsePhc(

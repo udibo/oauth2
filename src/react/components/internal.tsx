@@ -8,6 +8,7 @@ import {
 
 import type { AuthFieldProps, AuthFormState } from "./use-auth-form.ts";
 import type {
+  PasskeyOption,
   AuthFormClassNames,
   AuthFormValues,
   SocialProvider,
@@ -258,6 +259,27 @@ export function SocialButtons(props: SocialProvidersProps): ReactNode {
         className={classNames.socialDivider}
       />
     </>
+  );
+}
+
+export function PasskeyButton(props: {
+  option: PasskeyOption | undefined;
+  defaultLabel: string;
+}): ReactNode {
+  const classNames = useAuthFormClassNames();
+  const { option } = props;
+  if (!option) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void option.onSelect();
+      }}
+      data-oauth2-passkey-button=""
+      className={classNames.socialButton}
+    >
+      {option.label ?? props.defaultLabel}
+    </button>
   );
 }
 

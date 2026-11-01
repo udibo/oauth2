@@ -127,6 +127,34 @@ describe("SignInForm", () => {
     expect(selected).toStrictEqual(["github"]);
   });
 
+  it("offers passkey sign-in and passkey autofill when passkey is set", () => {
+    let selected = 0;
+    render(
+      <SignInForm
+        onSubmit={() => {}}
+        passkey={{
+          onSelect: () => {
+            selected += 1;
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByLabelText("Email or username").getAttribute("autocomplete"),
+    ).toStrictEqual("username webauthn");
+    const button = screen.getByRole("button", {
+      name: "Sign in with a passkey",
+    });
+    expect(button.getAttribute("type")).toStrictEqual("button");
+    fireEvent.click(button);
+    expect(selected).toStrictEqual(1);
+  });
+
+  it("renders no passkey button without the passkey prop", () => {
+    const { container } = render(<SignInForm onSubmit={() => {}} />);
+    expect(container.querySelector("[data-oauth2-passkey-button]")).toBeFalsy();
+  });
+
   it("renders no social section when providers are absent or empty", () => {
     const { container, rerender } = render(<SignInForm onSubmit={() => {}} />);
     expect(

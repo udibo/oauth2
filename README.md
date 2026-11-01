@@ -164,6 +164,7 @@ and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 | `/hono/bff`                  | BFF routes, server-held tokens, session and pending-login stores                                |
 | `/identity`                  | App-owned signup, login, password reset, email verification, passwordless, and protection hooks |
 | `/identity/mfa`              | TOTP, recovery codes, and MFA storage contract                                                  |
+| `/identity/passkeys`         | Passkey (WebAuthn) registration and sign-in, as a first or second factor                        |
 | `/identity/external`         | Social and external OIDC sign-in for your own login pages                                       |
 | `/identity/migration`        | Verify imported password hashes and upgrade them at login                                       |
 | `/hono/identity`             | Hono routes for `IdentityService`                                                               |

@@ -1,8 +1,9 @@
 /**
  * {@link MfaChallengeForm} — a default, accessible, unstyled second-factor
  * challenge form built on {@link useAuthForm}. Collects a one-time code and,
- * when allowed, toggles to accepting a recovery code instead. The active
- * method is forwarded to `onSubmit` so your endpoint knows how to verify it.
+ * when allowed, toggles to accepting a recovery code instead, and offers a
+ * passkey when `passkey` is supplied. The active method is forwarded to
+ * `onSubmit` so your endpoint knows how to verify it.
  *
  * @module
  */
@@ -11,9 +12,10 @@ import type { ReactNode } from "react";
 
 import { useAuthForm } from "./use-auth-form.ts";
 import type { AuthFormState } from "./use-auth-form.ts";
-import type { BaseAuthFormProps } from "./types.ts";
+import type { BaseAuthFormProps, PasskeyOption } from "./types.ts";
 import {
   AuthFormShell,
+  PasskeyButton,
   SubmitButton,
   TextField,
   useFocusFirstError,
@@ -54,6 +56,11 @@ export interface MfaChallengeFormProps extends BaseAuthFormProps<MfaChallengeVal
   /** Text overrides. */
   labels?: MfaChallengeLabels;
   /**
+   * Offer a passkey as the second factor: renders a "Use a passkey" button
+   * whose `onSelect` runs the ceremony against the already-identified user.
+   */
+  passkey?: PasskeyOption;
+  /**
    * Render-prop escape hatch. When provided, you own the markup and receive
    * the live {@link AuthFormState}. Toggle `method` with `setValue`.
    */
@@ -84,6 +91,7 @@ export function MfaChallengeForm(props: MfaChallengeFormProps): ReactNode {
     className,
     allowRecoveryCode = true,
     labels,
+    passkey,
     children,
   } = props;
 
@@ -114,6 +122,9 @@ export function MfaChallengeForm(props: MfaChallengeFormProps): ReactNode {
       method={props.method}
       formRef={props.formRef}
       rootProps={{ "data-oauth2-method": form.values.method }}
+      aboveForm={
+        <PasskeyButton option={passkey} defaultLabel="Use a passkey" />
+      }
     >
       <TextField
         fieldProps={form.getFieldProps("code")}
