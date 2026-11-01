@@ -143,6 +143,32 @@ export function runPasskeyStoreContractTests(
       expect((await store.findPasskey("cred-a"))?.userId).toBe(USER);
     });
 
+    it("treats a credential id as unique across relying parties", async () => {
+      await store.addPasskey(passkey(USER, "cred-a", "login.example.com"), 25);
+      expect(
+        await store.addPasskey(
+          passkey(OTHER_USER, "cred-a", "other.example.com"),
+          25,
+        ),
+      ).toBe("duplicate");
+      expect((await store.findPasskey("cred-a"))?.rpId).toBe(
+        "login.example.com",
+      );
+    });
+
+    it("refuses to record a use of a removed passkey", async () => {
+      await store.addPasskey(passkey(USER, "cred-a"), 25);
+      await store.removePasskey(USER, "cred-a");
+      expect(
+        await store.recordUse("cred-a", {
+          previousSignCount: 0,
+          signCount: 1,
+          backedUp: true,
+          usedAt: new Date(),
+        }),
+      ).toBe(false);
+    });
+
     it("refuses a passkey over the per-user limit", async () => {
       await store.addPasskey(passkey(USER, "cred-a"), 2);
       await store.addPasskey(passkey(USER, "cred-b"), 2);

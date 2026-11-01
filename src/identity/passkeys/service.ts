@@ -84,7 +84,11 @@ export interface PasskeyUser {
 
 /** A stored passkey, as {@link PasskeyStore} persists it. Nothing here is secret. */
 export interface Passkey {
-  /** The credential id, base64url. Unique in the store. */
+  /**
+   * The credential id, base64url. Chosen by the registering client, not by
+   * the server, so it must be unique across every row
+   * {@link PasskeyStore.findPasskey} can return.
+   */
   credentialId: string;
   /** The account this passkey signs in to. */
   userId: string;
@@ -175,7 +179,11 @@ export interface PasskeyUse {
 export interface PasskeyStore {
   /** The user's passkeys, oldest first; only those under `rpId` when given. */
   listPasskeys(userId: string, rpId?: string): Promise<Passkey[]>;
-  /** The passkey with this credential id, or `undefined`. */
+  /**
+   * The passkey with this credential id, or `undefined`. Credential ids are
+   * chosen by the registering client, so the uniqueness {@link addPasskey}
+   * enforces must span everything this lookup searches — never narrower.
+   */
   findPasskey(credentialId: string): Promise<Passkey | undefined>;
   /**
    * Insert the passkey unless its credential id already exists
@@ -186,7 +194,9 @@ export interface PasskeyStore {
   /**
    * Record a sign-in: set the sign count, backup state, and last-used time,
    * but only while the stored sign count still equals
-   * `use.previousSignCount`. Return whether the row changed.
+   * `use.previousSignCount`. Return whether the row changed — `false` when
+   * the passkey was removed meanwhile, so a removed passkey cannot finish one
+   * last sign-in.
    */
   recordUse(credentialId: string, use: PasskeyUse): Promise<boolean>;
   /** Rename one of the user's passkeys; `false` when it is not theirs. */
@@ -210,11 +220,12 @@ export interface PasskeyServiceOptions {
   /** How long a ceremony stays open, in milliseconds. Defaults to five minutes. */
   challengeTtlMs?: number;
   /**
-   * Throttles {@link PasskeyService.finishAuthentication} per user when the
-   * user is known, otherwise per credential id. Excess attempts emit
+   * Throttles {@link PasskeyService.finishAuthentication}: per user for a
+   * ceremony bound to one, and per the caller's `rateLimitKey` for passkey
+   * sign-in (unthrottled here without one — put your own per-IP limit in
+   * front). Only a live ceremony counts. Excess attempts emit
    * `passkey.verify.rate_limited` and, under `protectionMode: "enforce"`,
-   * throw `IdentityError` `rate_limited`. Add your own per-IP limit in front
-   * of discoverable sign-in.
+   * throw `IdentityError` `rate_limited`.
    */
   rateLimiter?: RateLimiterLike;
   /** `"enforce"` (default) applies the rate limit; `"log-only"` only reports it. */
@@ -304,6 +315,21 @@ export interface FinishPasskeyAuthenticationOptions {
   ceremonyId: string;
   /** The browser's response. */
   response: PasskeyAuthenticationResponse;
+  /**
+   * The user this sign-in must belong to — required whenever a user is
+   * already identified (a second factor, a re-authentication). The ceremony
+   * must have been started for exactly this user; one started without a user
+   * is refused, so a person cannot answer someone else's challenge with their
+   * own passkey. Omit it only for passkey sign-in.
+   */
+  userId?: string;
+  /**
+   * The rate-limit key for a sign-in with no identified user, such as
+   * `${tenantId}:${clientIp}`. Without it, only ceremonies bound to a user are
+   * throttled (per user); credential ids are never used as keys, since anyone
+   * who learns one could exhaust its owner's budget.
+   */
+  rateLimitKey?: string;
 }
 
 /**
@@ -507,8 +533,9 @@ export class PasskeyService {
 
   /**
    * Verify the browser's response and store the new passkey. The challenge
-   * is spent whatever the outcome. Attestation is not evaluated: whatever
-   * statement the authenticator sent, the passkey is stored as unattested.
+   * is spent whatever the outcome. Attestation is never relied on: a
+   * statement the authenticator volunteers must still be well-formed, but the
+   * passkey is stored as unattested and no authenticator is preferred.
    */
   async finishRegistration(
     options: FinishPasskeyRegistrationOptions,
@@ -627,21 +654,35 @@ export class PasskeyService {
   ): Promise<PasskeyVerification> {
     const { relyingParty, response } = options;
     const challenge = await this.#takeChallenge(options.ceremonyId);
-    const credentialId = typeof response?.id === "string" ? response.id : "";
-    const boundUserId = challenge?.userId;
+    const credentialId = credentialIdOf(response);
+    const expectedUserId = options.userId;
+    if (!challenge) {
+      return await this.#verifyFailed(
+        "expired_challenge",
+        credentialId,
+        expectedUserId,
+      );
+    }
+    const boundUserId = challenge.userId;
+    if (
+      challenge.ceremony !== "authentication" ||
+      challenge.rpId !== relyingParty.id ||
+      (expectedUserId !== undefined && boundUserId !== expectedUserId)
+    ) {
+      return await this.#verifyFailed(
+        "invalid",
+        credentialId,
+        expectedUserId ?? boundUserId,
+      );
+    }
     const rateKey =
       boundUserId !== undefined
         ? `passkey:verify:${boundUserId}`
-        : `passkey:verify:credential:${credentialId}`;
-    await this.#throttle(rateKey, boundUserId, credentialId);
-    if (!challenge) {
-      return await this.#verifyFailed("expired_challenge", credentialId);
-    }
-    if (
-      challenge.ceremony !== "authentication" ||
-      challenge.rpId !== relyingParty.id
-    ) {
-      return await this.#verifyFailed("invalid", credentialId, boundUserId);
+        : options.rateLimitKey !== undefined
+          ? `passkey:verify:anonymous:${options.rateLimitKey}`
+          : undefined;
+    if (rateKey !== undefined) {
+      await this.#throttle(rateKey, boundUserId, credentialId);
     }
     const passkey = credentialId
       ? await this.#store.findPasskey(credentialId)
@@ -657,7 +698,11 @@ export class PasskeyService {
       (boundUserId !== undefined && passkey.userId !== boundUserId) ||
       !userHandleMatches(response.response?.userHandle, passkey.userId)
     ) {
-      return await this.#verifyFailed("invalid", credentialId, passkey.userId);
+      return await this.#verifyFailed(
+        "invalid",
+        credentialId,
+        boundUserId ?? passkey.userId,
+      );
     }
     let verified;
     try {
@@ -701,7 +746,7 @@ export class PasskeyService {
     if (!recorded) {
       return await this.#verifyFailed("replayed", credentialId, passkey.userId);
     }
-    await this.#resetThrottle(rateKey);
+    if (rateKey !== undefined) await this.#resetThrottle(rateKey);
     await this.#emit({
       type: "passkey.verify.succeeded",
       userId: passkey.userId,
@@ -848,6 +893,18 @@ function assertRelyingParty(relyingParty: PasskeyRelyingParty): void {
 function normalizeName(name: string | undefined): string {
   const trimmed = (name ?? "").trim().slice(0, MAX_NAME_LENGTH);
   return trimmed === "" ? "Passkey" : trimmed;
+}
+
+const MAX_CREDENTIAL_ID_LENGTH = 1366;
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+function credentialIdOf(response: PasskeyAuthenticationResponse): string {
+  const id: unknown = response?.id;
+  return typeof id === "string" &&
+    id.length <= MAX_CREDENTIAL_ID_LENGTH &&
+    BASE64URL.test(id)
+    ? id
+    : "";
 }
 
 function userHandleMatches(

@@ -226,10 +226,12 @@ const { ceremonyId, options } = await passkeys.startAuthentication({
 });
 
 declare const response: PasskeyAuthenticationResponse;
+declare const clientIp: string;
 const result = await passkeys.finishAuthentication({
   relyingParty,
   ceremonyId,
   response,
+  rateLimitKey: clientIp,
 });
 if (result.valid) {
   // result.userId is the account; result.userVerified says whether the
@@ -246,6 +248,10 @@ and your MFA policy:
   reasonable to treat it as satisfying a required second factor.
 - **`userVerified: false`** — possession only. Send the person through your MFA
   challenge exactly as you would after a password.
+
+`rateLimitKey` throttles passkey sign-in per caller; the service never keys a
+limit on a credential id, which anyone who learned it could use to lock its
+owner out.
 
 Report every failure to the person the same way ("That passkey didn't work");
 the `reason` is for your logs.
@@ -288,11 +294,15 @@ flow cancels a pending autofill request, so each needs its own ceremony.
 
 ## Use a passkey as the second factor
 
-After a first factor, start the ceremony **with** the user's id. Only their
-passkeys are offered, and a passkey belonging to anyone else is refused.
+After a first factor, start the ceremony **with** the user's id, and finish
+it with the same id. Only their passkeys are offered, and the finish refuses a
+passkey belonging to anyone else — including one presented with a ceremony
+that was started without a user, which a person could otherwise obtain from
+your passkey sign-in route and answer with their own passkey.
 
 ```ts
 import type {
+  PasskeyAuthenticationResponse,
   PasskeyRelyingParty,
   PasskeyService,
 } from "@udibo/oauth2/identity/passkeys";
@@ -305,7 +315,18 @@ const { ceremonyId, options } = await passkeys.startAuthentication({
   relyingParty,
   userId: pendingUserId,
 });
+
+declare const response: PasskeyAuthenticationResponse;
+const result = await passkeys.finishAuthentication({
+  relyingParty,
+  ceremonyId,
+  response,
+  userId: pendingUserId,
+});
 ```
+
+Always pass `userId` here. Without it, `result.valid` only means *some*
+account's passkey signed.
 
 It throws `IdentityError` `passkey_not_registered` when the user has none, so
 check `listPasskeys(userId, relyingParty.id)` before offering the option.

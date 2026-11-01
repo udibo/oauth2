@@ -469,6 +469,146 @@ describe("PasskeyService authentication", () => {
     ).toStrictEqual({ valid: false, reason: "invalid" });
   });
 
+  it("refuses another account's passkey on an unbound ceremony when a user is expected", async () => {
+    const { passkeys, events } = setup();
+    const adaKey = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    const bobKey = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, adaKey);
+    await register(passkeys, bobKey, BOB);
+    const { ceremonyId, options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+    });
+    const response = await bobKey.authenticate(options);
+    expect(
+      await passkeys.finishAuthentication({
+        relyingParty: RP,
+        ceremonyId,
+        response,
+        userId: ADA.id,
+      }),
+    ).toStrictEqual({ valid: false, reason: "invalid" });
+    expect(events.at(-1)).toMatchObject({
+      type: "passkey.verify.failed",
+      reason: "invalid",
+      userId: ADA.id,
+    });
+  });
+
+  it("accepts the expected user's own passkey on a ceremony bound to them", async () => {
+    const { passkeys } = setup();
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    const { ceremonyId, options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+      userId: ADA.id,
+    });
+    const result = await passkeys.finishAuthentication({
+      relyingParty: RP,
+      ceremonyId,
+      response: await authenticator.authenticate(options),
+      userId: ADA.id,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("names the bound user, not the credential's owner, when the wrong passkey answers", async () => {
+    const { passkeys, events } = setup();
+    const adaKey = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    const bobKey = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, adaKey);
+    const bobPasskey = await register(passkeys, bobKey, BOB);
+    const { ceremonyId, options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+      userId: ADA.id,
+    });
+    await passkeys.finishAuthentication({
+      relyingParty: RP,
+      ceremonyId,
+      response: await bobKey.authenticate(options, {
+        credentialId: bobPasskey.credentialId,
+      }),
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: "passkey.verify.failed",
+      reason: "invalid",
+      userId: ADA.id,
+    });
+  });
+
+  it("does not let requests without a live ceremony exhaust a passkey's sign-in budget", async () => {
+    const { passkeys } = setup({
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
+    });
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    const { options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+    });
+    const forged = await authenticator.authenticate(options);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect(
+        await passkeys.finishAuthentication({
+          relyingParty: RP,
+          ceremonyId: `forged-${attempt}`,
+          response: forged,
+          rateLimitKey: "203.0.113.9",
+        }),
+      ).toStrictEqual({ valid: false, reason: "expired_challenge" });
+    }
+    expect((await signIn(passkeys, authenticator)).valid).toBe(true);
+  });
+
+  it("throttles passkey sign-in by the caller's key", async () => {
+    const { passkeys } = setup({
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
+    });
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    const attempt = async (origin: string) => {
+      const { ceremonyId, options } = await passkeys.startAuthentication({
+        relyingParty: RP,
+      });
+      return await passkeys.finishAuthentication({
+        relyingParty: RP,
+        ceremonyId,
+        response: await authenticator.authenticate(options, { origin }),
+        rateLimitKey: "203.0.113.9",
+      });
+    };
+    expect((await attempt("https://evil.test")).valid).toBe(false);
+    const error = await rejection(() => attempt(ORIGIN), IdentityError);
+    expect(error.code).toBe("rate_limited");
+  });
+
+  it("ignores a credential id that is not short base64url", async () => {
+    const { passkeys, events } = setup();
+    const authenticator = new TestPasskeyAuthenticator({ origin: ORIGIN });
+    await register(passkeys, authenticator);
+    const { ceremonyId, options } = await passkeys.startAuthentication({
+      relyingParty: RP,
+    });
+    const response = await authenticator.authenticate(options);
+    response.id = "A".repeat(100_000);
+    expect(
+      await passkeys.finishAuthentication({
+        relyingParty: RP,
+        ceremonyId,
+        response,
+      }),
+    ).toStrictEqual({ valid: false, reason: "unknown_passkey" });
+    const failed = events.at(-1);
+    assert(failed?.type === "passkey.verify.failed");
+    expect(failed.credentialId).toBe(undefined);
+  });
+
   it("refuses a second-factor ceremony for a user with no passkey", async () => {
     const { passkeys } = setup();
     const error = await rejection(
