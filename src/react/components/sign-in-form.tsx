@@ -2,8 +2,8 @@
  * {@link SignInForm} — a default, accessible, unstyled sign-in form built on
  * {@link useAuthForm}. Collects an identifier and password (optionally a
  * "remember me" checkbox), renders "Continue with …" social buttons when
- * providers are supplied, and reports the outcome through the injected
- * `onSubmit`.
+ * providers are supplied and a passkey button when `passkey` is, and reports
+ * the outcome through the injected `onSubmit`.
  *
  * @module
  */
@@ -12,9 +12,14 @@ import type { ReactNode } from "react";
 
 import { useAuthForm } from "./use-auth-form.ts";
 import type { AuthFormState } from "./use-auth-form.ts";
-import type { BaseAuthFormProps, SocialProvidersProps } from "./types.ts";
+import type {
+  BaseAuthFormProps,
+  PasskeyOption,
+  SocialProvidersProps,
+} from "./types.ts";
 import {
   AuthFormShell,
+  PasskeyButton,
   SocialButtons,
   SubmitButton,
   TextField,
@@ -58,6 +63,14 @@ export interface SignInFormProps
   /** Text overrides. */
   labels?: SignInLabels;
   /**
+   * Offer passkey sign-in: renders a "Sign in with a passkey" button and marks
+   * the identifier field `autocomplete="username webauthn"`, so a browser
+   * running a conditional-mediation request (`mediation: "conditional"`)
+   * offers saved passkeys in the field's autofill. Start that request
+   * yourself on mount; the form only provides the field.
+   */
+  passkey?: PasskeyOption;
+  /**
    * Render-prop escape hatch. When provided, you own the markup and receive
    * the live {@link AuthFormState}; the component still owns state and submit.
    */
@@ -97,6 +110,7 @@ export function SignInForm(props: SignInFormProps): ReactNode {
     showRemember = false,
     forgotPasswordHref,
     labels,
+    passkey,
     children,
   } = props;
 
@@ -121,17 +135,23 @@ export function SignInForm(props: SignInFormProps): ReactNode {
       method={props.method}
       formRef={props.formRef}
       aboveForm={
-        <SocialButtons
-          socialProviders={socialProviders}
-          onSocialSelect={onSocialSelect}
-          socialHref={socialHref}
-        />
+        <>
+          <PasskeyButton
+            option={passkey}
+            defaultLabel="Sign in with a passkey"
+          />
+          <SocialButtons
+            socialProviders={socialProviders}
+            onSocialSelect={onSocialSelect}
+            socialHref={socialHref}
+          />
+        </>
       }
     >
       <TextField
         fieldProps={form.getFieldProps("identifier")}
         label={labels?.identifier ?? "Email or username"}
-        autoComplete="username"
+        autoComplete={passkey ? "username webauthn" : "username"}
         required
         error={form.errors.identifier}
       />

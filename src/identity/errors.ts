@@ -8,7 +8,7 @@
 
 /**
  * Stable, machine-readable identity error codes. The package raises
- * `rate_limited`, `weak_password`, and the `mfa_*` codes, and the Hono route
+ * `rate_limited`, `weak_password`, and the `mfa_*` and `passkey_*` codes, and the Hono route
  * factory answers `forbidden_origin` (its same-origin guard, before a handler
  * runs) and `invalid_credentials` / `invalid_token` (a failed sign-in or token
  * check); the rest are for your store and routes to throw (e.g. `identifier_taken` on
@@ -23,6 +23,8 @@ export type IdentityErrorCode =
   | "email_not_verified"
   | "mfa_not_enrolled"
   | "mfa_already_enrolled"
+  | "passkey_limit_reached"
+  | "passkey_not_registered"
   | "captcha_failed"
   | "forbidden_origin";
 
@@ -77,6 +79,8 @@ const STATUS: Record<IdentityErrorCode, IdentityErrorStatus> = {
   email_not_verified: 403,
   mfa_not_enrolled: 409,
   mfa_already_enrolled: 409,
+  passkey_limit_reached: 409,
+  passkey_not_registered: 409,
   captcha_failed: 403,
   forbidden_origin: 403,
 };

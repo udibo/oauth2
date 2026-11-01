@@ -67,6 +67,10 @@
       "types": "./dist/identity/mfa/mod.d.ts",
       "default": "./dist/identity/mfa/mod.js"
     },
+    "./identity/passkeys": {
+      "types": "./dist/identity/passkeys/mod.d.ts",
+      "default": "./dist/identity/passkeys/mod.js"
+    },
     "./identity/migration": {
       "types": "./dist/identity/migration.d.ts",
       "default": "./dist/identity/migration.js"
@@ -152,6 +156,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
+    "@simplewebauthn/server": "^14.0.3",
     "@udibo/http-error": "^0.12.0"
   },
   "devDependencies": {
@@ -162,6 +167,7 @@
     "@semantic-release/git": "10.0.1",
     "@semantic-release/github": "12.0.8",
     "@semantic-release/npm": "13.1.5",
+    "@simplewebauthn/browser": "^14.0.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.4",

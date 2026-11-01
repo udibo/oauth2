@@ -21,6 +21,7 @@ const KNOWN_EXPORTS = {
   "./identity": "MemoryOtpStore",
   "./identity/external": "MemoryDiscoveryCache",
   "./identity/mfa": "MemoryMfaStore",
+  "./identity/passkeys": "PasskeyService",
   "./identity/migration": "parsePhc",
   "./hono/resource-server": "HonoResourceServer",
   "./hono/authorization-server": "HonoAuthorizationServer",

@@ -65,6 +65,7 @@
 - [React integration](docs/guides/react.md): session state, guards, and forms for app-owned login
 - [Integration testing](docs/guides/testing.md): route fixtures, persistent store contracts, and browser checks
 - [MFA](docs/guides/add-mfa.md): enrollment, pending login, challenge, and recovery
+- [Passkeys](docs/guides/add-passkeys.md): WebAuthn registration, passkey sign-in and autofill, passkeys as a second factor, and testing
 - [Passwordless](docs/guides/passwordless.md): email links/codes, storage, and request/verification behavior
 - [External sign-in](docs/guides/social-sign-in.md): trusted providers, callbacks, transient cookies, and linking
 - [Password migration](docs/guides/migrate-from-another-provider.md): import existing app credentials and upgrade on login

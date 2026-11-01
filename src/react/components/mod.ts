@@ -100,6 +100,7 @@ export type {
   AuthSubmitHandler,
   BaseAuthFormProps,
   BaseClassNames,
+  PasskeyOption,
   SocialProvider,
   SocialProvidersProps,
 } from "./types.ts";

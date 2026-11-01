@@ -83,6 +83,19 @@ export interface SocialProvidersProps {
 }
 
 /**
+ * A passkey button for a sign-in or challenge form. The component never runs
+ * the WebAuthn ceremony itself: `onSelect` fetches options from your server,
+ * calls `navigator.credentials.get()` (or `startAuthentication` from
+ * `@simplewebauthn/browser`), and posts the result back.
+ */
+export interface PasskeyOption {
+  /** Runs the passkey ceremony when the button is pressed. */
+  onSelect: () => void | Promise<void>;
+  /** Button text. Defaults to the form's own wording. */
+  label?: string;
+}
+
+/**
  * The class hook every prebuilt component shares. Component-specific class-name
  * maps ({@link AuthFormClassNames}, `UserMenuClassNames`) extend this, so `root`
  * means the same thing everywhere.

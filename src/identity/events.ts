@@ -4,7 +4,8 @@
  * {@link IdentityService} emits an {@link IdentityEvent} after each significant
  * auth outcome (sign-in success/failure, sign-up, credential upgrade-on-login,
  * reset and verification lifecycle, passwordless sign-in links and codes),
- * `MfaService` emits the `mfa.*` events, and a password-policy validator emits
+ * `MfaService` emits the `mfa.*` events, `PasskeyService` the `passkey.*`
+ * events, and a password-policy validator emits
  * `password_policy.check_unavailable` when it cannot complete its check. Wire
  * an {@link IdentityEventHook} via the service's `onEvent`
  * option to persist them in your own audit store — storage stays app-owned,
@@ -45,7 +46,8 @@ export type SignInCodeFailureReason =
   | "unknown_email";
 
 /**
- * An auth outcome emitted by {@link IdentityService}, `MfaService`, or a
+ * An auth outcome emitted by {@link IdentityService}, `MfaService`,
+ * `PasskeyService`, or a
  * password-policy validator. Discriminated on `type`; `userId` is present when
  * the flow resolved an account.
  */
@@ -240,7 +242,51 @@ export type IdentityEvent =
       enforced: boolean;
     }
   | { type: "mfa.recovery_codes.regenerated"; userId: string }
-  | { type: "mfa.disabled"; userId: string };
+  | { type: "mfa.disabled"; userId: string }
+  | {
+      type: "passkey.registered";
+      userId: string;
+      credentialId: string;
+      /** Whether the passkey may sync between devices. */
+      multiDevice: boolean;
+    }
+  | {
+      type: "passkey.registration.failed";
+      userId: string;
+      reason: "expired_challenge" | "invalid" | "duplicate" | "limit_reached";
+    }
+  | {
+      type: "passkey.verify.succeeded";
+      userId: string;
+      credentialId: string;
+      /** Whether the authenticator verified the person (PIN or biometric). */
+      userVerified: boolean;
+    }
+  | {
+      type: "passkey.verify.failed";
+      /**
+       * `"sign_count"` means the authenticator's counter went backwards — a
+       * possible cloned authenticator, worth an alert.
+       */
+      reason:
+        | "expired_challenge"
+        | "unknown_passkey"
+        | "invalid"
+        | "sign_count"
+        | "replayed";
+      /** Present when the passkey resolved to an account. */
+      userId?: string;
+      credentialId?: string;
+    }
+  | {
+      type: "passkey.verify.rate_limited";
+      userId?: string;
+      credentialId?: string;
+      retryAfterMs: number;
+      enforced: boolean;
+    }
+  | { type: "passkey.renamed"; userId: string; credentialId: string }
+  | { type: "passkey.removed"; userId: string; credentialId: string };
 
 /**
  * Receives each {@link IdentityEvent} after the flow's outcome is decided. The

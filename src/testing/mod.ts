@@ -35,6 +35,10 @@
  *   Identity tenant can test its own routes without running the identity
  *   service.
  *
+ * - **A software passkey authenticator.** {@link TestPasskeyAuthenticator}
+ *   answers `PasskeyService` options with real signed WebAuthn responses, so
+ *   passkey registration and sign-in can be tested without a browser.
+ *
  * Nothing in this module is an OAuth2 primitive — only testing support.
  * Production code should never import from here.
  *
@@ -79,3 +83,10 @@ export {
   type FakeTenantTokenRequest,
   type FakeTenantUser,
 } from "./tenant.ts";
+
+export {
+  type TestPasskeyAuthenticateOptions,
+  TestPasskeyAuthenticator,
+  type TestPasskeyAuthenticatorOptions,
+  type TestPasskeyCredential,
+} from "./passkey-authenticator.ts";

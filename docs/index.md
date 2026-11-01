@@ -33,6 +33,7 @@ Add only the features your application needs:
 | ------------------------------- | -------------------------------------------------------------------------- |
 | Social or enterprise OIDC login | [External sign-in](guides/social-sign-in.md)                               |
 | TOTP and recovery codes         | [MFA](guides/add-mfa.md)                                                   |
+| Passkeys (WebAuthn)             | [Passkeys](guides/add-passkeys.md)                                         |
 | Email codes and magic links     | [Passwordless sign-in](guides/passwordless.md)                             |
 | Existing password hashes        | [Password migration](guides/migrate-from-another-provider.md)              |
 | Bot challenge for own login     | [CAPTCHA route example](guides/add-login.md#captcha-at-the-route-boundary) |

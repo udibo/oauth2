@@ -48,6 +48,25 @@ describe("MfaChallengeForm", () => {
     });
   });
 
+  it("offers a passkey as the second factor when passkey is set", () => {
+    let selected = 0;
+    render(
+      <MfaChallengeForm
+        onSubmit={() => {}}
+        passkey={{
+          label: "Use your security key",
+          onSelect: () => {
+            selected += 1;
+          },
+        }}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use your security key" }),
+    );
+    expect(selected).toStrictEqual(1);
+  });
+
   it("hides the recovery toggle when allowRecoveryCode is false", () => {
     render(<MfaChallengeForm onSubmit={() => {}} allowRecoveryCode={false} />);
     expect(screen.queryByText("Use a recovery code")).toBeFalsy();
