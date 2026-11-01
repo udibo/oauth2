@@ -1,3 +1,9 @@
+## [0.42.0](https://github.com/udibo/oauth2/compare/0.41.0...0.42.0) (2026-11-01)
+
+### Features
+
+* **server:** bind machine tokens to one resource ([#166](https://github.com/udibo/oauth2/issues/166)) ([2efb380](https://github.com/udibo/oauth2/commit/2efb38013527c59376bf293b098af1359e45045b))
+
 ## [0.41.0](https://github.com/udibo/oauth2/compare/0.40.1...0.41.0) (2026-10-28)
 
 ### ⚠ BREAKING CHANGES
