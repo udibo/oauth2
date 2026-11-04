@@ -1,3 +1,9 @@
+## [0.45.0](https://github.com/udibo/oauth2/compare/0.44.0...0.45.0) (2026-11-04)
+
+### Features
+
+* **express:** add Express adapters for the authorization and resource servers ([#170](https://github.com/udibo/oauth2/issues/170)) ([49bdcd8](https://github.com/udibo/oauth2/commit/49bdcd89a9bc2468dfebea518310182e336123c0)), closes [#169](https://github.com/udibo/oauth2/issues/169)
+
 ## [0.44.0](https://github.com/udibo/oauth2/compare/0.43.0...0.44.0) (2026-11-04)
 
 ### ⚠ BREAKING CHANGES
