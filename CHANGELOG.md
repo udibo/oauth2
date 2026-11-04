@@ -1,3 +1,9 @@
+## [0.45.1](https://github.com/udibo/oauth2/compare/0.45.0...0.45.1) (2026-11-04)
+
+### Bug Fixes
+
+* **server:** ask for consent on an authorize request without scope ([#175](https://github.com/udibo/oauth2/issues/175)) ([c8e6085](https://github.com/udibo/oauth2/commit/c8e60854123bc520ca705e4fe64dc76ac6235043))
+
 ## [0.45.0](https://github.com/udibo/oauth2/compare/0.44.0...0.45.0) (2026-11-04)
 
 ### Features
