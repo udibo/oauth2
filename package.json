@@ -1,10 +1,11 @@
 {
   "name": "@udibo/oauth2",
   "version": "0.44.0",
-  "description": "A flexible OAuth2 toolkit: framework-agnostic authorization & resource servers, a typed client, Hono adapters (including a backend-for-frontend), and React bindings.",
+  "description": "A flexible OAuth2 toolkit: framework-agnostic authorization & resource servers, a typed client, Hono adapters (including a backend-for-frontend), Express adapters, and React bindings.",
   "keywords": [
     "authorization-server",
     "bff",
+    "express",
     "hono",
     "oauth2",
     "oidc",
@@ -99,6 +100,14 @@
       "types": "./dist/adapters/hono/log.d.ts",
       "default": "./dist/adapters/hono/log.js"
     },
+    "./express/resource-server": {
+      "types": "./dist/adapters/express/resource-server.d.ts",
+      "default": "./dist/adapters/express/resource-server.js"
+    },
+    "./express/authorization-server": {
+      "types": "./dist/adapters/express/authorization-server.d.ts",
+      "default": "./dist/adapters/express/authorization-server.js"
+    },
     "./react": {
       "types": "./dist/react/mod.d.ts",
       "default": "./dist/react/mod.js"
@@ -170,12 +179,15 @@
     "@simplewebauthn/browser": "^14.0.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
+    "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.3",
     "axe-core": "^4.14.0",
     "conventional-changelog-conventionalcommits": "9.3.1",
+    "express": "^5.3.0",
+    "express4": "npm:express@^4.21.2",
     "hono": "^4.13.13",
     "jsdom": "^30.1.2",
     "jsr": "^0.14.3",

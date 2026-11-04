@@ -288,6 +288,64 @@ login authenticates them; the browser returns to the client's `redirect_uri`
 with a single-use `code`; and the client exchanges it at `POST /oauth2/token`
 with its `code_verifier`.
 
+### Mount the endpoints on Express
+
+`ExpressAuthorizationServer` (from `@udibo/oauth2/express/authorization-server`)
+takes the same options as `HonoAuthorizationServer`. Its `routes()` returns one
+middleware serving the same paths, and its callbacks receive the Express `req`
+and `res` in place of the Hono `Context`, so they can read the session your app
+already keeps:
+
+```ts
+import express from "express";
+import { ExpressAuthorizationServer } from "@udibo/oauth2/express/authorization-server";
+import type { AuthorizationServerOptions } from "@udibo/oauth2/server/authorization";
+import type { BasicScope, ClientInterface } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const options: AuthorizationServerOptions<AppClient, AppUser, BasicScope>;
+declare function readSessionUser(req: express.Request): AppUser | undefined;
+
+const authServer = new ExpressAuthorizationServer<AppClient, AppUser>(options);
+const app = express();
+
+app.use(
+  "/oauth2",
+  authServer.routes({
+    authenticateUser: async (req: express.Request) => {
+      const user = readSessionUser(req);
+      if (user) return { user };
+      const returnTo = encodeURIComponent(req.originalUrl);
+      return new Response(null, {
+        status: 302,
+        headers: { location: `/login?return_to=${returnTo}` },
+      });
+    },
+  }),
+);
+
+app.use(express.urlencoded({ extended: false }));
+```
+
+Mount `routes()`, or any individual handler, before your body parsers. The
+endpoints read the raw form themselves: they enforce `maxBodyBytes` as the body
+streams in, refuse a repeated parameter, and refuse a body that is not
+form-encoded. A body parser that ran first would hide all three, so a handler
+that finds the body already consumed passes an error to `next` instead.
+
+The callbacks return a web `Response` rather than writing to `res`. A relative
+login redirect needs the `Response` constructor shown above, since
+`Response.redirect` requires an absolute URL. Annotate the callback's `req` to
+type it as your app's request; the handlers accept the request and response of
+Express 4 or 5 without depending on `express` themselves.
+
 ## Security defaults
 
 These protections are on by default, deliberately stricter than RFC 6749:

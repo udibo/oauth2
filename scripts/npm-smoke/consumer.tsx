@@ -32,6 +32,14 @@ import {
   parsePhc,
   type PhcHash,
 } from "@udibo/oauth2/identity/migration";
+import {
+  type ExpressAuthenticateUserFn,
+  ExpressAuthorizationServer,
+} from "@udibo/oauth2/express/authorization-server";
+import {
+  type ExpressMiddleware,
+  ExpressResourceServer,
+} from "@udibo/oauth2/express/resource-server";
 import { HonoAuthorizationServer } from "@udibo/oauth2/hono/authorization-server";
 import {
   DEFAULT_PROXY_FORWARD_HEADERS,
@@ -152,6 +160,13 @@ export const identityRoutes: typeof honoIdentityRoutes = honoIdentityRoutes;
 
 export const honoResourceServerCtor: typeof HonoResourceServer =
   HonoResourceServer;
+
+export const expressAuthorizationServerCtor: typeof ExpressAuthorizationServer =
+  ExpressAuthorizationServer;
+export const expressResourceServerCtor: typeof ExpressResourceServer =
+  ExpressResourceServer;
+export type ExpressSignIn = ExpressAuthenticateUserFn<{ id: string }>;
+export type ExpressHandler = ExpressMiddleware;
 export const contextKey: string = OAUTH2_CONTEXT_KEY;
 
 export const continuation: typeof loginContinuation = loginContinuation;
