@@ -1110,6 +1110,27 @@ describe("AuthorizationServer", () => {
       expect(await response.text()).toBe("<html>consent</html>");
     });
 
+    it("issues a code once the user approves a request without scope", async () => {
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(() =>
+        Promise.resolve({ approved: true }),
+      );
+      const request = new Request(
+        "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz",
+      );
+
+      const response = await server.handleAuthorizeRequest(
+        request,
+        () => Promise.resolve({ user: testUser }),
+        handleConsent,
+      );
+
+      expect(handleConsent).toHaveBeenCalledOnce();
+      expect(handleConsent.mock.calls[0][1]).toBeUndefined();
+      expect(
+        new URL(response.headers.get("Location")!).searchParams.has("code"),
+      ).toBe(true);
+    });
+
     it("answers consent_required for a request without scope under prompt=none", async () => {
       const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(() =>
         Promise.resolve(new Response("<html>consent</html>")),
