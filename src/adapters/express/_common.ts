@@ -80,8 +80,8 @@ const FORM_TYPE = "application/x-www-form-urlencoded";
  *
  * @throws {Error} When `Host` is missing or not a plain host and port, when
  * `req.hostname` or the request target would give the URL another host, when
- * the target has a `.` or `..` segment, which the URL would remove but
- * Express routes on, or,
+ * the target has a backslash or a `.` or `..` segment, which the URL would
+ * read differently from the path Express routes on, or,
  * with `stream`, when a body parser already read the body.
  */
 export function toFetchRequest(
@@ -143,17 +143,21 @@ function requestUrl(req: ExpressRequestLike): URL {
   if (!target.startsWith("/") || url.origin !== origin.origin) {
     throw new Error("The request target is not a path on this host.");
   }
-  if (hasDotSegment(target)) {
-    throw new Error("The request target has a dot segment.");
+  if (!isPlainPath(target)) {
+    throw new Error(
+      "The request target has a backslash or a dot segment, which the URL " +
+        "would read differently from Express's routing.",
+    );
   }
   return url;
 }
 
-function hasDotSegment(target: string): boolean {
+function isPlainPath(target: string): boolean {
   const path = target.split(/[?#]/, 1)[0];
-  return path
-    .split(/[/\\]/)
-    .some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment));
+  return (
+    !path.includes("\\") &&
+    !path.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
+  );
 }
 
 function parsedFormBody(req: ExpressRequestLike): string | null {

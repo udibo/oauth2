@@ -383,6 +383,36 @@ describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
     expect(resolvedUrls).toStrictEqual([]);
   });
 
+  it("refuses a backslash the URL would read as a separator but Express would not", async () => {
+    const app = express();
+    app.get("/:org/:tenant/:item", server.protect(), (_req, res) => {
+      res.send("served");
+    });
+    const origin = await serve(app);
+
+    expect(
+      await rawGet(origin, "/o\\b/a/x", { authorization: "Bearer read-token" }),
+    ).toBe(500);
+    expect(resolvedUrls).toStrictEqual([]);
+    expect(
+      await rawGet(origin, "/o/a/x", { authorization: "Bearer read-token" }),
+    ).toBe(200);
+  });
+
+  it("refuses an absolute-form target even when it names this origin", async () => {
+    const app = express();
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+
+    expect(
+      await rawGet(origin, `${origin}/api/me`, {
+        authorization: "Bearer read-token",
+      }),
+    ).toBe(500);
+    expect(resolvedUrls).toStrictEqual([]);
+  });
+
   it("refuses a dot segment the URL would remove but Express routes on", async () => {
     const app = express();
     const tenant = express.Router({ mergeParams: true });
