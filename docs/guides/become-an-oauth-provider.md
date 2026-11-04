@@ -346,6 +346,13 @@ login redirect needs the `Response` constructor shown above, since
 type it as your app's request; the handlers accept the request and response of
 Express 4 or 5 without depending on `express` themselves.
 
+The request URL the core and your `resolve` see is built from the `Host` header
+and `req.originalUrl`. Under `trust proxy`, only an exact
+`X-Forwarded-Proto: https` switches it to `https`; any other value leaves it
+`http`, so a forwarded header cannot move the URL to another host. A `Host`
+carrying anything beyond a host and port, or a request target that is not a
+path, is passed to `next` as an error.
+
 ## Security defaults
 
 These protections are on by default, deliberately stricter than RFC 6749:

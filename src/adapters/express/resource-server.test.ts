@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { BasicScope } from "../../models/scope.ts";
@@ -21,9 +23,25 @@ const testUser: TestUser = { id: "user-1", username: "testuser" };
 const testClient: TestClient = { id: "client-1" };
 const FORM = { "content-type": "application/x-www-form-urlencoded" };
 
+function rawGet(
+  origin: string,
+  path: string,
+  headers: Record<string, string>,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(`${origin}/`, { path, headers }, (response) => {
+      response.resume();
+      response.on("end", () => resolve(response.statusCode ?? 0));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
   let server: ExpressResourceServer<TestClient, TestUser>;
   let listening: Listening | undefined;
+  let resolvedUrls: string[];
 
   beforeEach(async () => {
     const userService = new MemoryUserService();
@@ -38,8 +56,12 @@ describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
       user: testUser,
       scope: new BasicScope("read"),
     });
+    resolvedUrls = [];
     server = new ExpressResourceServer<TestClient, TestUser>({
-      resolve: () => ({ services: { tokenService } }),
+      resolve: (request) => {
+        resolvedUrls.push(request.url);
+        return { services: { tokenService } };
+      },
       realm: "example",
     });
   });
@@ -270,6 +292,89 @@ describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
       headers: { authorization: "Bearer read-token" },
     });
     expect(await response.json()).toStrictEqual({ user: testUser.id });
+  });
+
+  it("hands the core the Host and the original target under a mount", async () => {
+    const app = express();
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+
+    await fetch(`${origin}/api/me?view=full`, {
+      headers: { authorization: "Bearer read-token" },
+    });
+    expect(resolvedUrls).toStrictEqual([`${origin}/api/me?view=full`]);
+  });
+
+  it("takes only an exact https from X-Forwarded-Proto under trust proxy", async () => {
+    const app = express();
+    app.set("trust proxy", "loopback");
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+    const host = new URL(origin).host;
+
+    for (const proto of [
+      "https",
+      "https://evil.example/#",
+      "http://evil.example/#",
+    ]) {
+      await rawGet(origin, "/api/me", {
+        authorization: "Bearer read-token",
+        "x-forwarded-proto": proto,
+      });
+    }
+    expect(resolvedUrls).toStrictEqual([
+      `https://${host}/api/me`,
+      `http://${host}/api/me`,
+      `http://${host}/api/me`,
+    ]);
+  });
+
+  it("refuses an absolute-form target or a Host carrying more than a host", async () => {
+    const app = express();
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+
+    const absolute = await rawGet(origin, "http://evil.example/api/me", {
+      authorization: "Bearer read-token",
+    });
+    const credentials = await rawGet(origin, "/api/me", {
+      authorization: "Bearer read-token",
+      host: "app.example@evil.example",
+    });
+    const path = await rawGet(origin, "/api/me", {
+      authorization: "Bearer read-token",
+      host: "app.example/evil#",
+    });
+    expect(absolute).toBe(500);
+    expect(credentials).toBe(500);
+    expect(path).toBe(500);
+    expect(resolvedUrls).toStrictEqual([]);
+  });
+
+  it("finds no token in a repeated or nested parsed access_token", async () => {
+    const app = express();
+    app.use(express.urlencoded({ extended: true }));
+    app.use("/api", server.protect());
+    app.post("/api/me", (_req, res) => {
+      res.json({ user: server.getContext(res).user?.id });
+    });
+    const origin = await serve(app);
+
+    for (const body of [
+      "access_token[]=read-token",
+      "access_token[0]=read-token",
+      "access_token=read-token&access_token=read-token",
+    ]) {
+      const response = await fetch(`${origin}/api/me`, {
+        method: "POST",
+        headers: FORM,
+        body,
+      });
+      expect(response.status, body).toBe(401);
+    }
   });
 
   it("authenticates a web Request inline", async () => {

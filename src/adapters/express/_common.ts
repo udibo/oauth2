@@ -31,7 +31,11 @@ export const OAUTH2_CONTEXT_KEY = "@udibo/oauth2" as const;
 export interface ExpressRequestLike extends IncomingMessage {
   /** The URL as received, before any mount path was stripped. */
   originalUrl?: string;
-  /** `http` or `https`, honoring Express's `trust proxy` setting. */
+  /**
+   * Express's scheme, which reads `X-Forwarded-Proto` under `trust proxy`.
+   * Only an exact `https` makes the request URL `https`; anything else is
+   * `http`.
+   */
   protocol?: string;
   /** Whatever a body parser that already ran left behind. */
   body?: unknown;
@@ -55,8 +59,9 @@ export type ExpressMiddleware<
 /**
  * How {@link toFetchRequest} supplies the body: `stream` hands the core the
  * unread request stream, and refuses one a body parser already consumed;
- * `parsed` never drains the stream, re-encoding a form body a parser left on
- * `req.body` so a form-encoded bearer token still reaches the core.
+ * `parsed` never drains the stream, re-encoding the single-valued fields of a
+ * form body a parser left on `req.body` so a form-encoded bearer token still
+ * reaches the core; a repeated or nested field is left out.
  */
 export type BodySource = "stream" | "parsed";
 
@@ -68,7 +73,9 @@ const FORM_TYPE = "application/x-www-form-urlencoded";
  * request: the full original URL, every header as received, and the body as
  * `source` says.
  *
- * @throws {Error} With `stream`, when a body parser already read the body.
+ * @throws {Error} When the `Host` header or the request target would give
+ * the URL another authority, or, with `stream`, when a body parser already
+ * read the body.
  */
 export function toFetchRequest(
   req: ExpressRequestLike,
@@ -80,10 +87,7 @@ export function toFetchRequest(
     const name = req.rawHeaders[i];
     if (!name.startsWith(":")) headers.append(name, req.rawHeaders[i + 1]);
   }
-  const url = new URL(
-    req.originalUrl ?? req.url ?? "/",
-    `${req.protocol ?? "http"}://${req.headers.host ?? "localhost"}`,
-  );
+  const url = requestUrl(req);
   if (BODYLESS_METHODS.has(method)) {
     return new Request(url, { method, headers });
   }
@@ -108,6 +112,25 @@ export function toFetchRequest(
   return new Request(url, { method, headers, body: parsedFormBody(req) });
 }
 
+function requestUrl(req: ExpressRequestLike): URL {
+  const scheme = req.protocol === "https" ? "https" : "http";
+  const origin = new URL(`${scheme}://${req.headers.host ?? "localhost"}`);
+  if (
+    origin.username ||
+    origin.password ||
+    origin.pathname !== "/" ||
+    origin.search ||
+    origin.hash
+  ) {
+    throw new Error("The Host header is not a plain host and port.");
+  }
+  const target = req.originalUrl ?? req.url ?? "/";
+  if (!target.startsWith("/") || target.startsWith("//")) {
+    throw new Error("The request target is not a path on this host.");
+  }
+  return new URL(target, origin);
+}
+
 function parsedFormBody(req: ExpressRequestLike): string | null {
   if (!req.readableEnded) return null;
   if (!req.headers["content-type"]?.includes(FORM_TYPE)) return null;
@@ -117,9 +140,7 @@ function parsedFormBody(req: ExpressRequestLike): string | null {
   if (body === null || typeof body !== "object") return null;
   const params = new URLSearchParams();
   for (const [name, value] of Object.entries(body)) {
-    for (const item of Array.isArray(value) ? value : [value]) {
-      if (typeof item === "string") params.append(name, item);
-    }
+    if (typeof value === "string") params.append(name, value);
   }
   return params.toString();
 }

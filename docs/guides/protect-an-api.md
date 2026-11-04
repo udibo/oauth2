@@ -403,8 +403,9 @@ app.post(
 
 The Express `protect()` never reads the request stream, so a body parser
 mounted after it still receives the body. It finds a form-encoded
-`access_token` only when a body parser has already parsed it onto `req.body`;
-with no parser in front, send the token in the `Authorization` header.
+`access_token` only when a body parser has already parsed it onto `req.body`
+as a single string; a repeated or nested `access_token` counts as no token. With
+no parser in front, send the token in the `Authorization` header.
 
 ## Layering scopes under one authenticated mount
 
