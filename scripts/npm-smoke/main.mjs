@@ -29,6 +29,8 @@ const KNOWN_EXPORTS = {
   "./hono/bff/testing": "createTestSession",
   "./hono/identity": "honoIdentityRoutes",
   "./hono/log": "requestLogger",
+  "./express/resource-server": "ExpressResourceServer",
+  "./express/authorization-server": "ExpressAuthorizationServer",
   "./react": "OAuth2Provider",
   "./react/components": "SignInForm",
   "./react/testing": "MockOAuth2Provider",

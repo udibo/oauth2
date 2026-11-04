@@ -18,6 +18,8 @@
     "./hono/bff/testing": "./src/adapters/hono/bff/testing.ts",
     "./hono/identity": "./src/adapters/hono/identity.ts",
     "./hono/log": "./src/adapters/hono/log.ts",
+    "./express/resource-server": "./src/adapters/express/resource-server.ts",
+    "./express/authorization-server": "./src/adapters/express/authorization-server.ts",
     "./react": "./src/react/mod.ts",
     "./react/components": "./src/react/components/mod.ts",
     "./react/testing": "./src/react/testing.tsx",

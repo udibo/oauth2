@@ -104,8 +104,9 @@ npx jsr add @udibo/oauth2   # or, with Deno: deno add jsr:@udibo/oauth2
 `hono`, `react`, and `react-dom` are optional peer dependencies. Install the
 ones for the entrypoints you import: `hono` for the `/hono/*` adapters, `react`
 and `react-dom` for `/react` and `/react/components`. `vitest` is an optional
-peer dependency of the testing helpers. Import the part you use; there is no
-root barrel or default export.
+peer dependency of the testing helpers. The `/express/*` adapters need no extra
+dependency: they accept the request and response of Express 4 or 5. Import the
+part you use; there is no root barrel or default export.
 
 ## Protect an API
 
@@ -217,31 +218,33 @@ development.
 All paths below start with `@udibo/oauth2`. Each entrypoint has typed API docs
 and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 
-| Subpath                      | Purpose                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| `/client`                    | `BffClient`, `DirectClient`, token storage, discovery caching                                   |
-| `/server`                    | Shared models, errors, scope types, and service contracts                                       |
-| `/server/authorization`      | Authorization server, grants, token/code services, signing keys                                 |
-| `/server/resource`           | Resource server, introspection and JWKS token readers                                           |
-| `/server/public-suffix`      | Public Suffix List checks for optional wildcard redirect registration                           |
-| `/hono/authorization-server` | Hono authorization endpoints                                                                    |
-| `/hono/resource-server`      | Bearer authentication and scope middleware                                                      |
-| `/hono/bff`                  | BFF routes, server-held tokens, session and pending-login stores                                |
-| `/identity`                  | App-owned signup, login, password reset, email verification, passwordless, and protection hooks |
-| `/identity/mfa`              | TOTP, recovery codes, and MFA storage contract                                                  |
-| `/identity/passkeys`         | Passkey (WebAuthn) registration and sign-in, as a first or second factor                        |
-| `/identity/external`         | Social and external OIDC sign-in for your own login pages                                       |
-| `/identity/migration`        | Verify imported password hashes and upgrade them at login                                       |
-| `/hono/identity`             | Hono routes for `IdentityService`                                                               |
-| `/hono/log`                  | Request logger and URL helper that redact every query value                                     |
-| `/react`                     | Context, hooks, authentication guards, and callback handling                                    |
-| `/react/components`          | Optional forms for login, signup, password reset, and MFA                                       |
-| `/crypto`                    | Random tokens, hashing, encoding, authenticated encryption                                      |
-| `/url`                       | Safe return paths and login continuation                                                        |
-| `/testing`                   | In-memory fixtures and authorization-server test helpers                                        |
-| `/testing/contract`          | Tests for app-owned service and storage implementations                                         |
-| `/hono/bff/testing`          | BFF session fixtures and session-store contract tests                                           |
-| `/react/testing`             | Mock clients and providers for component tests                                                  |
+| Subpath                         | Purpose                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `/client`                       | `BffClient`, `DirectClient`, token storage, discovery caching                                   |
+| `/server`                       | Shared models, errors, scope types, and service contracts                                       |
+| `/server/authorization`         | Authorization server, grants, token/code services, signing keys                                 |
+| `/server/resource`              | Resource server, introspection and JWKS token readers                                           |
+| `/server/public-suffix`         | Public Suffix List checks for optional wildcard redirect registration                           |
+| `/hono/authorization-server`    | Hono authorization endpoints                                                                    |
+| `/hono/resource-server`         | Bearer authentication and scope middleware                                                      |
+| `/hono/bff`                     | BFF routes, server-held tokens, session and pending-login stores                                |
+| `/express/authorization-server` | Express authorization endpoints                                                                 |
+| `/express/resource-server`      | Bearer authentication and scope middleware for Express                                          |
+| `/identity`                     | App-owned signup, login, password reset, email verification, passwordless, and protection hooks |
+| `/identity/mfa`                 | TOTP, recovery codes, and MFA storage contract                                                  |
+| `/identity/passkeys`            | Passkey (WebAuthn) registration and sign-in, as a first or second factor                        |
+| `/identity/external`            | Social and external OIDC sign-in for your own login pages                                       |
+| `/identity/migration`           | Verify imported password hashes and upgrade them at login                                       |
+| `/hono/identity`                | Hono routes for `IdentityService`                                                               |
+| `/hono/log`                     | Request logger and URL helper that redact every query value                                     |
+| `/react`                        | Context, hooks, authentication guards, and callback handling                                    |
+| `/react/components`             | Optional forms for login, signup, password reset, and MFA                                       |
+| `/crypto`                       | Random tokens, hashing, encoding, authenticated encryption                                      |
+| `/url`                          | Safe return paths and login continuation                                                        |
+| `/testing`                      | In-memory fixtures and authorization-server test helpers                                        |
+| `/testing/contract`             | Tests for app-owned service and storage implementations                                         |
+| `/hono/bff/testing`             | BFF session fixtures and session-store contract tests                                           |
+| `/react/testing`                | Mock clients and providers for component tests                                                  |
 
 ## Runtime support
 
@@ -253,7 +256,7 @@ checks a consumer of every entrypoint, and imports each one on Node.
 | Surface                                                                | Node 22+              | Browser                                     | Deno, Bun     |
 | ---------------------------------------------------------------------- | --------------------- | ------------------------------------------- | ------------- |
 | `/client`, `/react`, `/react/components`                               | Tested, including SSR | Intended for client code; no secrets        | Not verified  |
-| `/server/*`, `/identity/*`, `/hono/*`, `/crypto`, `/url`               | Tested                | Server functionality belongs on the backend | Not verified  |
+| `/server/*`, `/identity/*`, `/hono/*`, `/express/*`, `/crypto`, `/url` | Tested                | Server functionality belongs on the backend | Not verified  |
 | `/testing`, `/testing/contract`, `/hono/bff/testing`, `/react/testing` | Tested; need Vitest   | Not supported                               | Not verified  |
 | `udibo-oauth2` command (`bin`)                                         | Tested                | Not supported                               | Not supported |
 
@@ -959,6 +962,75 @@ client sends the user to `GET /oauth2/authorize` with `response_type=code`,
 login authenticates them; the browser returns to the client's `redirect_uri`
 with a single-use `code`; and the client exchanges it at `POST /oauth2/token`
 with its `code_verifier`.
+
+### Mount the endpoints on Express
+
+`ExpressAuthorizationServer` (from `@udibo/oauth2/express/authorization-server`)
+takes the same options as `HonoAuthorizationServer`. Its `routes()` returns one
+middleware serving the same paths, and its callbacks receive the Express `req`
+and `res` in place of the Hono `Context`, so they can read the session your app
+already keeps:
+
+```ts
+import express from "express";
+import { ExpressAuthorizationServer } from "@udibo/oauth2/express/authorization-server";
+import type { AuthorizationServerOptions } from "@udibo/oauth2/server/authorization";
+import type { BasicScope, ClientInterface } from "@udibo/oauth2/server";
+
+interface AppClient extends ClientInterface {
+  id: string;
+}
+
+interface AppUser {
+  id: string;
+}
+
+declare const options: AuthorizationServerOptions<AppClient, AppUser, BasicScope>;
+declare function readSessionUser(req: express.Request): AppUser | undefined;
+
+const authServer = new ExpressAuthorizationServer<AppClient, AppUser>(options);
+const app = express();
+
+app.use(
+  "/oauth2",
+  authServer.routes({
+    authenticateUser: async (req: express.Request) => {
+      const user = readSessionUser(req);
+      if (user) return { user };
+      const returnTo = encodeURIComponent(req.originalUrl);
+      return new Response(null, {
+        status: 302,
+        headers: { location: `/login?return_to=${returnTo}` },
+      });
+    },
+  }),
+);
+
+app.use(express.urlencoded({ extended: false }));
+```
+
+Mount `routes()`, or any individual handler, before your body parsers. The
+endpoints read the raw form themselves: they enforce `maxBodyBytes` as the body
+streams in, refuse a repeated parameter, and refuse a body that is not
+form-encoded. A body parser that ran first would hide all three, so a handler
+that finds the body already consumed passes an error to `next` instead.
+
+The callbacks return a web `Response` rather than writing to `res`. A relative
+login redirect needs the `Response` constructor shown above, since
+`Response.redirect` requires an absolute URL. Annotate the callback's `req` to
+type it as your app's request; the handlers accept the request and response of
+Express 4 or 5 without depending on `express` themselves.
+
+The request URL the core and your `resolve` see is built from the `Host` header
+and `req.originalUrl`. Under `trust proxy`, only an exact
+`X-Forwarded-Proto: https` switches it to `https`; any other value leaves it
+`http`. The adapter passes an error to `next`, rather than guess, for a missing
+`Host`, a `Host` carrying anything beyond a host and port, a request target that
+resolves to another host or carries a backslash or a `.` or `..` segment, and a `req.hostname` that differs from `Host` — as
+Express reports when `trust proxy` reads an `X-Forwarded-Host`. Behind a proxy,
+forward the original `Host` header. The URL keeps the request's percent-encoding while
+Express decodes route params, so a `resolve` that keys on a path segment should
+decode it the same way.
 
 ## Security defaults
 
@@ -3182,6 +3254,56 @@ declare const resourceServer: HonoResourceServer<{ id: string }, { id: string }>
 app.use("/api/*", bodyLimit({ maxSize: 64 * 1024 }));
 app.use("/api/*", resourceServer.protect());
 ```
+
+### On Express
+
+`ExpressResourceServer` (from `@udibo/oauth2/express/resource-server`) takes
+the same options and offers the same middleware for Express 4 or 5. It stores
+the authenticated context on `res.locals`, so `getContext(res)` reads it back:
+
+```ts
+import express from "express";
+import { ExpressResourceServer } from "@udibo/oauth2/express/resource-server";
+import type { TokenReaderInterface } from "@udibo/oauth2/server";
+
+interface Client {
+  id: string;
+}
+
+interface User {
+  id: string;
+}
+
+declare const tokenReader: TokenReaderInterface<Client, User>;
+
+const resourceServer = new ExpressResourceServer<Client, User>({
+  resolve: () => ({ services: { tokenService: tokenReader } }),
+  realm: "Example API",
+});
+
+const app = express();
+
+app.use("/api/private", resourceServer.protect());
+app.get("/api/private", (_req, res) => {
+  const { client, user } = resourceServer.getContext(res);
+  res.json({ client: client.id, user: user?.id });
+});
+
+app.post(
+  "/api/items",
+  resourceServer.protect("write"),
+  express.json({ limit: "64kb" }),
+  (req, res) => {
+    res.status(201).json(req.body);
+  },
+);
+```
+
+The Express `protect()` never reads the request stream, so a body parser
+mounted after it still receives the body. It finds a form-encoded
+`access_token` only when a body parser has already parsed it onto `req.body`
+as a single string; a repeated or nested `access_token` counts as no token. With
+no parser in front, send the token in the `Authorization` header.
 
 ## Layering scopes under one authenticated mount
 

@@ -357,6 +357,56 @@ app.use("/api/*", bodyLimit({ maxSize: 64 * 1024 }));
 app.use("/api/*", resourceServer.protect());
 ```
 
+### On Express
+
+`ExpressResourceServer` (from `@udibo/oauth2/express/resource-server`) takes
+the same options and offers the same middleware for Express 4 or 5. It stores
+the authenticated context on `res.locals`, so `getContext(res)` reads it back:
+
+```ts
+import express from "express";
+import { ExpressResourceServer } from "@udibo/oauth2/express/resource-server";
+import type { TokenReaderInterface } from "@udibo/oauth2/server";
+
+interface Client {
+  id: string;
+}
+
+interface User {
+  id: string;
+}
+
+declare const tokenReader: TokenReaderInterface<Client, User>;
+
+const resourceServer = new ExpressResourceServer<Client, User>({
+  resolve: () => ({ services: { tokenService: tokenReader } }),
+  realm: "Example API",
+});
+
+const app = express();
+
+app.use("/api/private", resourceServer.protect());
+app.get("/api/private", (_req, res) => {
+  const { client, user } = resourceServer.getContext(res);
+  res.json({ client: client.id, user: user?.id });
+});
+
+app.post(
+  "/api/items",
+  resourceServer.protect("write"),
+  express.json({ limit: "64kb" }),
+  (req, res) => {
+    res.status(201).json(req.body);
+  },
+);
+```
+
+The Express `protect()` never reads the request stream, so a body parser
+mounted after it still receives the body. It finds a form-encoded
+`access_token` only when a body parser has already parsed it onto `req.body`
+as a single string; a repeated or nested `access_token` counts as no token. With
+no parser in front, send the token in the `Authorization` header.
+
 ## Layering scopes under one authenticated mount
 
 When routes under a single mount need different scopes, authenticate once with a

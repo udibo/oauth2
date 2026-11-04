@@ -39,8 +39,9 @@ npx jsr add @udibo/oauth2   # or, with Deno: deno add jsr:@udibo/oauth2
 `hono`, `react`, and `react-dom` are optional peer dependencies. Install the
 ones for the entrypoints you import: `hono` for the `/hono/*` adapters, `react`
 and `react-dom` for `/react` and `/react/components`. `vitest` is an optional
-peer dependency of the testing helpers. Import the part you use; there is no
-root barrel or default export.
+peer dependency of the testing helpers. The `/express/*` adapters need no extra
+dependency: they accept the request and response of Express 4 or 5. Import the
+part you use; there is no root barrel or default export.
 
 ## Protect an API
 
@@ -152,31 +153,33 @@ development.
 All paths below start with `@udibo/oauth2`. Each entrypoint has typed API docs
 and examples in the [reference](https://jsr.io/@udibo/oauth2/doc).
 
-| Subpath                      | Purpose                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| `/client`                    | `BffClient`, `DirectClient`, token storage, discovery caching                                   |
-| `/server`                    | Shared models, errors, scope types, and service contracts                                       |
-| `/server/authorization`      | Authorization server, grants, token/code services, signing keys                                 |
-| `/server/resource`           | Resource server, introspection and JWKS token readers                                           |
-| `/server/public-suffix`      | Public Suffix List checks for optional wildcard redirect registration                           |
-| `/hono/authorization-server` | Hono authorization endpoints                                                                    |
-| `/hono/resource-server`      | Bearer authentication and scope middleware                                                      |
-| `/hono/bff`                  | BFF routes, server-held tokens, session and pending-login stores                                |
-| `/identity`                  | App-owned signup, login, password reset, email verification, passwordless, and protection hooks |
-| `/identity/mfa`              | TOTP, recovery codes, and MFA storage contract                                                  |
-| `/identity/passkeys`         | Passkey (WebAuthn) registration and sign-in, as a first or second factor                        |
-| `/identity/external`         | Social and external OIDC sign-in for your own login pages                                       |
-| `/identity/migration`        | Verify imported password hashes and upgrade them at login                                       |
-| `/hono/identity`             | Hono routes for `IdentityService`                                                               |
-| `/hono/log`                  | Request logger and URL helper that redact every query value                                     |
-| `/react`                     | Context, hooks, authentication guards, and callback handling                                    |
-| `/react/components`          | Optional forms for login, signup, password reset, and MFA                                       |
-| `/crypto`                    | Random tokens, hashing, encoding, authenticated encryption                                      |
-| `/url`                       | Safe return paths and login continuation                                                        |
-| `/testing`                   | In-memory fixtures and authorization-server test helpers                                        |
-| `/testing/contract`          | Tests for app-owned service and storage implementations                                         |
-| `/hono/bff/testing`          | BFF session fixtures and session-store contract tests                                           |
-| `/react/testing`             | Mock clients and providers for component tests                                                  |
+| Subpath                         | Purpose                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `/client`                       | `BffClient`, `DirectClient`, token storage, discovery caching                                   |
+| `/server`                       | Shared models, errors, scope types, and service contracts                                       |
+| `/server/authorization`         | Authorization server, grants, token/code services, signing keys                                 |
+| `/server/resource`              | Resource server, introspection and JWKS token readers                                           |
+| `/server/public-suffix`         | Public Suffix List checks for optional wildcard redirect registration                           |
+| `/hono/authorization-server`    | Hono authorization endpoints                                                                    |
+| `/hono/resource-server`         | Bearer authentication and scope middleware                                                      |
+| `/hono/bff`                     | BFF routes, server-held tokens, session and pending-login stores                                |
+| `/express/authorization-server` | Express authorization endpoints                                                                 |
+| `/express/resource-server`      | Bearer authentication and scope middleware for Express                                          |
+| `/identity`                     | App-owned signup, login, password reset, email verification, passwordless, and protection hooks |
+| `/identity/mfa`                 | TOTP, recovery codes, and MFA storage contract                                                  |
+| `/identity/passkeys`            | Passkey (WebAuthn) registration and sign-in, as a first or second factor                        |
+| `/identity/external`            | Social and external OIDC sign-in for your own login pages                                       |
+| `/identity/migration`           | Verify imported password hashes and upgrade them at login                                       |
+| `/hono/identity`                | Hono routes for `IdentityService`                                                               |
+| `/hono/log`                     | Request logger and URL helper that redact every query value                                     |
+| `/react`                        | Context, hooks, authentication guards, and callback handling                                    |
+| `/react/components`             | Optional forms for login, signup, password reset, and MFA                                       |
+| `/crypto`                       | Random tokens, hashing, encoding, authenticated encryption                                      |
+| `/url`                          | Safe return paths and login continuation                                                        |
+| `/testing`                      | In-memory fixtures and authorization-server test helpers                                        |
+| `/testing/contract`             | Tests for app-owned service and storage implementations                                         |
+| `/hono/bff/testing`             | BFF session fixtures and session-store contract tests                                           |
+| `/react/testing`                | Mock clients and providers for component tests                                                  |
 
 ## Runtime support
 
@@ -188,7 +191,7 @@ checks a consumer of every entrypoint, and imports each one on Node.
 | Surface                                                                | Node 22+              | Browser                                     | Deno, Bun     |
 | ---------------------------------------------------------------------- | --------------------- | ------------------------------------------- | ------------- |
 | `/client`, `/react`, `/react/components`                               | Tested, including SSR | Intended for client code; no secrets        | Not verified  |
-| `/server/*`, `/identity/*`, `/hono/*`, `/crypto`, `/url`               | Tested                | Server functionality belongs on the backend | Not verified  |
+| `/server/*`, `/identity/*`, `/hono/*`, `/express/*`, `/crypto`, `/url` | Tested                | Server functionality belongs on the backend | Not verified  |
 | `/testing`, `/testing/contract`, `/hono/bff/testing`, `/react/testing` | Tested; need Vitest   | Not supported                               | Not verified  |
 | `udibo-oauth2` command (`bin`)                                         | Tested                | Not supported                               | Not supported |
 
