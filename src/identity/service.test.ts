@@ -3738,3 +3738,255 @@ describe("IdentityService resetPassword voids other credentials", () => {
     expect(consoleError.mock.calls.length).toStrictEqual(1);
   });
 });
+
+describe("IdentityService mailed links bind to the address they were sent to", () => {
+  function makeMailedLinkService(
+    users: (
+      store: IdentityUserStore<TestUser>,
+    ) => IdentityUserStore<TestUser> = (store) => store,
+  ) {
+    const { store, changeEmail } = makeStore();
+    const tokens = new TokenFlowService(new MemoryTokenFlowStore());
+    const events: IdentityEvent[] = [];
+    const sent = {
+      reset: [] as DeliveryMessage[],
+      signIn: [] as DeliveryMessage[],
+      unlock: [] as DeliveryMessage[],
+    };
+    const lockout = new AccountLockout({
+      maxAttempts: 3,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const service = serviceWithoutSignInFloor({
+      users: users(store),
+      tokens,
+      lockout,
+      delivery: {
+        sendPasswordReset: (msg) => {
+          sent.reset.push(msg);
+        },
+        sendSignInLink: (msg) => {
+          sent.signIn.push(msg);
+        },
+        sendAccountUnlock: (msg) => {
+          sent.unlock.push(msg);
+        },
+      },
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const signUp = (email = "a@b.co") =>
+      service.signUp({
+        password: "hunter2hunter2",
+        profile: { email },
+      });
+    return { service, tokens, lockout, events, sent, signUp, changeEmail };
+  }
+
+  it("stamps the delivered address on every mailed reset, sign-in and unlock token", async () => {
+    const { service, tokens, sent, signUp } = makeMailedLinkService();
+    const user = await signUp();
+
+    await service.requestPasswordReset(" a@b.co ");
+    await service.requestSignInLink(" a@b.co ");
+    await service.requestAccountUnlock({ userId: user.id, email: "a@b.co" });
+
+    for (const [purpose, message] of [
+      [TokenPurpose.PasswordReset, sent.reset[0]],
+      [TokenPurpose.SignIn, sent.signIn[0]],
+      [TokenPurpose.AccountUnlock, sent.unlock[0]],
+    ] as const) {
+      expect(await tokens.inspect(purpose, message.token)).toStrictEqual({
+        status: "valid",
+        subject: user.id,
+        data: { email: "a@b.co" },
+      });
+    }
+  });
+
+  it("refuses a reset link after the account's email moved, leaving the password unchanged", async () => {
+    const { service, events, sent, signUp, changeEmail } =
+      makeMailedLinkService();
+    const user = await signUp();
+    await service.requestPasswordReset("a@b.co");
+    changeEmail(user.id, "new@b.co");
+
+    expect(
+      await service.resetPassword({
+        token: sent.reset[0].token,
+        password: "attackerpassword1",
+      }),
+    ).toStrictEqual(null);
+
+    expect(lastEventOfType(events, "password_reset.failed")).toStrictEqual({
+      type: "password_reset.failed",
+      reason: "invalid_token",
+    });
+    expect(eventsOfType(events, "password_reset.completed")).toStrictEqual([]);
+    expect(
+      await service.signIn({
+        identifier: "new@b.co",
+        password: "attackerpassword1",
+      }),
+    ).toStrictEqual(null);
+    assert.exists(
+      await service.signIn({
+        identifier: "new@b.co",
+        password: "hunter2hunter2",
+      }),
+    );
+  });
+
+  it("refuses a sign-in link after the account's email moved", async () => {
+    const { service, events, sent, signUp, changeEmail } =
+      makeMailedLinkService();
+    const user = await signUp();
+    await service.requestSignInLink("a@b.co");
+    changeEmail(user.id, "new@b.co");
+
+    expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
+      { status: "invalid" },
+    );
+    expect(lastEventOfType(events, "signin_link.failed")).toStrictEqual({
+      type: "signin_link.failed",
+      reason: "invalid",
+    });
+    expect(eventsOfType(events, "signin_link.consumed")).toStrictEqual([]);
+  });
+
+  it("refuses an unlock link after the account's email moved, leaving the lock in place", async () => {
+    const { service, lockout, events, sent, signUp, changeEmail } =
+      makeMailedLinkService();
+    const user = await signUp();
+    for (let i = 0; i < 3; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    await service.requestAccountUnlock({ userId: user.id, email: "a@b.co" });
+    changeEmail(user.id, "new@b.co");
+
+    expect(await service.unlockAccount(sent.unlock[0].token)).toStrictEqual({
+      status: "invalid",
+    });
+    expect(lastEventOfType(events, "account_unlock.failed")).toStrictEqual({
+      type: "account_unlock.failed",
+      reason: "invalid",
+    });
+    expect(eventsOfType(events, "account_unlock.completed")).toStrictEqual([]);
+    expect((await lockout.status(user.id)).locked).toStrictEqual(true);
+  });
+
+  it("refuses a link whose address now belongs to a different account", async () => {
+    const { service, sent, signUp, changeEmail } = makeMailedLinkService();
+    const first = await signUp();
+    await service.requestSignInLink("a@b.co");
+    await service.requestPasswordReset("a@b.co");
+    await service.requestAccountUnlock({ userId: first.id, email: "a@b.co" });
+    changeEmail(first.id, "new@b.co");
+    await signUp("a@b.co");
+
+    expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
+      { status: "invalid" },
+    );
+    expect(
+      await service.resetPassword({
+        token: sent.reset[0].token,
+        password: "attackerpassword1",
+      }),
+    ).toStrictEqual(null);
+    expect(await service.unlockAccount(sent.unlock[0].token)).toStrictEqual({
+      status: "invalid",
+    });
+  });
+
+  it("leaves a refused link unspent, so it redeems again once the account holds its address", async () => {
+    const { service, sent, signUp, changeEmail } = makeMailedLinkService();
+    const user = await signUp();
+    await service.requestSignInLink("a@b.co");
+    changeEmail(user.id, "new@b.co");
+    expect(
+      (await service.consumeSignInLink(sent.signIn[0].token)).status,
+    ).toStrictEqual("invalid");
+
+    changeEmail(user.id, "a@b.co");
+
+    expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
+      { status: "success", userId: user.id },
+    );
+  });
+
+  it("matches the stamped address through the store's own email lookup, so a case-folding store redeems a differently cased request", async () => {
+    const { service, sent, signUp } = makeMailedLinkService((store) => ({
+      ...store,
+      findByEmail: (email) => store.findByEmail(email.toLowerCase()),
+    }));
+    const user = await signUp();
+    await service.requestSignInLink("A@B.CO");
+    await service.requestPasswordReset("A@B.Co");
+    await service.requestAccountUnlock({ userId: user.id, email: "A@b.co" });
+
+    expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
+      { status: "success", userId: user.id },
+    );
+    expect(
+      await service.resetPassword({
+        token: sent.reset[0].token,
+        password: "newpassword1",
+      }),
+    ).toStrictEqual({ userId: user.id });
+    expect(await service.unlockAccount(sent.unlock[0].token)).toStrictEqual({
+      status: "success",
+      userId: user.id,
+    });
+  });
+
+  it("leaves the link unspent when the store throws during the address check", async () => {
+    let lookupFails = false;
+    const { service, sent, signUp } = makeMailedLinkService((store) => ({
+      ...store,
+      findByEmail: (email) =>
+        lookupFails
+          ? Promise.reject(new Error("store offline"))
+          : store.findByEmail(email),
+    }));
+    const user = await signUp();
+    await service.requestSignInLink("a@b.co");
+    lookupFails = true;
+
+    expect(
+      await rejection(service.consumeSignInLink(sent.signIn[0].token)),
+    ).toStrictEqual(new Error("store offline"));
+
+    lookupFails = false;
+    expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
+      { status: "success", userId: user.id },
+    );
+  });
+
+  it("still redeems a token minted without an address, as tokens issued before the address was stamped were", async () => {
+    const { service, tokens, signUp, changeEmail } = makeMailedLinkService();
+    const user = await signUp();
+    const mint = async (purpose: string) =>
+      (await tokens.create({ purpose, subject: user.id, ttlMs: 60_000 })).token;
+    const signInToken = await mint(TokenPurpose.SignIn);
+    const resetToken = await mint(TokenPurpose.PasswordReset);
+    const unlockToken = await mint(TokenPurpose.AccountUnlock);
+    changeEmail(user.id, "new@b.co");
+
+    expect(await service.consumeSignInLink(signInToken)).toStrictEqual({
+      status: "success",
+      userId: user.id,
+    });
+    expect(
+      await service.resetPassword({
+        token: resetToken,
+        password: "newpassword1",
+      }),
+    ).toStrictEqual({ userId: user.id });
+    expect(await service.unlockAccount(unlockToken)).toStrictEqual({
+      status: "success",
+      userId: user.id,
+    });
+  });
+});

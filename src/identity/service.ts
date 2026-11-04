@@ -78,7 +78,14 @@ export interface IdentityUserStore<User extends IdentityUser> {
   ): Promise<User>;
   /** Find a user by a sign-in identifier (email/username/phone). */
   findByIdentifier(identifier: string): Promise<User | undefined>;
-  /** Find a user by email (password-reset / re-verification requests). */
+  /**
+   * Find a user by email (password-reset / sign-in-link requests).
+   *
+   * Also called when a mailed reset, sign-in or account-unlock link is
+   * redeemed: the link works only while this still resolves the address it
+   * was sent to to the same user. Normalize as at write time; a lookup that
+   * case-folds lets a link requested with different casing still redeem.
+   */
   findByEmail(email: string): Promise<User | undefined>;
   /**
    * The user's stored password credential, or `undefined`.
@@ -458,7 +465,6 @@ type TokenDeliveryRequest = {
   to: string;
   subject: string;
   ttlMs: number;
-  data?: Record<string, unknown>;
   requested: IdentityEvent;
 };
 
@@ -685,7 +691,6 @@ export class IdentityService<User extends IdentityUser> {
         hook: "sendPasswordReset",
         to: normalized,
         subject: user.id,
-        data: { email: normalized },
         ttlMs: this.#ttl.passwordReset,
         requested: {
           type: "password_reset.requested",
@@ -701,7 +706,10 @@ export class IdentityService<User extends IdentityUser> {
    * was configured) revoke **all** of the user's sessions via
    * `revokeAllByUser`. Clears any failed-attempt lockout — the emailed token
    * proves the same account ownership the unlock flow does. Returns
-   * `{ userId }`, or `null` for an invalid/expired/used token.
+   * `{ userId }`, or `null` for an invalid/expired/used token — including one
+   * whose address no longer finds this user through
+   * {@link IdentityUserStore.findByEmail}, because the account's email moved
+   * after the link was mailed. That refusal leaves the token unspent.
    *
    * A reset is the user's "lock everyone else out" action, so the outstanding
    * passwordless credentials for the same account are voided too: sign-in links
@@ -752,6 +760,7 @@ export class IdentityService<User extends IdentityUser> {
         type: "password_reset.failed",
         reason: "invalid_token",
       }),
+      addressBound: true,
     });
     if (consumed.status !== "success") return null;
     const userId = consumed.resolved.subject;
@@ -859,7 +868,6 @@ export class IdentityService<User extends IdentityUser> {
       to: input.email,
       subject: input.userId,
       ttlMs: this.#ttl.emailVerification,
-      data: { email: input.email },
       requested: {
         type: "email_verification.requested",
         userId: input.userId,
@@ -911,7 +919,10 @@ export class IdentityService<User extends IdentityUser> {
    * Mint + deliver a single-use account-unlock link after a lockout. Call it
    * with the locked account's email (typically from your `lockout` event
    * handler — the service only knows opaque user ids). Requires `tokens` and
-   * a `delivery.sendAccountUnlock` hook to actually send. With a `rateLimiter`
+   * a `delivery.sendAccountUnlock` hook to actually send. `email` must be an
+   * address {@link IdentityUserStore.findByEmail} resolves to `userId`:
+   * {@link IdentityService.unlockAccount} refuses the link once it does not.
+   * With a `rateLimiter`
    * (or a tighter `rateLimiters.accountUnlock`), requests throttle per user and
    * throw {@link IdentityError} `rate_limited` when exceeded.
    */
@@ -945,7 +956,9 @@ export class IdentityService<User extends IdentityUser> {
 
   /**
    * Consume an unlock token and clear the account's lockout state (failures
-   * and lock). The self-service unlock path: the emailed link lands here.
+   * and lock). The self-service unlock path: the emailed link lands here. A
+   * link whose address no longer finds this user through
+   * {@link IdentityUserStore.findByEmail} reports `invalid` and stays unspent.
    */
   async unlockAccount(token: string): Promise<UnlockAccountResult> {
     const tokens = this.#requireTokens("unlockAccount");
@@ -954,6 +967,7 @@ export class IdentityService<User extends IdentityUser> {
       purpose: TokenPurpose.AccountUnlock,
       token,
       failed: (reason) => ({ type: "account_unlock.failed", reason }),
+      addressBound: true,
     });
     if (result.status !== "success") return result;
     const userId = result.resolved.subject;
@@ -1042,7 +1056,9 @@ export class IdentityService<User extends IdentityUser> {
    * stays your app's job. So does re-resolving the user: a user deleted or
    * disabled since the link was minted must be treated as `invalid` by your
    * user store, not signed in. `expired` and `invalid` are distinguished so
-   * the UI can offer a fresh link.
+   * the UI can offer a fresh link. A link whose address no longer finds this
+   * user through {@link IdentityUserStore.findByEmail} — the account's email
+   * moved after it was mailed — reports `invalid` and stays unspent.
    */
   async consumeSignInLink(token: string): Promise<ConsumeSignInLinkResult> {
     const tokens = this.#requireTokens("consumeSignInLink");
@@ -1051,6 +1067,7 @@ export class IdentityService<User extends IdentityUser> {
       purpose: TokenPurpose.SignIn,
       token,
       failed: (reason) => ({ type: "signin_link.failed", reason }),
+      addressBound: true,
     });
     if (result.status !== "success") return result;
     const userId = result.resolved.subject;
@@ -1371,7 +1388,7 @@ export class IdentityService<User extends IdentityUser> {
     const { token, expiresAt } = await tokens.create({
       purpose: DELIVERY_PURPOSES[request.hook],
       subject: request.subject,
-      data: request.data,
+      data: { email: request.to },
       ttlMs: request.ttlMs,
       invalidateExisting: true,
     });
@@ -1390,6 +1407,7 @@ export class IdentityService<User extends IdentityUser> {
     purpose: string;
     token: string;
     failed: (reason: "expired" | "invalid") => IdentityEvent;
+    addressBound?: boolean;
     beforeConsume?: (
       subject: string,
       data?: Record<string, unknown>,
@@ -1401,7 +1419,11 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit(input.failed("expired"));
       return { status: "expired" };
     }
-    if (status.status !== "valid") {
+    if (
+      status.status !== "valid" ||
+      (input.addressBound &&
+        !(await this.#stillAddressedTo(status.subject, status.data)))
+    ) {
       await this.#emit(input.failed("invalid"));
       return { status: "invalid" };
     }
@@ -1412,6 +1434,15 @@ export class IdentityService<User extends IdentityUser> {
       return { status: "invalid" };
     }
     return { status: "success", resolved };
+  }
+
+  async #stillAddressedTo(
+    subject: string,
+    data: Record<string, unknown> | undefined,
+  ): Promise<boolean> {
+    const email = emailFromData(data);
+    if (email === undefined) return true;
+    return (await this.#users.findByEmail(email))?.id === subject;
   }
 
   #emit(event: IdentityEvent): Promise<void> {

@@ -262,6 +262,11 @@ export async function consumeLink(
 }
 ```
 
+A link only redeems while the address it was mailed to still finds the same
+account through your store's `findByEmail`. If the account's email has moved
+since the link was requested, `consumeSignInLink` reports `invalid`, so a
+mailbox the account no longer uses cannot sign in to it.
+
 Whichever half returned a `userId`, three things are still your job:
 
 1. **Re-resolve the user.** An account deleted or disabled since the code or
