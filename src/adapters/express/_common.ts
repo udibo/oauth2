@@ -79,7 +79,9 @@ const FORM_TYPE = "application/x-www-form-urlencoded";
  * `source` says.
  *
  * @throws {Error} When `Host` is missing or not a plain host and port, when
- * `req.hostname` or the request target would give the URL another host, or,
+ * `req.hostname` or the request target would give the URL another host, when
+ * the target has a `.` or `..` segment, which the URL would remove but
+ * Express routes on, or,
  * with `stream`, when a body parser already read the body.
  */
 export function toFetchRequest(
@@ -136,11 +138,22 @@ function requestUrl(req: ExpressRequestLike): URL {
         "original Host header.",
     );
   }
-  const url = new URL(req.originalUrl ?? req.url ?? "/", origin);
-  if (url.origin !== origin.origin) {
+  const target = req.originalUrl ?? req.url ?? "/";
+  const url = new URL(target, origin);
+  if (!target.startsWith("/") || url.origin !== origin.origin) {
     throw new Error("The request target is not a path on this host.");
   }
+  if (hasDotSegment(target)) {
+    throw new Error("The request target has a dot segment.");
+  }
   return url;
+}
+
+function hasDotSegment(target: string): boolean {
+  const path = target.split(/[?#]/, 1)[0];
+  return path
+    .split(/[/\\]/)
+    .some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment));
 }
 
 function parsedFormBody(req: ExpressRequestLike): string | null {

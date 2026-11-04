@@ -383,6 +383,35 @@ describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
     expect(resolvedUrls).toStrictEqual([]);
   });
 
+  it("refuses a dot segment the URL would remove but Express routes on", async () => {
+    const app = express();
+    const tenant = express.Router({ mergeParams: true });
+    tenant.use(server.protect());
+    tenant.get("/:collection/:id", (_req, res) => {
+      res.send("served");
+    });
+    app.use("/t/:tenant", tenant);
+    const origin = await serve(app);
+
+    for (const path of [
+      "/t/a/../b",
+      "/t/a/%2e%2E/b",
+      "/t/a/./b",
+      "/t/a/..\\b",
+    ]) {
+      expect(
+        await rawGet(origin, path, { authorization: "Bearer read-token" }),
+        path,
+      ).toBe(500);
+    }
+    expect(resolvedUrls).toStrictEqual([]);
+    expect(
+      await rawGet(origin, "/t/a/items/1", {
+        authorization: "Bearer read-token",
+      }),
+    ).toBe(200);
+  });
+
   it("refuses an X-Forwarded-Host that makes req.hostname differ from Host under trust proxy", async () => {
     const app = express();
     app.set("trust proxy", "loopback");

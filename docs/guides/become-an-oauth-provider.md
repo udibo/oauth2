@@ -351,7 +351,7 @@ and `req.originalUrl`. Under `trust proxy`, only an exact
 `X-Forwarded-Proto: https` switches it to `https`; any other value leaves it
 `http`. The adapter passes an error to `next`, rather than guess, for a missing
 `Host`, a `Host` carrying anything beyond a host and port, a request target that
-resolves to another host, and a `req.hostname` that differs from `Host` — as
+resolves to another host or carries a `.` or `..` segment, and a `req.hostname` that differs from `Host` — as
 Express reports when `trust proxy` reads an `X-Forwarded-Host`. Behind a proxy,
 forward the original `Host` header.
 
