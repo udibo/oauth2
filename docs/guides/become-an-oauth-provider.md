@@ -349,9 +349,11 @@ Express 4 or 5 without depending on `express` themselves.
 The request URL the core and your `resolve` see is built from the `Host` header
 and `req.originalUrl`. Under `trust proxy`, only an exact
 `X-Forwarded-Proto: https` switches it to `https`; any other value leaves it
-`http`, so a forwarded header cannot move the URL to another host. A `Host`
-carrying anything beyond a host and port, or a request target that is not a
-path, is passed to `next` as an error.
+`http`. The adapter passes an error to `next`, rather than guess, for a missing
+`Host`, a `Host` carrying anything beyond a host and port, a request target that
+resolves to another host, and a `req.hostname` that differs from `Host` — as
+Express reports when `trust proxy` reads an `X-Forwarded-Host`. Behind a proxy,
+forward the original `Host` header.
 
 ## Security defaults
 

@@ -1,4 +1,5 @@
 import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -22,6 +23,17 @@ import { ExpressResourceServer } from "./resource-server.ts";
 const testUser: TestUser = { id: "user-1", username: "testuser" };
 const testClient: TestClient = { id: "client-1" };
 const FORM = { "content-type": "application/x-www-form-urlencoded" };
+
+async function rawHttp10(origin: string, path: string): Promise<string> {
+  const { hostname, port } = new URL(origin);
+  const socket = connect(Number(port), hostname);
+  socket.end(
+    `GET ${path} HTTP/1.0\r\nAuthorization: Bearer read-token\r\n\r\n`,
+  );
+  let response = "";
+  for await (const chunk of socket) response += String(chunk);
+  return response.split("\r\n", 1)[0];
+}
 
 function rawGet(
   origin: string,
@@ -351,6 +363,53 @@ describe.each(EXPRESS_VERSIONS)("ExpressResourceServer on %s", (_, express) => {
     expect(absolute).toBe(500);
     expect(credentials).toBe(500);
     expect(path).toBe(500);
+    expect(resolvedUrls).toStrictEqual([]);
+  });
+
+  it("refuses a backslash target that would resolve to another host", async () => {
+    const app = express();
+    app.use(server.protect());
+    app.get("/:segment/api/me", (_req, res) => {
+      res.send("served");
+    });
+    const origin = await serve(app);
+
+    for (const path of ["/\\evil.example/api/me", "/\\/evil.example/api/me"]) {
+      expect(
+        await rawGet(origin, path, { authorization: "Bearer read-token" }),
+        path,
+      ).toBe(500);
+    }
+    expect(resolvedUrls).toStrictEqual([]);
+  });
+
+  it("refuses an X-Forwarded-Host that makes req.hostname differ from Host under trust proxy", async () => {
+    const app = express();
+    app.set("trust proxy", "loopback");
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+
+    const forwarded = await rawGet(origin, "/api/me", {
+      authorization: "Bearer read-token",
+      "x-forwarded-host": "evil.example",
+    });
+    const sameHost = await rawGet(origin, "/api/me", {
+      authorization: "Bearer read-token",
+      "x-forwarded-host": new URL(origin).hostname,
+    });
+    expect(forwarded).toBe(500);
+    expect(sameHost).toBe(200);
+    expect(resolvedUrls).toHaveLength(1);
+  });
+
+  it("refuses a request with no Host header rather than inventing one", async () => {
+    const app = express();
+    app.use("/api", server.protect());
+    meRoute(app);
+    const origin = await serve(app);
+
+    expect(await rawHttp10(origin, "/api/me")).toMatch(/^HTTP\/1\.1 500 /);
     expect(resolvedUrls).toStrictEqual([]);
   });
 

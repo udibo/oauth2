@@ -37,6 +37,11 @@ export interface ExpressRequestLike extends IncomingMessage {
    * `http`.
    */
   protocol?: string;
+  /**
+   * Express's host name, which reads `X-Forwarded-Host` under `trust proxy`.
+   * A request whose `hostname` differs from its `Host` header is refused.
+   */
+  hostname?: string;
   /** Whatever a body parser that already ran left behind. */
   body?: unknown;
 }
@@ -73,9 +78,9 @@ const FORM_TYPE = "application/x-www-form-urlencoded";
  * request: the full original URL, every header as received, and the body as
  * `source` says.
  *
- * @throws {Error} When the `Host` header or the request target would give
- * the URL another authority, or, with `stream`, when a body parser already
- * read the body.
+ * @throws {Error} When `Host` is missing or not a plain host and port, when
+ * `req.hostname` or the request target would give the URL another host, or,
+ * with `stream`, when a body parser already read the body.
  */
 export function toFetchRequest(
   req: ExpressRequestLike,
@@ -113,22 +118,29 @@ export function toFetchRequest(
 }
 
 function requestUrl(req: ExpressRequestLike): URL {
+  const host = req.headers.host?.toLowerCase();
+  if (!host) throw new Error("The request has no Host header.");
   const scheme = req.protocol === "https" ? "https" : "http";
-  const origin = new URL(`${scheme}://${req.headers.host ?? "localhost"}`);
-  if (
-    origin.username ||
-    origin.password ||
-    origin.pathname !== "/" ||
-    origin.search ||
-    origin.hash
-  ) {
+  const origin = new URL(`${scheme}://${host}`);
+  const defaultPort = scheme === "https" ? "443" : "80";
+  if (host !== origin.host && host !== `${origin.host}:${defaultPort}`) {
     throw new Error("The Host header is not a plain host and port.");
   }
-  const target = req.originalUrl ?? req.url ?? "/";
-  if (!target.startsWith("/") || target.startsWith("//")) {
+  if (
+    req.hostname !== undefined &&
+    req.hostname.toLowerCase() !== origin.hostname
+  ) {
+    throw new Error(
+      "req.hostname differs from the Host header, likely through " +
+        "X-Forwarded-Host under trust proxy. Have the proxy forward the " +
+        "original Host header.",
+    );
+  }
+  const url = new URL(req.originalUrl ?? req.url ?? "/", origin);
+  if (url.origin !== origin.origin) {
     throw new Error("The request target is not a path on this host.");
   }
-  return new URL(target, origin);
+  return url;
 }
 
 function parsedFormBody(req: ExpressRequestLike): string | null {
