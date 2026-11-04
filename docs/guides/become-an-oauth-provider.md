@@ -576,6 +576,12 @@ Users who should not be able to grant everything they're asked for are handled
 here too: intersect the requested scope with what the user may grant and return
 it as the narrowed `scope`.
 
+The handler runs whenever the request asks for more than the `authorizedScope`
+your `authenticateUser` returned for this client. A request that names no
+`scope` still reaches it when `authenticateUser` returns no `authorizedScope`,
+since the user has authorized nothing for that client yet. Return an
+`authorizedScope` only for a grant the user has actually made.
+
 A request with `prompt=consent` reaches the handler even when the scope is
 already authorized, and the handler's fifth argument carries `prompt` so it can
 ask again instead of reusing a stored decision. A server with no handler cannot

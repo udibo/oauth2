@@ -465,10 +465,13 @@ export interface RotatedOutRevocationEvent<
  *   pre-authorized for this client; consent is needed unless it covers the
  *   whole accepted scope (the requested scope after the token service's
  *   `acceptedScope`). **Omitting `authorizedScope` means
- *   "nothing pre-authorized"** — so any requested scope needs consent: the
- *   framework calls `handleConsent` when one is configured, and otherwise
- *   treats the request as consented and grants the accepted scope. To
- *   pre-authorize everything, return the requested scope as `authorizedScope`.
+ *   "nothing pre-authorized"** — so every request needs consent, including
+ *   one that names no scope: the framework calls `handleConsent` when one is
+ *   configured, and otherwise treats the request as consented and grants the
+ *   accepted scope. An empty scope (`new BasicScope("")`) is a real grant
+ *   that lets a scope-less request skip consent, so return `undefined`, not
+ *   an empty scope, for a user with no grant on record. To pre-authorize
+ *   everything, return the requested scope as `authorizedScope`.
  *   Supply only verified event claims in `authenticationContext`; the code,
  *   token and refresh descendants retain a snapshot. Omit unknown claims.
  *   Set `reauthenticated: true` only when the user actively authenticated in
@@ -1823,7 +1826,8 @@ export class AuthorizationServer<
     }
     const needsConsent =
       forceConsent ||
-      (scope !== undefined && !(authorizedScope && authorizedScope.has(scope)));
+      authorizedScope === undefined ||
+      (scope !== undefined && !authorizedScope.has(scope));
     if (needsConsent && handleConsent) {
       const consent = await handleConsent(client, scope, user, authentication);
       if (consent instanceof Response) {

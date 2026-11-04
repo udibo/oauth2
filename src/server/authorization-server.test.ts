@@ -19,6 +19,7 @@ import { ClientCredentialsGrant } from "./grants/client-credentials.ts";
 import { RefreshTokenGrant } from "./grants/refresh-token.ts";
 import { AuthorizationCodeGrant } from "./grants/authorization-code.ts";
 import { DeviceAuthorizationGrant } from "./grants/device-authorization.ts";
+import type { HandleConsentFn } from "./authorization-server.ts";
 import {
   AuthorizationServer,
   type AuthorizationServerOptions,
@@ -1088,6 +1089,88 @@ describe("AuthorizationServer", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("Content-Type")).toBe("text/html");
       expect(await response.text()).toBe("<html>consent</html>");
+    });
+
+    it("asks for consent on a request without scope when the user has authorized nothing", async () => {
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(() =>
+        Promise.resolve(new Response("<html>consent</html>")),
+      );
+      const request = new Request(
+        "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz",
+      );
+
+      const response = await server.handleAuthorizeRequest(
+        request,
+        () => Promise.resolve({ user: testUser }),
+        handleConsent,
+      );
+
+      expect(handleConsent).toHaveBeenCalledOnce();
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("<html>consent</html>");
+    });
+
+    it("issues a code once the user approves a request without scope", async () => {
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(() =>
+        Promise.resolve({ approved: true }),
+      );
+      const request = new Request(
+        "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz",
+      );
+
+      const response = await server.handleAuthorizeRequest(
+        request,
+        () => Promise.resolve({ user: testUser }),
+        handleConsent,
+      );
+
+      expect(handleConsent).toHaveBeenCalledOnce();
+      expect(handleConsent.mock.calls[0][1]).toBeUndefined();
+      expect(
+        new URL(response.headers.get("Location")!).searchParams.has("code"),
+      ).toBe(true);
+    });
+
+    it("answers consent_required for a request without scope under prompt=none", async () => {
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(() =>
+        Promise.resolve(new Response("<html>consent</html>")),
+      );
+      const request = new Request(
+        "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz&prompt=none",
+      );
+
+      const response = await server.handleAuthorizeRequest(
+        request,
+        () => Promise.resolve({ user: testUser }),
+        handleConsent,
+      );
+
+      const url = new URL(response.headers.get("Location")!);
+      expect(url.searchParams.get("error")).toBe("consent_required");
+      expect(url.searchParams.has("code")).toBe(false);
+    });
+
+    it("skips consent on a request without scope when the user already authorized the client", async () => {
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>();
+      const priorAuth = () =>
+        Promise.resolve({
+          user: testUser,
+          authorizedScope: new BasicScope("read"),
+        });
+      const request = new Request(
+        "http://localhost/authorize?response_type=code&client_id=client-1&state=xyz",
+      );
+
+      const response = await server.handleAuthorizeRequest(
+        request,
+        priorAuth,
+        handleConsent,
+      );
+
+      expect(handleConsent).not.toHaveBeenCalled();
+      expect(
+        new URL(response.headers.get("Location")!).searchParams.has("code"),
+      ).toBe(true);
     });
 
     it("auto-grants when no consent handler is configured (assumes consent)", async () => {
