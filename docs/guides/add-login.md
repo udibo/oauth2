@@ -81,7 +81,13 @@ Each method's contract, including what it must do for enumeration safety:
 - **`findByEmail(email)`** — the reset/verification-request lookup. Return
   `undefined` for an unknown email and do nothing else; the service already
   guarantees `requestPasswordReset` resolves identically either way, so your
-  store must not log, throw, or otherwise behave observably differently.
+  store must not log, throw, or otherwise behave observably differently. The
+  service calls it again when an emailed reset, sign-in or unlock link is
+  redeemed: the link works only while the address it was sent to still
+  resolves to the same user, so a link mailed to an address the account has
+  since given up is refused. Normalize here as you do at write time — a
+  lookup that case-folds lets a link requested with a differently cased
+  address still redeem.
 - **`getCredential(userId)`** — return the stored `{ hash, salt }`, or
   `undefined` for accounts with no password (e.g. SSO-only). The service burns a
   comparable hashing delay on `undefined` so a password-less account is not
@@ -685,6 +691,8 @@ if (result.status === "success") {
 }
 ```
 
+Pass the address your `findByEmail` resolves to that user: the link is
+refused as `invalid` once that address no longer finds the account.
 `unlockAccount` clears the lock; `resetSignInThrottle` clears the rate-limit
 window for the identifier, which is otherwise still full of the failed attempts
 that caused the lock. (`resetPassword` clears the lockout on its own — an
