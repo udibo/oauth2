@@ -1823,7 +1823,8 @@ export class AuthorizationServer<
     }
     const needsConsent =
       forceConsent ||
-      (scope !== undefined && !(authorizedScope && authorizedScope.has(scope)));
+      authorizedScope === undefined ||
+      (scope !== undefined && !authorizedScope.has(scope));
     if (needsConsent && handleConsent) {
       const consent = await handleConsent(client, scope, user, authentication);
       if (consent instanceof Response) {
