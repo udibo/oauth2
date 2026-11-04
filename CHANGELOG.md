@@ -1,3 +1,26 @@
+## [0.44.0](https://github.com/udibo/oauth2/compare/0.43.0...0.44.0) (2026-11-04)
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** `resetPassword`, `consumeSignInLink` and
+`unlockAccount` now refuse a mailed token, as `null` / `invalid` with
+the token left unspent, unless `IdentityUserStore.findByEmail` still
+returns the token's user for the address the token was mailed to. Every
+reset, sign-in-link and unlock token now records that address in
+`data.email` when it is minted. Sign-in-link and unlock tokens minted by
+an earlier version carry no address and are still accepted on subject
+alone until they expire (at most one TTL, 1 hour by default). Migration:
+pass `requestAccountUnlock` an address that your `findByEmail` resolves
+to that user, and make `findByEmail` normalize the way your writes do
+(trim, lowercase), so links requested with different casing keep
+working.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Bug Fixes
+
+* **identity:** bind mailed links to the address they were sent to ([#168](https://github.com/udibo/oauth2/issues/168)) ([03c2486](https://github.com/udibo/oauth2/commit/03c248618b874cd7febf55ac1d0fe45a1633039c))
+
 ## [0.43.0](https://github.com/udibo/oauth2/compare/0.42.0...0.43.0) (2026-11-01)
 
 ### Features
