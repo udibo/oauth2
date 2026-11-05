@@ -205,6 +205,52 @@ describe("idp dev", () => {
     );
   });
 
+  it("names each client's access token format and JWT audience", async () => {
+    await withConfigFile(
+      {
+        users: [],
+        clients: [
+          { id: "opaque", grants: ["client_credentials"] },
+          {
+            id: "jwt",
+            grants: ["client_credentials"],
+            accessTokenFormat: "jwt",
+            audience: "https://api.example.com",
+          },
+        ],
+      },
+      async (path) => {
+        const idp = await startIdp([
+          "--config",
+          path,
+          "--admin-token",
+          ADMIN_TOKEN,
+        ]);
+
+        expect(idp.banner).toContain(
+          "opaque  public client\n    grants: client_credentials\n    redirect URIs: (none)\n    access tokens: opaque",
+        );
+        expect(idp.banner).toContain(
+          "    access tokens: jwt, audience https://api.example.com",
+        );
+        const state = await (
+          await fetch(`${idp.url}/__admin/state`, {
+            headers: { "x-admin-token": ADMIN_TOKEN },
+          })
+        ).json();
+        expect(
+          state.clients.map(
+            (client: Record<string, unknown>) =>
+              [client.id, client.accessTokenFormat, client.audience] as const,
+          ),
+        ).toStrictEqual([
+          ["opaque", "opaque", undefined],
+          ["jwt", "jwt", "https://api.example.com"],
+        ]);
+      },
+    );
+  });
+
   it("lists no users or clients when the config seeds none", async () => {
     await withConfigFile({ users: [], clients: [] }, async (path) => {
       const idp = await startIdp(["--config", path]);

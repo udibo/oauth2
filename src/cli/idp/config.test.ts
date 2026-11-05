@@ -165,6 +165,104 @@ describe("parseDevIdpConfig", () => {
     );
   });
 
+  it("defaults a client to opaque access tokens with no audience", () => {
+    const config = parseDevIdpConfig({
+      users: [],
+      clients: [{ id: "machine", grants: ["client_credentials"] }],
+    });
+
+    expect(config.clients[0].accessTokenFormat).toStrictEqual("opaque");
+    expect(config.clients[0].audience).toBeUndefined();
+    for (const client of defaultDevIdpConfig().clients) {
+      expect(client.accessTokenFormat).toStrictEqual("opaque");
+    }
+  });
+
+  it("defaults a JWT client's audience to its client id", () => {
+    const config = parseDevIdpConfig({
+      users: [],
+      clients: [
+        {
+          id: "machine",
+          grants: ["client_credentials"],
+          accessTokenFormat: "jwt",
+        },
+        {
+          id: "api-client",
+          grants: ["client_credentials"],
+          accessTokenFormat: "jwt",
+          audience: "https://api.example.com",
+        },
+      ],
+    });
+
+    expect(config.clients[0].accessTokenFormat).toStrictEqual("jwt");
+    expect(config.clients[0].audience).toStrictEqual("machine");
+    expect(config.clients[1].audience).toStrictEqual("https://api.example.com");
+  });
+
+  it("refuses an access token format other than opaque or jwt", () => {
+    for (const accessTokenFormat of ["JWT", "at+jwt", "", true, 1]) {
+      thrown(
+        () =>
+          parseDevIdpConfig({
+            users: [],
+            clients: [
+              {
+                id: "machine",
+                grants: ["client_credentials"],
+                accessTokenFormat,
+              },
+            ],
+          }),
+        Error,
+        'clients[0].accessTokenFormat must be "opaque" or "jwt"',
+      );
+    }
+  });
+
+  it("refuses an audience that is not a non-empty string", () => {
+    for (const audience of ["", ["https://api.example.com"], 7]) {
+      thrown(
+        () =>
+          parseDevIdpConfig({
+            users: [],
+            clients: [
+              {
+                id: "machine",
+                grants: ["client_credentials"],
+                accessTokenFormat: "jwt",
+                audience,
+              },
+            ],
+          }),
+        Error,
+        "clients[0].audience must be a non-empty string",
+      );
+    }
+  });
+
+  it("refuses an audience on a client whose access tokens are opaque", () => {
+    for (const format of [{}, { accessTokenFormat: "opaque" }]) {
+      thrown(
+        () =>
+          parseDevIdpConfig({
+            users: [],
+            clients: [
+              {
+                id: "machine",
+                grants: ["client_credentials"],
+                audience: "https://api.example.com",
+                ...format,
+              },
+            ],
+          }),
+        Error,
+        'clients[0].audience only applies with "accessTokenFormat": "jwt"',
+      );
+    }
+  });
+
   it("requires a private JWK when a signing key is pinned", () => {
     thrown(
       () => parseDevIdpConfig({ signingKey: { kty: "EC" } }),

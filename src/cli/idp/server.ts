@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 
 import { serve as serveNode } from "@hono/node-server";
 
+import type { AuthenticationContext } from "../../models/authentication.ts";
 import type { ClientInterface } from "../../models/client.ts";
 import type { BasicScope } from "../../models/scope.ts";
 import {
@@ -35,7 +36,9 @@ import { PasswordGrant } from "../../server/grants/password.ts";
 import { RefreshTokenGrant } from "../../server/grants/refresh-token.ts";
 import { satisfiesAuthenticationRequest } from "../../server/authentication-request.ts";
 import {
+  createJwtAccessTokenGenerator,
   type SigningKey,
+  type SigningKeyProvider,
   StaticSigningKeyProvider,
 } from "../../server/signing-keys.ts";
 import {
@@ -50,10 +53,11 @@ import {
   MemoryAuthorizationCodeService,
   MemoryClientService,
   MemoryTokenService,
+  type MemoryTokenServiceOptions,
   MemoryUserService,
 } from "../../testing/services.ts";
 
-import type { DevIdpConfig } from "./config.ts";
+import { type DevIdpConfig, jwtAudienceOf } from "./config.ts";
 import {
   consentPage,
   htmlResponse,
@@ -118,6 +122,59 @@ interface DevIdpState {
   secrets: Map<string, string>;
 }
 
+class DevIdpTokenService extends MemoryTokenService<
+  ClientInterface,
+  DevIdpUser,
+  BasicScope
+> {
+  readonly #jwtAudiences: ReadonlyMap<string, string>;
+  readonly #signingKeys: SigningKeyProvider;
+  readonly #issuer: { value: string };
+
+  constructor(
+    options: MemoryTokenServiceOptions<ClientInterface, DevIdpUser, BasicScope>,
+    jwt: {
+      audiences: ReadonlyMap<string, string>;
+      signingKeys: SigningKeyProvider;
+      issuer: { value: string };
+    },
+  ) {
+    super(options);
+    this.#jwtAudiences = jwt.audiences;
+    this.#signingKeys = jwt.signingKeys;
+    this.#issuer = jwt.issuer;
+  }
+
+  override generateAccessToken(
+    client: ClientInterface,
+    user: DevIdpUser | undefined,
+    scope?: BasicScope | null,
+    authenticationContext?: AuthenticationContext,
+    expiresAt?: Date,
+    resource?: string,
+  ): Promise<string> {
+    const audience = this.#jwtAudiences.get(client.id);
+    if (audience === undefined) {
+      return super.generateAccessToken(client, user as DevIdpUser, scope);
+    }
+    return createJwtAccessTokenGenerator({
+      signingKeys: this.#signingKeys,
+      issuer: this.#issuer.value,
+      audience,
+      lifetimeSeconds: this.accessTokenLifetime,
+    })(client, user, scope, authenticationContext, expiresAt, resource);
+  }
+}
+
+function jwtAudiences(config: DevIdpConfig): Map<string, string> {
+  const audiences = new Map<string, string>();
+  for (const client of config.clients) {
+    const audience = jwtAudienceOf(client);
+    if (audience !== undefined) audiences.set(client.id, audience);
+  }
+  return audiences;
+}
+
 async function createState(
   config: DevIdpConfig,
   signingKey: SigningKey,
@@ -132,16 +189,16 @@ async function createState(
     DevIdpUser,
     BasicScope
   >({ clientService, userService });
-  const tokenService = new MemoryTokenService<
-    ClientInterface,
-    DevIdpUser,
-    BasicScope
-  >({
-    clientService,
-    userService,
-    accessTokenLifetime: config.accessTokenLifetime,
-    authorizationCodeService,
-  });
+  const signingKeys = new StaticSigningKeyProvider(signingKey);
+  const tokenService = new DevIdpTokenService(
+    {
+      clientService,
+      userService,
+      accessTokenLifetime: config.accessTokenLifetime,
+      authorizationCodeService,
+    },
+    { audiences: jwtAudiences(config), signingKeys, issuer },
+  );
 
   const grants: AuthorizationServerOptions<
     ClientInterface,
@@ -185,7 +242,7 @@ async function createState(
     }),
     grants,
     scopesSupported: config.scopesSupported,
-    signingKeys: new StaticSigningKeyProvider(signingKey),
+    signingKeys,
     userClaims: (user) => ({
       preferred_username: user.username,
       ...user.claims,
@@ -660,6 +717,8 @@ function adminState(
       confidential: client.secret !== undefined,
       redirectUris: client.redirectUris,
       grants: client.grants,
+      accessTokenFormat: client.accessTokenFormat ?? "opaque",
+      audience: jwtAudienceOf(client),
     })),
     sessions: state.sessions.size,
   });
