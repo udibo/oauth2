@@ -1,3 +1,9 @@
+## [0.46.0](https://github.com/udibo/oauth2/compare/0.45.1...0.46.0) (2026-11-05)
+
+### Features
+
+* **idp:** issue JWT access tokens with a per-client audience ([#178](https://github.com/udibo/oauth2/issues/178)) ([30609ca](https://github.com/udibo/oauth2/commit/30609cae72afab4ded194727c8b917412ad727a2)), closes [#176](https://github.com/udibo/oauth2/issues/176)
+
 ## [0.45.1](https://github.com/udibo/oauth2/compare/0.45.0...0.45.1) (2026-11-04)
 
 ### Bug Fixes
