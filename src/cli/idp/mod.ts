@@ -14,6 +14,7 @@ import {
 import {
   defaultDevIdpConfig,
   type DevIdpConfig,
+  jwtAudienceOf,
   loadDevIdpConfig,
 } from "./config.ts";
 import {
@@ -127,6 +128,9 @@ function describeSeed(config: DevIdpConfig): string[] {
       }`,
       `    grants: ${client.grants.join(", ")}`,
       `    redirect URIs: ${client.redirectUris.join(", ") || "(none)"}`,
+      jwtAudienceOf(client) === undefined
+        ? "    access tokens: opaque"
+        : `    access tokens: jwt, audience ${jwtAudienceOf(client)}`,
     );
   }
   return lines;

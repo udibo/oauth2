@@ -7038,6 +7038,7 @@ Clients:
   dev-client  secret: dev-secret
     grants: authorization_code, refresh_token, client_credentials
     redirect URIs: http://localhost:3000/callback, ...
+    access tokens: opaque
   dev-public-client  public client
 ```
 
@@ -7115,7 +7116,9 @@ npx udibo-oauth2 idp dev --config idp.json
       "id": "web-app",
       "secret": "dev-secret",
       "redirectUris": ["http://localhost:3000/callback"],
-      "grants": ["authorization_code", "refresh_token"]
+      "grants": ["authorization_code", "refresh_token"],
+      "accessTokenFormat": "jwt",
+      "audience": "https://api.example.com"
     }
   ]
 }
@@ -7136,6 +7139,8 @@ npx udibo-oauth2 idp dev --config idp.json
 | `clients[].redirectUris` | none                                  | Matched **exactly** (no wildcard seam here) — list every URI. A loopback IP literal (`http://127.0.0.1`, `http://[::1]`) matches on any port, per RFC 8252 §7.3. |
 | `clients[].grants`       | `authorization_code refresh_token`    | A grant the client does not list is rejected.                                                                                                                    |
 | `clients[].ownerUserId`  | none                                  | Puts a user on the client's `client_credentials` token. Omit it for a machine token with no user, whose subject is the client itself.                            |
+| `clients[].accessTokenFormat` | `"opaque"`                       | `"jwt"` issues signed RFC 9068 access tokens an API can verify offline. See [JWT access tokens](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md#jwt-access-tokens).                                             |
+| `clients[].audience`     | the client id                         | The `aud` claim of the client's JWT access tokens. Refused unless `accessTokenFormat` is `"jwt"`.                                                                |
 
 Unknown fields are rejected rather than ignored, so a typo fails at startup
 instead of silently doing nothing. Flags (`--port`, `--hostname`, `--issuer`)
@@ -7144,6 +7149,88 @@ override the file.
 The device authorization grant is not served — it needs a verification UI that
 this tool does not ship. Everything else in the package's grant set is
 available.
+
+## JWT access tokens
+
+By default every access token is opaque: a random string only this server can
+resolve, through `/introspect` or `/userinfo`. An API that verifies access
+tokens offline with `JwksTokenReader` (Strategy 2 in
+[Protect an API](https://github.com/udibo/oauth2/blob/main/docs/guides/protect-an-api.md)) needs signed tokens instead. Set
+`accessTokenFormat` to `"jwt"` on each client whose tokens that API receives:
+
+```json
+{
+  "clients": [
+    {
+      "id": "web-app",
+      "secret": "dev-secret",
+      "redirectUris": ["http://localhost:3000/callback"],
+      "grants": ["authorization_code", "refresh_token", "client_credentials"],
+      "accessTokenFormat": "jwt",
+      "audience": "https://api.example.com"
+    },
+    {
+      "id": "reports-job",
+      "secret": "reports-secret",
+      "grants": ["client_credentials"],
+      "accessTokenFormat": "jwt",
+      "audience": "https://reports.example.com"
+    }
+  ]
+}
+```
+
+That client's access tokens are then RFC 9068 `at+jwt` tokens, signed with the
+same key `/jwks` publishes, from every grant the server serves (authorization
+code, refresh, client credentials) and from `/__admin/tokens`. Their `iss` is the
+issuer pinned at startup, their `aud` is the client's `audience` (the client id
+when you leave it out), and their `exp` is never later than the expiry the
+server itself stores, so `accessTokenLifetime` still drives expiry tests. A
+client-credentials token with no `ownerUserId` names the client as its `sub`.
+
+Point the API under test at the provider the same way it points at a production
+issuer:
+
+```ts
+import { JwksTokenReader } from "@udibo/oauth2/server/resource";
+
+interface ApiClient {
+  id: string;
+}
+interface ApiUser {
+  id: string;
+}
+
+const tokenReader = new JwksTokenReader<ApiClient, ApiUser>({
+  issuer: "http://127.0.0.1:9000",
+  audience: "https://api.example.com",
+  getClient: (claims) => ({ id: String(claims.client_id) }),
+  getUser: (claims) =>
+    claims.sub && claims.sub !== claims.client_id
+      ? { id: claims.sub }
+      : undefined,
+});
+```
+
+The reader discovers `/jwks` from the issuer's metadata, so `issuer` must be the
+exact issuer the provider printed at startup (pin it with `--issuer` when your
+API reaches the server under another name).
+
+`audience` is per client so one config can serve more than one API. That is what
+lets a test prove the API enforces its audience, which RFC 9068 §4 requires: in
+the config above, a `client_credentials` token for `reports-job` is correctly
+signed by the same issuer but carries `aud: "https://reports.example.com"`, and
+the reader configured for `https://api.example.com` must refuse it.
+
+`audience` on a client without `"accessTokenFormat": "jwt"` is refused at
+startup rather than ignored: an opaque token has no `aud`, so the setting would
+silently do nothing.
+
+Introspection, UserInfo, and revocation keep working for both kinds, because the
+server stores every token it issues. Revoking a JWT marks it inactive at
+`/introspect`, but an API verifying it offline keeps accepting it until `exp` —
+the trade-off of offline verification, the same as in production. Clients
+without the field keep opaque tokens, so a config can mix both.
 
 ## Stable signing keys
 
@@ -7235,7 +7322,8 @@ Accepts `userId` instead of `username`, and `redirectUri` when the client has
 more than one. Omit `scope` to get every supported scope.
 
 **Inspect what is seeded.** `GET /__admin/state` (also token-gated) returns the
-users, clients, and live session count — useful when a test fails and you want
+users, clients (including each client's `accessTokenFormat` and, for a JWT
+client, its `audience`), and live session count — useful when a test fails and you want
 to know whether a reset actually happened.
 
 ## In CI

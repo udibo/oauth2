@@ -2,6 +2,7 @@ import { connect } from "node:net";
 
 import { assert, describe, expect, it, vi } from "vitest";
 import { rejection } from "../../_test_assert.ts";
+import { JwksTokenReader } from "../../server/jwks-token-reader.ts";
 import {
   exportSigningKeyJwk,
   generateSigningKey,
@@ -919,6 +920,311 @@ describe("dev identity provider consent prompt", () => {
       expect(
         new URL(denied.headers.get("location")!).searchParams.get("error"),
       ).toStrictEqual("access_denied");
+    });
+  });
+});
+
+describe("dev identity provider JWT access tokens", () => {
+  const API_AUDIENCE = "https://api.example.com";
+  const OTHER_AUDIENCE = "https://other-api.example.com";
+  const LIFETIME = 120;
+  const jwtConfig: Partial<DevIdpConfig> = {
+    accessTokenLifetime: LIFETIME,
+    clients: [
+      ...defaultDevIdpConfig().clients,
+      {
+        id: "api-client",
+        secret: "api-secret",
+        redirectUris: [REDIRECT_URI],
+        grants: ["authorization_code", "refresh_token", "client_credentials"],
+        accessTokenFormat: "jwt",
+        audience: API_AUDIENCE,
+      },
+      {
+        id: "other-api-client",
+        secret: "other-secret",
+        redirectUris: [],
+        grants: ["client_credentials"],
+        accessTokenFormat: "jwt",
+        audience: OTHER_AUDIENCE,
+      },
+      {
+        id: "default-audience-client",
+        secret: "default-secret",
+        redirectUris: [],
+        grants: ["client_credentials"],
+        accessTokenFormat: "jwt",
+      },
+    ],
+  };
+
+  function readerFor(
+    idp: DevIdentityProvider,
+    audience: string,
+  ): JwksTokenReader<{ id: string }, { id: string }> {
+    return new JwksTokenReader<{ id: string }, { id: string }>({
+      issuer: idp.issuer,
+      audience,
+      getClient: (claims) => ({ id: String(claims.client_id) }),
+      getUser: (claims) =>
+        claims.sub && claims.sub !== claims.client_id
+          ? { id: claims.sub }
+          : undefined,
+    });
+  }
+
+  async function tokenRequest(
+    idp: DevIdentityProvider,
+    form: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const response = await fetch(`${idp.url}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(form),
+    });
+    expect(response.status).toStrictEqual(200);
+    return await response.json();
+  }
+
+  async function clientCredentials(
+    idp: DevIdentityProvider,
+    clientId: string,
+    clientSecret: string,
+  ): Promise<string> {
+    const tokens = await tokenRequest(idp, {
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret,
+    });
+    return tokens.access_token;
+  }
+
+  async function authorizationCode(
+    idp: DevIdentityProvider,
+  ): Promise<Record<string, string>> {
+    const browser = new Browser();
+    const verifier = generateCodeVerifier();
+    const begin = authorizeUrl(idp, await generateCodeChallenge(verifier), {
+      client_id: "api-client",
+      scope: "openid offline_access",
+    });
+    const signedIn = await signIn(browser, idp, begin);
+    expect(signedIn.status).toStrictEqual(303);
+    await signedIn.body?.cancel();
+    const authorized = await browser.fetch(
+      new URL(signedIn.headers.get("location")!, idp.url),
+    );
+    expect(authorized.status).toStrictEqual(302);
+    await authorized.body?.cancel();
+    const code = new URL(authorized.headers.get("location")!).searchParams.get(
+      "code",
+    );
+    assert.exists(code);
+    return await tokenRequest(idp, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: "api-client",
+      client_secret: "api-secret",
+      code_verifier: verifier,
+    });
+  }
+
+  async function introspect(
+    idp: DevIdentityProvider,
+    token: string,
+  ): Promise<Record<string, unknown>> {
+    const response = await fetch(`${idp.url}/introspect`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        token,
+        client_id: "api-client",
+        client_secret: "api-secret",
+      }),
+    });
+    expect(response.status).toStrictEqual(200);
+    return await response.json();
+  }
+
+  function decodeSegment(token: string, index: 0 | 1): Record<string, unknown> {
+    return JSON.parse(
+      Buffer.from(token.split(".")[index], "base64url").toString("utf8"),
+    );
+  }
+
+  async function expectJwtFor(
+    idp: DevIdentityProvider,
+    token: string,
+    expected: { clientId: string; userId?: string },
+  ): Promise<void> {
+    const accepted = await readerFor(idp, API_AUDIENCE).getToken(token);
+    assert.exists(accepted);
+    expect(accepted.client.id).toStrictEqual(expected.clientId);
+    expect(accepted.user?.id).toStrictEqual(expected.userId);
+    expect(
+      await readerFor(idp, OTHER_AUDIENCE).getToken(token),
+    ).toBeUndefined();
+    expect(await readerFor(idp, expected.clientId).getToken(token)).toBe(
+      undefined,
+    );
+
+    expect(decodeSegment(token, 0).typ).toStrictEqual("at+jwt");
+    const claims = decodeSegment(token, 1);
+    expect(claims.iss).toStrictEqual(idp.issuer);
+    expect(claims.aud).toStrictEqual(API_AUDIENCE);
+    const exp = claims.exp as number;
+    const iat = claims.iat as number;
+    expect(exp - iat).toBeLessThanOrEqual(LIFETIME);
+
+    const introspection = await introspect(idp, token);
+    expect(introspection.active).toStrictEqual(true);
+    expect(introspection.client_id).toStrictEqual(expected.clientId);
+    expect(exp).toBeLessThanOrEqual(introspection.exp as number);
+  }
+
+  it("issues an authorization code token the client's audience accepts and no other", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const tokens = await authorizationCode(idp);
+      await expectJwtFor(idp, tokens.access_token, {
+        clientId: "api-client",
+        userId: "user-alice",
+      });
+    });
+  });
+
+  it("issues a refreshed token the client's audience accepts and no other", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const first = await authorizationCode(idp);
+      assert.exists(first.refresh_token);
+      const refreshed = await tokenRequest(idp, {
+        grant_type: "refresh_token",
+        refresh_token: first.refresh_token,
+        client_id: "api-client",
+        client_secret: "api-secret",
+      });
+      expect(refreshed.access_token).not.toStrictEqual(first.access_token);
+      await expectJwtFor(idp, refreshed.access_token, {
+        clientId: "api-client",
+        userId: "user-alice",
+      });
+    });
+  });
+
+  it("issues a client credentials token the client's audience accepts and no other", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const token = await clientCredentials(idp, "api-client", "api-secret");
+      await expectJwtFor(idp, token, { clientId: "api-client" });
+      expect(decodeSegment(token, 1).sub).toStrictEqual("api-client");
+    });
+  });
+
+  it("issues an admin-minted token the client's audience accepts and no other", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const tokens = await mintTokens(idp, { clientId: "api-client" });
+      await expectJwtFor(idp, tokens.access_token, {
+        clientId: "api-client",
+        userId: "user-alice",
+      });
+    });
+  });
+
+  it("gives each client its own audience, so another API's token is refused", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const otherToken = await clientCredentials(
+        idp,
+        "other-api-client",
+        "other-secret",
+      );
+      expect(
+        await readerFor(idp, API_AUDIENCE).getToken(otherToken),
+      ).toBeUndefined();
+      const accepted = await readerFor(idp, OTHER_AUDIENCE).getToken(
+        otherToken,
+      );
+      expect(accepted?.client.id).toStrictEqual("other-api-client");
+    });
+  });
+
+  it("defaults the audience to the client id", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const token = await clientCredentials(
+        idp,
+        "default-audience-client",
+        "default-secret",
+      );
+      expect(decodeSegment(token, 1).aud).toStrictEqual(
+        "default-audience-client",
+      );
+      const accepted = await readerFor(idp, "default-audience-client").getToken(
+        token,
+      );
+      expect(accepted?.client.id).toStrictEqual("default-audience-client");
+    });
+  });
+
+  it("refuses a token signed by another provider's key at the same issuer", async () => {
+    const issuer = "http://127.0.0.1:1";
+    let forged = "";
+    await withIdp({ config: { ...jwtConfig, issuer } }, async (other) => {
+      forged = await clientCredentials(other, "api-client", "api-secret");
+    });
+    await withIdp({ config: { ...jwtConfig, issuer } }, async (idp) => {
+      const reader = new JwksTokenReader<{ id: string }, { id: string }>({
+        issuer,
+        audience: API_AUDIENCE,
+        jwksUri: `${idp.url}/jwks`,
+        getClient: (claims) => ({ id: String(claims.client_id) }),
+      });
+      expect(decodeSegment(forged, 1).iss).toStrictEqual(issuer);
+      expect(await reader.getToken(forged)).toBeUndefined();
+      const genuine = await clientCredentials(idp, "api-client", "api-secret");
+      expect((await reader.getToken(genuine))?.client.id).toStrictEqual(
+        "api-client",
+      );
+    });
+  });
+
+  it("keeps opaque tokens for a client without the field, alongside JWT clients", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const tokens = await mintTokens(idp, { clientId: "dev-client" });
+      expect(tokens.access_token).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+      expect(
+        await readerFor(idp, "dev-client").getToken(tokens.access_token),
+      ).toBeUndefined();
+      const introspection = await introspect(idp, tokens.access_token);
+      expect(introspection.active).toStrictEqual(true);
+      expect(introspection.client_id).toStrictEqual("dev-client");
+
+      const machine = await clientCredentials(idp, "dev-client", "dev-secret");
+      expect(machine.split(".")).toHaveLength(1);
+    });
+  });
+
+  it("answers UserInfo, revocation and introspection for a JWT access token", async () => {
+    await withIdp({ config: jwtConfig }, async (idp) => {
+      const tokens = await mintTokens(idp, { clientId: "api-client" });
+      const userinfo = await fetch(`${idp.url}/userinfo`, {
+        headers: { authorization: `Bearer ${tokens.access_token}` },
+      });
+      expect(userinfo.status).toStrictEqual(200);
+      expect((await userinfo.json()).sub).toStrictEqual("user-alice");
+
+      const revoked = await fetch(`${idp.url}/revoke`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          token: tokens.access_token,
+          token_type_hint: "access_token",
+          client_id: "api-client",
+          client_secret: "api-secret",
+        }),
+      });
+      expect(revoked.status).toStrictEqual(200);
+      await revoked.body?.cancel();
+      expect((await introspect(idp, tokens.access_token)).active).toBe(false);
     });
   });
 });

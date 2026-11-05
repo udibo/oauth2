@@ -52,6 +52,33 @@ export interface DevIdpClientConfig {
    * service-account user, never a human owner.
    */
   ownerUserId?: string;
+  /**
+   * `"opaque"` (the default) issues random access tokens that only this
+   * server can resolve, through introspection or UserInfo. `"jwt"` issues
+   * RFC 9068 `at+jwt` access tokens signed with the key `/jwks` publishes,
+   * so an API can verify them offline with `JwksTokenReader`. Every grant
+   * and `/__admin/tokens` honour it.
+   */
+  accessTokenFormat?: DevIdpAccessTokenFormat;
+  /**
+   * The `aud` claim of this client's JWT access tokens. Defaults to the
+   * client id. Only meaningful with `accessTokenFormat: "jwt"`; the config
+   * parser refuses it on an opaque client.
+   */
+  audience?: string;
+}
+
+/** How a client's access tokens are minted. */
+export type DevIdpAccessTokenFormat = "opaque" | "jwt";
+
+/**
+ * The `aud` a client's JWT access tokens carry: its `audience`, else its id.
+ * `undefined` for a client whose access tokens are opaque, which ignores any
+ * `audience` it sets.
+ */
+export function jwtAudienceOf(client: DevIdpClientConfig): string | undefined {
+  if (client.accessTokenFormat !== "jwt") return undefined;
+  return client.audience ?? client.id;
 }
 
 /**
@@ -119,7 +146,15 @@ const CONFIG_FIELDS = [
   "clients",
 ];
 const USER_FIELDS = ["id", "username", "password", "claims"];
-const CLIENT_FIELDS = ["id", "secret", "redirectUris", "grants", "ownerUserId"];
+const CLIENT_FIELDS = [
+  "id",
+  "secret",
+  "redirectUris",
+  "grants",
+  "ownerUserId",
+  "accessTokenFormat",
+  "audience",
+];
 
 /**
  * The configuration used when `idp dev` runs without `--config`: one
@@ -153,11 +188,13 @@ export function defaultDevIdpConfig(): DevIdpConfig {
         redirectUris: [...DEFAULT_REDIRECT_URIS],
         grants: ["authorization_code", "refresh_token", "client_credentials"],
         ownerUserId: "user-alice",
+        accessTokenFormat: "opaque",
       },
       {
         id: "dev-public-client",
         redirectUris: [...DEFAULT_REDIRECT_URIS],
         grants: [...DEFAULT_CLIENT_GRANTS],
+        accessTokenFormat: "opaque",
       },
     ],
   };
@@ -268,13 +305,40 @@ function parseClient(value: unknown, path: string): DevIdpClientConfig {
       "must list at least one URI for a client using the authorization_code grant",
     );
   }
+  const id = string(source.id, `${path}.id`);
+  const accessTokenFormat =
+    source.accessTokenFormat === undefined
+      ? "opaque"
+      : parseAccessTokenFormat(
+          source.accessTokenFormat,
+          `${path}.accessTokenFormat`,
+        );
+  const audience = optionalString(source.audience, `${path}.audience`);
+  if (audience !== undefined && accessTokenFormat !== "jwt") {
+    fail(
+      `${path}.audience`,
+      'only applies with "accessTokenFormat": "jwt" (opaque tokens carry no audience)',
+    );
+  }
   return {
-    id: string(source.id, `${path}.id`),
+    id,
     secret: optionalString(source.secret, `${path}.secret`),
     redirectUris,
     grants,
     ownerUserId: optionalString(source.ownerUserId, `${path}.ownerUserId`),
+    accessTokenFormat,
+    ...(accessTokenFormat === "jwt" ? { audience: audience ?? id } : {}),
   };
+}
+
+function parseAccessTokenFormat(
+  value: unknown,
+  path: string,
+): DevIdpAccessTokenFormat {
+  if (value !== "opaque" && value !== "jwt") {
+    fail(path, 'must be "opaque" or "jwt"');
+  }
+  return value;
 }
 
 function parseConsent(value: unknown, path: string): "auto" | "prompt" {
