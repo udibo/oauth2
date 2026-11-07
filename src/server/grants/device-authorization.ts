@@ -152,6 +152,12 @@ export class DeviceAuthorizationGrant<
    *
    * The device code is claimed by revoking it once the user has approved, so
    * concurrent polls of one approved device code cannot both receive a token.
+   * When the token service implements
+   * {@linkcode TokenServiceInterface.exchangeDeviceCode}, the claim and the
+   * token's save are that one call, and a save that fails leaves the approval
+   * for the next poll; otherwise the grant revokes and then saves, and a
+   * failed save spends the approval. A token that cannot be generated spends
+   * it either way.
    * Recording the poll time is bookkeeping for `slow_down` only: it is skipped
    * on every outcome that revokes the authorization. When the store **raises**
    * for the vanished record — as it must, if a lost race is to be
@@ -230,13 +236,27 @@ export class DeviceAuthorizationGrant<
     }
 
     const { user, scope } = authorization;
+    const exchangeDeviceCode =
+      tokenService.exchangeDeviceCode?.bind(tokenService);
 
-    if (!(await deviceAuthorizationService.revoke(authorization))) {
-      throw new InvalidGrantError("device_code already used");
+    if (!exchangeDeviceCode) {
+      if (!(await deviceAuthorizationService.revoke(authorization))) {
+        throw new InvalidGrantError("device_code already used");
+      }
+      const token = await this.generateToken(client, user, scope, tokenService);
+      return await tokenService.save(token);
     }
 
-    const token = await this.generateToken(client, user, scope, tokenService);
-    return await tokenService.save(token);
+    let token: Token<Client, User, S>;
+    try {
+      token = await this.generateToken(client, user, scope, tokenService);
+    } catch (error) {
+      await deviceAuthorizationService.revoke(authorization);
+      throw error;
+    }
+    const saved = await exchangeDeviceCode(authorization, token);
+    if (!saved) throw new InvalidGrantError("device_code already used");
+    return saved;
   }
 
   async #recordPoll(

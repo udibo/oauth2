@@ -16,7 +16,7 @@ import type { AbstractScope } from "../../models/scope.ts";
  * - Generating and storing device codes and user codes
  * - Looking up device codes for polling
  * - Looking up user codes for user authorization
- * - Marking codes as authorized or denied
+ * - Marking pending codes as authorized or denied, once
  * - Cleaning up expired codes
  *
  * **Every method taking a `DeviceAuthorization` must accept the records this
@@ -102,6 +102,17 @@ export interface DeviceAuthorizationServiceInterface<
   /**
    * Marks a device authorization as authorized by the user.
    *
+   * **Approve only a pending authorization, in one conditional write.** The
+   * record must still be stored, unexpired, and neither approved nor denied;
+   * otherwise reject and change nothing. In SQL this is an `UPDATE ... WHERE
+   * device_code = $1 AND NOT authorized AND NOT denied AND expires_at > now()`
+   * whose affected-row count decides. Never re-create a record that is gone:
+   * the grant claims an authorization by revoking it, so an upsert here
+   * after the claim makes the spent device code redeemable for a second
+   * token. A second approval must not re-bind the device to another user. To
+   * withdraw an approval before the device claims it, call
+   * {@linkcode DeviceAuthorizationServiceInterface.revoke}.
+   *
    * @param authorization The authorization to approve
    * @param user The user who approved the request
    * @param scope Optional scope (may be narrower than originally requested)
@@ -114,6 +125,11 @@ export interface DeviceAuthorizationServiceInterface<
 
   /**
    * Marks a device authorization as denied by the user.
+   *
+   * The same precondition as
+   * {@linkcode DeviceAuthorizationServiceInterface.approve} applies: deny only
+   * a stored, unexpired authorization that is neither approved nor denied, in
+   * one conditional write, and reject otherwise without re-creating it.
    */
   deny(
     authorization: DeviceAuthorization<Client, User, Scope>,

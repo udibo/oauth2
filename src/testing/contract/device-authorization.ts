@@ -298,6 +298,117 @@ export function runDeviceAuthorizationServiceContractTests<
         expect(refetched?.denied).toBe(true);
       });
 
+      async function expectRefused(
+        decision: Promise<unknown>,
+        why: string,
+      ): Promise<void> {
+        let refused = false;
+        try {
+          await decision;
+        } catch {
+          refused = true;
+        }
+        expect(refused, why).toBe(true);
+      }
+
+      it("approve refuses an authorization that was already claimed, without restoring it", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        expect(await deviceService.revoke(auth)).toBe(true);
+        await expectRefused(
+          deviceService.approve(byUserCode, user),
+          "approving a claimed or cancelled authorization must reject",
+        );
+        await assertUnreachableByEitherCode(auth);
+      });
+
+      it("deny refuses an authorization that was already claimed, without restoring it", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        expect(await deviceService.revoke(auth)).toBe(true);
+        await expectRefused(
+          deviceService.deny(byUserCode),
+          "denying a claimed or cancelled authorization must reject",
+        );
+        await assertUnreachableByEitherCode(auth);
+      });
+
+      it("approve refuses an authorization the user already approved, keeping the first approval", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        const other = makeUser(2);
+        await options.addUser(userService, other, "pw");
+        await deviceService.approve(byUserCode, user);
+        await expectRefused(
+          deviceService.approve(byUserCode, other),
+          "a second approval must not re-bind the device to another user",
+        );
+        const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
+        expect(
+          (refetched?.user as MemoryUserShape | undefined)?.id,
+        ).toStrictEqual(user.id);
+      });
+
+      it("approve refuses a denied authorization, which stays denied", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        await deviceService.deny(byUserCode);
+        await expectRefused(
+          deviceService.approve(byUserCode, user),
+          "a decision is final: approve after deny must reject",
+        );
+        const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
+        expect(refetched?.denied).toBe(true);
+        expect(refetched?.authorized).not.toBe(true);
+      });
+
+      it("deny refuses an approved authorization, which stays approved", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        await deviceService.approve(byUserCode, user);
+        await expectRefused(
+          deviceService.deny(byUserCode),
+          "a decision is final: deny after approve must reject; cancel with revoke",
+        );
+        const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
+        expect(refetched?.authorized).toBe(true);
+        expect(refetched?.denied).not.toBe(true);
+      });
+
+      it("approve refuses an expired authorization", async () => {
+        const auth = {
+          ...(await makeDeviceAuth()),
+          expiresAt: new Date(Date.now() - 1000),
+        };
+        await deviceService.save(auth);
+        const byUserCode = await deviceService.getByUserCode(auth.userCode);
+        assert(byUserCode, "getByUserCode should resolve what was saved");
+        await expectRefused(
+          deviceService.approve(byUserCode, user),
+          "an expired authorization must not be approved",
+        );
+        expect(
+          (await deviceService.getByDeviceCode(auth.deviceCode))?.authorized,
+        ).not.toBe(true);
+      });
+
+      it("approve takes effect for exactly one of two concurrent approvals", async () => {
+        const { auth, byUserCode } = await saveDeviceAuth();
+        const other = makeUser(2);
+        await options.addUser(userService, other, "pw");
+        const results = await Promise.allSettled([
+          deviceService.approve(byUserCode, user),
+          deviceService.approve(byUserCode, other),
+        ]);
+        const approved = results.filter((r) => r.status === "fulfilled");
+        expect(
+          approved.length,
+          "approval must be one conditional write on a pending record",
+        ).toBe(1);
+        const winner = (
+          approved[0] as PromiseFulfilledResult<DeviceAuthorization<C, U, S>>
+        ).value.user as MemoryUserShape | undefined;
+        const refetched = await deviceService.getByDeviceCode(auth.deviceCode);
+        expect(
+          (refetched?.user as MemoryUserShape | undefined)?.id,
+        ).toStrictEqual(winner?.id);
+      });
+
       it("updateLastPolled accepts the record getByDeviceCode returns", async () => {
         const { auth, byDeviceCode } = await saveDeviceAuth();
         const updated = await deviceService.updateLastPolled(byDeviceCode);

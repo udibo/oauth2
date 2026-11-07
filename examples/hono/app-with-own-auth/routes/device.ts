@@ -68,12 +68,19 @@ app.post("/", async (c) => {
     return c.html(approvalPage({ userCode, clientId: auth.client.id }));
   }
 
-  if (decision === "approve") {
-    await deviceService.approve(auth, user);
-    return c.html(resultPage({ approved: true }));
+  try {
+    if (decision === "approve") {
+      await deviceService.approve(auth, user);
+    } else {
+      await deviceService.deny(auth);
+    }
+  } catch {
+    return c.html(
+      entryPage({ userCode, error: "This code was already used or expired." }),
+      400,
+    );
   }
-  await deviceService.deny(auth);
-  return c.html(resultPage({ approved: false }));
+  return c.html(resultPage({ approved: decision === "approve" }));
 });
 
 export default app;

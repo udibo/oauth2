@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { rejection } from "../../_test_assert.ts";
 import type { DeviceAuthorization } from "../../models/device-authorization.ts";
 import { BasicScope } from "../../models/scope.ts";
@@ -206,6 +206,49 @@ async function createGrantWithStore<
   });
 
   return { grant, deviceAuthorizationService };
+}
+
+async function createExchangingGrant() {
+  const userService = new MemoryUserService<TestUser>();
+  const clientService = new MemoryClientService<TestClient, TestUser>(
+    userService,
+  );
+  const deviceAuthorizationService = new MemoryDeviceAuthorizationService<
+    TestClient,
+    TestUser,
+    BasicScope
+  >({ clientService, userService });
+  const tokenService = new MemoryTokenService<TestClient, TestUser, BasicScope>(
+    { clientService, userService, deviceAuthorizationService },
+  );
+  await userService.add(testUser, "password");
+  await clientService.add(testClient, "secret", testUser.id);
+  const grant = new DeviceAuthorizationGrant<TestClient, TestUser, BasicScope>({
+    resolve: () => ({
+      clientService,
+      tokenService,
+      deviceAuthorizationService,
+    }),
+  });
+  await deviceAuthorizationService.save({
+    deviceCode: "exchanged-code",
+    userCode: "EXCH-1234",
+    expiresAt: new Date(Date.now() + 300000),
+    client: testClient,
+    interval: 0,
+    authorized: true,
+    user: testUser,
+  });
+  const poll = () =>
+    exchangeToken(
+      grant,
+      tokenRequest({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: "exchanged-code",
+      }),
+      testClient,
+    );
+  return { tokenService, deviceAuthorizationService, poll };
 }
 
 describe("DeviceAuthorizationGrant", () => {
@@ -910,6 +953,63 @@ describe("DeviceAuthorizationGrant", () => {
       );
 
       expect(deviceAuthorizationService.pollWrites).toBe(0);
+    });
+
+    it("keeps an approved device code claimable when its token cannot be saved", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      const failure = new Error("token insert failed");
+      using save = vi.spyOn(tokenService, "save");
+      save.mockRejectedValueOnce(failure);
+
+      expect(await rejection(poll())).toBe(failure);
+
+      expect(
+        (await deviceAuthorizationService.getByDeviceCode("exchanged-code"))
+          ?.authorized,
+        "a failed token write must not spend the device's approval",
+      ).toBe(true);
+      const token = await poll();
+      expect(token.user?.id).toBe(testUser.id);
+      expect(
+        await deviceAuthorizationService.getByDeviceCode("exchanged-code"),
+      ).toBe(undefined);
+    });
+
+    it("spends the approval when no token can be issued for it", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      const failure = new Error("access token could not be minted");
+      using generate = vi.spyOn(tokenService, "generateAccessToken");
+      generate.mockRejectedValueOnce(failure);
+
+      expect(await rejection(poll())).toBe(failure);
+
+      expect(
+        await deviceAuthorizationService.getByDeviceCode("exchanged-code"),
+      ).toBe(undefined);
+    });
+
+    it("issues one token however many polls race an atomic exchange", async () => {
+      const { tokenService, poll } = await createExchangingGrant();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 4 }, () => poll()),
+      );
+
+      const issued = results.filter((result) => result.status === "fulfilled");
+      expect(issued.length).toBe(1);
+      for (const result of results) {
+        if (result.status === "rejected") {
+          assert.instanceOf(result.reason, InvalidGrantError);
+        }
+      }
+      const { accessToken } = (
+        issued[0] as PromiseFulfilledResult<{ accessToken: string }>
+      ).value;
+      expect((await tokenService.getToken(accessToken))?.accessToken).toBe(
+        accessToken,
+      );
     });
 
     it("should return token when user has authorized", async () => {
