@@ -97,7 +97,8 @@ sections apply only when you host those flows.
 
 ## If your app hosts login
 
-- [ ] A device-flow token store implements `exchangeDeviceCode`, and the
+- [ ] A device-flow token store implements `exchangeDeviceCode` and passes
+      `runDeviceCodeExchangeContractTests` with its barrier wired, and the
       device store's `approve` and `deny` change only a pending, unexpired
       record, passing `runDeviceAuthorizationServiceContractTests`.
 - [ ] The full password credential, including `params`, is persisted.

@@ -242,6 +242,40 @@ describe("AccountLockout", () => {
     expect((await lockout.status("u1", now + 1)).locked).toStrictEqual(false);
   });
 
+  it("admits the attempt unlocked, without a lock, when its recount's lock is refused too", async () => {
+    const inner = new MemoryLockoutStore();
+    let increments = 0;
+    const store: LockoutStore = {
+      get: (userId, now) => inner.get(userId, now),
+      increment: (userId, now) => {
+        increments++;
+        return inner.increment(userId, now);
+      },
+      set: (userId, record) => inner.set(userId, record),
+      clear: (userId) => inner.clear(userId),
+      lock: () => Promise.resolve(false),
+    };
+    const lockout = new AccountLockout({
+      maxAttempts: 2,
+      lockDurationMs: 60_000,
+      store,
+    });
+    const now = 1_000_000;
+    await inner.increment("u1", now);
+
+    const attempt = await lockout.reserveAttempt("u1", now);
+
+    expect(
+      increments,
+      "a refused lock is retried against one fresh count, never looped",
+    ).toBe(2);
+    expect(
+      attempt,
+      "with no lock written, the attempt reports the state the store holds",
+    ).toStrictEqual({ failures: 3, locked: false, justLocked: false });
+    expect((await lockout.status("u1", now)).locked).toBe(false);
+  });
+
   it("locks through set when the store has no conditional lock", async () => {
     const inner = new MemoryLockoutStore();
     const lockout = new AccountLockout({

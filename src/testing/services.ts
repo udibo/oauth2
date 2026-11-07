@@ -350,11 +350,10 @@ export class MemoryTokenService<
 
   /**
    * Claims an approved authorization from the paired
-   * `deviceAuthorizationService` and saves the token issued from it, restoring
-   * the authorization when the save throws, so the grant either issues the
-   * token or leaves the approval for the next poll. Resolves `undefined` when
-   * the authorization was already claimed. Present only when the service was
-   * constructed with `deviceAuthorizationService`.
+   * `deviceAuthorizationService` and saves the token issued from it in one
+   * step, or does neither, resolving `undefined` when the authorization was
+   * already claimed. Present only when the service was constructed with
+   * `deviceAuthorizationService`.
    */
   readonly exchangeDeviceCode?: (
     authorization: DeviceAuthorization<C, U, S>,
@@ -392,17 +391,11 @@ export class MemoryTokenService<
     authorization: DeviceAuthorization<C, U, S>,
     token: Token<C, U, S>,
   ): Promise<Token<C, U, S> | undefined> {
-    const restore = claimStoredDeviceCode(
-      devices,
-      await sha256Hash(authorization.deviceCode),
-    );
-    if (!restore) return undefined;
-    try {
-      return (await this.save(token)) as Token<C, U, S>;
-    } catch (error) {
-      restore();
-      throw error;
-    }
+    const deviceCodeHash = await sha256Hash(authorization.deviceCode);
+    const stored = await this.#prepare(token);
+    if (!claimStoredDeviceCode(devices, deviceCodeHash)) return undefined;
+    this.#store(stored);
+    return token;
   }
 
   async #exchangeCode(
@@ -1016,7 +1009,7 @@ let claimStoredDeviceCode: <
 >(
   service: MemoryDeviceAuthorizationService<C, U, S>,
   deviceCodeHash: string,
-) => (() => void) | undefined;
+) => boolean;
 
 /** In-memory `DeviceAuthorizationServiceInterface` implementation. */
 export class MemoryDeviceAuthorizationService<
@@ -1036,13 +1029,10 @@ export class MemoryDeviceAuthorizationService<
   static {
     claimStoredDeviceCode = (service, deviceCodeHash) => {
       const stored = service.#byDeviceCode.get(deviceCodeHash);
-      if (!stored) return undefined;
+      if (!stored) return false;
       service.#byDeviceCode.delete(deviceCodeHash);
       service.#byUserCode.delete(stored.userCodeHash);
-      return () => {
-        service.#byDeviceCode.set(deviceCodeHash, stored);
-        service.#byUserCode.set(stored.userCodeHash, stored);
-      };
+      return true;
     };
   }
 

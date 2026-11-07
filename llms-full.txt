@@ -6650,7 +6650,9 @@ replayed between the claim and the save leaves the token saved next live.
 
 For the device authorization grant, implement `exchangeDeviceCode` so the claim
 of an approved device code and the save of its token are one atomic step.
-Without it, a save that fails after the claim spends the user's approval. Make
+Without it, a save that fails after the claim spends the user's approval.
+`runDeviceCodeExchangeContractTests` checks it under concurrent callers, with
+`DeviceCodeExchangeBarriers` wired between the claim and the insert. Make
 `approve` and `deny` conditional writes on a pending, unexpired record that
 never re-create a claimed one; `runDeviceAuthorizationServiceContractTests`
 checks them.
@@ -6941,7 +6943,8 @@ sections apply only when you host those flows.
 
 ## If your app hosts login
 
-- [ ] A device-flow token store implements `exchangeDeviceCode`, and the
+- [ ] A device-flow token store implements `exchangeDeviceCode` and passes
+      `runDeviceCodeExchangeContractTests` with its barrier wired, and the
       device store's `approve` and `deny` change only a pending, unexpired
       record, passing `runDeviceAuthorizationServiceContractTests`.
 - [ ] The full password credential, including `params`, is persisted.
@@ -7977,7 +7980,10 @@ A `LockoutStore` without the optional `lock` is locked with an unconditional
 `set` after `increment`. An over-budget attempt whose lock lands after a
 concurrent successful sign-in reset the account locks it again, with no
 lockout event. With `lock`, that write is refused and the attempt is counted
-again against the fresh record.
+again against the fresh record, once. If that second lock is refused as well,
+because another reset landed in between or the store's `lock` never writes,
+the attempt reports the account unlocked and reaches the password check: no
+lock exists to enforce, and `AccountLockout` does not retry further.
 
 ## DirectClient storage outside a browser
 

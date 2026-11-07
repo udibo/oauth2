@@ -127,7 +127,9 @@ replayed between the claim and the save leaves the token saved next live.
 
 For the device authorization grant, implement `exchangeDeviceCode` so the claim
 of an approved device code and the save of its token are one atomic step.
-Without it, a save that fails after the claim spends the user's approval. Make
+Without it, a save that fails after the claim spends the user's approval.
+`runDeviceCodeExchangeContractTests` checks it under concurrent callers, with
+`DeviceCodeExchangeBarriers` wired between the claim and the insert. Make
 `approve` and `deny` conditional writes on a pending, unexpired record that
 never re-create a claimed one; `runDeviceAuthorizationServiceContractTests`
 checks them.

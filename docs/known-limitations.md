@@ -128,7 +128,10 @@ A `LockoutStore` without the optional `lock` is locked with an unconditional
 `set` after `increment`. An over-budget attempt whose lock lands after a
 concurrent successful sign-in reset the account locks it again, with no
 lockout event. With `lock`, that write is refused and the attempt is counted
-again against the fresh record.
+again against the fresh record, once. If that second lock is refused as well,
+because another reset landed in between or the store's `lock` never writes,
+the attempt reports the account unlocked and reaches the password check: no
+lock exists to enforce, and `AccountLockout` does not retry further.
 
 ## DirectClient storage outside a browser
 

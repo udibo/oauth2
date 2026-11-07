@@ -27,7 +27,7 @@
  * @module
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import type { LockoutStore } from "../../identity/lockout.ts";
 
 /** Options for {@link runLockoutStoreContractTests}. */
@@ -49,6 +49,13 @@ export interface LockoutStoreContractOptions {
    * whose count must stay apart from the first. Defaults to `"user-2"`.
    */
   otherUserId?: string;
+  /**
+   * Set to `true` to require the optional {@link LockoutStore.lock}: the suite
+   * then fails a store that does not implement it. Left unset, the `lock`
+   * cases run when the store implements it and are skipped with a note when
+   * it does not.
+   */
+  lock?: boolean;
   /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"LockoutStore contract"`.
@@ -179,6 +186,15 @@ export function runLockoutStoreContractTests(
       const NOT_IMPLEMENTED =
         "lock is not implemented — AccountLockout falls back to set, so an " +
         "over-budget attempt can re-lock an account a concurrent sign-in reset";
+
+      if (options.lock) {
+        it("is implemented", () => {
+          assert(
+            typeof store.lock === "function",
+            `${NOT_IMPLEMENTED}. Implement it, or drop \`lock: true\`.`,
+          );
+        });
+      }
 
       it("locks the account while its count stands, keeping the count", async ({
         skip,

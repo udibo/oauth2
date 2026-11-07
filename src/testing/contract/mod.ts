@@ -36,6 +36,11 @@
  * and an exchange whose insert fails. A store that awaits between its claim
  * and its insert wires `CodeExchangeBarriers` into `exchangeCode`.
  *
+ * `TokenServiceInterface.exchangeDeviceCode` has one as well: concurrent
+ * exchanges of one approved device code, an exchange of a claimed
+ * authorization, and an exchange whose insert fails, with
+ * `DeviceCodeExchangeBarriers` wired the same way.
+ *
  * The service runners take a factory plus seed helpers because `add` /
  * `register` methods aren't part of the public service interfaces — the
  * consumer tells the runner how to populate test data.
@@ -67,6 +72,12 @@ export {
   type CodeExchangeContractServices,
   runCodeExchangeContractTests,
 } from "./code-exchange.ts";
+export {
+  type DeviceCodeExchangeBarriers,
+  type DeviceCodeExchangeContractOptions,
+  type DeviceCodeExchangeContractServices,
+  runDeviceCodeExchangeContractTests,
+} from "./device-code-exchange.ts";
 export {
   runTokenReaderContractTests,
   type TokenReaderContractFixture,

@@ -958,11 +958,12 @@ describe("DeviceAuthorizationGrant", () => {
     it("keeps an approved device code claimable when its token cannot be saved", async () => {
       const { tokenService, deviceAuthorizationService, poll } =
         await createExchangingGrant();
-      const failure = new Error("token insert failed");
-      using save = vi.spyOn(tokenService, "save");
-      save.mockRejectedValueOnce(failure);
+      using generate = vi.spyOn(tokenService, "generateAccessToken");
+      generate.mockResolvedValueOnce(
+        Symbol("unpersistable") as unknown as string,
+      );
 
-      expect(await rejection(poll())).toBe(failure);
+      await rejection(poll(), TypeError);
 
       expect(
         (await deviceAuthorizationService.getByDeviceCode("exchanged-code"))
@@ -974,6 +975,39 @@ describe("DeviceAuthorizationGrant", () => {
       expect(
         await deviceAuthorizationService.getByDeviceCode("exchanged-code"),
       ).toBe(undefined);
+    });
+
+    it("does not restore an authorization cancelled while its exchange was in flight", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      const byUserCode =
+        await deviceAuthorizationService.getByUserCode("EXCH-1234");
+      assert(byUserCode, "the approved authorization is stored");
+      const saveReached = Promise.withResolvers<void>();
+      const saveRelease = Promise.withResolvers<void>();
+      using save = vi.spyOn(tokenService, "save");
+      save.mockImplementationOnce(async () => {
+        saveReached.resolve();
+        await saveRelease.promise;
+        throw new Error("token insert failed");
+      });
+
+      const first = poll();
+      const firstSettled = first.then(
+        () => undefined,
+        () => undefined,
+      );
+      await Promise.race([saveReached.promise, firstSettled]);
+      expect(await deviceAuthorizationService.revoke(byUserCode)).toBe(false);
+      saveRelease.resolve();
+      await firstSettled;
+
+      await rejection(
+        poll(),
+        InvalidGrantError,
+        undefined,
+        "a claim the verification page saw as gone must stay gone",
+      );
     });
 
     it("spends the approval when no token can be issued for it", async () => {

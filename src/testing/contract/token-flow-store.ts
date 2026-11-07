@@ -49,6 +49,13 @@ export interface TokenFlowStoreContractOptions {
    */
   deleteBySubject?: boolean;
   /**
+   * Set to `true` to require the optional
+   * {@link TokenFlowStore.replacePending}: the suite then fails a store that
+   * does not implement it. Left unset, the `replacePending` cases run when the
+   * store implements it and are skipped with a note when it does not.
+   */
+  replacePending?: boolean;
+  /**
    * The subject the cases issue tokens for, in your application's id format. A
    * store whose rows reference a users table needs it to name a user that
    * exists. Defaults to `"user-1"`.
@@ -220,6 +227,15 @@ export function runTokenFlowStoreContractTests(
         "replacePending is not implemented — TokenFlowService.create with " +
         "invalidateExisting deletes then saves, so concurrent requests can " +
         "each leave a live link";
+
+      if (options.replacePending) {
+        it("is implemented", () => {
+          assert(
+            typeof store.replacePending === "function",
+            `${NOT_IMPLEMENTED}. Implement it, or drop \`replacePending: true\`.`,
+          );
+        });
+      }
 
       it("replaces the pair's pending records with the new one", async ({
         skip,

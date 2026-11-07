@@ -387,6 +387,23 @@ export function runDeviceAuthorizationServiceContractTests<
         ).not.toBe(true);
       });
 
+      it("deny refuses an expired authorization", async () => {
+        const auth = {
+          ...(await makeDeviceAuth()),
+          expiresAt: new Date(Date.now() - 1000),
+        };
+        await deviceService.save(auth);
+        const byUserCode = await deviceService.getByUserCode(auth.userCode);
+        assert(byUserCode, "getByUserCode should resolve what was saved");
+        await expectRefused(
+          deviceService.deny(byUserCode),
+          "an expired authorization must not be denied",
+        );
+        expect(
+          (await deviceService.getByDeviceCode(auth.deviceCode))?.denied,
+        ).not.toBe(true);
+      });
+
       it("approve takes effect for exactly one of two concurrent approvals", async () => {
         const { auth, byUserCode } = await saveDeviceAuth();
         const other = makeUser(2);
