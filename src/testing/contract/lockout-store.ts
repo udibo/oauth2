@@ -8,6 +8,9 @@
  * guess for every attempt sharing it: the brute-force floor the lockout is
  * meant to be moves up by however many attempts an attacker can land at once.
  *
+ * The optional `lock` cases run when the store implements it and are skipped,
+ * with a note naming the gap, when it does not.
+ *
  * @example Verify a database-backed store
  * ```ts
  * import { runLockoutStoreContractTests } from "@udibo/oauth2/testing/contract";
@@ -169,6 +172,83 @@ export function runLockoutStoreContractTests(
         const record = await store.get(USER);
         expect(record?.failures).toStrictEqual(4);
         expect(record?.lockedUntil).toBe(undefined);
+      });
+    });
+
+    describe("lock (optional)", () => {
+      const NOT_IMPLEMENTED =
+        "lock is not implemented — AccountLockout falls back to set, so an " +
+        "over-budget attempt can re-lock an account a concurrent sign-in reset";
+
+      it("locks the account while its count stands, keeping the count", async ({
+        skip,
+      }) => {
+        if (!store.lock) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 3; i++) await store.increment(USER, now);
+        const lockedUntil = now + 60_000;
+        expect(await store.lock(USER, { failures: 3, lockedUntil }, now)).toBe(
+          true,
+        );
+        const record = await store.get(USER);
+        expect(record?.failures).toStrictEqual(3);
+        expect(record?.lockedUntil).toBe(lockedUntil);
+      });
+
+      it("locks when later attempts counted past the lock's own count", async ({
+        skip,
+      }) => {
+        if (!store.lock) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 5; i++) await store.increment(USER, now);
+        expect(
+          await store.lock(
+            USER,
+            { failures: 3, lockedUntil: now + 60_000 },
+            now,
+          ),
+        ).toBe(true);
+        expect((await store.get(USER))?.failures).toStrictEqual(5);
+      });
+
+      it("refuses once the account was cleared", async ({ skip }) => {
+        if (!store.lock) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 3; i++) await store.increment(USER, now);
+        await store.clear(USER);
+        expect(
+          await store.lock(
+            USER,
+            { failures: 3, lockedUntil: now + 60_000 },
+            now,
+          ),
+          "a lock computed before a successful sign-in must not land after it",
+        ).toBe(false);
+        expect(await store.get(USER)).toBe(undefined);
+      });
+
+      it("refuses once a fresh count started below the lock's count", async ({
+        skip,
+      }) => {
+        if (!store.lock) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 3; i++) await store.increment(USER, now);
+        await store.clear(USER);
+        await store.increment(USER, now);
+        expect(
+          await store.lock(
+            USER,
+            { failures: 3, lockedUntil: now + 60_000 },
+            now,
+          ),
+        ).toBe(false);
+        const record = await store.get(USER);
+        expect(record?.failures).toStrictEqual(1);
+        expect(record?.lockedUntil).toBe(undefined);
+      });
+
+      it("locks only the account it is given", async ({ skip }) => {
+        if (!store.lock) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 3; i++) await store.increment(USER, now);
+        await store.increment(OTHER_USER, now);
+        await store.lock(USER, { failures: 3, lockedUntil: now + 60_000 }, now);
+        expect((await store.get(OTHER_USER))?.lockedUntil).toBe(undefined);
       });
     });
 

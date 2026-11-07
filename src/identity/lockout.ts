@@ -53,6 +53,25 @@ export interface LockoutStore {
    * merging: a record with no `lockedUntil` leaves the account unlocked.
    */
   set(userId: string, record: LockoutRecord): Promise<void>;
+  /**
+   * Optional: lock the account until `record.lockedUntil` only while its stored
+   * count is still at least `record.failures`, keeping the stored count, and
+   * resolve whether the lock was written. It must be one conditional write
+   * (`UPDATE … SET locked_until = $until WHERE failures >= $failures`, checking
+   * the row count), never a read then a write. `now` is the clock `increment`
+   * was given, for a store that expires records.
+   *
+   * `AccountLockout` calls it instead of {@link LockoutStore.set} when an
+   * attempt's count reaches `maxAttempts`. Without it, the lock is an
+   * unconditional `set` after `increment`, so an over-budget attempt whose
+   * lock lands after a concurrent {@link LockoutStore.clear} re-locks an
+   * account that just signed in, and no lockout event reports it.
+   */
+  lock?(
+    userId: string,
+    record: LockoutRecord & { lockedUntil: number },
+    now: number,
+  ): Promise<boolean>;
   /** Clear the account's record (successful sign-in or unlock). */
   clear(userId: string): Promise<void>;
 }
@@ -243,6 +262,7 @@ export class AccountLockout implements AccountLockoutLike {
   async #count(
     userId: string,
     now: number = Date.now(),
+    recounted = false,
   ): Promise<LockoutFailureResult> {
     const record = await this.#store.increment(userId, now);
     const { failures } = record;
@@ -258,7 +278,10 @@ export class AccountLockout implements AccountLockoutLike {
 
     if (failures >= this.#maxAttempts) {
       const lockedUntil = now + this.#lockDurationMs;
-      await this.#store.set(userId, { failures, lockedUntil });
+      if (!(await this.#lock(userId, { failures, lockedUntil }, now))) {
+        if (!recounted) return this.#count(userId, now, true);
+        return { failures, locked: false, justLocked: false };
+      }
       // Concurrent attempts can overshoot the threshold before the lock lands;
       // only the attempt that hits it exactly reports justLocked, so the
       // lockout event (and any unlock email) fires once.
@@ -271,6 +294,16 @@ export class AccountLockout implements AccountLockoutLike {
     }
 
     return { failures, locked: false, justLocked: false };
+  }
+
+  async #lock(
+    userId: string,
+    record: LockoutRecord & { lockedUntil: number },
+    now: number,
+  ): Promise<boolean> {
+    if (this.#store.lock) return this.#store.lock(userId, record, now);
+    await this.#store.set(userId, record);
+    return true;
   }
 
   /** Clear the account's failures and any lock (successful sign-in, unlock). */
@@ -408,6 +441,27 @@ export class MemoryLockoutStore implements LockoutStore {
     this.#entries.set(userId, { record, touchedAt });
     this.#collect(userId, touchedAt);
     return Promise.resolve();
+  }
+
+  /**
+   * Lock `userId` until `record.lockedUntil` when its live record still
+   * counts at least `record.failures`; resolves whether it did.
+   */
+  lock(
+    userId: string,
+    record: LockoutRecord & { lockedUntil: number },
+    now: number,
+  ): Promise<boolean> {
+    const entry = this.#entries.get(userId);
+    if (
+      !entry ||
+      this.#expired(entry, now) ||
+      entry.record.failures < record.failures
+    ) {
+      return Promise.resolve(false);
+    }
+    entry.record = { ...entry.record, lockedUntil: record.lockedUntil };
+    return Promise.resolve(true);
   }
 
   /** Drop `userId`'s record. */
