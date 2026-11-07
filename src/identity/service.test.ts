@@ -1570,6 +1570,331 @@ describe("IdentityService lockout", () => {
   });
 });
 
+describe("IdentityService lockout under concurrent sign-ins", () => {
+  const MAX_ATTEMPTS = 3;
+  const CONCURRENT_GUESSES = 10;
+
+  function gatedHasher() {
+    const gate = Promise.withResolvers<void>();
+    const hasher = {
+      verifyCalls: 0,
+      release: () => gate.resolve(),
+      hash: (password: string) =>
+        Promise.resolve({ hash: `gated:${password}`, salt: "salt" }),
+      async verify(password: string, credential: PasswordCredential) {
+        hasher.verifyCalls++;
+        await gate.promise;
+        return credential.hash === `gated:${password}`;
+      },
+    };
+    return hasher;
+  }
+
+  function makeConcurrentService(options?: {
+    protectionMode?: "enforce" | "log-only";
+  }) {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    const hasher = gatedHasher();
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      passwords: hasher,
+      lockout,
+      protectionMode: options?.protectionMode,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    return { service, events, hasher, lockout };
+  }
+
+  async function signUpAlice(service: IdentityService<TestUser>) {
+    return await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+  }
+
+  async function guessConcurrently(
+    service: IdentityService<TestUser>,
+    hasher: ReturnType<typeof gatedHasher>,
+  ): Promise<(TestUser | null)[]> {
+    let settled = 0;
+    const guesses = Array.from({ length: CONCURRENT_GUESSES }, () =>
+      service
+        .signIn({ identifier: "a@b.co", password: "wrong" })
+        .finally(() => {
+          settled++;
+        }),
+    );
+    await vi.waitFor(() => {
+      expect(hasher.verifyCalls + settled).toStrictEqual(CONCURRENT_GUESSES);
+    });
+    hasher.release();
+    return await Promise.all(guesses);
+  }
+
+  it("lets at most maxAttempts concurrent guesses reach the password check", async () => {
+    const { service, events, hasher, lockout } = makeConcurrentService();
+    const user = await signUpAlice(service);
+
+    const results = await guessConcurrently(service, hasher);
+
+    expect(results).toStrictEqual(Array(CONCURRENT_GUESSES).fill(null));
+    expect(
+      hasher.verifyCalls,
+      "every guess past the budget must be refused before the password check",
+    ).toStrictEqual(MAX_ATTEMPTS);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([
+      {
+        type: "lockout",
+        userId: user.id,
+        identifier: "a@b.co",
+        failures: MAX_ATTEMPTS,
+        lockedUntil: (await lockout.status(user.id)).lockedUntil,
+        enforced: true,
+      },
+    ]);
+    expect(
+      eventsOfType(events, "sign_in.locked").map((event) => event.enforced),
+    ).toStrictEqual(Array(CONCURRENT_GUESSES - MAX_ATTEMPTS).fill(true));
+    expect(eventsOfType(events, "sign_in.failed").length).toStrictEqual(
+      MAX_ATTEMPTS,
+    );
+    expect((await lockout.status(user.id)).locked).toStrictEqual(true);
+  });
+
+  it("refuses the correct password once concurrent guesses spent the budget", async () => {
+    const { service, hasher } = makeConcurrentService();
+    await signUpAlice(service);
+
+    await guessConcurrently(service, hasher);
+
+    expect(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "hunter2hunter2",
+      }),
+    ).toStrictEqual(null);
+    expect(hasher.verifyCalls).toStrictEqual(MAX_ATTEMPTS);
+  });
+
+  it("log-only mode verifies every concurrent guess and still locks once", async () => {
+    const { service, events, hasher, lockout } = makeConcurrentService({
+      protectionMode: "log-only",
+    });
+    const user = await signUpAlice(service);
+
+    await guessConcurrently(service, hasher);
+
+    expect(hasher.verifyCalls).toStrictEqual(CONCURRENT_GUESSES);
+    expect(
+      eventsOfType(events, "lockout").map((event) => [
+        event.failures,
+        event.enforced,
+      ]),
+    ).toStrictEqual([[MAX_ATTEMPTS, false]]);
+    expect(
+      eventsOfType(events, "sign_in.locked").map((event) => event.enforced),
+    ).toStrictEqual(Array(CONCURRENT_GUESSES - MAX_ATTEMPTS).fill(false));
+    expect((await lockout.status(user.id)).failures).toStrictEqual(
+      CONCURRENT_GUESSES,
+    );
+
+    assert.exists(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "hunter2hunter2",
+      }),
+    );
+    expect(await lockout.status(user.id)).toStrictEqual({
+      locked: false,
+      failures: 0,
+    });
+  });
+
+  it("log-only mode reports an account the status read already found locked once per attempt", async () => {
+    const { service, events, hasher } = makeConcurrentService({
+      protectionMode: "log-only",
+    });
+    await signUpAlice(service);
+    hasher.release();
+
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    expect(eventsOfType(events, "sign_in.locked")).toStrictEqual([]);
+    for (let i = 0; i < 2; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+
+    expect(
+      eventsOfType(events, "sign_in.locked").map((event) => event.enforced),
+      "the refused reservation must not report a lock the status read already reported",
+    ).toStrictEqual([false, false]);
+  });
+
+  it("fires the lockout event when the attempt that reaches the threshold throws", async () => {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    let verifyCalls = 0;
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      passwords: {
+        hash: (password) =>
+          Promise.resolve({ hash: `plain:${password}`, salt: "salt" }),
+        verify: (password, credential) => {
+          verifyCalls++;
+          if (verifyCalls === MAX_ATTEMPTS) {
+            return Promise.reject(new Error("verifier unavailable"));
+          }
+          return Promise.resolve(credential.hash === `plain:${password}`);
+        },
+      },
+      lockout,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const user = await signUpAlice(service);
+
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    await rejection(
+      () => service.signIn({ identifier: "a@b.co", password: "wrong" }),
+      Error,
+      "verifier unavailable",
+    );
+    await service.signIn({ identifier: "a@b.co", password: "wrong" });
+
+    expect(
+      eventsOfType(events, "lockout").map((event) => [
+        event.userId,
+        event.failures,
+      ]),
+      "the lock the thrown attempt created must still announce itself, so the unlock email goes out",
+    ).toStrictEqual([[user.id, MAX_ATTEMPTS]]);
+    expect((await lockout.status(user.id)).locked).toStrictEqual(true);
+  });
+
+  it("signs in with the correct password on the attempt that reaches the threshold", async () => {
+    const { service, events, hasher, lockout } = makeConcurrentService();
+    const user = await signUpAlice(service);
+    hasher.release();
+
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    const signedIn = await service.signIn({
+      identifier: "a@b.co",
+      password: "hunter2hunter2",
+    });
+
+    expect(signedIn?.id).toStrictEqual(user.id);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
+    expect(await lockout.status(user.id)).toStrictEqual({
+      locked: false,
+      failures: 0,
+    });
+  });
+
+  it("clears the reserved attempt when the sign-in succeeds", async () => {
+    const { service, hasher, lockout } = makeConcurrentService();
+    const user = await signUpAlice(service);
+    hasher.release();
+
+    for (let round = 0; round < MAX_ATTEMPTS; round++) {
+      assert.exists(
+        await service.signIn({
+          identifier: "a@b.co",
+          password: "hunter2hunter2",
+        }),
+      );
+    }
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+
+    const status = await lockout.status(user.id);
+    expect([status.locked, status.failures]).toStrictEqual([
+      false,
+      MAX_ATTEMPTS - 1,
+    ]);
+  });
+
+  it("reserves no attempt for an account with no password", async () => {
+    const { store } = makeStore();
+    store.getCredential = () => Promise.resolve(undefined);
+    const lockoutStore = new MemoryLockoutStore();
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      lockout: new AccountLockout({ maxAttempts: 1, store: lockoutStore }),
+    });
+    const user = await signUpAlice(service);
+
+    for (let i = 0; i < 3; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "anything" });
+    }
+
+    expect(await lockoutStore.get(user.id)).toBe(undefined);
+  });
+
+  it("drives a plain-object lockout's reserveAttempt instead of recordFailure", async () => {
+    const { store } = makeStore();
+    const hasher = gatedHasher();
+    hasher.release();
+    const calls: string[] = [];
+    const lockout: AccountLockoutLike = {
+      status: () => Promise.resolve({ locked: false, failures: 0 }),
+      reserveAttempt: () => {
+        calls.push("reserveAttempt");
+        return Promise.resolve({
+          failures: 4,
+          locked: true,
+          justLocked: false,
+          lockedUntil: Date.now() + 60_000,
+        });
+      },
+      recordFailure: () => {
+        calls.push("recordFailure");
+        return Promise.resolve({
+          failures: 1,
+          locked: false,
+          justLocked: false,
+        });
+      },
+      reset: () => Promise.resolve(),
+    };
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      passwords: hasher,
+      lockout,
+    });
+    await signUpAlice(service);
+
+    expect(
+      await service.signIn({
+        identifier: "a@b.co",
+        password: "hunter2hunter2",
+      }),
+      "a refused reservation must refuse even the correct password",
+    ).toStrictEqual(null);
+    expect(hasher.verifyCalls).toStrictEqual(0);
+    expect(calls).toStrictEqual(["reserveAttempt"]);
+  });
+});
+
 function makeLegacyStore() {
   const byId = new Map<string, TestUser>();
   const emailToId = new Map<string, string>();
@@ -2309,13 +2634,27 @@ function costedHasher(costMs: number): PasswordHasherLike {
   };
 }
 
-function lockoutHolding(locked: { userId: string }): AccountLockoutLike {
+function lockoutHolding(locked: {
+  userId: string;
+  overBudgetUserId: string;
+}): AccountLockoutLike {
   return {
     status: (userId) =>
       Promise.resolve(
         userId === locked.userId
           ? { locked: true, failures: 3, lockedUntil: Date.now() + 60_000 }
           : { locked: false, failures: 0 },
+      ),
+    reserveAttempt: (userId) =>
+      Promise.resolve(
+        userId === locked.overBudgetUserId
+          ? {
+              failures: 4,
+              locked: true,
+              justLocked: false,
+              lockedUntil: Date.now() + 60_000,
+            }
+          : { failures: 1, locked: false, justLocked: false },
       ),
     recordFailure: () =>
       Promise.resolve({ failures: 1, locked: false, justLocked: false }),
@@ -2348,7 +2687,7 @@ describe("IdentityService failed sign-in timing", () => {
     options?: Partial<IdentityServiceOptions<TestUser>>,
   ) {
     const legacyStore = makeLegacyStore();
-    const locked = { userId: "" };
+    const locked = { userId: "", overBudgetUserId: "" };
     const service = new IdentityService<TestUser>({
       users: legacyStore.store,
       passwords: costedHasher(NATIVE_KDF_MS),
@@ -2360,8 +2699,11 @@ describe("IdentityService failed sign-in timing", () => {
     return { ...legacyStore, service, locked };
   }
 
-  async function seedBranches() {
-    const { store, creds, importUser, service, locked } = makeTimingService();
+  async function seedBranches(
+    options?: Partial<IdentityServiceOptions<TestUser>>,
+  ) {
+    const { store, creds, importUser, service, locked } =
+      makeTimingService(options);
     await store.create(
       { email: "native@b.co" },
       { hash: "costed:right-password", salt: "salt" },
@@ -2381,6 +2723,11 @@ describe("IdentityService failed sign-in timing", () => {
       { hash: "costed:right-password", salt: "salt" },
     );
     locked.userId = lockedOut.id;
+    const overBudget = await store.create(
+      { email: "over-budget@b.co" },
+      { hash: "costed:right-password", salt: "salt" },
+    );
+    locked.overBudgetUserId = overBudget.id;
     return {
       service,
       branches: {
@@ -2390,6 +2737,7 @@ describe("IdentityService failed sign-in timing", () => {
         "imported hash no verifier claims": "unreadable@b.co",
         "account with no password at all": "none@b.co",
         "locked account": "locked@b.co",
+        "attempt refused by its reservation": "over-budget@b.co",
       } as Record<string, string>,
     };
   }
@@ -2433,6 +2781,34 @@ describe("IdentityService failed sign-in timing", () => {
     ).toStrictEqual(
       Object.fromEntries(RATIO_BRANCHES.map((branch) => [branch, FLOOR_MS])),
     );
+  });
+
+  it("spends a password hash on an attempt its reservation refuses, as on a wrong password", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    const { service, branches } = await seedBranches({
+      failedSignInFloorMs: 0,
+    });
+    const timings: Record<string, number> = {};
+
+    for (const branch of [
+      "wrong native password",
+      "attempt refused by its reservation",
+    ]) {
+      timings[branch] = await elapsedMs(time, () =>
+        service.signIn({
+          identifier: branches[branch],
+          password: "wrong-password",
+        }),
+      );
+    }
+
+    expect(
+      timings,
+      "with no floor to hide behind, a refusal that skipped the hash would return visibly sooner",
+    ).toStrictEqual({
+      "wrong native password": NATIVE_KDF_MS,
+      "attempt refused by its reservation": NATIVE_KDF_MS,
+    });
   });
 
   it("floors a rejection at 250ms with no option set", async () => {

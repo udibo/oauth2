@@ -112,6 +112,48 @@ describe("AccountLockout", () => {
     expect((await lockout.status("u1", now + 1)).locked).toStrictEqual(true);
   });
 
+  it("admits exactly maxAttempts of any number of concurrent reservations", async () => {
+    const lockout = new AccountLockout({
+      maxAttempts: 3,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const now = 1_000_000;
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => lockout.reserveAttempt("u1", now)),
+    );
+
+    const admitted = results
+      .filter((r) => !r.locked || r.justLocked)
+      .map((r) => r.failures)
+      .sort((a, b) => a - b);
+    expect(admitted).toStrictEqual([1, 2, 3]);
+    expect(results.filter((r) => r.justLocked).length).toStrictEqual(1);
+    expect((await lockout.status("u1", now + 1)).locked).toStrictEqual(true);
+  });
+
+  it("refuses a reservation against an active lock without moving it", async () => {
+    const store = new MemoryLockoutStore();
+    const lockout = new AccountLockout({
+      maxAttempts: 2,
+      lockDurationMs: 60_000,
+      store,
+    });
+    const now = 1_000_000;
+    await lockout.reserveAttempt("u1", now);
+    await lockout.reserveAttempt("u1", now);
+
+    const refused = await lockout.reserveAttempt("u1", now + 5_000);
+
+    expect(refused).toStrictEqual({
+      failures: 3,
+      locked: true,
+      justLocked: false,
+      lockedUntil: now + 60_000,
+    });
+  });
+
   it("two instances sharing a store agree on failures and the lock", async () => {
     const store = new MemoryLockoutStore();
     const first = new AccountLockout({

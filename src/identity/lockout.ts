@@ -20,7 +20,11 @@
 
 /** Per-account lockout state. */
 export interface LockoutRecord {
-  /** Consecutive failed sign-in attempts since the last success/unlock. */
+  /**
+   * Consecutive sign-in attempts counted since the last success/unlock. An
+   * attempt is counted before its password is checked, so an attempt still in
+   * flight is included until a success clears the record.
+   */
   failures: number;
   /** When the active lock expires (epoch ms); absent when not locked. */
   lockedUntil?: number;
@@ -35,11 +39,13 @@ export interface LockoutStore {
    */
   get(userId: string, now?: number): Promise<LockoutRecord | undefined>;
   /**
-   * Add one failure and return the new record: an expired lock resets the
+   * Add one attempt and return the new record: an expired lock resets the
    * count to 1 and drops the lock; otherwise `failures + 1` with any active
-   * lock kept. Must be atomic (a single statement / compare-and-set in shared
-   * stores) — a read-modify-write here lets concurrent failed attempts lose
-   * counts and undershoot the lockout threshold.
+   * lock kept. `AccountLockout` calls it before the password is checked and
+   * admits the attempt only on the count it returns, so it must be atomic (a
+   * single statement / compare-and-set in shared stores) and return the
+   * post-increment count: a read-modify-write lets concurrent attempts share a
+   * count, and each one sharing it is another guess past `maxAttempts`.
    */
   increment(userId: string, now: number): Promise<LockoutRecord>;
   /**
@@ -136,9 +142,29 @@ export interface AccountLockoutLike {
   /**
    * Record one failed attempt and report the resulting state. `justLocked` must
    * be true for exactly one attempt per lock — `IdentityService` fires the
-   * lockout event and any unlock email off it.
+   * lockout event and any unlock email off it. `IdentityService` calls it after
+   * a wrong password only when {@link AccountLockoutLike.reserveAttempt} is
+   * absent.
    */
   recordFailure(userId: string, now?: number): Promise<LockoutFailureResult>;
+  /**
+   * Count one sign-in attempt atomically before its password is checked, and
+   * report the resulting state the way {@link AccountLockoutLike.recordFailure}
+   * does. `IdentityService` checks the password only when the result is
+   * unlocked or `justLocked` — the attempt that reaches the threshold is still
+   * checked — and refuses the rest under `"enforce"`. A wrong password then
+   * fires the lockout event off the reservation's `justLocked`; a success
+   * calls {@link AccountLockoutLike.reset}; an attempt that throws stays
+   * counted and, when its reservation was `justLocked`, still fires the
+   * lockout event.
+   *
+   * Optional. Without it `IdentityService` reads
+   * {@link AccountLockoutLike.status} and calls `recordFailure` only after a
+   * wrong password, so concurrent guesses that all read the account unlocked
+   * are each checked and can exceed the threshold. {@link AccountLockout}
+   * implements it.
+   */
+  reserveAttempt?(userId: string, now?: number): Promise<LockoutFailureResult>;
   /** Clear the account's failures and any lock (successful sign-in, unlock). */
   reset(userId: string): Promise<void>;
 }
@@ -195,7 +221,26 @@ export class AccountLockout implements AccountLockoutLike {
    * Record one failed attempt, locking the account when the consecutive-failure
    * threshold is crossed. An attempt after a lock expired starts a fresh count.
    */
-  async recordFailure(
+  recordFailure(
+    userId: string,
+    now: number = Date.now(),
+  ): Promise<LockoutFailureResult> {
+    return this.#count(userId, now);
+  }
+
+  /**
+   * Count one sign-in attempt before its password is checked, with the same
+   * accounting as {@link recordFailure}: of any number of concurrent attempts,
+   * only the first `maxAttempts` come back unlocked or `justLocked`.
+   */
+  reserveAttempt(
+    userId: string,
+    now: number = Date.now(),
+  ): Promise<LockoutFailureResult> {
+    return this.#count(userId, now);
+  }
+
+  async #count(
     userId: string,
     now: number = Date.now(),
   ): Promise<LockoutFailureResult> {
