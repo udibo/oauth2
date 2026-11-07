@@ -155,7 +155,8 @@ export interface AccountLockoutLike {
    * checked — and refuses the rest under `"enforce"`. A wrong password then
    * fires the lockout event off the reservation's `justLocked`; a success
    * calls {@link AccountLockoutLike.reset}; an attempt that throws stays
-   * counted.
+   * counted and, when its reservation was `justLocked`, still fires the
+   * lockout event.
    *
    * Optional. Without it `IdentityService` reads
    * {@link AccountLockoutLike.status} and calls `recordFailure` only after a

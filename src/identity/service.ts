@@ -485,6 +485,7 @@ type AuthenticateOutcome =
 interface SignInAttempt {
   admit(): Promise<boolean>;
   fail(): Promise<void>;
+  abandon(): Promise<void>;
 }
 
 /**
@@ -631,7 +632,13 @@ export class IdentityService<User extends IdentityUser> {
       return await this.#rejectSignIn(startedAt);
     }
     const attempt = this.#signInAttempt(user.id, identifier, lockReported);
-    const outcome = await this.#authenticate(user.id, input.password, attempt);
+    let outcome: AuthenticateOutcome;
+    try {
+      outcome = await this.#authenticate(user.id, input.password, attempt);
+    } catch (error) {
+      await attempt.abandon();
+      throw error;
+    }
     if (outcome === "refused") return await this.#rejectSignIn(startedAt);
     if (outcome !== "authenticated") {
       await this.#emit({
@@ -1255,9 +1262,13 @@ export class IdentityService<User extends IdentityUser> {
       return {
         admit: () => Promise.resolve(true),
         fail: () => this.#recordSignInFailure(userId, identifier),
+        abandon: () => Promise.resolve(),
       };
     }
     let reservation: LockoutFailureResult | undefined;
+    const announceLock = async (): Promise<void> => {
+      if (reservation) await this.#emitLockout(userId, identifier, reservation);
+    };
     return {
       admit: async () => {
         reservation = await reserve(userId);
@@ -1265,10 +1276,8 @@ export class IdentityService<User extends IdentityUser> {
         if (!lockReported) await this.#emitSignInLocked(userId, identifier);
         return !this.#enforce;
       },
-      fail: async () => {
-        if (reservation)
-          await this.#emitLockout(userId, identifier, reservation);
-      },
+      fail: announceLock,
+      abandon: announceLock,
     };
   }
 

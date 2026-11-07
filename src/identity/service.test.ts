@@ -1718,6 +1718,76 @@ describe("IdentityService lockout under concurrent sign-ins", () => {
     });
   });
 
+  it("log-only mode reports an account the status read already found locked once per attempt", async () => {
+    const { service, events, hasher } = makeConcurrentService({
+      protectionMode: "log-only",
+    });
+    await signUpAlice(service);
+    hasher.release();
+
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    expect(eventsOfType(events, "sign_in.locked")).toStrictEqual([]);
+    for (let i = 0; i < 2; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+
+    expect(
+      eventsOfType(events, "sign_in.locked").map((event) => event.enforced),
+      "the refused reservation must not report a lock the status read already reported",
+    ).toStrictEqual([false, false]);
+  });
+
+  it("fires the lockout event when the attempt that reaches the threshold throws", async () => {
+    const { store } = makeStore();
+    const events: IdentityEvent[] = [];
+    let verifyCalls = 0;
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      passwords: {
+        hash: (password) =>
+          Promise.resolve({ hash: `plain:${password}`, salt: "salt" }),
+        verify: (password, credential) => {
+          verifyCalls++;
+          if (verifyCalls === MAX_ATTEMPTS) {
+            return Promise.reject(new Error("verifier unavailable"));
+          }
+          return Promise.resolve(credential.hash === `plain:${password}`);
+        },
+      },
+      lockout,
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const user = await signUpAlice(service);
+
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
+      await service.signIn({ identifier: "a@b.co", password: "wrong" });
+    }
+    await rejection(
+      () => service.signIn({ identifier: "a@b.co", password: "wrong" }),
+      Error,
+      "verifier unavailable",
+    );
+    await service.signIn({ identifier: "a@b.co", password: "wrong" });
+
+    expect(
+      eventsOfType(events, "lockout").map((event) => [
+        event.userId,
+        event.failures,
+      ]),
+      "the lock the thrown attempt created must still announce itself, so the unlock email goes out",
+    ).toStrictEqual([[user.id, MAX_ATTEMPTS]]);
+    expect((await lockout.status(user.id)).locked).toStrictEqual(true);
+  });
+
   it("signs in with the correct password on the attempt that reaches the threshold", async () => {
     const { service, events, hasher, lockout } = makeConcurrentService();
     const user = await signUpAlice(service);
