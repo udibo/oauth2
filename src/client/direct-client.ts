@@ -1006,6 +1006,11 @@ export class DirectClient extends OAuth2ClientBase {
    * token, because the other client rotated it first: storage is left alone
    * and the refresh retries once with the newer token.
    *
+   * A refresh that revives a session with no stored token bundle (a reload
+   * that kept only the refresh token) emits `authenticated` after
+   * `token_refreshed`, because it is the first time this client holds the
+   * user's claims.
+   *
    * Single-flight has one consequence worth knowing: a call that **joins** a
    * refresh already started by {@link renewSession} inherits that call's quiet
    * policy, so it will not emit `error` on a transport failure even though it
@@ -1054,13 +1059,19 @@ export class DirectClient extends OAuth2ClientBase {
     reportTransient: boolean,
     snapshot: { version?: number },
   ): Promise<string> {
-    const { version, refreshToken } = await this.#mutateSession(async () => {
-      const version = (snapshot.version = this.#sessionVersion);
-      return {
-        version,
-        refreshToken: await this.#readRefreshToken(reportTransient),
-      };
-    });
+    const { version, refreshToken, revivesEmptyBundle } =
+      await this.#mutateSession(async () => {
+        const version = (snapshot.version = this.#sessionVersion);
+        const refreshToken = await this.#readRefreshToken(reportTransient);
+        const bundle = await Promise.resolve()
+          .then(() => this.#tokenStorage.get())
+          .catch(() => undefined);
+        return {
+          version,
+          refreshToken,
+          revivesEmptyBundle: bundle === null || bundle?.accessToken === "",
+        };
+      });
     if (version !== this.#sessionVersion) {
       throw new InvalidGrantError("session changed during refresh");
     }
@@ -1078,17 +1089,24 @@ export class DirectClient extends OAuth2ClientBase {
         );
         const tokens = await this.#saveTokens(response, version, true);
         this.emit({ type: "token_refreshed", tokens });
+        if (revivesEmptyBundle) this.emit({ type: "authenticated", tokens });
         return tokens.accessToken;
       } catch (error) {
         if (version !== this.#sessionVersion) {
           throw new InvalidGrantError("session changed during refresh");
         }
         if (isOAuth2ErrorCode(error, "invalid_grant")) {
-          const replacement = await this.#clearSessionUnlessReplaced(presented);
-          if (replacement === null) {
+          const outcome = await this.#clearSessionUnlessReplaced(
+            presented,
+            version,
+          );
+          if (outcome.superseded) {
+            throw new InvalidGrantError("session changed during refresh");
+          }
+          if (outcome.replacement === undefined) {
             this.emit({ type: "logged_out", reason: "invalid_grant" });
           } else if (attempt === 0) {
-            presented = replacement;
+            presented = outcome.replacement;
             continue;
           }
         } else if (reportTransient) {
@@ -1735,15 +1753,19 @@ export class DirectClient extends OAuth2ClientBase {
     return this.#mutateSession(() => this.#clearStores());
   }
 
-  #clearSessionUnlessReplaced(presented: string): Promise<string | null> {
+  #clearSessionUnlessReplaced(
+    presented: string,
+    version: number,
+  ): Promise<{ superseded?: true; replacement?: string }> {
     return this.#mutateSession(async () => {
       const stored = await Promise.resolve()
         .then(() => this.#refreshTokenStorage?.get())
         .catch(() => null);
-      if (stored && stored !== presented) return stored;
+      if (version !== this.#sessionVersion) return { superseded: true };
+      if (stored && stored !== presented) return { replacement: stored };
       this.#sessionVersion++;
       await this.#clearStores();
-      return null;
+      return {};
     });
   }
 

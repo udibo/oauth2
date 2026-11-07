@@ -5,6 +5,10 @@ import { act, type ReactNode, StrictMode } from "react";
 
 import { BffClient } from "../client/bff-client.ts";
 import { DirectClient } from "../client/direct-client.ts";
+import {
+  MemoryRefreshTokenStorage,
+  MemoryTokenStorage,
+} from "../client/storage.ts";
 import { OAuth2Callback } from "./callback.tsx";
 import { OAuth2Provider } from "./provider.tsx";
 import { RequireAuth } from "./require-auth.tsx";
@@ -227,6 +231,74 @@ describe("MockOAuth2Provider + useOAuth2", () => {
     });
     expect(screen.getByTestId("auth").textContent).toBe("true");
     expect(screen.getByTestId("user").textContent).toBe("u-pub");
+  });
+
+  it("keeps the newer sign-in's claims when a second sign-in follows with no sign-out", async () => {
+    const client = createMockOAuth2Client();
+    const first = Promise.withResolvers<{ sub: string } | null>();
+    const second = Promise.withResolvers<{ sub: string } | null>();
+    using _getUser = vi
+      .spyOn(client, "getUser")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    render(
+      <OAuth2Provider client={client} initialState={{ user: null }}>
+        <Probe />
+      </OAuth2Provider>,
+    );
+    act(() => client.signIn({ sub: "u-old" }));
+    act(() => client.signIn({ sub: "u-new" }));
+    await act(async () => {
+      second.resolve({ sub: "u-new" });
+      await second.promise;
+    });
+    await act(async () => {
+      first.resolve({ sub: "u-old" });
+      await first.promise;
+    });
+    expect(screen.getByTestId("user").textContent).toBe("u-new");
+  });
+
+  it("shows the user once an on-demand refresh revives a reloaded session", async () => {
+    const refresh = new MemoryRefreshTokenStorage();
+    await refresh.set("rt-1");
+    const claims = btoa(JSON.stringify({ sub: "u-reloaded" }))
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/, "");
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: "http://localhost/token" },
+      tokenStorage: new MemoryTokenStorage(),
+      refreshTokenStorage: refresh,
+      fetch: (() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: "at-2",
+              token_type: "Bearer",
+              expires_in: 3600,
+              refresh_token: "rt-2",
+              id_token: `e30.${claims}.sig`,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        )) as typeof fetch,
+    });
+    await act(async () => {
+      render(
+        <OAuth2Provider client={client}>
+          <Probe />
+        </OAuth2Provider>,
+      );
+    });
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("none");
+
+    await act(async () => {
+      await client.getAccessToken();
+    });
+    expect(screen.getByTestId("user").textContent).toBe("u-reloaded");
   });
 
   it("drops claims that resolve after the session signed out", async () => {

@@ -29,7 +29,10 @@ export interface OAuth2State {
   /**
    * Current user claims, or `null` when unauthenticated. From
    * `GET /auth/session` behind a `BffClient`; the decoded `id_token` claims
-   * (or the `userinfo_endpoint` body) behind a `DirectClient`.
+   * (or the `userinfo_endpoint` body) behind a `DirectClient`. Can also be
+   * `null` while `isAuthenticated` is `true`, until the claims load: a
+   * `DirectClient` reloaded with only a stored refresh token has none until
+   * its first refresh.
    */
   user: UserInfoClaims | null;
   /** Last error surfaced by the client, or `null`. */

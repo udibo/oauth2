@@ -336,6 +336,10 @@ describe("DirectClient", () => {
       const [a, b] = await Promise.all([client.refresh(), client.refresh()]);
       expect(a, "single-flight refresh should share promise").toBe(b);
       expect(events.filter((e) => e.type === "token_refreshed").length).toBe(1);
+      expect(
+        events.some((e) => e.type === "authenticated"),
+        "a refresh over a stored bundle is not a new sign-in",
+      ).toBe(false);
     });
 
     it("clears session and emits logged_out on invalid_grant", async () => {
@@ -390,7 +394,10 @@ describe("DirectClient", () => {
       expect(await client.refresh()).toBe("at-3");
       expect(presented).toStrictEqual(["rt-1", "rt-2"]);
       expect(await shared.get()).toBe("rt-3");
-      expect(events.map((e) => e.type)).toStrictEqual(["token_refreshed"]);
+      expect(events.map((e) => e.type)).toStrictEqual([
+        "token_refreshed",
+        "authenticated",
+      ]);
     });
 
     it("clears the session when the newer refresh token another tab stored is dead too", async () => {
@@ -446,6 +453,54 @@ describe("DirectClient", () => {
       expect(
         events.map((e) => (e.type === "logged_out" ? e.reason : e.type)),
       ).toStrictEqual(["invalid_grant"]);
+    });
+
+    it("leaves a sign-in that starts while a dead refresh re-reads storage intact", async () => {
+      let reads = 0;
+      const reread = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<string | null>();
+      const tokens = new MemoryTokenStorage();
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        endpoints: { token: TOKEN_URL },
+        tokenStorage: tokens,
+        refreshTokenStorage: {
+          get: () => {
+            if (reads++ === 0) return "rt-1";
+            reread.resolve();
+            return release.promise;
+          },
+          set: () => {},
+          clear: () => {},
+        },
+        fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+          const grant = new URLSearchParams(String(init?.body)).get(
+            "grant_type",
+          );
+          return Promise.resolve(
+            grant === "refresh_token"
+              ? jsonResponse({ error: "invalid_grant" }, 400)
+              : jsonResponse({
+                  access_token: "at-signed-in",
+                  token_type: "Bearer",
+                  expires_in: 3600,
+                }),
+          );
+        }) as typeof fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      const refreshing = client.refresh();
+      await reread.promise;
+      const signingIn = client.getClientCredentialsToken();
+      release.resolve("rt-1");
+
+      await rejection(() => refreshing, InvalidGrantError, "session changed");
+      expect((await signingIn).accessToken).toBe("at-signed-in");
+      expect((await tokens.get())?.accessToken).toBe("at-signed-in");
+      expect(events.some((e) => e.type === "logged_out")).toBe(false);
     });
 
     it("retries a lost refresh race once, leaving a token rotated again in place", async () => {
