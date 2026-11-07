@@ -2,10 +2,11 @@
  * Contract test suite for {@link LockoutStore} implementations — the
  * per-account failure counter behind `AccountLockout`.
  *
- * `AccountLockout` locks on the failure count `increment` returns, so a store
- * that lets concurrent failed sign-ins share a count undershoots the threshold:
- * the brute-force floor the lockout is meant to be moves up by however many
- * attempts an attacker can land at once.
+ * `AccountLockout` counts each sign-in attempt with `increment` before its
+ * password is checked, and admits the attempt only on the count `increment`
+ * returns. A store that lets concurrent attempts share a count admits one extra
+ * guess for every attempt sharing it: the brute-force floor the lockout is
+ * meant to be moves up by however many attempts an attacker can land at once.
  *
  * @example Verify a database-backed store
  * ```ts
@@ -130,10 +131,26 @@ export function runLockoutStoreContractTests(
         );
         expect(
           results.map((result) => result.failures).sort((a, b) => a - b),
-          "the lockout triggers on the returned count — concurrent failures " +
-            "sharing a count undershoot the threshold",
+          "sign-in is admitted on the returned count — concurrent attempts " +
+            "sharing a count each get another guess past the threshold",
         ).toStrictEqual([1, 2, 3, 4, 5]);
         expect((await store.get(USER))?.failures).toStrictEqual(5);
+      });
+
+      it("gives every concurrent attempt against an active lock its own count", async () => {
+        const lockedUntil = now + 60_000;
+        await store.set(USER, { failures: 3, lockedUntil });
+        const results = await Promise.all(
+          Array.from({ length: 4 }, () => store.increment(USER, now)),
+        );
+        expect(
+          results.map((result) => result.failures).sort((a, b) => a - b),
+        ).toStrictEqual([4, 5, 6, 7]);
+        expect(
+          results.map((result) => result.lockedUntil),
+          "every attempt counted during the lock must see it, or one is " +
+            "admitted to the password check",
+        ).toStrictEqual([lockedUntil, lockedUntil, lockedUntil, lockedUntil]);
       });
     });
 

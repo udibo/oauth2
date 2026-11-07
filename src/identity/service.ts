@@ -26,7 +26,7 @@ import {
   buildVerificationUrl,
   type DeliveryHooks,
 } from "./delivery.ts";
-import type { AccountLockoutLike } from "./lockout.ts";
+import type { AccountLockoutLike, LockoutFailureResult } from "./lockout.ts";
 import {
   type PasswordCredential,
   type PasswordHasherLike,
@@ -376,7 +376,10 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * records consecutive wrong-password failures per account and — once the
    * threshold locks the account — rejects further attempts with the same
    * uniform, timing-equalized `null` an unknown identifier gets (no lockout
-   * oracle). A successful sign-in resets the count;
+   * oracle). With a lockout that implements
+   * {@link AccountLockoutLike.reserveAttempt}, as `AccountLockout` does,
+   * each attempt is counted before its password is checked, so concurrent
+   * guesses cannot exceed the threshold. A successful sign-in resets the count;
    * {@link IdentityService.unlockAccount} clears a lock via an emailed
    * single-use token.
    */
@@ -473,7 +476,16 @@ type ConsumedToken =
   | { status: "expired" }
   | { status: "invalid" };
 
-type AuthenticateOutcome = "authenticated" | "no_password" | "wrong_password";
+type AuthenticateOutcome =
+  | "authenticated"
+  | "no_password"
+  | "wrong_password"
+  | "refused";
+
+interface SignInAttempt {
+  admit(): Promise<boolean>;
+  fail(): Promise<void>;
+}
 
 /**
  * Composable own-auth flows. Construct once with your dependencies and call the
@@ -613,11 +625,14 @@ export class IdentityService<User extends IdentityUser> {
       });
       return await this.#rejectSignIn(startedAt);
     }
-    if (await this.#isLockedOut(user.id, identifier)) {
+    const lockReported = await this.#reportLock(user.id, identifier);
+    if (lockReported && this.#enforce) {
       await this.#equalizeTiming(input.password);
       return await this.#rejectSignIn(startedAt);
     }
-    const outcome = await this.#authenticate(user.id, input.password);
+    const attempt = this.#signInAttempt(user.id, identifier, lockReported);
+    const outcome = await this.#authenticate(user.id, input.password, attempt);
+    if (outcome === "refused") return await this.#rejectSignIn(startedAt);
     if (outcome !== "authenticated") {
       await this.#emit({
         type: "sign_in.failed",
@@ -625,9 +640,7 @@ export class IdentityService<User extends IdentityUser> {
         reason: outcome,
         userId: user.id,
       });
-      if (outcome === "wrong_password") {
-        await this.#recordSignInFailure(user.id, identifier);
-      }
+      if (outcome === "wrong_password") await attempt.fail();
       return await this.#rejectSignIn(startedAt);
     }
     await this.#resetThrottle("signIn", identifier);
@@ -1215,22 +1228,54 @@ export class IdentityService<User extends IdentityUser> {
     return null;
   }
 
-  async #isLockedOut(userId: string, identifier: string): Promise<boolean> {
+  async #reportLock(userId: string, identifier: string): Promise<boolean> {
     if (!this.#lockout) return false;
     const status = await this.#lockout.status(userId);
     if (!status.locked) return false;
+    await this.#emitSignInLocked(userId, identifier);
+    return true;
+  }
+
+  async #emitSignInLocked(userId: string, identifier: string): Promise<void> {
     await this.#emit({
       type: "sign_in.locked",
       userId,
       identifier,
       enforced: this.#enforce,
     });
-    return this.#enforce;
+  }
+
+  #signInAttempt(
+    userId: string,
+    identifier: string,
+    lockReported: boolean,
+  ): SignInAttempt {
+    const reserve = this.#lockout?.reserveAttempt?.bind(this.#lockout);
+    if (!reserve) {
+      return {
+        admit: () => Promise.resolve(true),
+        fail: () => this.#recordSignInFailure(userId, identifier),
+      };
+    }
+    let reservation: LockoutFailureResult | undefined;
+    return {
+      admit: async () => {
+        reservation = await reserve(userId);
+        if (!reservation.locked || reservation.justLocked) return true;
+        if (!lockReported) await this.#emitSignInLocked(userId, identifier);
+        return !this.#enforce;
+      },
+      fail: async () => {
+        if (reservation)
+          await this.#emitLockout(userId, identifier, reservation);
+      },
+    };
   }
 
   async #authenticate(
     userId: string,
     password: string,
+    attempt: SignInAttempt,
   ): Promise<AuthenticateOutcome> {
     const credential = await this.#users.getCredential(userId);
     // Native credential is authoritative: only try an imported hash when there
@@ -1241,6 +1286,10 @@ export class IdentityService<User extends IdentityUser> {
     if (!credential && !legacyHash) {
       await this.#equalizeTiming(password);
       return "no_password";
+    }
+    if (!(await attempt.admit())) {
+      await this.#equalizeTiming(password);
+      return "refused";
     }
     if (credential && (await this.#passwords.verify(password, credential))) {
       return (await this.#rehashCredential(userId, password, credential))
@@ -1331,7 +1380,18 @@ export class IdentityService<User extends IdentityUser> {
     identifier: string,
   ): Promise<void> {
     if (!this.#lockout) return;
-    const result = await this.#lockout.recordFailure(userId);
+    await this.#emitLockout(
+      userId,
+      identifier,
+      await this.#lockout.recordFailure(userId),
+    );
+  }
+
+  async #emitLockout(
+    userId: string,
+    identifier: string,
+    result: LockoutFailureResult,
+  ): Promise<void> {
     if (!result.justLocked) return;
     await this.#emit({
       type: "lockout",

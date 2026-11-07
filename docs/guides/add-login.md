@@ -566,7 +566,9 @@ Two distinct protections, both consulted by `signIn`:
   routes map to `429` with a `Retry-After` header. A successful sign-in resets
   the window.
 - **`AccountLockout`** counts _consecutive failures per account_ and locks the
-  account once a threshold is crossed. Defaults: 10 failures → 15-minute lock. A
+  account once a threshold is crossed. Defaults: 10 failures → 15-minute lock.
+  Each attempt is counted before its password is checked, so concurrent guesses
+  get no more than the threshold between them; a success clears the count. A
   locked account's sign-in returns the same uniform, timing-equalized `null` an
   unknown identifier gets — lockout must not become an oracle for "this account
   exists and the password was close".
@@ -577,8 +579,8 @@ holds if every instance that serves sign-in reads the same counters
 Implement the small `RateLimitStore` / `LockoutStore` interfaces over Redis or
 your database (lockout columns on the users table also give admins
 visibility). Both `increment` contracts require atomicity — a read-modify-write
-lets concurrent attempts lose counts, undershooting the lockout threshold or
-slipping a burst past the limiter.
+lets concurrent attempts share a count, admitting guesses past the lockout
+threshold or slipping a burst past the limiter.
 
 ```ts
 import {
