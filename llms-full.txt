@@ -2322,6 +2322,7 @@ interface TokenFlowStore {
   get(tokenHash: string): Promise<TokenFlowRecord | null>;
   markConsumed(tokenHash: string, consumedAt: number): Promise<boolean>;
   deleteBySubject?(purpose: string, subject: string): Promise<void>;
+  replacePending?(record: TokenFlowRecord): Promise<void>;
 }
 ```
 
@@ -2335,7 +2336,10 @@ count) that returns `true` only for the caller that claimed the record — that 
 what keeps a link single-use under concurrent redemption. Implement the optional
 `deleteBySubject`: the service uses it (via `invalidateExisting`) to void a
 user's outstanding reset links whenever a new one is issued, so only the latest
-emailed link works.
+emailed link works. Implement the optional `replacePending` too: it deletes the
+pair's pending records and saves the new one in one atomic step, serialized on
+`(purpose, subject)`. Without it the service deletes and then saves, so two
+concurrent requests can each leave a live link.
 
 ```ts
 import { TokenFlowService } from "@udibo/oauth2/identity";
@@ -2613,7 +2617,10 @@ Implement the small `RateLimitStore` / `LockoutStore` interfaces over Redis or
 your database (lockout columns on the users table also give admins
 visibility). Both `increment` contracts require atomicity — a read-modify-write
 lets concurrent attempts share a count, admitting guesses past the lockout
-threshold or slipping a burst past the limiter.
+threshold or slipping a burst past the limiter. Implement the optional
+`LockoutStore.lock` as one conditional write as well: it locks the account only
+while the stored count still stands, so a lock computed by an over-budget
+attempt cannot land after a concurrent successful sign-in cleared the count.
 
 ```ts
 import {
@@ -6641,6 +6648,13 @@ is given; `runCodeExchangeContractTests` and
 `runTokenServiceContractTests` check them. Without `exchangeCode`, a code
 replayed between the claim and the save leaves the token saved next live.
 
+For the device authorization grant, implement `exchangeDeviceCode` so the claim
+of an approved device code and the save of its token are one atomic step.
+Without it, a save that fails after the claim spends the user's approval. Make
+`approve` and `deny` conditional writes on a pending, unexpired record that
+never re-create a claimed one; `runDeviceAuthorizationServiceContractTests`
+checks them.
+
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.
 Serialize issuance for each `(email, purpose)` across instances when your
@@ -6790,7 +6804,8 @@ six-digit code has only a million possibilities: storing its hash does not make
 a leaked code database resistant to offline guessing.
 
 For password reset, implement `TokenFlowStore.deleteBySubject` to invalidate
-outstanding sign-in links. Reset also attempts OTP invalidation when the reset
+outstanding sign-in links, and `TokenFlowStore.replacePending` so a new reset
+link replaces the pending ones atomically. Reset also attempts OTP invalidation when the reset
 token contains the email. These cleanup operations are best-effort; decide how
 your app responds to failures and monitor them. See
 [known limitations](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#identity-flows-udibooauth2identity).
@@ -6926,13 +6941,17 @@ sections apply only when you host those flows.
 
 ## If your app hosts login
 
+- [ ] A device-flow token store implements `exchangeDeviceCode`, and the
+      device store's `approve` and `deny` change only a pending, unexpired
+      record, passing `runDeviceAuthorizationServiceContractTests`.
 - [ ] The full password credential, including `params`, is persisted.
 - [ ] Automatic rehash/import uses atomic `replaceCredential`; a failed
       comparison writes nothing, and the sign-in proceeds only if the password
       re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
 - [ ] `RateLimiter` and `AccountLockout` use a `RateLimitStore` and a
-      `LockoutStore` that every instance shares, with an atomic `increment`.
+      `LockoutStore` that every instance shares, with an atomic `increment`
+      and a conditional `lock`.
       `MemoryRateLimitStore` and `MemoryLockoutStore` appear only in
       single-process, test and local configurations. See
       [rate limit and lockout storage](https://github.com/udibo/oauth2/blob/main/docs/known-limitations.md#rate-limit-and-lockout-storage-across-instances).
@@ -7954,6 +7973,12 @@ counters, so a client gets the rate limit once per instance, an attacker gets
 stop sign-in on another. Pass a `RateLimitStore` and a `LockoutStore` over
 Redis or a database every instance shares, with an atomic `increment`.
 
+A `LockoutStore` without the optional `lock` is locked with an unconditional
+`set` after `increment`. An over-budget attempt whose lock lands after a
+concurrent successful sign-in reset the account locks it again, with no
+lockout event. With `lock`, that write is refused and the attempt is counted
+again against the fresh record.
+
 ## DirectClient storage outside a browser
 
 In a browser document `DirectClient` keeps pending sign-ins in
@@ -8158,6 +8183,15 @@ should not be enabled for new deployments.
   `exchangeCode` when constructed with the `authorizationCodeService` it shares
   with the grant.
 
+- **Device authorization grant.** Without
+  `TokenServiceInterface.exchangeDeviceCode`, the grant claims an approved
+  device code with `revoke` and then saves its token, so a save that fails
+  after the claim spends the approval and the user must start over.
+  `MemoryTokenService` implements `exchangeDeviceCode` when constructed with
+  the `deviceAuthorizationService` it shares with the grant. The package never
+  calls `approve` or `deny`; whether a late or repeated decision is refused is
+  up to the store, which the contract requires.
+
 ## Resource servers (`@udibo/oauth2/server/resource`)
 
 - Offline JWT validation does not consult token revocation state. A revoked
@@ -8328,6 +8362,10 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   tokens by calling `TokenFlowService.create` itself gets the link half only.
   Account-unlock and email-verification links are deliberately untouched —
   neither authenticates anyone.
+- **`invalidateExisting` is atomic only with `TokenFlowStore.replacePending`.**
+  Without it, `TokenFlowService.create` deletes the pending tokens and then
+  saves the new one in two calls, so concurrent requests for one
+  `(purpose, subject)` can each leave a live link.
 - **`honoIdentityRoutes`' CSRF guard trusts the browser, and only the browser.**
   The factory mounts a same-origin guard on unsafe methods by default: a request
   whose `Sec-Fetch-Site` is anything but `same-origin`/`none` is refused with

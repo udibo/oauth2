@@ -125,6 +125,13 @@ is given; `runCodeExchangeContractTests` and
 `runTokenServiceContractTests` check them. Without `exchangeCode`, a code
 replayed between the claim and the save leaves the token saved next live.
 
+For the device authorization grant, implement `exchangeDeviceCode` so the claim
+of an approved device code and the save of its token are one atomic step.
+Without it, a save that fails after the claim spends the user's approval. Make
+`approve` and `deny` conditional writes on a pending, unexpired record that
+never re-create a claimed one; `runDeviceAuthorizationServiceContractTests`
+checks them.
+
 Sequential OTP resends invalidate prior codes. Concurrent requests use separate
 invalidate/create calls, so that alone does not guarantee one outstanding code.
 Serialize issuance for each `(email, purpose)` across instances when your
@@ -274,7 +281,8 @@ six-digit code has only a million possibilities: storing its hash does not make
 a leaked code database resistant to offline guessing.
 
 For password reset, implement `TokenFlowStore.deleteBySubject` to invalidate
-outstanding sign-in links. Reset also attempts OTP invalidation when the reset
+outstanding sign-in links, and `TokenFlowStore.replacePending` so a new reset
+link replaces the pending ones atomically. Reset also attempts OTP invalidation when the reset
 token contains the email. These cleanup operations are best-effort; decide how
 your app responds to failures and monitor them. See
 [known limitations](../known-limitations.md#identity-flows-udibooauth2identity).

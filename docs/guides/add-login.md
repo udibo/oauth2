@@ -289,6 +289,7 @@ interface TokenFlowStore {
   get(tokenHash: string): Promise<TokenFlowRecord | null>;
   markConsumed(tokenHash: string, consumedAt: number): Promise<boolean>;
   deleteBySubject?(purpose: string, subject: string): Promise<void>;
+  replacePending?(record: TokenFlowRecord): Promise<void>;
 }
 ```
 
@@ -302,7 +303,10 @@ count) that returns `true` only for the caller that claimed the record — that 
 what keeps a link single-use under concurrent redemption. Implement the optional
 `deleteBySubject`: the service uses it (via `invalidateExisting`) to void a
 user's outstanding reset links whenever a new one is issued, so only the latest
-emailed link works.
+emailed link works. Implement the optional `replacePending` too: it deletes the
+pair's pending records and saves the new one in one atomic step, serialized on
+`(purpose, subject)`. Without it the service deletes and then saves, so two
+concurrent requests can each leave a live link.
 
 ```ts
 import { TokenFlowService } from "@udibo/oauth2/identity";
@@ -580,7 +584,10 @@ Implement the small `RateLimitStore` / `LockoutStore` interfaces over Redis or
 your database (lockout columns on the users table also give admins
 visibility). Both `increment` contracts require atomicity — a read-modify-write
 lets concurrent attempts share a count, admitting guesses past the lockout
-threshold or slipping a burst past the limiter.
+threshold or slipping a burst past the limiter. Implement the optional
+`LockoutStore.lock` as one conditional write as well: it locks the account only
+while the stored count still stands, so a lock computed by an over-budget
+attempt cannot land after a concurrent successful sign-in cleared the count.
 
 ```ts
 import {
