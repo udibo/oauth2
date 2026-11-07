@@ -336,6 +336,10 @@ describe("DirectClient", () => {
       const [a, b] = await Promise.all([client.refresh(), client.refresh()]);
       expect(a, "single-flight refresh should share promise").toBe(b);
       expect(events.filter((e) => e.type === "token_refreshed").length).toBe(1);
+      expect(
+        events.some((e) => e.type === "authenticated"),
+        "a refresh over a stored bundle is not a new sign-in",
+      ).toBe(false);
     });
 
     it("clears session and emits logged_out on invalid_grant", async () => {
@@ -357,6 +361,175 @@ describe("DirectClient", () => {
           (e) => e.type === "logged_out" && e.reason === "invalid_grant",
         ),
       ).toBe(true);
+    });
+
+    it("keeps a refresh token another tab rotated in while this refresh lost the race, and refreshes with it", async () => {
+      const shared = new MemoryRefreshTokenStorage();
+      await shared.set("rt-1");
+      const presented: string[] = [];
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: TOKEN_URL },
+        refreshTokenStorage: shared,
+        fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          const token = String(
+            new URLSearchParams(String(init?.body)).get("refresh_token"),
+          );
+          presented.push(token);
+          if (token === "rt-1") {
+            await shared.set("rt-2");
+            return jsonResponse({ error: "invalid_grant" }, 400);
+          }
+          return jsonResponse({
+            access_token: "at-3",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "rt-3",
+          });
+        }) as typeof fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      expect(await client.refresh()).toBe("at-3");
+      expect(presented).toStrictEqual(["rt-1", "rt-2"]);
+      expect(await shared.get()).toBe("rt-3");
+      expect(events.map((e) => e.type)).toStrictEqual([
+        "token_refreshed",
+        "authenticated",
+      ]);
+    });
+
+    it("clears the session when the newer refresh token another tab stored is dead too", async () => {
+      const shared = new MemoryRefreshTokenStorage();
+      await shared.set("rt-1");
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: TOKEN_URL },
+        refreshTokenStorage: shared,
+        fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          const token = new URLSearchParams(String(init?.body)).get(
+            "refresh_token",
+          );
+          if (token === "rt-1") await shared.set("rt-2");
+          return jsonResponse({ error: "invalid_grant" }, 400);
+        }) as typeof fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      await rejection(() => client.refresh(), InvalidGrantError);
+      expect(await shared.get()).toBe(null);
+      expect(
+        events.map((e) => (e.type === "logged_out" ? e.reason : e.type)),
+      ).toStrictEqual(["invalid_grant"]);
+    });
+
+    it("clears the session on invalid_grant when the store cannot be re-read to compare", async () => {
+      let reads = 0;
+      let cleared = false;
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: TOKEN_URL },
+        refreshTokenStorage: {
+          get: () => {
+            if (reads++ > 0) throw new Error("indexeddb unavailable");
+            return "rt-1";
+          },
+          set: () => {},
+          clear: () => {
+            cleared = true;
+          },
+        },
+        fetch: respondingWith(() =>
+          jsonResponse({ error: "invalid_grant" }, 400),
+        ).fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      await rejection(() => client.refresh(), InvalidGrantError);
+      expect(cleared).toBe(true);
+      expect(
+        events.map((e) => (e.type === "logged_out" ? e.reason : e.type)),
+      ).toStrictEqual(["invalid_grant"]);
+    });
+
+    it("leaves a sign-in that starts while a dead refresh re-reads storage intact", async () => {
+      let reads = 0;
+      const reread = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<string | null>();
+      const tokens = new MemoryTokenStorage();
+      const client = new DirectClient({
+        clientId: testClient.id,
+        clientSecret: CLIENT_SECRET,
+        endpoints: { token: TOKEN_URL },
+        tokenStorage: tokens,
+        refreshTokenStorage: {
+          get: () => {
+            if (reads++ === 0) return "rt-1";
+            reread.resolve();
+            return release.promise;
+          },
+          set: () => {},
+          clear: () => {},
+        },
+        fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+          const grant = new URLSearchParams(String(init?.body)).get(
+            "grant_type",
+          );
+          return Promise.resolve(
+            grant === "refresh_token"
+              ? jsonResponse({ error: "invalid_grant" }, 400)
+              : jsonResponse({
+                  access_token: "at-signed-in",
+                  token_type: "Bearer",
+                  expires_in: 3600,
+                }),
+          );
+        }) as typeof fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      const refreshing = client.refresh();
+      await reread.promise;
+      const signingIn = client.getClientCredentialsToken();
+      release.resolve("rt-1");
+
+      await rejection(() => refreshing, InvalidGrantError, "session changed");
+      expect((await signingIn).accessToken).toBe("at-signed-in");
+      expect((await tokens.get())?.accessToken).toBe("at-signed-in");
+      expect(events.some((e) => e.type === "logged_out")).toBe(false);
+    });
+
+    it("retries a lost refresh race once, leaving a token rotated again in place", async () => {
+      const shared = new MemoryRefreshTokenStorage();
+      await shared.set("rt-1");
+      const presented: string[] = [];
+      const client = new DirectClient({
+        clientId: "spa",
+        endpoints: { token: TOKEN_URL },
+        refreshTokenStorage: shared,
+        fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          const token = String(
+            new URLSearchParams(String(init?.body)).get("refresh_token"),
+          );
+          presented.push(token);
+          await shared.set(`${token}-rotated-elsewhere`);
+          return jsonResponse({ error: "invalid_grant" }, 400);
+        }) as typeof fetch,
+      });
+      const events: OAuth2ClientEvent[] = [];
+      client.subscribe((e) => events.push(e));
+
+      await rejection(() => client.refresh(), InvalidGrantError);
+      expect(await shared.get()).not.toBe(null);
+      expect(presented).toStrictEqual(["rt-1", "rt-1-rotated-elsewhere"]);
+      expect(await shared.get()).toBe(
+        "rt-1-rotated-elsewhere-rotated-elsewhere",
+      );
+      expect(events.some((e) => e.type === "logged_out")).toBe(false);
     });
 
     it("refuses the refresh when the refresh token store cannot be read", async () => {
@@ -1123,6 +1296,54 @@ describe("DirectClient", () => {
       expect(session.sessionExpiresIn).toBe(0);
     });
 
+    it("reports signed in after a reload when only the refresh token survived, and renews from it", async () => {
+      const refresh = new MemoryRefreshTokenStorage();
+      const beforeReload = new DirectClient({
+        authRequestStorage: new MemoryAuthRequestStorage(),
+        refreshTokenStorage: refresh,
+        clientId: testPublicClient.id,
+        redirectUri: REDIRECT_URI,
+        endpoints: { authorization: AUTHORIZE_URL, token: TOKEN_URL },
+        fetch: fixture.fetchImpl,
+      });
+      const begin = await beforeReload.login();
+      const { tokens } = await beforeReload.handleAuthorizationCallback(
+        await performAuthorizeRedirect(fixture.authServer, begin.url),
+      );
+
+      const afterReload = new DirectClient({
+        clientId: testPublicClient.id,
+        endpoints: { token: TOKEN_URL },
+        tokenStorage: new MemoryTokenStorage(),
+        refreshTokenStorage: refresh,
+        fetch: fixture.fetchImpl,
+      });
+      expect(await afterReload.getSession()).toStrictEqual({
+        isAuthenticated: true,
+        user: null,
+        sessionExpiresIn: 0,
+        logoutUrl: null,
+      });
+
+      const renewed = await afterReload.renewSession();
+      expect(renewed.isAuthenticated).toBe(true);
+      expect(renewed.sessionExpiresIn).toBeGreaterThan(0);
+      const accessToken = await afterReload.getAccessToken();
+      expect(accessToken).not.toBe("");
+      expect(accessToken).not.toBe(tokens.accessToken);
+    });
+
+    it("reports signed out with no token bundle and no stored refresh token", async () => {
+      const client = new DirectClient({
+        clientId: testPublicClient.id,
+        endpoints: { token: TOKEN_URL },
+        tokenStorage: new MemoryTokenStorage(),
+        refreshTokenStorage: new MemoryRefreshTokenStorage(),
+        fetch: fixture.fetchImpl,
+      });
+      expect((await client.getSession()).isAuthenticated).toBe(false);
+    });
+
     it("reports signed out for a bundle with an empty accessToken", async () => {
       const store = new MemoryTokenStorage();
       await store.set({ accessToken: "", tokenType: "Bearer" });
@@ -1849,15 +2070,20 @@ describe("DirectClient response hardening", () => {
   });
 
   it("refuses a 200 carrying no access_token rather than persisting one", async () => {
-    const client = publicClient(
-      respondingWith(() => jsonResponse({ token_type: "Bearer" })).fetch,
-    );
+    const tokens = new MemoryTokenStorage();
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: TOKEN_URL },
+      tokenStorage: tokens,
+      refreshTokenStorage: seededRefreshStore(),
+      fetch: respondingWith(() => jsonResponse({ token_type: "Bearer" })).fetch,
+    });
     const error = await rejection(() => client.refresh(), ServerError);
     expect(error.message).toContain('no "access_token"');
     expect(
-      (await client.getSession()).isAuthenticated,
+      await tokens.get(),
       "a response with no access_token must leave nothing persisted",
-    ).toBe(false);
+    ).toBe(null);
   });
 
   it("refuses to replay a credentialed POST at a redirect target", async () => {
@@ -2224,6 +2450,29 @@ describe("DirectClient logout", () => {
     });
     expect(await client.logout()).toStrictEqual({});
     expect(await tokens.get()).toBe(null);
+  });
+
+  it("revokes the refresh token even when clearing local storage fails", async () => {
+    const revoked: string[] = [];
+    const client = new DirectClient({
+      clientId: "spa",
+      endpoints: { token: TOKEN_URL, revocation: REVOKE_URL },
+      tokenStorage: seededTokenStore(),
+      refreshTokenStorage: {
+        get: () => "rt-seed",
+        set: () => {},
+        clear: () => Promise.reject(new Error("indexeddb clear failed")),
+      },
+      fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        revoked.push(
+          String(new URLSearchParams(init?.body as string).get("token")),
+        );
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }) as typeof fetch,
+    });
+
+    await rejection(() => client.logout(), Error, "indexeddb clear failed");
+    expect(revoked).toStrictEqual(["rt-seed"]);
   });
 
   it("signs out locally even when the refresh token store cannot be read", async () => {
