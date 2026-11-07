@@ -229,6 +229,55 @@ describe("MockOAuth2Provider + useOAuth2", () => {
     expect(screen.getByTestId("user").textContent).toBe("u-pub");
   });
 
+  it("drops claims that resolve after the session signed out", async () => {
+    const client = createMockOAuth2Client();
+    const pending = Promise.withResolvers<{ sub: string } | null>();
+    using _getUser = vi
+      .spyOn(client, "getUser")
+      .mockReturnValue(pending.promise);
+    render(
+      <OAuth2Provider client={client} initialState={{ user: null }}>
+        <Probe />
+      </OAuth2Provider>,
+    );
+    act(() => client.signIn({ sub: "u-stale" }));
+    act(() => client.signOut());
+    await act(async () => {
+      pending.resolve({ sub: "u-stale" });
+      await pending.promise;
+    });
+    expect(screen.getByTestId("auth").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("none");
+  });
+
+  it("keeps the newer sign-in's claims when an older lookup resolves last", async () => {
+    const client = createMockOAuth2Client();
+    const first = Promise.withResolvers<{ sub: string } | null>();
+    const second = Promise.withResolvers<{ sub: string } | null>();
+    using _getUser = vi
+      .spyOn(client, "getUser")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    render(
+      <OAuth2Provider client={client} initialState={{ user: null }}>
+        <Probe />
+      </OAuth2Provider>,
+    );
+    act(() => client.signIn({ sub: "u-old" }));
+    act(() => client.signOut());
+    act(() => client.signIn({ sub: "u-new" }));
+    await act(async () => {
+      second.resolve({ sub: "u-new" });
+      await second.promise;
+    });
+    await act(async () => {
+      first.resolve({ sub: "u-old" });
+      await first.promise;
+    });
+    expect(screen.getByTestId("auth").textContent).toBe("true");
+    expect(screen.getByTestId("user").textContent).toBe("u-new");
+  });
+
   it("OAuth2Provider probes getSession and exposes logoutUrl", async () => {
     const client = createMockOAuth2Client({
       isAuthenticated: true,

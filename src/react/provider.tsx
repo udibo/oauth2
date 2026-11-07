@@ -137,12 +137,18 @@ export function OAuth2Provider(props: OAuth2ProviderProps): ReactNode {
 
   useEffect(() => {
     let cancelled = false;
+    let identityChanges = 0;
     const handle = (event: OAuth2ClientEvent) => {
       setState((prev) => reduce(prev, event));
+      if (event.type === "authenticated" || event.type === "logged_out") {
+        identityChanges++;
+      }
       if (event.type === "authenticated") {
+        const lookup = identityChanges;
         client.getUser().then(
           (user: UserInfoClaims | null) => {
-            if (!cancelled) setState((prev) => ({ ...prev, user }));
+            if (cancelled || lookup !== identityChanges) return;
+            setState((prev) => ({ ...prev, user }));
           },
           () => {},
         );

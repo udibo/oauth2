@@ -1001,6 +1001,10 @@ export class DirectClient extends OAuth2ClientBase {
    * If the refresh fails with `invalid_grant` (the token was revoked or, under
    * rotation, already consumed), all local token state is cleared and
    * `logged_out` is emitted so the framework adapter can redirect to login.
+   * The exception is a refresh-token storage shared with another client (a
+   * second tab on `IndexedDBRefreshTokenStorage`) that now holds a different
+   * token, because the other client rotated it first: storage is left alone
+   * and the refresh retries once with the newer token.
    *
    * Single-flight has one consequence worth knowing: a call that **joins** a
    * refresh already started by {@link renewSession} inherits that call's quiet
@@ -1063,27 +1067,35 @@ export class DirectClient extends OAuth2ClientBase {
     if (!refreshToken) {
       throw new InvalidGrantError("no refresh token available");
     }
-    try {
-      const response = await this.#postToken(
-        new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-        }),
-      );
-      const tokens = await this.#saveTokens(response, version, true);
-      this.emit({ type: "token_refreshed", tokens });
-      return tokens.accessToken;
-    } catch (error) {
-      if (version !== this.#sessionVersion) {
-        throw new InvalidGrantError("session changed during refresh");
+    let presented = refreshToken;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await this.#postToken(
+          new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: presented,
+          }),
+        );
+        const tokens = await this.#saveTokens(response, version, true);
+        this.emit({ type: "token_refreshed", tokens });
+        return tokens.accessToken;
+      } catch (error) {
+        if (version !== this.#sessionVersion) {
+          throw new InvalidGrantError("session changed during refresh");
+        }
+        if (isOAuth2ErrorCode(error, "invalid_grant")) {
+          const replacement = await this.#clearSessionUnlessReplaced(presented);
+          if (replacement === null) {
+            this.emit({ type: "logged_out", reason: "invalid_grant" });
+          } else if (attempt === 0) {
+            presented = replacement;
+            continue;
+          }
+        } else if (reportTransient) {
+          this.emit({ type: "error", error });
+        }
+        throw error;
       }
-      if (isOAuth2ErrorCode(error, "invalid_grant")) {
-        await this.#clearSession();
-        this.emit({ type: "logged_out", reason: "invalid_grant" });
-      } else if (reportTransient) {
-        this.emit({ type: "error", error });
-      }
-      throw error;
     }
   }
 
@@ -1416,6 +1428,9 @@ export class DirectClient extends OAuth2ClientBase {
    * state, emits `logged_out`, and returns the OIDC end-session URL when the
    * server advertises one.
    *
+   * The revocation is attempted even when clearing local storage fails, in
+   * which case `logout` rejects with the storage's error and emits nothing.
+   *
    * Best effort covers the reads too: a refresh-token store that cannot be
    * read skips the revocation, and a token store that cannot be read omits
    * `id_token_hint`, rather than failing the sign-out, because a client that
@@ -1446,13 +1461,14 @@ export class DirectClient extends OAuth2ClientBase {
         () => undefined,
       );
     if (version !== this.#sessionVersion) return {};
-    await this.#clearSession();
-    this.emit({ type: "logged_out", reason: "user" });
-    if (refreshToken) {
-      try {
-        await this.revoke(refreshToken, { tokenTypeHint: "refresh_token" });
-      } catch {
-        // Non-fatal; the local session clears regardless.
+    try {
+      await this.#clearSession();
+      this.emit({ type: "logged_out", reason: "user" });
+    } finally {
+      if (refreshToken) {
+        await this.revoke(refreshToken, {
+          tokenTypeHint: "refresh_token",
+        }).catch(() => {});
       }
     }
     let endSession: string | undefined;
@@ -1501,6 +1517,9 @@ export class DirectClient extends OAuth2ClientBase {
    * out rather than leaving the UI authenticated over a dead token. An expired
    * bundle that a stored refresh token could still revive also reads as signed
    * in, with `sessionExpiresIn: 0` — call {@link renewSession} to revive it.
+   * So does a stored refresh token with no bundle at all, as after a reload
+   * with `IndexedDBRefreshTokenStorage` and an in-memory access token; `user`
+   * is `null` until the renewal stores a bundle.
    *
    * `logoutUrl` is always `null`: sign-out runs through {@link logout}, which
    * revokes and clears locally rather than sending the browser somewhere.
@@ -1517,7 +1536,15 @@ export class DirectClient extends OAuth2ClientBase {
   async #session(quiet: boolean): Promise<SessionState> {
     try {
       const tokens = await this.#tokenStorage.get();
-      if (!tokens?.accessToken) return SIGNED_OUT;
+      if (!tokens?.accessToken) {
+        if (!(await this.#refreshTokenStorage?.get())) return SIGNED_OUT;
+        return {
+          isAuthenticated: true,
+          user: null,
+          sessionExpiresIn: 0,
+          logoutUrl: null,
+        };
+      }
       const expiresIn = tokens.accessTokenExpiresAt
         ? Math.round((tokens.accessTokenExpiresAt - Date.now()) / 1000)
         : null;
@@ -1705,11 +1732,25 @@ export class DirectClient extends OAuth2ClientBase {
 
   #clearSession(): Promise<void> {
     this.#sessionVersion++;
+    return this.#mutateSession(() => this.#clearStores());
+  }
+
+  #clearSessionUnlessReplaced(presented: string): Promise<string | null> {
     return this.#mutateSession(async () => {
-      await this.#tokenStorage.clear();
-      await this.#refreshTokenStorage?.clear();
-      await this.#authRequestStorage?.clear();
+      const stored = await Promise.resolve()
+        .then(() => this.#refreshTokenStorage?.get())
+        .catch(() => null);
+      if (stored && stored !== presented) return stored;
+      this.#sessionVersion++;
+      await this.#clearStores();
+      return null;
     });
+  }
+
+  async #clearStores(): Promise<void> {
+    await this.#tokenStorage.clear();
+    await this.#refreshTokenStorage?.clear();
+    await this.#authRequestStorage?.clear();
   }
 }
 
