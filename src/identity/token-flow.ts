@@ -84,6 +84,20 @@ export interface TokenFlowStore {
    * really was used, instead of the generic `invalid`.
    */
   deleteBySubject?(purpose: string, subject: string): Promise<void>;
+  /**
+   * Optional: delete every still-pending record for `(record.purpose,
+   * record.subject)` and save `record`, as one atomic step. Concurrent calls
+   * for one pair must leave exactly one of their records pending, so serialize
+   * them on the pair (a row lock or advisory lock taken before the delete, or
+   * a unique index on pending rows): two transactions that each delete and
+   * then insert under read committed both leave their row behind. Keep
+   * consumed records, as {@link TokenFlowStore.deleteBySubject} does.
+   *
+   * {@link TokenFlowService.create} calls it for `invalidateExisting` when
+   * present. Without it, the service deletes and then saves in two calls, so
+   * concurrent requests for one pair each leave a live link.
+   */
+  replacePending?(record: TokenFlowRecord): Promise<void>;
 }
 
 /** Options for {@link TokenFlowService.create}. */
@@ -97,9 +111,11 @@ export interface CreateTokenOptions {
   /** Lifetime in milliseconds. */
   ttlMs: number;
   /**
-   * Invalidate any existing pending tokens for this `(purpose, subject)` first.
-   * Silently skipped when the store lacks
-   * {@link TokenFlowStore.deleteBySubject}. Defaults to `false`.
+   * Invalidate any existing pending tokens for this `(purpose, subject)`,
+   * atomically with saving the new one when the store implements
+   * {@link TokenFlowStore.replacePending}. Silently skipped when the store
+   * implements neither it nor {@link TokenFlowStore.deleteBySubject}. Defaults
+   * to `false`.
    */
   invalidateExisting?: boolean;
 }
@@ -175,20 +191,25 @@ export class TokenFlowService {
 
   /** Mint a token; stores its hash and returns the raw token (once). */
   async create(opts: CreateTokenOptions): Promise<CreatedToken> {
-    if (opts.invalidateExisting) {
-      await this.invalidate(opts.purpose, opts.subject);
-    }
     const token = randomToken();
     const now = Date.now();
     const expiresAt = now + opts.ttlMs;
-    await this.#store.save({
+    const record: TokenFlowRecord = {
       tokenHash: await sha256Hash(token),
       purpose: opts.purpose,
       subject: opts.subject,
       data: opts.data,
       expiresAt,
       createdAt: now,
-    });
+    };
+    if (opts.invalidateExisting && this.#store.replacePending) {
+      await this.#store.replacePending(record);
+    } else {
+      if (opts.invalidateExisting) {
+        await this.invalidate(opts.purpose, opts.subject);
+      }
+      await this.#store.save(record);
+    }
     return { token, expiresAt };
   }
 
@@ -287,6 +308,21 @@ export class MemoryTokenFlowStore implements TokenFlowStore {
    * still report `consumed` rather than the generic `invalid`.
    */
   deleteBySubject(purpose: string, subject: string): Promise<void> {
+    this.#deletePending(purpose, subject);
+    return Promise.resolve();
+  }
+
+  /**
+   * Drop the pending records for the record's `(purpose, subject)` and save
+   * it, in one synchronous step.
+   */
+  replacePending(record: TokenFlowRecord): Promise<void> {
+    this.#deletePending(record.purpose, record.subject);
+    this.#byHash.set(record.tokenHash, record);
+    return Promise.resolve();
+  }
+
+  #deletePending(purpose: string, subject: string): void {
     for (const [hash, record] of this.#byHash) {
       if (
         record.purpose === purpose &&
@@ -296,6 +332,5 @@ export class MemoryTokenFlowStore implements TokenFlowStore {
         this.#byHash.delete(hash);
       }
     }
-    return Promise.resolve();
   }
 }

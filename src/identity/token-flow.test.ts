@@ -167,6 +167,59 @@ describe("TokenFlowService", () => {
       (await tokens.consume(TokenPurpose.PasswordReset, b.token))?.subject,
     ).toStrictEqual("u1");
   });
+  it("leaves one live link when creates that invalidate existing ones race", async () => {
+    const { tokens } = setup();
+    const created = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        tokens.create({
+          purpose: TokenPurpose.PasswordReset,
+          subject: "u1",
+          ttlMs: HOUR,
+          invalidateExisting: true,
+        }),
+      ),
+    );
+
+    const live = [];
+    for (const { token } of created) {
+      if (await tokens.validate(TokenPurpose.PasswordReset, token)) {
+        live.push(token);
+      }
+    }
+    expect(
+      live.length,
+      "each create invalidates the others, so only one link may still work",
+    ).toStrictEqual(1);
+  });
+
+  it("invalidates then saves on a store without replacePending", async () => {
+    const backing = new MemoryTokenFlowStore();
+    const store: TokenFlowStore = {
+      save: (record) => backing.save(record),
+      get: (hash) => backing.get(hash),
+      markConsumed: (hash, at) => backing.markConsumed(hash, at),
+      deleteBySubject: (purpose, subject) =>
+        backing.deleteBySubject(purpose, subject),
+    };
+    const tokens = new TokenFlowService(store);
+    const first = await tokens.create({
+      purpose: TokenPurpose.SignIn,
+      subject: "u1",
+      ttlMs: HOUR,
+    });
+    const second = await tokens.create({
+      purpose: TokenPurpose.SignIn,
+      subject: "u1",
+      ttlMs: HOUR,
+      invalidateExisting: true,
+    });
+
+    expect(await tokens.validate(TokenPurpose.SignIn, first.token)).toBe(null);
+    expect(
+      (await tokens.validate(TokenPurpose.SignIn, second.token))?.subject,
+    ).toStrictEqual("u1");
+  });
+
   it("invalidate drops the subject's pending tokens for that purpose only", async () => {
     const { tokens } = setup();
     const reset = await tokens.create({
