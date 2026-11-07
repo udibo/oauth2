@@ -1,3 +1,13 @@
+## [0.47.0](https://github.com/udibo/oauth2/compare/0.46.0...0.47.0) (2026-11-07)
+
+### Features
+
+* **identity:** count lockout attempts before the password check ([#182](https://github.com/udibo/oauth2/issues/182)) ([91850a7](https://github.com/udibo/oauth2/commit/91850a774ee7a51c8e934ac01beb65b73721effe))
+
+### Bug Fixes
+
+* **client:** keep shared-storage sessions and stale claims consistent ([#181](https://github.com/udibo/oauth2/issues/181)) ([7442158](https://github.com/udibo/oauth2/commit/7442158ac1b0987a8a65741a7b3cced962a16c05))
+
 ## [0.46.0](https://github.com/udibo/oauth2/compare/0.45.1...0.46.0) (2026-11-05)
 
 ### Features
