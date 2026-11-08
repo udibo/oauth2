@@ -69,6 +69,46 @@ const cases: Case[] = [
     rejected: true,
   },
   {
+    name: "rejects a private issue shorthand that release notes link to the private repository",
+    message: "fix: synthetic change\n\nRefs udibo#405",
+    rejected: true,
+  },
+  {
+    name: "rejects a private issue shorthand regardless of case",
+    message: "fix: synthetic change\n\nCloses (UDIBO#405)",
+    rejected: true,
+  },
+  {
+    name: "rejects a private repository name without an issue number",
+    message: "fix: synthetic change\n\nFollows the udibo/udibo pull request",
+    rejected: true,
+  },
+  {
+    name: "rejects a private repository name that ends a sentence",
+    message: "fix: synthetic change\n\nFound while working in udibo/udibo.",
+    rejected: true,
+  },
+  {
+    name: "rejects a private repository root URL that ends a sentence",
+    message: "fix: synthetic change\n\nSee https://github.com/udibo/udibo.",
+    rejected: true,
+  },
+  {
+    name: "rejects a private repository clone URL",
+    message: "fix: synthetic change\n\nSee https://github.com/udibo/udibo.git",
+    rejected: true,
+  },
+  {
+    name: "permits a shorthand issue in a repository with a shared name suffix",
+    message: "fix: synthetic change\n\nRefs not-udibo#405 and udibo-docs#405",
+    rejected: false,
+  },
+  {
+    name: "permits a repository name that extends the private name",
+    message: "fix: synthetic change\n\nRefs udibo/udibo-docs#405",
+    rejected: false,
+  },
+  {
     name: "permits references to the public package",
     message:
       "fix: synthetic change\n\nCloses udibo/oauth2#24\n\nSee https://github.com/udibo/oauth2/issues/24",
@@ -128,6 +168,12 @@ const cases: Case[] = [
     message: "fix: synthetic public change",
     proposed:
       "fix: synthetic public change\nCloses https://github.com/udibo/udibo/issues/405",
+    rejected: true,
+  },
+  {
+    name: "refuses a private issue shorthand in the proposed squash body",
+    message: "fix: synthetic public change",
+    proposed: "fix: synthetic public change\nRefs udibo#405",
     rejected: true,
   },
   {
@@ -195,8 +241,9 @@ describe("the --references-only entry point", () => {
   function run(
     root: string,
     env: Record<string, string>,
+    entry = script,
   ): ReturnType<typeof spawnSync> {
-    return spawnSync(process.execPath, [script, "--references-only"], {
+    return spawnSync(process.execPath, [entry, "--references-only"], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, ...env },
@@ -210,6 +257,33 @@ describe("the --references-only entry point", () => {
     const result = run(tree.root, { RELEASE_REFERENCE_BASE: "" });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Pull request base Git head is required");
+  });
+
+  it("refuses a pull request body that names a private issue by shorthand", () => {
+    tree = createTree();
+    for (const name of ["verify-release.ts", "_main.ts"]) {
+      tree.write(
+        `scripts/${name}`,
+        readFileSync(new URL(`./${name}`, import.meta.url), "utf8"),
+      );
+    }
+    git(tree.root, "init");
+    git(tree.root, "commit", "--allow-empty", "-m", "test: synthetic baseline");
+    const base = git(tree.root, "rev-parse", "HEAD");
+    git(tree.root, "commit", "--allow-empty", "-m", "fix: synthetic change");
+    const result = run(
+      tree.root,
+      {
+        RELEASE_REFERENCE_BASE: base,
+        RELEASE_REFERENCE_PR_TITLE: "fix: synthetic change",
+        RELEASE_REFERENCE_PR_BODY: "## Closes\n\nRefs udibo#405",
+      },
+      join(tree.root, "scripts", "verify-release.ts"),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Release input references a private repository",
+    );
   });
 });
 
