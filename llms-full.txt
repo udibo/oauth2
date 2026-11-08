@@ -5521,7 +5521,10 @@ export async function consumeLink(
 ```
 
 An expired or spent link reports `expired` or `invalid` whichever browser
-opens it, so `other-browser` is only ever said about a live link.
+opens it, so `other-browser` is only ever said about a live link. The example
+sets `requireBinding`, which refuses unbound links too; an app that starts
+binding links leaves it off until the unbound links it already sent have
+expired.
 
 `success` carries the `email` the link was sent to. Use that address, not the
 one the account holds when your route runs, for anything the sign-in proves

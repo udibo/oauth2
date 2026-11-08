@@ -34,7 +34,11 @@ export interface TokenFlowRecord {
   purpose: string;
   /** The subject the token acts on (typically a user id). */
   subject: string;
-  /** Optional extra payload (e.g. the email being verified). */
+  /**
+   * Optional extra payload (e.g. the email being verified, a sign-in link's
+   * browser binding). A store must persist the whole object, every key
+   * included: identity flows enforce checks against keys beyond `email`.
+   */
   data?: Record<string, unknown>;
   /** Expiry, epoch ms. */
   expiresAt: number;
