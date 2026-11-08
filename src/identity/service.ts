@@ -25,7 +25,9 @@ import {
   buildUnlockUrl,
   buildVerificationUrl,
   type DeliveryHooks,
+  type DeliveryMessage,
 } from "./delivery.ts";
+import { SIGN_IN_LINK_BINDING_PARAM } from "./sign-in-link-binding.ts";
 import type { AccountLockoutLike, LockoutFailureResult } from "./lockout.ts";
 import {
   type PasswordCredential,
@@ -463,10 +465,12 @@ const RATE_KEYS: Record<keyof IdentityRateLimiters, (value: string) => string> =
 /**
  * Outcome of {@link IdentityService.consumeSignInLink}. `expired` and
  * `invalid` are distinguished so the UI can offer a fresh link for an expired
- * one. No session is created — do that in your app on `success`.
+ * one. No session is created — do that in your app on `success`. `email` is
+ * the address the link was sent to, as it was requested; it is absent only for
+ * a link minted without one through {@link TokenFlowService.create}.
  */
 export type ConsumeSignInLinkResult =
-  | { status: "success"; userId: string }
+  | { status: "success"; userId: string; email?: string }
   | { status: "expired" }
   | { status: "invalid" };
 
@@ -499,6 +503,7 @@ type TokenDeliveryRequest = {
   subject: string;
   ttlMs: number;
   requested: IdentityEvent;
+  binding?: string;
 };
 
 type ConsumedToken =
@@ -1073,10 +1078,16 @@ export class IdentityService<User extends IdentityUser> {
    * key `pwless:<email>`) when a `rateLimiter` — or a tighter
    * `rateLimiters.signInLink` — is configured; throws {@link IdentityError}
    * `rate_limited` in enforce mode. Default link lifetime is 15 minutes.
+   *
+   * Pass `binding` from {@link createSignInLinkBinding} to tie the link to the
+   * requesting browser: the link's URL carries it as the
+   * {@link SIGN_IN_LINK_BINDING_PARAM} query parameter and the delivery message
+   * as `binding`. Check it with {@link verifySignInLinkBinding} before
+   * {@link IdentityService.consumeSignInLink}.
    */
   async requestSignInLink(
     email: string,
-    options?: { ttlMs?: number },
+    options?: { ttlMs?: number; binding?: string },
   ): Promise<void> {
     const tokens = this.#requireTokens("requestSignInLink");
     const normalized = email.trim();
@@ -1102,13 +1113,14 @@ export class IdentityService<User extends IdentityUser> {
           email: normalized,
           userId: user.id,
         },
+        binding: options?.binding,
       }),
     );
   }
 
   /**
    * Consume a sign-in link token (single-use). `success` carries the `userId`
-   * to sign in; establishing the session — and running your MFA gate first —
+   * to sign in and the `email` the link was sent to; establishing the session — and running your MFA gate first —
    * stays your app's job. So does re-resolving the user: a user deleted or
    * disabled since the link was minted must be treated as `invalid` by your
    * user store, not signed in. `expired` and `invalid` are distinguished so
@@ -1127,8 +1139,11 @@ export class IdentityService<User extends IdentityUser> {
     });
     if (result.status !== "success") return result;
     const userId = result.resolved.subject;
+    const email = emailFromData(result.resolved.data);
     await this.#emit({ type: "signin_link.consumed", userId });
-    return { status: "success", userId };
+    return email === undefined
+      ? { status: "success", userId }
+      : { status: "success", userId, email };
   }
 
   /**
@@ -1503,6 +1518,7 @@ export class IdentityService<User extends IdentityUser> {
       token,
       request.subject,
       expiresAt,
+      request.binding,
     );
     await this.#emit(request.requested);
   }
@@ -1579,16 +1595,19 @@ export class IdentityService<User extends IdentityUser> {
     token: string,
     subject: string,
     expiresAt: number,
+    binding?: string,
   ): Promise<void> {
     const delivery = this.#delivery;
     const send = delivery?.[hook];
     if (!send) return;
     const url = this.#baseUrl
-      ? URL_BUILDERS[hook](this.#baseUrl, token)
+      ? withBinding(URL_BUILDERS[hook](this.#baseUrl, token), binding)
       : undefined;
+    const message: DeliveryMessage = { to, url, token, subject, expiresAt };
+    if (binding !== undefined) message.binding = binding;
     await this.#trapDeliveryFailure(
       hook,
-      () => send.call(delivery, { to, url, token, subject, expiresAt }),
+      () => send.call(delivery, message),
       async () => {
         await this.#tokens?.consume(DELIVERY_PURPOSES[hook], token);
       },
@@ -1691,6 +1710,13 @@ async function logVoidFailure(
       error instanceof Error ? error.message : error,
     );
   }
+}
+
+function withBinding(url: string, binding: string | undefined): string {
+  if (binding === undefined) return url;
+  const bound = new URL(url);
+  bound.searchParams.set(SIGN_IN_LINK_BINDING_PARAM, binding);
+  return bound.toString();
 }
 
 function emailFromData(

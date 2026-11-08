@@ -27,6 +27,12 @@ export interface DeliveryMessage {
   subject: string;
   /** Token expiry, epoch ms. */
   expiresAt: number;
+  /**
+   * The browser binding a sign-in link carries, when the app passed one to
+   * `IdentityService.requestSignInLink`. `url` already includes it; add it to
+   * a link you build from `token` yourself.
+   */
+  binding?: string;
 }
 
 /** A single delivery transport callback. */

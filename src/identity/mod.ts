@@ -23,6 +23,8 @@
  * - {@link createIdentifierResolver} / {@link classifyIdentifier} — accept
  *   "email or username (or phone)" on a sign-in form without the bespoke branch.
  * - {@link DeliveryHooks} + URL builders — the seam your mailer/SMS plugs into.
+ * - {@link createSignInLinkBinding} / {@link verifySignInLinkBinding} — tie an
+ *   emailed sign-in link to the browser that asked for it.
  * - {@link RevocableSessionService} / {@link ListableSessionService} /
  *   {@link isRecentlyAuthenticated} — session revocation on credential change,
  *   the optional listing half ({@link SessionSummary} rows for a "where you're
@@ -91,6 +93,12 @@ export {
   type DeliveryHooks,
   type DeliveryMessage,
 } from "./delivery.ts";
+export {
+  createSignInLinkBinding,
+  SIGN_IN_LINK_BINDING_PARAM,
+  type SignInLinkBinding,
+  verifySignInLinkBinding,
+} from "./sign-in-link-binding.ts";
 export {
   isRecentlyAuthenticated,
   type ListableSessionService,

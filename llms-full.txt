@@ -5268,7 +5268,7 @@ one store (`OtpStore`, for codes only) and two delivery hooks.
 |                    | Magic link                                            | Email code                                    |
 | ------------------ | ----------------------------------------------------- | --------------------------------------------- |
 | User action        | click                                                 | type 6 digits                                 |
-| Cross-device       | breaks — the link opens on whatever device reads mail | works — read on the phone, type on the laptop |
+| Cross-device       | breaks — a bound link works only in the browser that asked | works — read on the phone, type on the laptop |
 | Wrong-guess budget | not applicable (high-entropy token)                   | 5 attempts, then the code is dead             |
 | Link prescanners   | corporate mail scanners can consume the token first   | unaffected                                    |
 | Default lifetime   | 15 minutes                                            | 10 minutes                                    |
@@ -5491,20 +5491,38 @@ has an account. The precise reason is still recorded server-side on the
 `signin_code.failed` event, which is where it belongs.
 
 Links get the fuller result, because a high-entropy token is not enumerable and
-"this link expired, request a new one" is a real usability win:
+"this link expired, request a new one" is a real usability win. Check the
+link's [browser binding](https://github.com/udibo/oauth2/blob/main/docs/guides/passwordless.md#bind-links-to-the-browser-that-asked) first, so a link opened elsewhere is
+refused before its token is read:
 
 ```ts
+import { verifySignInLinkBinding } from "@udibo/oauth2/identity";
 import type { IdentityService } from "@udibo/oauth2/identity";
 
 export async function consumeLink(
   identity: IdentityService<{ id: string }>,
-  token: string,
-): Promise<{ userId: string } | { retry: boolean }> {
-  const result = await identity.consumeSignInLink(token);
-  if (result.status === "success") return { userId: result.userId };
+  link: { token: string; binding: string | null },
+  browserNonce: string | undefined,
+): Promise<
+  | { userId: string; email?: string }
+  | { retry: boolean }
+  | { otherBrowser: true }
+> {
+  if (!verifySignInLinkBinding(browserNonce, link.binding)) {
+    return { otherBrowser: true };
+  }
+  const result = await identity.consumeSignInLink(link.token);
+  if (result.status === "success") {
+    return { userId: result.userId, email: result.email };
+  }
   return { retry: result.status === "expired" };
 }
 ```
+
+`success` carries the `email` the link was sent to. Use that address, not the
+one the account holds when your route runs, for anything the sign-in proves
+about the mailbox, such as marking the address verified: the account's address
+can change between the token being spent and your code reading the user.
 
 A link only redeems while the address it was mailed to still finds the same
 account through your store's `findByEmail`. If the account's email has moved
@@ -5519,6 +5537,49 @@ Whichever half returned a `userId`, three things are still your job:
    factor — see
    [add-mfa.md](https://github.com/udibo/oauth2/blob/main/docs/guides/add-mfa.md#the-challenge-one-gate-every-sign-in-path).
 3. **Create the session.** The library never does.
+
+## Bind links to the browser that asked
+
+A sign-in link is a bearer credential: whoever opens it signs in, in whatever
+browser they open it in. Binding it to the browser that asked for it means a
+link that is forwarded, or opened from a mailbox on another device, cannot sign
+that other browser in; it asks for a sign-in email of its own instead.
+
+When the email is requested, `createSignInLinkBinding` returns a random `nonce`
+to keep in the requesting browser and its `binding`, the nonce's SHA-256, for
+the link. Keep the nonce in an `HttpOnly`, `SameSite=Lax` cookie that lives at
+least as long as the link, and pass the binding to `requestSignInLink`, which
+adds it to the link as the `binding` query parameter:
+
+```ts
+import { createSignInLinkBinding } from "@udibo/oauth2/identity";
+import type { IdentityService } from "@udibo/oauth2/identity";
+
+export async function requestLink(
+  identity: IdentityService<{ id: string }>,
+  email: string,
+  heldNonce: string | undefined,
+): Promise<{ setCookie: string }> {
+  const { nonce, binding } = createSignInLinkBinding(heldNonce);
+  await identity.requestSignInLink(email, { binding });
+  return {
+    setCookie: `sign_in_link=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`,
+  };
+}
+```
+
+Pass the nonce the browser already holds: a well-formed one is kept, so an
+earlier link that browser was sent still works there. Set the cookie on every
+request, whether or not the address has an account, so the response does not
+reveal which addresses do. When the link is opened, read the cookie and the
+link's `binding` and call `verifySignInLinkBinding` before
+`consumeSignInLink`, as in the verify half above. It compares in constant time
+and refuses a missing or malformed value. Clear the cookie once the link has
+signed the browser in.
+
+`SameSite=Lax` is enough because the landing page posts the token from the
+same site. A delivery hook that builds its own URL from `token` gets the
+binding as `message.binding` and must add it to the link itself.
 
 ## Throttling keys
 
@@ -5608,6 +5669,9 @@ Before going live:
       without the token in the URL) so it doesn't leak through `Referer` or
       browser history.
 - [ ] **Codes are not embedded in a link** in the email body.
+- [ ] **Links are bound to the requesting browser**:
+      `verifySignInLinkBinding` runs before `consumeSignInLink`, and the nonce
+      lives only in an `HttpOnly` cookie.
 - [ ] **The user is re-resolved and the MFA gate runs** before any session is
       created.
 - [ ] **`signin_link.*` and `signin_code.*` events are captured** server-side

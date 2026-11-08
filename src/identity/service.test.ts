@@ -39,6 +39,11 @@ import {
   type IdentityUserStore,
 } from "./service.ts";
 import { type LegacyPasswordVerifier, pbkdf2Verifier } from "./migration.ts";
+import {
+  createSignInLinkBinding,
+  SIGN_IN_LINK_BINDING_PARAM,
+  verifySignInLinkBinding,
+} from "./sign-in-link-binding.ts";
 
 interface TestUser {
   id: string;
@@ -3010,9 +3015,10 @@ describe("IdentityService passwordless", () => {
     const events: IdentityEvent[] = [];
     const links: DeliveryMessage[] = [];
     const codes: CodeDeliveryMessage[] = [];
+    const tokens = new TokenFlowService(new MemoryTokenFlowStore());
     const service = serviceWithoutSignInFloor({
       users: store,
-      tokens: new TokenFlowService(new MemoryTokenFlowStore()),
+      tokens,
       ttl: options?.ttl,
       otp: { store: new MemoryOtpStore(), ...options?.otp },
       delivery: {
@@ -3042,7 +3048,7 @@ describe("IdentityService passwordless", () => {
         password: "hunter2hunter2",
         profile: { email: "a@b.co" },
       });
-    return { service, events, links, codes, signUp };
+    return { service, tokens, events, links, codes, signUp };
   }
 
   it("requestSignInLink delivers a single-use link that consumeSignInLink redeems once", async () => {
@@ -3060,10 +3066,65 @@ describe("IdentityService passwordless", () => {
     expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
+      email: "a@b.co",
     });
     expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "invalid",
     });
+  });
+
+  it("consumeSignInLink returns the address the link was sent to", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    const user = await signUp();
+
+    await service.requestSignInLink("  a@b.co ");
+
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
+      status: "success",
+      userId: user.id,
+      email: "a@b.co",
+    });
+  });
+
+  it("consumeSignInLink returns no address for a link minted without one", async () => {
+    const { service, tokens, signUp } = makePasswordlessService();
+    const user = await signUp();
+    const { token } = await tokens.create({
+      purpose: TokenPurpose.SignIn,
+      subject: user.id,
+      ttlMs: 60_000,
+    });
+
+    expect(await service.consumeSignInLink(token)).toStrictEqual({
+      status: "success",
+      userId: user.id,
+    });
+  });
+
+  it("requestSignInLink puts the browser binding on the link and in the message", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    await signUp();
+    const { nonce, binding } = createSignInLinkBinding();
+
+    await service.requestSignInLink("a@b.co", { binding });
+
+    const url = new URL(links[0].url!);
+    expect(url.searchParams.get(SIGN_IN_LINK_BINDING_PARAM)).toBe(binding);
+    expect(url.searchParams.get("token")).toBe(links[0].token);
+    expect(links[0].binding).toBe(binding);
+    expect(
+      verifySignInLinkBinding(nonce, url.searchParams.get("binding")),
+    ).toBe(true);
+  });
+
+  it("requestSignInLink without a binding sends an unbound link", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    await signUp();
+
+    await service.requestSignInLink("a@b.co");
+
+    expect(new URL(links[0].url!).searchParams.has("binding")).toBe(false);
+    expect(links[0]).not.toHaveProperty("binding");
   });
 
   it("requestSignInLink for an unknown email resolves identically but sends nothing", async () => {
@@ -3114,6 +3175,7 @@ describe("IdentityService passwordless", () => {
     expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
+      email: "a@b.co",
     });
   });
 
@@ -3148,6 +3210,7 @@ describe("IdentityService passwordless", () => {
     expect(await service.consumeSignInLink(links[1].token)).toStrictEqual({
       status: "success",
       userId: user.id,
+      email: "a@b.co",
     });
   });
 
@@ -4201,6 +4264,7 @@ describe("IdentityService resetPassword voids other credentials", () => {
     expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
       status: "success",
       userId: user.id,
+      email: "a@b.co",
     });
   });
 
@@ -4401,7 +4465,7 @@ describe("IdentityService mailed links bind to the address they were sent to", (
     changeEmail(user.id, "a@b.co");
 
     expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
-      { status: "success", userId: user.id },
+      { status: "success", userId: user.id, email: "a@b.co" },
     );
   });
 
@@ -4416,7 +4480,7 @@ describe("IdentityService mailed links bind to the address they were sent to", (
     await service.requestAccountUnlock({ userId: user.id, email: "A@b.co" });
 
     expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
-      { status: "success", userId: user.id },
+      { status: "success", userId: user.id, email: "A@B.CO" },
     );
     expect(
       await service.resetPassword({
@@ -4449,7 +4513,7 @@ describe("IdentityService mailed links bind to the address they were sent to", (
 
     lookupFails = false;
     expect(await service.consumeSignInLink(sent.signIn[0].token)).toStrictEqual(
-      { status: "success", userId: user.id },
+      { status: "success", userId: user.id, email: "a@b.co" },
     );
   });
 
