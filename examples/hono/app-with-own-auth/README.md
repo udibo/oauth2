@@ -45,7 +45,9 @@ see exactly what delegated auth drops.
   hooks in `oauth2/identity.ts` for its mailer.
 - **Email verification** at `/verify-email` — sign-up with an email mints a
   verification link (also console-logged) whose consumption marks the user
-  verified, with distinct expired vs. invalid outcomes.
+  verified, with distinct expired vs. invalid outcomes. The link verifies only
+  from a session for the account it was sent for; anyone else is asked to sign
+  in and the link stays usable.
 - **Real consent UI** at `/consent` that records the user's decision in a
   server-side one-time record (keyed by a short-lived cookie, bound to the
   user/client/scope) before redirecting back to `/oauth2/authorize` — the

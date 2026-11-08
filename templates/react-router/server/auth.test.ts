@@ -357,8 +357,15 @@ describe("sign-up", () => {
   });
 });
 
+function sessionCookieOf(res: Response): string {
+  return res.headers
+    .getSetCookie()
+    .map((line) => line.split(";")[0]!)
+    .join("; ");
+}
+
 describe("email verification", () => {
-  it("verifies with a single-use token, then rejects reuse", async () => {
+  it("verifies with a single-use token from the account's own session, then rejects reuse", async () => {
     let verifyUrl = "";
     using _hook = vi
       .spyOn(delivery, "sendEmailVerification")
@@ -373,11 +380,23 @@ describe("email verification", () => {
     });
     expect(res.status).toBe(302);
     await res.body?.cancel();
+    const cookie = sessionCookieOf(res);
 
     const token = new URL(verifyUrl).searchParams.get("token")!;
-    const verify = await app.request("/identity/email/verify", {
+    const signedOut = await app.request("/identity/email/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    expect(signedOut.status).toBe(401);
+    expect(await signedOut.json()).toStrictEqual({ error: "sign_in_required" });
+    expect((await userService.findByUsername(email))?.emailVerified).toBe(
+      false,
+    );
+
+    const verify = await app.request("/identity/email/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ token }),
     });
     expect(verify.status).toBe(200);
@@ -386,7 +405,7 @@ describe("email verification", () => {
 
     const reuse = await app.request("/identity/email/verify", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ token }),
     });
     expect(reuse.status).toBe(400);

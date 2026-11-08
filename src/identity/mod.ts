@@ -106,6 +106,7 @@ export {
   type IdentityUser,
   type IdentityUserStore,
   type UnlockAccountResult,
+  type VerifyEmailInput,
   type VerifyEmailResult,
   type VerifySignInCodeResult,
 } from "./service.ts";

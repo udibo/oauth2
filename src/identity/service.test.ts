@@ -432,7 +432,10 @@ describe("IdentityService", () => {
       `https://app.example/verify-email?token=${token}`,
     );
 
-    const result = await service.verifyEmail(token);
+    const result = await service.verifyEmail({
+      token: token,
+      sessionUserId: user.id,
+    });
     expect(result.status).toStrictEqual("success");
     if (result.status === "success") {
       expect(result.userId).toStrictEqual(user.id);
@@ -440,10 +443,14 @@ describe("IdentityService", () => {
     }
     expect(verified.has(user.id)).toStrictEqual(true);
 
-    expect((await service.verifyEmail(token)).status).toStrictEqual("invalid");
-    expect((await service.verifyEmail("garbage")).status).toStrictEqual(
-      "invalid",
-    );
+    expect(
+      (await service.verifyEmail({ token: token, sessionUserId: user.id }))
+        .status,
+    ).toStrictEqual("invalid");
+    expect(
+      (await service.verifyEmail({ token: "garbage", sessionUserId: user.id }))
+        .status,
+    ).toStrictEqual("invalid");
   });
 
   it("verifyEmail passes the address the token was issued for, so a link cannot verify an address swapped in afterwards", async () => {
@@ -459,7 +466,10 @@ describe("IdentityService", () => {
     const { token } = sent[0].msg;
 
     changeEmail(user.id, "victim@corp.example");
-    const result = await service.verifyEmail(token);
+    const result = await service.verifyEmail({
+      token: token,
+      sessionUserId: user.id,
+    });
 
     expect(result.status).toStrictEqual("success");
     expect(verified.has(user.id)).toStrictEqual(false);
@@ -479,7 +489,100 @@ describe("IdentityService", () => {
     const { token } = sent[0].msg;
 
     await time.tickAsync(24 * 60 * 60 * 1000 + 1000);
-    expect((await service.verifyEmail(token)).status).toStrictEqual("expired");
+    expect(
+      (await service.verifyEmail({ token: token, sessionUserId: user.id }))
+        .status,
+    ).toStrictEqual("expired");
+  });
+
+  it("verifyEmail asks a request with no session to sign in, verifying nothing and keeping the link for its account", async () => {
+    const { service, sent, verified } = makeService();
+    const owner = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: owner.id,
+      email: "a@b.co",
+    });
+    const { token } = sent[0].msg;
+
+    for (const sessionUserId of [null, ""]) {
+      expect(await service.verifyEmail({ token, sessionUserId })).toStrictEqual(
+        { status: "sign-in-required" },
+      );
+    }
+    expect(verified.size, "a click with no session must not vouch").toBe(0);
+
+    expect(
+      await service.verifyEmail({ token, sessionUserId: owner.id }),
+    ).toStrictEqual({ status: "success", userId: owner.id, email: "a@b.co" });
+    expect(verified.has(owner.id)).toBe(true);
+  });
+
+  it("verifyEmail refuses another account's session, verifying neither account and keeping the link", async () => {
+    const { service, sent, verified } = makeService();
+    const owner = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    const other = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "other@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: owner.id,
+      email: "a@b.co",
+    });
+    const { token } = sent[0].msg;
+
+    expect(
+      await service.verifyEmail({ token, sessionUserId: other.id }),
+    ).toStrictEqual({ status: "wrong-account" });
+    expect(verified.size).toBe(0);
+
+    expect(
+      (await service.verifyEmail({ token, sessionUserId: owner.id })).status,
+    ).toStrictEqual("success");
+    expect([...verified]).toStrictEqual([owner.id]);
+  });
+
+  it("verifyEmail reports an expired, spent or unknown link as such whatever session presents it", async () => {
+    using time = new FakeTime();
+    const { service, sent } = makeService();
+    const owner = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: owner.id,
+      email: "a@b.co",
+    });
+    const spent = sent[0].msg.token;
+    expect(
+      (await service.verifyEmail({ token: spent, sessionUserId: owner.id }))
+        .status,
+    ).toStrictEqual("success");
+    await service.requestEmailVerification({
+      userId: owner.id,
+      email: "a@b.co",
+    });
+    const expiring = sent[1].msg.token;
+
+    for (const sessionUserId of [null, "someone-else", owner.id]) {
+      expect(
+        (await service.verifyEmail({ token: spent, sessionUserId })).status,
+      ).toStrictEqual("invalid");
+      expect(
+        (await service.verifyEmail({ token: "garbage", sessionUserId })).status,
+      ).toStrictEqual("invalid");
+    }
+    await time.tickAsync(24 * 60 * 60 * 1000 + 1000);
+    for (const sessionUserId of [null, "someone-else"]) {
+      expect(
+        (await service.verifyEmail({ token: expiring, sessionUserId })).status,
+      ).toStrictEqual("expired");
+    }
   });
 
   it("invalidates the minted token and stays uniform when delivery throws", async () => {
@@ -595,12 +698,16 @@ describe("IdentityService", () => {
     });
 
     await rejection(
-      () => service.verifyEmail(capturedToken),
+      () =>
+        service.verifyEmail({ token: capturedToken, sessionUserId: user.id }),
       Error,
       "db write failed",
     );
 
-    const result = await service.verifyEmail(capturedToken);
+    const result = await service.verifyEmail({
+      token: capturedToken,
+      sessionUserId: user.id,
+    });
     expect(result.status).toStrictEqual("success");
     expect(marked).toStrictEqual([user.id]);
   });
@@ -1193,8 +1300,11 @@ describe("IdentityService events", () => {
       userId: user.id,
       email: "a@b.co",
     });
-    await service.verifyEmail("garbage");
-    await service.verifyEmail(minted.emailVerification[0]);
+    await service.verifyEmail({ token: "garbage", sessionUserId: user.id });
+    await service.verifyEmail({
+      token: minted.emailVerification[0],
+      sessionUserId: user.id,
+    });
 
     expect(
       lastEventOfType(events, "email_verification.requested"),
@@ -1230,7 +1340,10 @@ describe("IdentityService events", () => {
       email: "a@b.co",
     });
     time.tick(2000);
-    const result = await service.verifyEmail(minted.emailVerification[0]);
+    const result = await service.verifyEmail({
+      token: minted.emailVerification[0],
+      sessionUserId: user.id,
+    });
 
     expect(result.status).toStrictEqual("expired");
     expect(lastEventOfType(events, "email_verification.failed")).toStrictEqual({

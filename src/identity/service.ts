@@ -404,17 +404,47 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
  * Outcome of {@link IdentityService.verifyEmail}. `success` carries the verified
  * user; `expired` and `invalid` are distinguished so the UI can offer to resend
  * an expired link rather than showing one generic error.
+ *
+ * `sign-in-required` (no session) and `wrong-account` (a session for a
+ * different user) answer a live link that was not presented by the account it
+ * was minted for. The link stays unspent and the address stays unverified, so
+ * show a sign-in prompt and let the person retry the same link once signed in
+ * as that account.
  */
 export type VerifyEmailResult =
   | { status: "success"; userId: string; email?: string }
   | { status: "expired" }
-  | { status: "invalid" };
+  | { status: "invalid" }
+  | { status: "sign-in-required" }
+  | { status: "wrong-account" };
+
+/** Input to {@link IdentityService.verifyEmail}. */
+export interface VerifyEmailInput {
+  /** The token from the emailed verification link. */
+  token: string;
+  /**
+   * The id of the user signed in on the request presenting the link, or
+   * `null` when it carries no session. Only that user's own link verifies;
+   * read it from your session, never from the request body.
+   */
+  sessionUserId: string | null;
+}
 
 const DEFAULT_RESET_TTL = 60 * 60 * 1000;
 const DEFAULT_VERIFY_TTL = 24 * 60 * 60 * 1000;
 const DEFAULT_UNLOCK_TTL = 60 * 60 * 1000;
 const DEFAULT_SIGNIN_LINK_TTL = 15 * 60 * 1000;
 const DEFAULT_FAILED_SIGN_IN_FLOOR_MS = 250;
+
+type SessionRefusal = "sign-in-required" | "wrong-account";
+
+function sessionRefusal(
+  sessionUserId: string | null,
+  subject: string,
+): SessionRefusal | null {
+  if (!sessionUserId) return "sign-in-required";
+  return sessionUserId === subject ? null : "wrong-account";
+}
 
 function foldEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -899,6 +929,11 @@ export class IdentityService<User extends IdentityUser> {
   /**
    * Consume a verification token and mark the user's email verified.
    *
+   * The token verifies only for a request signed in as the user it was minted
+   * for: pass that session's user id as `sessionUserId`. A live token with no
+   * session reports `sign-in-required`, and with another user's session
+   * `wrong-account`; both leave it unspent and the address unverified.
+   *
    * Returns a discriminated {@link VerifyEmailResult} so the UI can tell an
    * **expired** link (offer to resend) from a generically **invalid** one — the
    * `inspect()` distinction, surfaced through the flow. A `valid` token is
@@ -914,13 +949,14 @@ export class IdentityService<User extends IdentityUser> {
    * store that predicates on both never verifies an address the link was not
    * minted for.
    */
-  async verifyEmail(token: string): Promise<VerifyEmailResult> {
+  async verifyEmail(input: VerifyEmailInput): Promise<VerifyEmailResult> {
     const tokens = this.#requireTokens("verifyEmail");
     const result = await this.#consumeToken({
       tokens,
       purpose: TokenPurpose.EmailVerification,
-      token,
+      token: input.token,
       failed: (reason) => ({ type: "email_verification.failed", reason }),
+      refuse: (subject) => sessionRefusal(input.sessionUserId, subject),
       beforeConsume: (subject, data) =>
         this.#users.markEmailVerified?.(subject, emailFromData(data)),
     });
@@ -1471,17 +1507,18 @@ export class IdentityService<User extends IdentityUser> {
     await this.#emit(request.requested);
   }
 
-  async #consumeToken(input: {
+  async #consumeToken<Refusal extends string = never>(input: {
     tokens: TokenFlowService;
     purpose: string;
     token: string;
     failed: (reason: "expired" | "invalid") => IdentityEvent;
     addressBound?: boolean;
+    refuse?: (subject: string) => Refusal | null;
     beforeConsume?: (
       subject: string,
       data?: Record<string, unknown>,
     ) => Promise<void> | void;
-  }): Promise<ConsumedToken> {
+  }): Promise<ConsumedToken | { status: Refusal }> {
     const { tokens, purpose, token } = input;
     const status = await tokens.inspect(purpose, token);
     if (status.status === "expired") {
@@ -1496,6 +1533,8 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit(input.failed("invalid"));
       return { status: "invalid" };
     }
+    const refusal = input.refuse?.(status.subject);
+    if (refusal) return { status: refusal };
     await input.beforeConsume?.(status.subject, status.data);
     const resolved = await tokens.consume(purpose, token);
     if (!resolved) {

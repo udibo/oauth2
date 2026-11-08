@@ -590,7 +590,11 @@ describe("email verification partial failures", () => {
     h.faults.add("markEmailVerified");
 
     await rejection(
-      () => h.service.verifyEmail(h.verifications[0].token),
+      () =>
+        h.service.verifyEmail({
+          token: h.verifications[0].token,
+          sessionUserId: user.id,
+        }),
       Error,
       "markEmailVerified failed",
     );
@@ -598,7 +602,12 @@ describe("email verification partial failures", () => {
 
     expect(h.verified.has(user.id)).toBe(false);
     expect(
-      (await h.service.verifyEmail(h.verifications[0].token)).status,
+      (
+        await h.service.verifyEmail({
+          token: h.verifications[0].token,
+          sessionUserId: user.id,
+        })
+      ).status,
     ).toStrictEqual("success");
   });
 
@@ -609,7 +618,11 @@ describe("email verification partial failures", () => {
     h.faults.add("consumeVerification");
 
     await rejection(
-      () => h.service.verifyEmail(h.verifications[0].token),
+      () =>
+        h.service.verifyEmail({
+          token: h.verifications[0].token,
+          sessionUserId: user.id,
+        }),
       Error,
       "consumeVerification failed",
     );
@@ -619,9 +632,12 @@ describe("email verification partial failures", () => {
     expect(
       h.events.some((event) => event.type === "email_verification.completed"),
     ).toBe(false);
-    expect(await h.service.verifyEmail(h.verifications[0].token)).toStrictEqual(
-      { status: "success", userId: user.id, email: EMAIL },
-    );
+    expect(
+      await h.service.verifyEmail({
+        token: h.verifications[0].token,
+        sessionUserId: user.id,
+      }),
+    ).toStrictEqual({ status: "success", userId: user.id, email: EMAIL });
   });
 });
 

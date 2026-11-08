@@ -102,7 +102,9 @@ place a session lives. Verify the implementation with the `resetCredential` opti
 
 `verifyEmail` marks the address verified **before** it spends the link, so the
 link stays usable whenever the flag did not change. `markEmailVerified` must be
-idempotent for this to be safe.
+idempotent for this to be safe. Neither step runs when the request is not signed
+in as the link's account: the result is `sign-in-required` or `wrong-account`
+and the link stays usable.
 
 | Failing step                    | Already changed                    | Signal                                                         | Recovery                                                                                                                                   |
 | ------------------------------- | ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |

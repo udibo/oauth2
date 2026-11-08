@@ -1039,19 +1039,31 @@ describe("email verification flow", () => {
     });
     expect(createRes.status).toBe(302);
     expect(verifyUrl).toContain("/verify-email?token=");
+    const cookie = `idp_session=${setCookieValue(createRes, "idp_session")}`;
 
     const user = await userService.findByUsername(username);
     expect(user?.emailVerified).toBe(false);
 
     const token = new URL(verifyUrl).searchParams.get("token")!;
-    const verifyRes = await app.request(`/verify-email?token=${token}`);
+    const signedOut = await app.request(`/verify-email?token=${token}`);
+    expect(signedOut.status).toBe(401);
+    expect(await signedOut.text()).toContain("Sign in to verify your email");
+    expect((await userService.findByUsername(username))?.emailVerified).toBe(
+      false,
+    );
+
+    const verifyRes = await app.request(`/verify-email?token=${token}`, {
+      headers: { cookie },
+    });
     expect(verifyRes.status).toBe(200);
     expect(await verifyRes.text()).toContain("Email verified");
     expect((await userService.findByUsername(username))?.emailVerified).toBe(
       true,
     );
 
-    const reuse = await app.request(`/verify-email?token=${token}`);
+    const reuse = await app.request(`/verify-email?token=${token}`, {
+      headers: { cookie },
+    });
     expect(reuse.status).toBe(400);
   });
 

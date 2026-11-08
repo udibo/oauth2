@@ -59,6 +59,42 @@ describe("VerifyEmail route", () => {
     ).toBeInTheDocument();
   });
 
+  it("asks a signed-out visitor to sign in and come back to the same link", async () => {
+    server.use(
+      http.post("*/identity/email/verify", () =>
+        HttpResponse.json({ error: "sign_in_required" }, { status: 401 }),
+      ),
+    );
+    await renderVerify("/verify-email?token=live-token");
+
+    expect(
+      await screen.findByText(/to finish verifying your email/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login?return_to=" +
+        encodeURIComponent("/verify-email?token=live-token"),
+    );
+  });
+
+  it("tells a visitor signed in as someone else that the link is for another account", async () => {
+    server.use(
+      http.post("*/identity/email/verify", () =>
+        HttpResponse.json({ error: "wrong_account" }, { status: 403 }),
+      ),
+    );
+    await renderVerify("/verify-email?token=other-token");
+
+    expect(
+      await screen.findByText(/sent for a different account/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login?return_to=" +
+        encodeURIComponent("/verify-email?token=other-token"),
+    );
+  });
+
   it("reports a link without a token as invalid without calling the server", async () => {
     await renderVerify("/verify-email");
 

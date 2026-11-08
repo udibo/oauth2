@@ -120,6 +120,8 @@ sections apply only when you host those flows.
       implemented and monitored.
 - [ ] Email verification is conditional on the current address matching the
       address proved.
+- [ ] Email verification passes the signed-in user's id from your session to
+      `verifyEmail`, so a link verifies only from its own account's session.
 - [ ] MFA enrollment, disable, recovery, and verification routes authenticate
       and authorize the user.
 - [ ] A completed first factor creates pending MFA state, not a full application
