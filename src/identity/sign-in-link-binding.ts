@@ -10,6 +10,11 @@
  * {@link IdentityService.consumeSignInLink}, so a refusal leaves the link
  * unspent and still usable in the browser that asked for it.
  *
+ * The binding is not a secret: it keeps a link from signing in a browser that
+ * did not ask for it, and is no protection once someone else holds the link.
+ * Keep the nonce in a `__Host-` prefixed cookie so another subdomain cannot
+ * plant one.
+ *
  * @module
  */
 

@@ -301,6 +301,10 @@ browser they open it in. Binding it to the browser that asked for it means a
 link that is forwarded, or opened from a mailbox on another device, cannot sign
 that other browser in; it asks for a sign-in email of its own instead.
 
+The binding is not a secret: it keeps a link from signing in a browser that did
+not ask for it, and is no protection once someone else holds the link. Keep the
+link out of logs, `Referer` and browser history as the checklist below says.
+
 When the email is requested, `createSignInLinkBinding` returns a random `nonce`
 to keep in the requesting browser and its `binding`, the nonce's SHA-256, for
 the link. Keep the nonce in an `HttpOnly`, `SameSite=Lax` cookie that lives at
@@ -319,12 +323,14 @@ export async function requestLink(
   const { nonce, binding } = createSignInLinkBinding(heldNonce);
   await identity.requestSignInLink(email, { binding });
   return {
-    setCookie: `sign_in_link=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`,
+    setCookie: `__Host-sign_in_link=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`,
   };
 }
 ```
 
-Pass the nonce the browser already holds: a well-formed one is kept, so an
+The `__Host-` prefix keeps another subdomain of your site from planting a nonce
+of its choosing in the browser; a planted nonce would let a link requested in
+another browser pass the check. Pass the nonce the browser already holds: a well-formed one is kept, so an
 earlier link that browser was sent still works there. Set the cookie on every
 request, whether or not the address has an account, so the response does not
 reveal which addresses do. When the link is opened, read the cookie and the
@@ -427,7 +433,7 @@ Before going live:
 - [ ] **Codes are not embedded in a link** in the email body.
 - [ ] **Links are bound to the requesting browser**:
       `verifySignInLinkBinding` runs before `consumeSignInLink`, and the nonce
-      lives only in an `HttpOnly` cookie.
+      lives only in an `HttpOnly`, `__Host-` prefixed cookie.
 - [ ] **The user is re-resolved and the MFA gate runs** before any session is
       created.
 - [ ] **`signin_link.*` and `signin_code.*` events are captured** server-side
