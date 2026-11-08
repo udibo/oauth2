@@ -3117,6 +3117,97 @@ describe("IdentityService passwordless", () => {
     ).toBe(true);
   });
 
+  it("consumeSignInLink redeems a bound link in the browser holding its nonce", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    const user = await signUp();
+    const { nonce, binding } = createSignInLinkBinding();
+    await service.requestSignInLink("a@b.co", { binding });
+
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce }),
+    ).toStrictEqual({ status: "success", userId: user.id, email: "a@b.co" });
+  });
+
+  it("consumeSignInLink refuses a bound link to any other nonce and leaves it unspent", async () => {
+    const { service, links, events, signUp } = makePasswordlessService();
+    const user = await signUp();
+    const { nonce, binding } = createSignInLinkBinding();
+    await service.requestSignInLink("a@b.co", { binding });
+    const holder = createSignInLinkBinding();
+
+    for (const other of [holder.nonce, undefined, null, "", binding]) {
+      expect(
+        await service.consumeSignInLink(links[0].token, { nonce: other }),
+      ).toStrictEqual({ status: "other-browser" });
+    }
+    expect(await service.consumeSignInLink(links[0].token)).toStrictEqual({
+      status: "other-browser",
+    });
+    expect(
+      events.filter((event) => event.type === "signin_link.failed"),
+    ).toStrictEqual(
+      Array.from({ length: 6 }, () => ({
+        type: "signin_link.failed",
+        reason: "other_browser",
+      })),
+    );
+
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce }),
+    ).toStrictEqual({ status: "success", userId: user.id, email: "a@b.co" });
+  });
+
+  it("consumeSignInLink checks the binding the link was minted with, not one a holder supplies", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    await signUp();
+    const { binding } = createSignInLinkBinding();
+    await service.requestSignInLink("a@b.co", { binding });
+    const holder = createSignInLinkBinding();
+
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce: holder.nonce }),
+    ).toStrictEqual({ status: "other-browser" });
+  });
+
+  it("consumeSignInLink reports an expired or spent bound link as such, whatever the nonce", async () => {
+    using time = new FakeTime();
+    const { service, links, signUp } = makePasswordlessService();
+    await signUp();
+    const { nonce, binding } = createSignInLinkBinding();
+    const other = createSignInLinkBinding().nonce;
+
+    await service.requestSignInLink("a@b.co", { binding });
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce }),
+    ).toMatchObject({ status: "success" });
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce: other }),
+    ).toStrictEqual({ status: "invalid" });
+
+    await service.requestSignInLink("a@b.co", { binding });
+    time.tick(15 * 60 * 1000 + 1);
+    expect(
+      await service.consumeSignInLink(links[1].token, { nonce: other }),
+    ).toStrictEqual({ status: "expired" });
+  });
+
+  it("consumeSignInLink redeems a link minted without a binding unless one is required", async () => {
+    const { service, links, signUp } = makePasswordlessService();
+    const user = await signUp();
+    const { nonce } = createSignInLinkBinding();
+
+    await service.requestSignInLink("a@b.co");
+    expect(
+      await service.consumeSignInLink(links[0].token, {
+        nonce,
+        requireBinding: true,
+      }),
+    ).toStrictEqual({ status: "other-browser" });
+    expect(
+      await service.consumeSignInLink(links[0].token, { nonce }),
+    ).toStrictEqual({ status: "success", userId: user.id, email: "a@b.co" });
+  });
+
   it("requestSignInLink without a binding sends an unbound link", async () => {
     const { service, links, signUp } = makePasswordlessService();
     await signUp();

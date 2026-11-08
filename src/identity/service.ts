@@ -27,7 +27,10 @@ import {
   type DeliveryHooks,
   type DeliveryMessage,
 } from "./delivery.ts";
-import { SIGN_IN_LINK_BINDING_PARAM } from "./sign-in-link-binding.ts";
+import {
+  SIGN_IN_LINK_BINDING_PARAM,
+  verifySignInLinkBinding,
+} from "./sign-in-link-binding.ts";
 import type { AccountLockoutLike, LockoutFailureResult } from "./lockout.ts";
 import {
   type PasswordCredential,
@@ -468,11 +471,29 @@ const RATE_KEYS: Record<keyof IdentityRateLimiters, (value: string) => string> =
  * one. No session is created — do that in your app on `success`. `email` is
  * the address the link was sent to, as it was requested; it is absent only for
  * a link minted without one through {@link TokenFlowService.create}.
+ * `other-browser` means the link is live but was asked for in another browser;
+ * it stays unspent, so the browser that asked can still use it.
  */
 export type ConsumeSignInLinkResult =
   | { status: "success"; userId: string; email?: string }
   | { status: "expired" }
-  | { status: "invalid" };
+  | { status: "invalid" }
+  | { status: "other-browser" };
+
+/** Options for {@link IdentityService.consumeSignInLink}. */
+export interface ConsumeSignInLinkOptions {
+  /**
+   * The sign-in link nonce the opening browser holds (from
+   * {@link createSignInLinkBinding}, typically read from its cookie). A link
+   * requested with a `binding` redeems only when this nonce hashes to it.
+   */
+  nonce?: string | null;
+  /**
+   * Refuse a link minted without a binding as `other-browser`, as well as a
+   * mismatched one. Set it once every link your app sends is bound.
+   */
+  requireBinding?: boolean;
+}
 
 /**
  * Outcome of {@link IdentityService.verifySignInCode}. Deliberately only
@@ -1080,10 +1101,10 @@ export class IdentityService<User extends IdentityUser> {
    * `rate_limited` in enforce mode. Default link lifetime is 15 minutes.
    *
    * Pass `binding` from {@link createSignInLinkBinding} to tie the link to the
-   * requesting browser: the link's URL carries it as the
+   * requesting browser: the token stores it, the link's URL carries it as the
    * {@link SIGN_IN_LINK_BINDING_PARAM} query parameter and the delivery message
-   * as `binding`. Check it with {@link verifySignInLinkBinding} before
-   * {@link IdentityService.consumeSignInLink}.
+   * as `binding`. {@link IdentityService.consumeSignInLink} then redeems the
+   * link only given that browser's `nonce`.
    */
   async requestSignInLink(
     email: string,
@@ -1127,8 +1148,18 @@ export class IdentityService<User extends IdentityUser> {
    * the UI can offer a fresh link. A link whose address no longer finds this
    * user through {@link IdentityUserStore.findByEmail} — the account's email
    * moved after it was mailed — reports `invalid` and stays unspent.
+   *
+   * A link requested with a `binding` redeems only when `options.nonce` is the
+   * nonce that binding was made from; any other nonce, or none, reports
+   * `other-browser` and leaves the link unspent. The check runs against the
+   * binding stored with the token, so it holds against someone who has the
+   * link and sets a nonce of their own. An expired or spent link reports
+   * `expired` or `invalid` whatever the nonce.
    */
-  async consumeSignInLink(token: string): Promise<ConsumeSignInLinkResult> {
+  async consumeSignInLink(
+    token: string,
+    options?: ConsumeSignInLinkOptions,
+  ): Promise<ConsumeSignInLinkResult> {
     const tokens = this.#requireTokens("consumeSignInLink");
     const result = await this.#consumeToken({
       tokens,
@@ -1136,7 +1167,12 @@ export class IdentityService<User extends IdentityUser> {
       token,
       failed: (reason) => ({ type: "signin_link.failed", reason }),
       addressBound: true,
+      refuse: (_subject, data) => otherBrowserRefusal(data, options),
     });
+    if (result.status === "other-browser") {
+      await this.#emit({ type: "signin_link.failed", reason: "other_browser" });
+      return result;
+    }
     if (result.status !== "success") return result;
     const userId = result.resolved.subject;
     const email = emailFromData(result.resolved.data);
@@ -1508,7 +1544,10 @@ export class IdentityService<User extends IdentityUser> {
     const { token, expiresAt } = await tokens.create({
       purpose: DELIVERY_PURPOSES[request.hook],
       subject: request.subject,
-      data: { email: request.to },
+      data:
+        request.binding === undefined
+          ? { email: request.to }
+          : { email: request.to, binding: request.binding },
       ttlMs: request.ttlMs,
       invalidateExisting: true,
     });
@@ -1529,7 +1568,10 @@ export class IdentityService<User extends IdentityUser> {
     token: string;
     failed: (reason: "expired" | "invalid") => IdentityEvent;
     addressBound?: boolean;
-    refuse?: (subject: string) => Refusal | null;
+    refuse?: (
+      subject: string,
+      data?: Record<string, unknown>,
+    ) => Refusal | null;
     beforeConsume?: (
       subject: string,
       data?: Record<string, unknown>,
@@ -1549,7 +1591,7 @@ export class IdentityService<User extends IdentityUser> {
       await this.#emit(input.failed("invalid"));
       return { status: "invalid" };
     }
-    const refusal = input.refuse?.(status.subject);
+    const refusal = input.refuse?.(status.subject, status.data);
     if (refusal) return { status: refusal };
     await input.beforeConsume?.(status.subject, status.data);
     const resolved = await tokens.consume(purpose, token);
@@ -1717,6 +1759,19 @@ function withBinding(url: string, binding: string | undefined): string {
   const bound = new URL(url);
   bound.searchParams.set(SIGN_IN_LINK_BINDING_PARAM, binding);
   return bound.toString();
+}
+
+function otherBrowserRefusal(
+  data: Record<string, unknown> | undefined,
+  options: ConsumeSignInLinkOptions | undefined,
+): "other-browser" | null {
+  const binding = data?.binding;
+  if (typeof binding !== "string") {
+    return options?.requireBinding ? "other-browser" : null;
+  }
+  return verifySignInLinkBinding(options?.nonce, binding)
+    ? null
+    : "other-browser";
 }
 
 function emailFromData(

@@ -5491,33 +5491,37 @@ has an account. The precise reason is still recorded server-side on the
 `signin_code.failed` event, which is where it belongs.
 
 Links get the fuller result, because a high-entropy token is not enumerable and
-"this link expired, request a new one" is a real usability win. Check the
-link's [browser binding](https://github.com/udibo/oauth2/blob/main/docs/guides/passwordless.md#bind-links-to-the-browser-that-asked) first, so a link opened elsewhere is
-refused before its token is read:
+"this link expired, request a new one" is a real usability win. Pass the
+opening browser's nonce so the link's
+[browser binding](https://github.com/udibo/oauth2/blob/main/docs/guides/passwordless.md#bind-links-to-the-browser-that-asked) is checked; a link
+asked for in another browser reports `other-browser` and stays unspent:
 
 ```ts
-import { verifySignInLinkBinding } from "@udibo/oauth2/identity";
 import type { IdentityService } from "@udibo/oauth2/identity";
 
 export async function consumeLink(
   identity: IdentityService<{ id: string }>,
-  link: { token: string; binding: string | null },
+  token: string,
   browserNonce: string | undefined,
 ): Promise<
   | { userId: string; email?: string }
   | { retry: boolean }
   | { otherBrowser: true }
 > {
-  if (!verifySignInLinkBinding(browserNonce, link.binding)) {
-    return { otherBrowser: true };
-  }
-  const result = await identity.consumeSignInLink(link.token);
+  const result = await identity.consumeSignInLink(token, {
+    nonce: browserNonce,
+    requireBinding: true,
+  });
   if (result.status === "success") {
     return { userId: result.userId, email: result.email };
   }
+  if (result.status === "other-browser") return { otherBrowser: true };
   return { retry: result.status === "expired" };
 }
 ```
+
+An expired or spent link reports `expired` or `invalid` whichever browser
+opens it, so `other-browser` is only ever said about a live link.
 
 `success` carries the `email` the link was sent to. Use that address, not the
 one the account holds when your route runs, for anything the sign-in proves
@@ -5545,15 +5549,17 @@ browser they open it in. Binding it to the browser that asked for it means a
 link that is forwarded, or opened from a mailbox on another device, cannot sign
 that other browser in; it asks for a sign-in email of its own instead.
 
-The binding is not a secret: it keeps a link from signing in a browser that did
-not ask for it, and is no protection once someone else holds the link. Keep the
-link out of logs, `Referer` and browser history as the checklist below says.
+The token stores the binding it was requested with, and `consumeSignInLink`
+checks the opening browser's nonce against that stored value. The binding the
+link carries is not a secret and is not what decides: someone who holds the
+link cannot redeem it by setting a nonce of their own. Keep the link out of
+logs, `Referer` and browser history as the checklist below says all the same.
 
 When the email is requested, `createSignInLinkBinding` returns a random `nonce`
-to keep in the requesting browser and its `binding`, the nonce's SHA-256, for
-the link. Keep the nonce in an `HttpOnly`, `SameSite=Lax` cookie that lives at
-least as long as the link, and pass the binding to `requestSignInLink`, which
-adds it to the link as the `binding` query parameter:
+to keep in the requesting browser and its `binding`, the nonce's SHA-256. Keep
+the nonce in an `HttpOnly`, `SameSite=Lax` cookie that lives at least as long
+as the link, and pass the binding to `requestSignInLink`, which stores it with
+the token and adds it to the link as the `binding` query parameter:
 
 ```ts
 import { createSignInLinkBinding } from "@udibo/oauth2/identity";
@@ -5577,11 +5583,12 @@ of its choosing in the browser; a planted nonce would let a link requested in
 another browser pass the check. Pass the nonce the browser already holds: a well-formed one is kept, so an
 earlier link that browser was sent still works there. Set the cookie on every
 request, whether or not the address has an account, so the response does not
-reveal which addresses do. When the link is opened, read the cookie and the
-link's `binding` and call `verifySignInLinkBinding` before
-`consumeSignInLink`, as in the verify half above. It compares in constant time
-and refuses a missing or malformed value. Clear the cookie once the link has
-signed the browser in.
+reveal which addresses do. When the link is opened, read the cookie and pass it
+to `consumeSignInLink` as `nonce`, as in the verify half above. The comparison
+runs in constant time and refuses a missing or malformed nonce. Set
+`requireBinding` once every link your app sends is bound, so a link minted
+without a binding is refused too. Clear the cookie once the link has signed the
+browser in.
 
 `SameSite=Lax` is enough because the landing page posts the token from the
 same site. A delivery hook that builds its own URL from `token` gets the
@@ -5676,8 +5683,9 @@ Before going live:
       browser history.
 - [ ] **Codes are not embedded in a link** in the email body.
 - [ ] **Links are bound to the requesting browser**:
-      `verifySignInLinkBinding` runs before `consumeSignInLink`, and the nonce
-      lives only in an `HttpOnly`, `__Host-` prefixed cookie.
+      `consumeSignInLink` gets the browser's `nonce` (with `requireBinding`
+      once every link is bound), and the nonce lives only in an `HttpOnly`,
+      `__Host-` prefixed cookie.
 - [ ] **The user is re-resolved and the MFA gate runs** before any session is
       created.
 - [ ] **`signin_link.*` and `signin_code.*` events are captured** server-side
