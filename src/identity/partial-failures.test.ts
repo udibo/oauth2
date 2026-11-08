@@ -351,7 +351,7 @@ describe("password reset partial failures", () => {
     expect(
       await h.service.consumeSignInLink(h.links[0].token),
       "the link outlives the reset until it expires",
-    ).toStrictEqual({ status: "success", userId: user.id });
+    ).toStrictEqual({ status: "success", userId: user.id, email: EMAIL });
     expect(h.sessionsOf(user.id)).toStrictEqual([]);
     expect(consoleError.mock.calls.length).toStrictEqual(1);
   });
@@ -673,6 +673,7 @@ describe("passwordless sign-in partial failures", () => {
     expect(await h.service.consumeSignInLink(h.links[1].token)).toStrictEqual({
       status: "success",
       userId: user.id,
+      email: EMAIL,
     });
   });
 });

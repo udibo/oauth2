@@ -12,7 +12,7 @@ Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
 
 ### Bug Fixes
 
-* **identity:** require the subject's session to verify email ([#184](https://github.com/udibo/oauth2/issues/184)) ([ab1d5af](https://github.com/udibo/oauth2/commit/ab1d5af7fcdc8fb938a507b22c0e83c994ae4341)), closes [udibo#3238](https://github.com/udibo/udibo/issues/3238)
+* **identity:** require the subject's session to verify email ([#184](https://github.com/udibo/oauth2/issues/184)) ([ab1d5af](https://github.com/udibo/oauth2/commit/ab1d5af7fcdc8fb938a507b22c0e83c994ae4341))
 
 ## [0.48.0](https://github.com/udibo/oauth2/compare/0.47.0...0.48.0) (2026-11-08)
 
