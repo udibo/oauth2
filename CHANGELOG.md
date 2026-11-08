@@ -1,3 +1,19 @@
+## [0.48.0](https://github.com/udibo/oauth2/compare/0.47.0...0.48.0) (2026-11-08)
+
+### ⚠ BREAKING CHANGES
+
+* `DeviceAuthorizationServiceInterface.approve` and
+`deny` must now reject an authorization that is no longer pending: one
+that was claimed, already approved or denied, or has expired.
+`MemoryDeviceAuthorizationService` throws for such a record, and
+`runDeviceAuthorizationServiceContractTests` fails a store that still
+approves or denies one. To withdraw an approval before the device claims
+it, call `revoke`.
+
+### Features
+
+* make device claims, flow-token replacement and lockout locks atomic ([#183](https://github.com/udibo/oauth2/issues/183)) ([2d613c7](https://github.com/udibo/oauth2/commit/2d613c726dd2421ea2134bbedaba33338161be85)), closes [#182](https://github.com/udibo/oauth2/issues/182)
+
 ## [0.47.0](https://github.com/udibo/oauth2/compare/0.46.0...0.47.0) (2026-11-07)
 
 ### Features
