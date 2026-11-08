@@ -1,3 +1,19 @@
+## [0.49.0](https://github.com/udibo/oauth2/compare/0.48.0...0.49.0) (2026-11-08)
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** `IdentityService.verifyEmail` takes `{ token,
+sessionUserId }` and `VerifyEmailResult` adds `sign-in-required` and
+`wrong-account`. `honoIdentityRoutes` mounts `/email/verify` only with a
+`sessionUserId` reader and answers those outcomes with `401
+sign_in_required` and `403 wrong_account`.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Bug Fixes
+
+* **identity:** require the subject's session to verify email ([#184](https://github.com/udibo/oauth2/issues/184)) ([ab1d5af](https://github.com/udibo/oauth2/commit/ab1d5af7fcdc8fb938a507b22c0e83c994ae4341)), closes [udibo#3238](https://github.com/udibo/udibo/issues/3238)
+
 ## [0.48.0](https://github.com/udibo/oauth2/compare/0.47.0...0.48.0) (2026-11-08)
 
 ### ⚠ BREAKING CHANGES
