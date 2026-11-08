@@ -435,6 +435,7 @@ runMfaStoreContractTests({
 runTokenFlowStoreContractTests({
   describeName: "MemoryTokenFlowStore satisfies TokenFlowStore contract",
   makeStore: () => new MemoryTokenFlowStore(),
+  replacePending: true,
 });
 
 runOtpStoreContractTests({
@@ -457,6 +458,7 @@ runRateLimitStoreContractTests({
 runLockoutStoreContractTests({
   describeName: "MemoryLockoutStore satisfies LockoutStore contract",
   makeStore: () => new MemoryLockoutStore(),
+  lock: true,
 });
 
 runTenantContractTests({

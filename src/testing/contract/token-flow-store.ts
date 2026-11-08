@@ -6,6 +6,9 @@
  * single-use, and only a conditional write survives concurrent requests
  * redeeming one link. This suite races eight of them on one link.
  *
+ * The optional `replacePending` cases run when the store implements it and
+ * are skipped, with a note naming the gap, when it does not.
+ *
  * @example Verify a database-backed store
  * ```ts
  * import { runTokenFlowStoreContractTests } from "@udibo/oauth2/testing/contract";
@@ -45,6 +48,13 @@ export interface TokenFlowStoreContractOptions {
    * that meant to implement it and does not fails loudly.
    */
   deleteBySubject?: boolean;
+  /**
+   * Set to `true` to require the optional
+   * {@link TokenFlowStore.replacePending}: the suite then fails a store that
+   * does not implement it. Left unset, the `replacePending` cases run when the
+   * store implements it and are skipped with a note when it does not.
+   */
+  replacePending?: boolean;
   /**
    * The subject the cases issue tokens for, in your application's id format. A
    * store whose rows reference a users table needs it to name a user that
@@ -209,6 +219,75 @@ export function runTokenFlowStoreContractTests(
             (await store.get(hash("2")))?.consumedAt !== undefined,
           "neither stamp may be lost to the other's stale read",
         );
+      });
+    });
+
+    describe("replacePending (optional)", () => {
+      const NOT_IMPLEMENTED =
+        "replacePending is not implemented — TokenFlowService.create with " +
+        "invalidateExisting deletes then saves, so concurrent requests can " +
+        "each leave a live link";
+
+      if (options.replacePending) {
+        it("is implemented", () => {
+          assert(
+            typeof store.replacePending === "function",
+            `${NOT_IMPLEMENTED}. Implement it, or drop \`replacePending: true\`.`,
+          );
+        });
+      }
+
+      it("replaces the pair's pending records with the new one", async ({
+        skip,
+      }) => {
+        if (!store.replacePending) return skip(NOT_IMPLEMENTED);
+        await store.save(record({ tokenHash: hash("old") }));
+        await store.replacePending(record({ tokenHash: hash("new") }));
+        expect(await store.get(hash("old"))).toBe(null);
+        expect((await store.get(hash("new")))?.tokenHash).toBe(hash("new"));
+      });
+
+      it("keeps consumed records, other subjects and other purposes", async ({
+        skip,
+      }) => {
+        if (!store.replacePending) return skip(NOT_IMPLEMENTED);
+        await store.save(record({ tokenHash: hash("used") }));
+        expect(await store.markConsumed(hash("used"), Date.now())).toBe(true);
+        await store.save(
+          record({ tokenHash: hash("other-subject"), subject: OTHER_SUBJECT }),
+        );
+        await store.save(
+          record({ tokenHash: hash("other-purpose"), purpose: OTHER_PURPOSE }),
+        );
+
+        await store.replacePending(record({ tokenHash: hash("new") }));
+
+        assert(
+          (await store.get(hash("used")))?.consumedAt !== undefined,
+          "a consumed record must survive so inspect() can answer `consumed`",
+        );
+        assert((await store.get(hash("other-subject"))) !== null);
+        assert((await store.get(hash("other-purpose"))) !== null);
+      });
+
+      it(`leaves exactly one of ${CONCURRENT_CALLERS} concurrent replacements pending`, async ({
+        skip,
+      }) => {
+        if (!store.replacePending) return skip(NOT_IMPLEMENTED);
+        const replace = store.replacePending.bind(store);
+        await race((caller) =>
+          replace(record({ tokenHash: hash(`racer-${caller}`) })),
+        );
+        const pending = [];
+        for (let caller = 0; caller < CONCURRENT_CALLERS; caller++) {
+          const stored = await store.get(hash(`racer-${caller}`));
+          if (stored && stored.consumedAt === undefined) pending.push(stored);
+        }
+        expect(
+          pending.length,
+          "each replacement invalidates the others — interleaved deletes and " +
+            "inserts leave several live links to one mailbox",
+        ).toBe(1);
       });
     });
 

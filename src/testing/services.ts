@@ -268,6 +268,15 @@ export interface MemoryTokenServiceOptions<
    * map, so a subclass that overrides the code store's `revoke` is bypassed.
    */
   authorizationCodeService?: MemoryAuthorizationCodeService<C, U, S>;
+  /**
+   * The device-authorization store the device grant claims from. Pass it to
+   * give the token service {@linkcode MemoryTokenService.exchangeDeviceCode},
+   * so the grant claims an approved device code and saves its token in one
+   * step; without it the grant claims and saves in two.
+   * `exchangeDeviceCode` claims from the store's own maps, so a subclass that
+   * overrides the store's `revoke` is bypassed.
+   */
+  deviceAuthorizationService?: MemoryDeviceAuthorizationService<C, U, S>;
 }
 
 interface StoredToken<S extends AbstractScope> {
@@ -340,10 +349,23 @@ export class MemoryTokenService<
   ) => Promise<Token<C, U, S> | undefined>;
 
   /**
+   * Claims an approved authorization from the paired
+   * `deviceAuthorizationService` and saves the token issued from it in one
+   * step, or does neither, resolving `undefined` when the authorization was
+   * already claimed. Present only when the service was constructed with
+   * `deviceAuthorizationService`.
+   */
+  readonly exchangeDeviceCode?: (
+    authorization: DeviceAuthorization<C, U, S>,
+    token: Token<C, U, S>,
+  ) => Promise<Token<C, U, S> | undefined>;
+
+  /**
    * Creates an empty token store.
    *
    * @param options Backing client/user services, optional default token
-   * lifetimes, and the code store that enables `exchangeCode`.
+   * lifetimes, and the code and device stores that enable `exchangeCode` and
+   * `exchangeDeviceCode`.
    */
   constructor(options: MemoryTokenServiceOptions<C, U, S>) {
     this.#clientService = options.clientService;
@@ -357,6 +379,23 @@ export class MemoryTokenService<
       this.exchangeCode = (authorizationCode, token) =>
         this.#exchangeCode(codes, authorizationCode, token);
     }
+    const devices = options.deviceAuthorizationService;
+    if (devices) {
+      this.exchangeDeviceCode = (authorization, token) =>
+        this.#exchangeDeviceCode(devices, authorization, token);
+    }
+  }
+
+  async #exchangeDeviceCode(
+    devices: MemoryDeviceAuthorizationService<C, U, S>,
+    authorization: DeviceAuthorization<C, U, S>,
+    token: Token<C, U, S>,
+  ): Promise<Token<C, U, S> | undefined> {
+    const deviceCodeHash = await sha256Hash(authorization.deviceCode);
+    const stored = await this.#prepare(token);
+    if (!claimStoredDeviceCode(devices, deviceCodeHash)) return undefined;
+    this.#store(stored);
+    return token;
   }
 
   async #exchangeCode(
@@ -963,6 +1002,15 @@ interface StoredDeviceAuthorization<S extends AbstractScope> {
   lastPolled?: Date;
 }
 
+let claimStoredDeviceCode: <
+  C extends ClientInterface,
+  U extends MemoryUserShape,
+  S extends AbstractScope,
+>(
+  service: MemoryDeviceAuthorizationService<C, U, S>,
+  deviceCodeHash: string,
+) => boolean;
+
 /** In-memory `DeviceAuthorizationServiceInterface` implementation. */
 export class MemoryDeviceAuthorizationService<
   C extends ClientInterface,
@@ -977,6 +1025,16 @@ export class MemoryDeviceAuthorizationService<
   #userService: UserServiceInterface<U>;
   #byDeviceCode = new Map<string, StoredDeviceAuthorization<S>>();
   #byUserCode = new Map<string, StoredDeviceAuthorization<S>>();
+
+  static {
+    claimStoredDeviceCode = (service, deviceCodeHash) => {
+      const stored = service.#byDeviceCode.get(deviceCodeHash);
+      if (!stored) return false;
+      service.#byDeviceCode.delete(deviceCodeHash);
+      service.#byUserCode.delete(stored.userCodeHash);
+      return true;
+    };
+  }
 
   /**
    * Creates an empty device-authorization store.
@@ -1110,20 +1168,35 @@ export class MemoryDeviceAuthorizationService<
     return undefined;
   }
 
+  async #findPending(
+    authorization: DeviceAuthorization<C, U, S>,
+    method: string,
+  ): Promise<StoredDeviceAuthorization<S>> {
+    const stored = await this.#findStored(authorization);
+    if (!stored) {
+      throw new Error(`${method}: device authorization not found`);
+    }
+    if (stored.authorized || stored.denied) {
+      throw new Error(`${method}: device authorization already decided`);
+    }
+    if (stored.expiresAt.getTime() <= Date.now()) {
+      throw new Error(`${method}: device authorization expired`);
+    }
+    return stored;
+  }
+
   /**
-   * Marks the authorization granted by `user`, optionally narrowing `scope`,
-   * so a subsequent device-code poll can exchange it for a token. Returns the
-   * updated record. Throws when the authorization is not stored.
+   * Marks the pending authorization granted by `user`, optionally narrowing
+   * `scope`, so a subsequent device-code poll can exchange it for a token.
+   * Returns the updated record. Throws when the authorization is not stored,
+   * has expired, or was already approved or denied.
    */
   async approve(
     authorization: DeviceAuthorization<C, U, S>,
     user: U,
     scope?: S | null,
   ): Promise<DeviceAuthorization<C, U, S>> {
-    const stored = await this.#findStored(authorization);
-    if (!stored) {
-      throw new Error("approve: device authorization not found");
-    }
+    const stored = await this.#findPending(authorization, "approve");
     stored.authorized = true;
     stored.userId = user.id;
     if (scope !== undefined) stored.scope = scope;
@@ -1136,16 +1209,14 @@ export class MemoryDeviceAuthorizationService<
   }
 
   /**
-   * Marks the authorization denied so a subsequent poll is rejected. Returns
-   * the updated record. Throws when the authorization is not stored.
+   * Marks the pending authorization denied so a subsequent poll is rejected.
+   * Returns the updated record. Throws when the authorization is not stored,
+   * has expired, or was already approved or denied.
    */
   async deny(
     authorization: DeviceAuthorization<C, U, S>,
   ): Promise<DeviceAuthorization<C, U, S>> {
-    const stored = await this.#findStored(authorization);
-    if (!stored) {
-      throw new Error("deny: device authorization not found");
-    }
+    const stored = await this.#findPending(authorization, "deny");
     stored.denied = true;
     return { ...authorization, denied: true };
   }

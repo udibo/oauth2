@@ -124,6 +124,15 @@ counters, so a client gets the rate limit once per instance, an attacker gets
 stop sign-in on another. Pass a `RateLimitStore` and a `LockoutStore` over
 Redis or a database every instance shares, with an atomic `increment`.
 
+A `LockoutStore` without the optional `lock` is locked with an unconditional
+`set` after `increment`. An over-budget attempt whose lock lands after a
+concurrent successful sign-in reset the account locks it again, with no
+lockout event. With `lock`, that write is refused and the attempt is counted
+again against the fresh record, once. If that second lock is refused as well,
+because another reset landed in between or the store's `lock` never writes,
+the attempt reports the account unlocked and reaches the password check: no
+lock exists to enforce, and `AccountLockout` does not retry further.
+
 ## DirectClient storage outside a browser
 
 In a browser document `DirectClient` keeps pending sign-ins in
@@ -328,6 +337,15 @@ should not be enabled for new deployments.
   `exchangeCode` when constructed with the `authorizationCodeService` it shares
   with the grant.
 
+- **Device authorization grant.** Without
+  `TokenServiceInterface.exchangeDeviceCode`, the grant claims an approved
+  device code with `revoke` and then saves its token, so a save that fails
+  after the claim spends the approval and the user must start over.
+  `MemoryTokenService` implements `exchangeDeviceCode` when constructed with
+  the `deviceAuthorizationService` it shares with the grant. The package never
+  calls `approve` or `deny`; whether a late or repeated decision is refused is
+  up to the store, which the contract requires.
+
 ## Resource servers (`@udibo/oauth2/server/resource`)
 
 - Offline JWT validation does not consult token revocation state. A revoked
@@ -498,6 +516,10 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   tokens by calling `TokenFlowService.create` itself gets the link half only.
   Account-unlock and email-verification links are deliberately untouched —
   neither authenticates anyone.
+- **`invalidateExisting` is atomic only with `TokenFlowStore.replacePending`.**
+  Without it, `TokenFlowService.create` deletes the pending tokens and then
+  saves the new one in two calls, so concurrent requests for one
+  `(purpose, subject)` can each leave a live link.
 - **`honoIdentityRoutes`' CSRF guard trusts the browser, and only the browser.**
   The factory mounts a same-origin guard on unsafe methods by default: a request
   whose `Sec-Fetch-Site` is anything but `same-origin`/`none` is refused with

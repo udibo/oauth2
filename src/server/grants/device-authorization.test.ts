@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { rejection } from "../../_test_assert.ts";
 import type { DeviceAuthorization } from "../../models/device-authorization.ts";
 import { BasicScope } from "../../models/scope.ts";
@@ -206,6 +206,49 @@ async function createGrantWithStore<
   });
 
   return { grant, deviceAuthorizationService };
+}
+
+async function createExchangingGrant() {
+  const userService = new MemoryUserService<TestUser>();
+  const clientService = new MemoryClientService<TestClient, TestUser>(
+    userService,
+  );
+  const deviceAuthorizationService = new MemoryDeviceAuthorizationService<
+    TestClient,
+    TestUser,
+    BasicScope
+  >({ clientService, userService });
+  const tokenService = new MemoryTokenService<TestClient, TestUser, BasicScope>(
+    { clientService, userService, deviceAuthorizationService },
+  );
+  await userService.add(testUser, "password");
+  await clientService.add(testClient, "secret", testUser.id);
+  const grant = new DeviceAuthorizationGrant<TestClient, TestUser, BasicScope>({
+    resolve: () => ({
+      clientService,
+      tokenService,
+      deviceAuthorizationService,
+    }),
+  });
+  await deviceAuthorizationService.save({
+    deviceCode: "exchanged-code",
+    userCode: "EXCH-1234",
+    expiresAt: new Date(Date.now() + 300000),
+    client: testClient,
+    interval: 0,
+    authorized: true,
+    user: testUser,
+  });
+  const poll = () =>
+    exchangeToken(
+      grant,
+      tokenRequest({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: "exchanged-code",
+      }),
+      testClient,
+    );
+  return { tokenService, deviceAuthorizationService, poll };
 }
 
 describe("DeviceAuthorizationGrant", () => {
@@ -910,6 +953,97 @@ describe("DeviceAuthorizationGrant", () => {
       );
 
       expect(deviceAuthorizationService.pollWrites).toBe(0);
+    });
+
+    it("keeps an approved device code claimable when its token cannot be saved", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      using generate = vi.spyOn(tokenService, "generateAccessToken");
+      generate.mockResolvedValueOnce(
+        Symbol("unpersistable") as unknown as string,
+      );
+
+      await rejection(poll(), TypeError);
+
+      expect(
+        (await deviceAuthorizationService.getByDeviceCode("exchanged-code"))
+          ?.authorized,
+        "a failed token write must not spend the device's approval",
+      ).toBe(true);
+      const token = await poll();
+      expect(token.user?.id).toBe(testUser.id);
+      expect(
+        await deviceAuthorizationService.getByDeviceCode("exchanged-code"),
+      ).toBe(undefined);
+    });
+
+    it("does not restore an authorization cancelled while its exchange was in flight", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      const byUserCode =
+        await deviceAuthorizationService.getByUserCode("EXCH-1234");
+      assert(byUserCode, "the approved authorization is stored");
+      const saveReached = Promise.withResolvers<void>();
+      const saveRelease = Promise.withResolvers<void>();
+      using save = vi.spyOn(tokenService, "save");
+      save.mockImplementationOnce(async () => {
+        saveReached.resolve();
+        await saveRelease.promise;
+        throw new Error("token insert failed");
+      });
+
+      const first = poll();
+      const firstSettled = first.then(
+        () => undefined,
+        () => undefined,
+      );
+      await Promise.race([saveReached.promise, firstSettled]);
+      expect(await deviceAuthorizationService.revoke(byUserCode)).toBe(false);
+      saveRelease.resolve();
+      await firstSettled;
+
+      await rejection(
+        poll(),
+        InvalidGrantError,
+        undefined,
+        "a claim the verification page saw as gone must stay gone",
+      );
+    });
+
+    it("spends the approval when no token can be issued for it", async () => {
+      const { tokenService, deviceAuthorizationService, poll } =
+        await createExchangingGrant();
+      const failure = new Error("access token could not be minted");
+      using generate = vi.spyOn(tokenService, "generateAccessToken");
+      generate.mockRejectedValueOnce(failure);
+
+      expect(await rejection(poll())).toBe(failure);
+
+      expect(
+        await deviceAuthorizationService.getByDeviceCode("exchanged-code"),
+      ).toBe(undefined);
+    });
+
+    it("issues one token however many polls race an atomic exchange", async () => {
+      const { tokenService, poll } = await createExchangingGrant();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 4 }, () => poll()),
+      );
+
+      const issued = results.filter((result) => result.status === "fulfilled");
+      expect(issued.length).toBe(1);
+      for (const result of results) {
+        if (result.status === "rejected") {
+          assert.instanceOf(result.reason, InvalidGrantError);
+        }
+      }
+      const { accessToken } = (
+        issued[0] as PromiseFulfilledResult<{ accessToken: string }>
+      ).value;
+      expect((await tokenService.getToken(accessToken))?.accessToken).toBe(
+        accessToken,
+      );
     });
 
     it("should return token when user has authorized", async () => {

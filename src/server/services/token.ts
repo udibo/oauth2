@@ -1,6 +1,7 @@
 import type { ClientInterface } from "../../models/client.ts";
 import type { AuthenticationContext } from "../../models/authentication.ts";
 import type { AuthorizationCode } from "../../models/authorization-code.ts";
+import type { DeviceAuthorization } from "../../models/device-authorization.ts";
 import type { RefreshToken, Token } from "../../models/token.ts";
 import type { AbstractScope, BasicScope } from "../../models/scope.ts";
 import type { ClientServiceInterface } from "./client.ts";
@@ -318,6 +319,26 @@ export interface TokenServiceInterface<
    */
   exchangeCode?(
     authorizationCode: AuthorizationCode<Client, User, Scope>,
+    token: Token<Client, User, Scope>,
+  ): Promise<Token<Client, User, Scope> | undefined>;
+
+  /**
+   * Redeems an approved device authorization in one atomic step: claims
+   * `authorization` as `DeviceAuthorizationServiceInterface.revoke` would,
+   * removing it by both of its codes, and persists `token`, the token issued
+   * from it, or does neither. Resolves the saved token, or `undefined` with
+   * nothing persisted when the authorization was already claimed or never
+   * stored. Concurrent calls for one device code persist exactly one token.
+   *
+   * When implemented, the device authorization grant calls it instead of
+   * claiming with `revoke` and saving with {@linkcode save}. Without it, the
+   * grant claims and then saves in two calls, so a save that fails after the
+   * claim spends the user's approval and the device must start over. A failed
+   * insert must leave the authorization claimable; committing the delete and
+   * the insert in one database transaction meets this.
+   */
+  exchangeDeviceCode?(
+    authorization: DeviceAuthorization<Client, User, Scope>,
     token: Token<Client, User, Scope>,
   ): Promise<Token<Client, User, Scope> | undefined>;
 

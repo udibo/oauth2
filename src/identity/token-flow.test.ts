@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MemoryTokenFlowStore,
+  type TokenFlowRecord,
   TokenFlowService,
   type TokenFlowStore,
   TokenPurpose,
@@ -167,6 +168,93 @@ describe("TokenFlowService", () => {
       (await tokens.consume(TokenPurpose.PasswordReset, b.token))?.subject,
     ).toStrictEqual("u1");
   });
+  it("leaves one live link when creates that invalidate existing ones race", async () => {
+    const { tokens } = setup();
+    const created = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        tokens.create({
+          purpose: TokenPurpose.PasswordReset,
+          subject: "u1",
+          ttlMs: HOUR,
+          invalidateExisting: true,
+        }),
+      ),
+    );
+
+    const live = [];
+    for (const { token } of created) {
+      if (await tokens.validate(TokenPurpose.PasswordReset, token)) {
+        live.push(token);
+      }
+    }
+    expect(
+      live.length,
+      "each create invalidates the others, so only one link may still work",
+    ).toStrictEqual(1);
+  });
+
+  it("replaces pending tokens in one replacePending call when the store has it", async () => {
+    const backing = new MemoryTokenFlowStore();
+    const store = {
+      save: vi.fn((record: TokenFlowRecord) => backing.save(record)),
+      get: (hash: string) => backing.get(hash),
+      markConsumed: (hash: string, at: number) =>
+        backing.markConsumed(hash, at),
+      deleteBySubject: vi.fn((purpose: string, subject: string) =>
+        backing.deleteBySubject(purpose, subject),
+      ),
+      replacePending: vi.fn((record: TokenFlowRecord) =>
+        backing.replacePending(record),
+      ),
+    } satisfies TokenFlowStore;
+    const tokens = new TokenFlowService(store);
+
+    const { token } = await tokens.create({
+      purpose: TokenPurpose.PasswordReset,
+      subject: "u1",
+      ttlMs: HOUR,
+      invalidateExisting: true,
+    });
+
+    expect(store.replacePending).toHaveBeenCalledTimes(1);
+    expect(
+      store.deleteBySubject,
+      "a separate delete reopens the delete-then-insert race",
+    ).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
+    expect(
+      (await tokens.validate(TokenPurpose.PasswordReset, token))?.subject,
+    ).toStrictEqual("u1");
+  });
+
+  it("invalidates then saves on a store without replacePending", async () => {
+    const backing = new MemoryTokenFlowStore();
+    const store: TokenFlowStore = {
+      save: (record) => backing.save(record),
+      get: (hash) => backing.get(hash),
+      markConsumed: (hash, at) => backing.markConsumed(hash, at),
+      deleteBySubject: (purpose, subject) =>
+        backing.deleteBySubject(purpose, subject),
+    };
+    const tokens = new TokenFlowService(store);
+    const first = await tokens.create({
+      purpose: TokenPurpose.SignIn,
+      subject: "u1",
+      ttlMs: HOUR,
+    });
+    const second = await tokens.create({
+      purpose: TokenPurpose.SignIn,
+      subject: "u1",
+      ttlMs: HOUR,
+      invalidateExisting: true,
+    });
+
+    expect(await tokens.validate(TokenPurpose.SignIn, first.token)).toBe(null);
+    expect(
+      (await tokens.validate(TokenPurpose.SignIn, second.token))?.subject,
+    ).toStrictEqual("u1");
+  });
+
   it("invalidate drops the subject's pending tokens for that purpose only", async () => {
     const { tokens } = setup();
     const reset = await tokens.create({

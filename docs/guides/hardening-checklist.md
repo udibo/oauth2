@@ -97,13 +97,18 @@ sections apply only when you host those flows.
 
 ## If your app hosts login
 
+- [ ] A device-flow token store implements `exchangeDeviceCode` and passes
+      `runDeviceCodeExchangeContractTests` with its barrier wired, and the
+      device store's `approve` and `deny` change only a pending, unexpired
+      record, passing `runDeviceAuthorizationServiceContractTests`.
 - [ ] The full password credential, including `params`, is persisted.
 - [ ] Automatic rehash/import uses atomic `replaceCredential`; a failed
       comparison writes nothing, and the sign-in proceeds only if the password
       re-verifies against the credential now stored.
 - [ ] Rate limiting and lockout are explicitly configured and enforced.
 - [ ] `RateLimiter` and `AccountLockout` use a `RateLimitStore` and a
-      `LockoutStore` that every instance shares, with an atomic `increment`.
+      `LockoutStore` that every instance shares, with an atomic `increment`
+      and a conditional `lock`.
       `MemoryRateLimitStore` and `MemoryLockoutStore` appear only in
       single-process, test and local configurations. See
       [rate limit and lockout storage](../known-limitations.md#rate-limit-and-lockout-storage-across-instances).

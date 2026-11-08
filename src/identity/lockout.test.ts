@@ -2,8 +2,47 @@ import { describe, expect, it } from "vitest";
 import {
   AccountLockout,
   type AccountLockoutOptions,
+  type LockoutRecord,
+  type LockoutStore,
   MemoryLockoutStore,
 } from "./lockout.ts";
+
+interface HeldLockWrite {
+  store: LockoutStore;
+  reached: Promise<void>;
+  release(): void;
+}
+
+function holdLockWrites(inner: MemoryLockoutStore): HeldLockWrite {
+  const reached = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const held = async <T>(write: () => Promise<T>): Promise<T> => {
+    reached.resolve();
+    await release.promise;
+    return write();
+  };
+  return {
+    store: {
+      get: (userId, now) => inner.get(userId, now),
+      increment: (userId, now) => inner.increment(userId, now),
+      clear: (userId) => inner.clear(userId),
+      set: (userId, record) => held(() => inner.set(userId, record)),
+      lock: (userId, record, now) =>
+        held(() => inner.lock(userId, record, now)),
+    },
+    reached: reached.promise,
+    release: () => release.resolve(),
+  };
+}
+
+function withoutLock(inner: MemoryLockoutStore): LockoutStore {
+  return {
+    get: (userId, now) => inner.get(userId, now),
+    increment: (userId, now) => inner.increment(userId, now),
+    set: (userId, record: LockoutRecord) => inner.set(userId, record),
+    clear: (userId) => inner.clear(userId),
+  };
+}
 
 describe("AccountLockout", () => {
   it("locks after the consecutive-failure threshold", async () => {
@@ -150,6 +189,113 @@ describe("AccountLockout", () => {
       failures: 3,
       locked: true,
       justLocked: false,
+      lockedUntil: now + 60_000,
+    });
+  });
+
+  it("does not re-lock an account reset while an over-budget attempt was locking it", async () => {
+    const inner = new MemoryLockoutStore();
+    const { store, reached, release } = holdLockWrites(inner);
+    const lockout = new AccountLockout({
+      maxAttempts: 3,
+      lockDurationMs: 60_000,
+      store,
+    });
+    const now = 1_000_000;
+    for (let i = 0; i < 3; i++) await inner.increment("u1", now);
+
+    const overBudget = lockout.reserveAttempt("u1", now);
+    await reached;
+    await lockout.reset("u1");
+    release();
+
+    expect(
+      await overBudget,
+      "the attempt is counted again against the record the reset left",
+    ).toStrictEqual({ failures: 1, locked: false, justLocked: false });
+    expect(
+      await lockout.status("u1", now + 1),
+      "a lock computed before the reset must not land after it",
+    ).toStrictEqual({ locked: false, failures: 1, lockedUntil: undefined });
+  });
+
+  it("reports no new lock when a reset lands before the threshold attempt's lock", async () => {
+    const inner = new MemoryLockoutStore();
+    const { store, reached, release } = holdLockWrites(inner);
+    const lockout = new AccountLockout({
+      maxAttempts: 3,
+      lockDurationMs: 60_000,
+      store,
+    });
+    const now = 1_000_000;
+    for (let i = 0; i < 2; i++) await inner.increment("u1", now);
+
+    const threshold = lockout.reserveAttempt("u1", now);
+    await reached;
+    await lockout.reset("u1");
+    release();
+
+    expect(
+      (await threshold).justLocked,
+      "the lockout event fires only for a lock that exists",
+    ).toStrictEqual(false);
+    expect((await lockout.status("u1", now + 1)).locked).toStrictEqual(false);
+  });
+
+  it("admits the attempt unlocked, without a lock, when its recount's lock is refused too", async () => {
+    const inner = new MemoryLockoutStore();
+    let increments = 0;
+    const store: LockoutStore = {
+      get: (userId, now) => inner.get(userId, now),
+      increment: (userId, now) => {
+        increments++;
+        return inner.increment(userId, now);
+      },
+      set: (userId, record) => inner.set(userId, record),
+      clear: (userId) => inner.clear(userId),
+      lock: () => Promise.resolve(false),
+    };
+    const lockout = new AccountLockout({
+      maxAttempts: 2,
+      lockDurationMs: 60_000,
+      store,
+    });
+    const now = 1_000_000;
+    await inner.increment("u1", now);
+
+    const attempt = await lockout.reserveAttempt("u1", now);
+
+    expect(
+      increments,
+      "a refused lock is retried against one fresh count, never looped",
+    ).toBe(2);
+    expect(
+      attempt,
+      "with no lock written, the attempt reports the state the store holds",
+    ).toStrictEqual({ failures: 3, locked: false, justLocked: false });
+    expect((await lockout.status("u1", now)).locked).toBe(false);
+  });
+
+  it("locks through set when the store has no conditional lock", async () => {
+    const inner = new MemoryLockoutStore();
+    const lockout = new AccountLockout({
+      maxAttempts: 2,
+      lockDurationMs: 60_000,
+      store: withoutLock(inner),
+    });
+    const now = 1_000_000;
+
+    await lockout.reserveAttempt("u1", now);
+    const second = await lockout.reserveAttempt("u1", now);
+
+    expect(second).toStrictEqual({
+      failures: 2,
+      locked: true,
+      justLocked: true,
+      lockedUntil: now + 60_000,
+    });
+    expect(await inner.get("u1", now)).toStrictEqual({
+      failures: 2,
       lockedUntil: now + 60_000,
     });
   });
