@@ -21,7 +21,7 @@ import { isMain } from "./_main.ts";
 
 const DEFAULT_ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const PRIVATE_REFERENCE =
-  /(?<![a-z0-9_./-])udibo(?:#\d+\b|\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-]))|(?<![a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?github\.com\/udibo\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-])/i;
+  /(?<![a-z0-9_./-])\/?udibo(?:#[\w-]|\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-]))|(?<![a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?github\.com\/udibo\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-])/i;
 const DEPENDENCY_FIELDS = [
   "dependencies",
   "optionalDependencies",

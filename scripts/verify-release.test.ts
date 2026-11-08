@@ -99,6 +99,31 @@ const cases: Case[] = [
     rejected: true,
   },
   {
+    name: "rejects a private issue shorthand with an empty owner, which release notes resolve to the private repository",
+    message: "fix: synthetic change\n\nRefs /udibo#405",
+    rejected: true,
+  },
+  {
+    name: "rejects a private issue reference with an empty owner",
+    message: "fix: synthetic change\n\nRefs /udibo/udibo#405",
+    rejected: true,
+  },
+  {
+    name: "rejects a private issue shorthand with a non-numeric id",
+    message: "fix: synthetic change\n\nRefs udibo#abc",
+    rejected: true,
+  },
+  {
+    name: "rejects a private repository URL on the www host",
+    message: "fix: synthetic change\n\nSee https://www.github.com/udibo/udibo",
+    rejected: true,
+  },
+  {
+    name: "permits a shorthand issue after another host's path",
+    message: "fix: synthetic change\n\nSee not-github.com/udibo#405",
+    rejected: false,
+  },
+  {
     name: "permits a shorthand issue in a repository with a shared name suffix",
     message: "fix: synthetic change\n\nRefs not-udibo#405 and udibo-docs#405",
     rejected: false,
