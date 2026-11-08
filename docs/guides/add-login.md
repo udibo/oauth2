@@ -319,6 +319,44 @@ const tokens = new TokenFlowService(tokenStore);
 
 A `MemoryTokenFlowStore` ships for development and tests.
 
+## Verify an email address
+
+`requestEmailVerification({ userId, email })` mails a single-use link, and
+`verifyEmail({ token, sessionUserId })` spends it. Pass the id of the user
+signed in on the request that presents the link, read from your session, or
+`null` when there is none. The link verifies only for the account it was minted
+for:
+
+| Request presenting a live link     | Result             | Link     |
+| ---------------------------------- | ------------------ | -------- |
+| Signed in as the link's account    | `success`          | Spent    |
+| No session                         | `sign-in-required` | Unspent  |
+| Signed in as a different account   | `wrong-account`    | Unspent  |
+
+An `expired` or `invalid` link reports that whoever presents it. On either
+refusal, send the person to sign in as the right account and bring them back to
+the same link.
+
+```ts
+import type { IdentityService } from "@udibo/oauth2/identity";
+
+declare const identity: IdentityService<{ id: string }>;
+declare function currentUserId(): string | undefined;
+declare function signInThenReturnTo(link: string): void;
+declare const token: string;
+
+const result = await identity.verifyEmail({
+  token,
+  sessionUserId: currentUserId() ?? null,
+});
+if (result.status === "sign-in-required" || result.status === "wrong-account") {
+  signInThenReturnTo(`/verify-email?token=${encodeURIComponent(token)}`);
+}
+```
+
+`honoIdentityRoutes` answers the refusals with `401`
+`{ error: "sign_in_required" }` and `403` `{ error: "wrong_account" }`.
+
 ## Sessions: visibility and revocation
 
 The library never creates sessions — after `signIn` returns a user, setting your
@@ -845,7 +883,9 @@ endpoints — `/signup`, `/signin`, `/password/reset-request`, `/password/reset`
 `/email/verify` — and maps `IdentityError` codes to statuses
 (`invalid_credentials` 401, `invalid_token` 400, `rate_limited` 429,
 `weak_password` 422, `identifier_taken` 409, `forbidden_origin` 403); your
-`onAuthenticated` hook creates the session. Those routes carry a same-origin
+`onAuthenticated` hook creates the session, and your `sessionUserId` reader
+tells `/email/verify` who is signed in (the route is mounted only with it; see
+[Verify an email address](#verify-an-email-address)). Those routes carry a same-origin
 guard on unsafe methods by default — see
 [known limitations](../known-limitations.md) for the `csrf` option. In any other
 framework — or when you want your own request shapes — call the service methods

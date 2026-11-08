@@ -16,8 +16,11 @@ import {
 
 import {
   type HonoIdentityCsrfOptions,
+  type HonoIdentityOptions,
   honoIdentityRoutes,
 } from "./identity.ts";
+
+const SESSION_HEADER = "x-test-session-user";
 
 interface TestUser {
   id: string;
@@ -29,6 +32,8 @@ function build(
   passwordPolicy?: PasswordPolicy,
   csrf?: HonoIdentityCsrfOptions | false,
   maxBodyBytes?: number,
+  sessionUserId: HonoIdentityOptions<TestUser>["sessionUserId"] | null = (c) =>
+    c.req.header(SESSION_HEADER),
 ) {
   const byId = new Map<string, TestUser>();
   const emailToId = new Map<string, string>();
@@ -91,6 +96,7 @@ function build(
         : undefined,
       csrf,
       maxBodyBytes,
+      sessionUserId: sessionUserId ?? undefined,
     }),
   );
   return { app, service, sent, profiles, verifiedCalls };
@@ -203,13 +209,113 @@ describe("honoIdentityRoutes", () => {
     });
     const token = sent[0].token;
 
-    const ok = await postJson(app, "/auth/email/verify", { token });
+    const session = { [SESSION_HEADER]: user.id };
+
+    const ok = await postJson(app, "/auth/email/verify", { token }, session);
     expect(ok.status).toStrictEqual(200);
     expect((await ok.json()).userId).toStrictEqual(user.id);
 
-    const bad = await postJson(app, "/auth/email/verify", { token: "nope" });
+    const bad = await postJson(
+      app,
+      "/auth/email/verify",
+      { token: "nope" },
+      session,
+    );
     expect(bad.status).toStrictEqual(400);
     await bad.body?.cancel();
+  });
+
+  it("email verify asks a request with no session to sign in (401), keeping the token for its account", async () => {
+    const { app, service, sent, verifiedCalls } = build();
+    const user = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: user.id,
+      email: "a@b.co",
+    });
+    const token = sent[0].token;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await postJson(app, "/auth/email/verify", { token });
+      expect(res.status).toStrictEqual(401);
+      expect(await res.json()).toStrictEqual({ error: "sign_in_required" });
+    }
+    expect(verifiedCalls).toStrictEqual([]);
+
+    const ok = await postJson(
+      app,
+      "/auth/email/verify",
+      { token },
+      { [SESSION_HEADER]: user.id },
+    );
+    expect(await ok.json()).toStrictEqual({ ok: true, userId: user.id });
+    expect(verifiedCalls).toStrictEqual([{ userId: user.id, email: "a@b.co" }]);
+  });
+
+  it("email verify refuses another account's session (403), verifying neither account and keeping the token", async () => {
+    const { app, service, sent, verifiedCalls } = build();
+    const owner = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    const other = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "other@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: owner.id,
+      email: "a@b.co",
+    });
+    const token = sent[0].token;
+
+    const refused = await postJson(
+      app,
+      "/auth/email/verify",
+      { token },
+      { [SESSION_HEADER]: other.id },
+    );
+    expect(refused.status).toStrictEqual(403);
+    expect(await refused.json()).toStrictEqual({ error: "wrong_account" });
+    expect(verifiedCalls).toStrictEqual([]);
+
+    const ok = await postJson(
+      app,
+      "/auth/email/verify",
+      { token },
+      { [SESSION_HEADER]: owner.id },
+    );
+    expect(await ok.json()).toStrictEqual({ ok: true, userId: owner.id });
+    expect(verifiedCalls).toStrictEqual([
+      { userId: owner.id, email: "a@b.co" },
+    ]);
+  });
+
+  it("email verify awaits an async session lookup", async () => {
+    const { app, service, sent } = build(
+      true,
+      undefined,
+      undefined,
+      undefined,
+      (c) => Promise.resolve(c.req.header(SESSION_HEADER) ?? null),
+    );
+    const user = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: user.id,
+      email: "a@b.co",
+    });
+
+    const res = await postJson(
+      app,
+      "/auth/email/verify",
+      { token: sent[0].token },
+      { [SESSION_HEADER]: user.id },
+    );
+    expect(await res.json()).toStrictEqual({ ok: true, userId: user.id });
   });
 
   it("hands the store the address the verification token was issued for", async () => {
@@ -223,9 +329,12 @@ describe("honoIdentityRoutes", () => {
       email: "a@b.co",
     });
 
-    const res = await postJson(app, "/auth/email/verify", {
-      token: sent[0].token,
-    });
+    const res = await postJson(
+      app,
+      "/auth/email/verify",
+      { token: sent[0].token },
+      { [SESSION_HEADER]: user.id },
+    );
     expect(res.status).toStrictEqual(200);
     await res.body?.cancel();
 
@@ -381,6 +490,31 @@ describe("honoIdentityRoutes", () => {
       email: "x@y.co",
     });
     expect(reset.status).toStrictEqual(200);
+  });
+
+  it("does not mount email verify without a sessionUserId reader", async () => {
+    const { app, service, sent, verifiedCalls } = build(
+      true,
+      undefined,
+      undefined,
+      undefined,
+      null,
+    );
+    const user = await service.signUp({
+      password: "hunter2hunter2",
+      profile: { email: "a@b.co" },
+    });
+    await service.requestEmailVerification({
+      userId: user.id,
+      email: "a@b.co",
+    });
+
+    const res = await postJson(app, "/auth/email/verify", {
+      token: sent[0].token,
+    });
+    expect(res.status).toStrictEqual(404);
+    await res.body?.cancel();
+    expect(verifiedCalls).toStrictEqual([]);
   });
 });
 

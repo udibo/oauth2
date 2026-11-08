@@ -29,7 +29,8 @@
  * Session creation stays in your app: the `signup`/`signin` routes call your
  * `onAuthenticated(c, user)` hook on success, where you mint your session and
  * return a `Response` (e.g. a redirect via `bff.loginContinuation`). Omit the
- * hook to mount only the stateless reset/verify routes.
+ * hook to leave those two routes unmounted. `/email/verify` reads your session
+ * through the `sessionUserId(c)` option and is mounted only when you pass it.
  *
  * Accepts JSON or form-encoded bodies. Responses are simple JSON
  * (`{ ok: true }` / `{ error }`); render your own UI around them. Because a
@@ -65,7 +66,10 @@ export interface HonoIdentityPaths {
   requestPasswordReset?: string;
   /** `POST` password reset (consume token). Default `/password/reset`. */
   resetPassword?: string;
-  /** `POST` email verification (consume token). Default `/email/verify`. */
+  /**
+   * `POST` email verification (consume token), mounted only with
+   * {@link HonoIdentityOptions.sessionUserId}. Default `/email/verify`.
+   */
   verifyEmail?: string;
 }
 
@@ -133,6 +137,33 @@ export interface HonoIdentityOptions<User extends IdentityUser> {
   ) => Response | Promise<Response>;
   /** Override the default paths. */
   paths?: HonoIdentityPaths;
+  /**
+   * Reads the id of the user your app has signed in on this request, or
+   * `null`/`undefined` when there is no session. **Required to mount the
+   * `/email/verify` route**, which passes it to
+   * {@link IdentityService.verifyEmail}: a link verifies only for the account
+   * it was minted for. A live link posted with no session answers `401`
+   * `{ error: "sign_in_required" }`, and with another account's session `403`
+   * `{ error: "wrong_account" }`; both leave the link unspent, so send the
+   * person to sign in and post the same token again.
+   *
+   * @example
+   * ```ts
+   * import { honoIdentityRoutes } from "@udibo/oauth2/hono/identity";
+   * import type { IdentityService } from "@udibo/oauth2/identity";
+   * import type { Context } from "hono";
+   *
+   * declare const identity: IdentityService<{ id: string }>;
+   * declare function readSession(c: Context): { userId: string } | undefined;
+   *
+   * honoIdentityRoutes(identity, {
+   *   sessionUserId: (c) => readSession(c)?.userId,
+   * });
+   * ```
+   */
+  sessionUserId?: (
+    c: Context,
+  ) => string | null | undefined | Promise<string | null | undefined>;
 }
 
 function handle(fn: (c: Context) => Response | Promise<Response>): Handler {
@@ -250,7 +281,9 @@ function sameOriginGuard(options: HonoIdentityCsrfOptions): MiddlewareHandler {
 /**
  * Build a Hono app mounting the password-credential endpoints
  * (`/signup`, `/signin`, `/password/reset-request`, `/password/reset`,
- * `/email/verify`) over `service`. Mount it wherever you like, e.g.
+ * `/email/verify`) over `service`. `/signup` and `/signin` need
+ * {@link HonoIdentityOptions.onAuthenticated}, and `/email/verify` needs
+ * {@link HonoIdentityOptions.sessionUserId}. Mount it wherever you like, e.g.
  * `app.route("/auth", honoIdentityRoutes(service, …))`.
  *
  * A JSON body keeps each field's type except `password`, `identifier`, `email`,
@@ -284,7 +317,7 @@ export function honoIdentityRoutes<User extends IdentityUser>(
     verifyEmail: "/email/verify",
     ...options.paths,
   };
-  const onAuthenticated = options.onAuthenticated;
+  const { onAuthenticated, sessionUserId } = options;
   if (options.csrf !== false) {
     app.use("*", sameOriginGuard(options.csrf ?? {}));
   }
@@ -339,17 +372,28 @@ export function honoIdentityRoutes<User extends IdentityUser>(
     }),
   );
 
-  app.post(
-    paths.verifyEmail,
-    handle(async (c) => {
-      const body = await readBody(c, maxBodyBytes);
-      const result = await service.verifyEmail(String(body.token ?? ""));
-      if (result.status === "success") {
-        return c.json({ ok: true, userId: result.userId });
-      }
-      return c.json({ error: `token_${result.status}` }, 400);
-    }),
-  );
+  if (sessionUserId) {
+    app.post(
+      paths.verifyEmail,
+      handle(async (c) => {
+        const body = await readBody(c, maxBodyBytes);
+        const result = await service.verifyEmail({
+          token: String(body.token ?? ""),
+          sessionUserId: (await sessionUserId(c)) ?? null,
+        });
+        switch (result.status) {
+          case "success":
+            return c.json({ ok: true, userId: result.userId });
+          case "sign-in-required":
+            return c.json({ error: "sign_in_required" }, 401);
+          case "wrong-account":
+            return c.json({ error: "wrong_account" }, 403);
+          default:
+            return c.json({ error: `token_${result.status}` }, 400);
+        }
+      }),
+    );
+  }
 
   return app;
 }

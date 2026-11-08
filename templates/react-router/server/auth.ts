@@ -90,6 +90,7 @@ auth.route(
       startSession(c, user.id, returnTo);
       return c.redirect(bff.loginContinuation(returnTo));
     },
+    sessionUserId: (c) => readSession(c)?.userId,
   }),
 );
 
