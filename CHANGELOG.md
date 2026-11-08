@@ -1,3 +1,9 @@
+## [0.50.0](https://github.com/udibo/oauth2/compare/0.49.0...0.50.0) (2026-11-08)
+
+### Features
+
+* **identity:** bind sign-in links to the requesting browser ([#185](https://github.com/udibo/oauth2/issues/185)) ([4dce859](https://github.com/udibo/oauth2/commit/4dce859b3f737a9f130baf9e9dd2eac77e5cb9ec))
+
 ## [0.49.0](https://github.com/udibo/oauth2/compare/0.48.0...0.49.0) (2026-11-08)
 
 ### ⚠ BREAKING CHANGES
