@@ -134,7 +134,11 @@ export function runTokenFlowStoreContractTests(
       it("round-trips every field of a saved record", async () => {
         const saved = record({
           tokenHash: hash("1"),
-          data: { email: "user@example.com" },
+          data: {
+            email: "user@example.com",
+            binding: "a-sign-in-link-binding",
+            nested: { list: [1, "two"] },
+          },
         });
         await store.save(saved);
         const fetched = await store.get(hash("1"));

@@ -184,7 +184,10 @@ export type IdentityEvent =
   | { type: "email_verification.failed"; reason: "expired" | "invalid" }
   | { type: "signin_link.requested"; email: string; userId?: string }
   | { type: "signin_link.consumed"; userId: string }
-  | { type: "signin_link.failed"; reason: "expired" | "invalid" }
+  | {
+      type: "signin_link.failed";
+      reason: "expired" | "invalid" | "other_browser";
+    }
   | {
       type: "signin_link.rate_limited";
       email: string;

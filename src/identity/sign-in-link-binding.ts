@@ -3,17 +3,17 @@
  *
  * When a browser asks for a sign-in email, {@link createSignInLinkBinding}
  * returns a random `nonce` for your app to keep in that browser (an `HttpOnly`
- * cookie) and its `binding`, the SHA-256 of the nonce, for the link to carry
- * (pass it to {@link IdentityService.requestSignInLink}). When the link is
- * opened, {@link verifySignInLinkBinding} checks the browser's nonce against
- * the link's binding before you hand the token to
- * {@link IdentityService.consumeSignInLink}, so a refusal leaves the link
- * unspent and still usable in the browser that asked for it.
+ * cookie) and its `binding`, the SHA-256 of the nonce. Pass the binding to
+ * {@link IdentityService.requestSignInLink}, which stores it with the token and
+ * puts it on the link. When the link is opened, pass the browser's nonce to
+ * {@link IdentityService.consumeSignInLink}: it redeems the link only when the
+ * nonce hashes to the stored binding, and otherwise leaves the link unspent and
+ * still usable in the browser that asked for it.
  *
- * The binding is not a secret: it keeps a link from signing in a browser that
- * did not ask for it, and is no protection once someone else holds the link.
- * Keep the nonce in a `__Host-` prefixed cookie so another subdomain cannot
- * plant one.
+ * The binding is not a secret. Because the check runs against the binding
+ * stored with the token, holding the link and setting a nonce of one's own is
+ * not enough to redeem it. Keep the nonce in a `__Host-` prefixed cookie so
+ * another subdomain cannot plant one.
  *
  * @module
  */
@@ -78,9 +78,9 @@ export function createSignInLinkBinding(
 /**
  * Whether a link carrying `binding` was asked for by the browser holding
  * `nonce`. Compares in constant time and is `false` when either value is
- * missing or the nonce is malformed. Call it before
- * {@link IdentityService.consumeSignInLink}, so a link opened elsewhere is
- * refused without its token being read or spent.
+ * missing or the nonce is malformed. {@link IdentityService.consumeSignInLink}
+ * runs this check against the binding stored with the token when given a
+ * `nonce`; call it yourself only to compare a binding you hold separately.
  *
  * @param nonce The nonce the opening browser holds, if any.
  * @param binding The binding the link carries, if any.

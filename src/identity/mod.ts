@@ -107,6 +107,7 @@ export {
   supportsSessionListing,
 } from "./session.ts";
 export {
+  type ConsumeSignInLinkOptions,
   type ConsumeSignInLinkResult,
   type IdentityRateLimiters,
   IdentityService,
