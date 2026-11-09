@@ -1,3 +1,9 @@
+## [0.51.0](https://github.com/udibo/oauth2/compare/0.50.0...0.51.0) (2026-11-09)
+
+### Features
+
+* **identity:** check sign-in link bindings at consumption ([#188](https://github.com/udibo/oauth2/issues/188)) ([53a3916](https://github.com/udibo/oauth2/commit/53a39167da80f3771ca945c042c08aacdee883d5))
+
 ## [0.50.0](https://github.com/udibo/oauth2/compare/0.49.0...0.50.0) (2026-11-08)
 
 ### Features
