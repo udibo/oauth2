@@ -1691,6 +1691,7 @@ describe("IdentityService lockout", () => {
 describe("IdentityService lockout under concurrent sign-ins", () => {
   const MAX_ATTEMPTS = 3;
   const CONCURRENT_GUESSES = 10;
+  const LOCK_DURATION_MS = 60_000;
 
   function gatedHasher() {
     const gate = Promise.withResolvers<void>();
@@ -1716,7 +1717,7 @@ describe("IdentityService lockout under concurrent sign-ins", () => {
     const hasher = gatedHasher();
     const lockout = new AccountLockout({
       maxAttempts: MAX_ATTEMPTS,
-      lockDurationMs: 60_000,
+      lockDurationMs: LOCK_DURATION_MS,
       store: new MemoryLockoutStore(),
     });
     const service = serviceWithoutSignInFloor({
@@ -1760,6 +1761,8 @@ describe("IdentityService lockout under concurrent sign-ins", () => {
   it("lets at most maxAttempts concurrent guesses reach the password check", async () => {
     const { service, events, hasher, lockout } = makeConcurrentService();
     const user = await signUpAlice(service);
+    const signInAt = Date.now();
+    using _clock = vi.spyOn(Date, "now").mockReturnValue(signInAt);
 
     const results = await guessConcurrently(service, hasher);
 
@@ -1774,7 +1777,7 @@ describe("IdentityService lockout under concurrent sign-ins", () => {
         userId: user.id,
         identifier: "a@b.co",
         failures: MAX_ATTEMPTS,
-        lockedUntil: (await lockout.status(user.id)).lockedUntil,
+        lockedUntil: signInAt + LOCK_DURATION_MS,
         enforced: true,
       },
     ]);
@@ -1784,7 +1787,9 @@ describe("IdentityService lockout under concurrent sign-ins", () => {
     expect(eventsOfType(events, "sign_in.failed").length).toStrictEqual(
       MAX_ATTEMPTS,
     );
-    expect((await lockout.status(user.id)).locked).toStrictEqual(true);
+    expect((await lockout.status(user.id)).lockedUntil).toStrictEqual(
+      signInAt + LOCK_DURATION_MS,
+    );
   });
 
   it("refuses the correct password once concurrent guesses spent the budget", async () => {
