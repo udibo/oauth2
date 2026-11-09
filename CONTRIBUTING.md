@@ -166,6 +166,12 @@ releases and the changelog:
 - `chore(deps):` / `build(deps):` dependency bumps (patch — the `deps` scope is
   required for a release to be cut)
 - Present tense, lowercase, subject under 72 characters.
+- Reference only public issues, pull requests and URLs in commit messages, PR
+  titles and PR bodies: `Closes #<n>` for this repository, `owner/repo#<n>` for
+  another public one. The public release notes turn a `repo#<n>` or
+  `owner/repo#<n>` reference into a link to that repository, so CI refuses a pull request whose title, body
+  or commits reference the private application repository by URL, by name or
+  by that shorthand. Keep that traceability in the private repository instead.
 
 ## Releases
 

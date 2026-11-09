@@ -4,7 +4,9 @@
  * are prepared, or anything is pushed or published; pull-request CI runs the
  * references guard alone.
  *
- * - Unreleased commits must not reference the private application repository.
+ * - Unreleased commits must not reference the private application repository,
+ *   by URL, by `owner/repo` name, or by the `repo#N` shorthand that release
+ *   notes would link to it.
  * - A runtime dependency must not resolve through JSR, and `.npmrc` must not
  *   route the `@jsr` scope, because the npm package would then fail to install
  *   for anyone without that registry configured (see PUBLISHING.md).
@@ -19,7 +21,7 @@ import { isMain } from "./_main.ts";
 
 const DEFAULT_ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const PRIVATE_REFERENCE =
-  /(?<![a-z0-9_.-])(?:udibo\/udibo#\d+\b|(?:https?:\/\/)?(?:www\.)?github\.com\/udibo\/udibo(?:\.git)?(?![a-z0-9_.-]))/i;
+  /(?<![a-z0-9_./-])\/?udibo(?:#[\w-]|\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-]))|(?<![a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?github\.com\/udibo\/udibo(?:\.git)?(?![a-z0-9_-]|\.[a-z0-9_-])/i;
 const DEPENDENCY_FIELDS = [
   "dependencies",
   "optionalDependencies",

@@ -52,7 +52,8 @@ The release job depends on these:
 The `0.0.0` tag on the initial package import is a version baseline, not a
 published package. `scripts/verify-release.ts` rejects commits since
 semantic-release's last release head that reference the private application
-repository, before notes are generated, release files are prepared, or packages
+repository — by URL, by `owner/repo` name, or by the `repo#<n>` shorthand that
+release notes would link to it — before notes are generated, release files are prepared, or packages
 are published. With no previous release, it checks all commits. Pull-request CI
 applies the same check to commits since the base head and the proposed squash
 title and body, including edits to that text. Keep commit footers and URLs
