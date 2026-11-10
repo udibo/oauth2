@@ -117,12 +117,10 @@ npx udibo-oauth2 idp dev \
 
 The [quickstart](../quickstart.md#start-from-npm-no-account) has the complete
 Hono app: redirect sign-in, callback, a protected page, and sign-out. What
-follows is how its settings line up with this server's, so nothing is copied by
-hand from the startup output.
+follows is how its settings line up with this server's.
 
-Pin the port and the issuer in the config (or with `--port` and `--issuer`) and
-give the app the same values, so the startup output never has to be copied by
-hand:
+Pin the port and the issuer in the config and give the app the same values, so
+the startup output never has to be copied by hand:
 
 | Provider (`idp.json`)    | App (`DirectClient`)     | Must match                                               |
 | ------------------------ | ------------------------ | -------------------------------------------------------- |
@@ -130,6 +128,8 @@ hand:
 | `clients[].id`           | `clientId`               | Exactly                                                  |
 | `clients[].secret`       | `clientSecret`           | Exactly                                                  |
 | `clients[].redirectUris` | `redirectUri`            | Listed exactly (a loopback IP literal ignores the port)  |
+
+Alternatively, pin them with flags, which override the file:
 
 ```sh
 npx udibo-oauth2 idp dev --config idp.json --port 9000 --issuer http://127.0.0.1:9000
@@ -152,7 +152,10 @@ Three traps the quickstart's app avoids:
   `authenticated` or `signedIn` do not exist on it.
 - **A form `POST` to `/auth/logout` is refused with 403.** That route requires
   the BFF's CSRF header, which a plain HTML form cannot send. A same-origin link
-  to `GET /auth/logout` works from a page.
+  to `GET /auth/logout` works from a page, because the BFF accepts a `GET` only
+  for same-origin browser navigations (a scripted `GET` with no `Sec-Fetch-Site`,
+  `Origin`, or `Referer` gets 403). For production, sign out with a `POST` that
+  carries the `x-csrf: 1` header, the stronger path.
 
 Signing out of the app does not sign out of this provider. Its discovery
 document advertises no end-session endpoint, so the BFF's `rpInitiatedLogout`

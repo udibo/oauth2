@@ -65,8 +65,11 @@ provider's issuer and port so the app can be configured once:
 ### Write the app
 
 Save this as `app.ts`. The `issuer`, `clientId`, `clientSecret`, and
-`redirectUri` in `DirectClient` are the values `idp.json` declares, and
-`DirectClient` discovers the provider's endpoints from the issuer.
+`redirectUri` in `DirectClient` come from environment variables, defaulting to
+the values `idp.json` declares, and `DirectClient` discovers the provider's
+endpoints from the issuer. The defaults are local demo values: never commit a
+real client secret, and set `AUTH_CLIENT_SECRET` from your secret store when you
+use a real registration.
 
 ```ts
 import { serve } from "@hono/node-server";
@@ -80,10 +83,11 @@ import {
 } from "@udibo/oauth2/hono/bff";
 
 const client = new DirectClient({
-  issuer: "http://127.0.0.1:9000",
-  clientId: "demo-app",
-  clientSecret: "demo-secret",
-  redirectUri: "http://127.0.0.1:3100/auth/callback",
+  issuer: process.env.AUTH_ISSUER ?? "http://127.0.0.1:9000",
+  clientId: process.env.AUTH_CLIENT_ID ?? "demo-app",
+  clientSecret: process.env.AUTH_CLIENT_SECRET ?? "demo-secret",
+  redirectUri:
+    process.env.AUTH_CALLBACK_URL ?? "http://127.0.0.1:3100/auth/callback",
 });
 
 const bff = new HonoBff({
@@ -136,7 +140,11 @@ Open <http://127.0.0.1:3100/>, select **Sign in**, and enter
 `/dashboard` showing "Hello, Alice Example". Opening `/dashboard` with no
 session sends you through the same sign-in. Stop each process with Ctrl+C.
 
-Selecting **Sign out** ends the app's session. The provider keeps its own
+Selecting **Sign out** ends the app's session. The link is a `GET`, which the
+BFF accepts only for same-origin browser navigations: a scripted `GET` with no
+`Sec-Fetch-Site`, `Origin`, or `Referer` header gets 403. For production, sign
+out with a `POST` that carries the `x-csrf: 1` header, which the BFF's own
+documentation describes as the stronger path. The provider keeps its own
 browser session, so the next sign-in completes without asking for a password
 again. To see the sign-in page again, also open <http://127.0.0.1:9000/logout>.
 
@@ -155,7 +163,7 @@ explains each value.
 
 ### Moving to a hosted OpenID Connect issuer
 
-The app code stays the same; the configuration changes:
+The app code stays the same; set the `AUTH_*` environment variables it reads:
 
 | Setting       | Local provider                  | Hosted issuer                                                  |
 | ------------- | ------------------------------- | -------------------------------------------------------------- |
@@ -166,10 +174,21 @@ The app code stays the same; the configuration changes:
 | Scopes        | `openid profile email`          | Only scopes your registration allows                           |
 
 Before production, also replace what the local path leaves in memory or
-disabled: swap `MemorySessionStore` for a persistent `SessionStore` shared by
-every instance, swap `MemoryAuthRequestStorageFactory` for
-`EncryptedCookieAuthRequestStorage`, and remove `cookie: { secure: false }` from
-the BFF options so the HTTPS defaults apply. The
+disabled:
+
+- Swap `MemoryAuthRequestStorageFactory` for `EncryptedCookieAuthRequestStorage`,
+  which takes a `secret` shared by every instance.
+- Swap `MemorySessionStore` for a persistent `SessionStore` shared by every
+  instance, or for the stateless `EncryptedCookieSessionStore`, which also takes
+  a `secret` (a list, to rotate it). Give each store a secret of its own, kept
+  in your secret store.
+- Remove `cookie: { secure: false }` from the BFF options so the HTTPS defaults
+  apply.
+
+Sign-out against a hosted issuer can also end the issuer's session. Set
+`rpInitiatedLogout: true` on the BFF; it works when the issuer's discovery
+document advertises an `end_session_endpoint`, and the post-logout redirect URI
+(your app's return URL) must be registered with the issuer. The
 [environments guide](guides/deploy-across-environments.md) keeps these values
 together per environment, and the
 [deployment guide](guides/production-deployment.md) and
