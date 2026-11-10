@@ -172,7 +172,11 @@ tokenService.acceptedResource = async (client, user, resource, scope) =>
 ```
 
 `currentResourceAccess` is your policy: check the client's current authority,
-resource availability and allowed scopes together. A resource URI is an
+resource availability and allowed scopes together. The policy also receives an
+optional fifth argument, `{ grantType: "client_credentials" }`, and serves the
+authorization code grant too once that grant opts in, as the next section
+shows. Accept only the canonical spelling of each resource: the value is
+stored and used as `aud` exactly as sent. A resource URI is an
 identifier, never a URL the library fetches. A multi-tenant API should use a
 resource specific to the destination tenant, for example
 `https://api.example.com/workspaces/one`. Multiple values, even equal repeats,
@@ -191,16 +195,180 @@ extension claims. An opaque-token API must compare the stored resource; a JWT
 API must validate issuer and audience. Both still enforce current grants and
 scope: binding a token does not itself authorize a resource.
 
-This support is for the client-credentials grant only. It issues no refresh
-token. A refresh parent that already carries a resource is refused before
-rotation, rather than issuing a successor that loses the binding. Other grants,
-multiple-resource issuance and assistant authorization are outside this feature.
+The client-credentials grant issues no refresh token. To bind the tokens a user
+authorizes, opt the authorization code and refresh grants in as described next.
+Multiple-resource issuance, the device authorization grant and the password
+grant are outside this feature.
 
 RFC 6749 §4.4 limits that grant to confidential clients, so it refuses any
 request that presents no client secret with `401 invalid_client` — a public
 client, or a confidential client that left its secret out. Register each machine
 client with a secret and have it send that secret with HTTP Basic or as
 `client_secret` in the body, not both.
+
+### Bind user tokens to one resource
+
+Clients that follow RFC 8707, such as Model Context Protocol clients, send
+`resource` on both the authorization request and the token request. Construct
+the `AuthorizationCodeGrant` and the `RefreshTokenGrant` with
+`resourceIndicators: true` to bind the tokens from that flow to one resource,
+decided by the same `tokenService.acceptedResource` policy.
+
+One policy serves both grants: implementing `acceptedResource` opts the
+client-credentials grant in as well, where it is called with no interaction
+and with whatever user `clientService.getUser(client)` resolves. Its optional
+fifth argument, `{ grantType }`, is `"authorization_code"` at the
+authorization endpoint and `"client_credentials"` at the token endpoint, so
+the policy can treat machine issuance and user issuance differently. Always
+check `client` too: a policy that looks only at `user` lets a machine client
+whose `getUser` resolves a person mint a token for any resource that person
+may use.
+
+```ts
+import {
+  AuthorizationCodeGrant,
+  RefreshTokenGrant,
+  type AuthorizationCodeServiceInterface,
+  type ClientServiceInterface,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+
+interface McpClient { id: string; grants?: string[]; redirectUris?: string[] }
+interface Person { id: string }
+declare const clientService: ClientServiceInterface<McpClient, Person>;
+declare const tokenService: TokenServiceInterface<McpClient, Person>;
+declare const authorizationCodeService: AuthorizationCodeServiceInterface<
+  McpClient,
+  Person
+>;
+declare function personMayUse(
+  personId: string,
+  resource: string,
+  scopes: readonly string[],
+): Promise<boolean>;
+declare function machineMayUse(
+  clientId: string,
+  resource: string,
+  scopes: readonly string[],
+): Promise<boolean>;
+
+const resourcesByClient = new Map<string, readonly string[]>([
+  ["mcp-desktop", ["https://mcp.example.com/mcp"]],
+  ["inventory-worker", ["https://api.example.com/inventory"]],
+]);
+
+tokenService.acceptedResource = async (
+  client,
+  user,
+  resource,
+  scope,
+  context,
+) => {
+  if (resource === undefined) return true;
+  if (!resourcesByClient.get(client.id)?.includes(resource)) return false;
+  const scopes = [...(scope ?? [])];
+  switch (context?.grantType) {
+    case "authorization_code":
+      return user !== undefined && await personMayUse(user.id, resource, scopes);
+    case "client_credentials":
+      return await machineMayUse(client.id, resource, scopes);
+    default:
+      return false;
+  }
+};
+
+const services = { clientService, tokenService, authorizationCodeService };
+const grants = {
+  authorization_code: new AuthorizationCodeGrant<McpClient, Person>({
+    resolve: () => services,
+    resourceIndicators: true,
+  }),
+  refresh_token: new RefreshTokenGrant<McpClient, Person>({
+    resolve: () => services,
+    resourceIndicators: true,
+  }),
+};
+```
+
+Returning `true` for `undefined` allows unbound tokens; return `false` there
+to require a resource for selected clients or grants.
+
+The binding is decided once and then carried, and every comparison is an exact
+string comparison: `https://mcp.example.com/mcp`,
+`https://mcp.example.com/mcp/` and `https://MCP.example.com/mcp` are three
+different resources. The library does not normalize, and the policy cannot
+either: it only answers yes or no, and the spelling the client sent is what is
+stored and what becomes the token's `aud`. Accept only the canonical spelling
+of each resource, as the exact allow-list above does, so a differently cased or
+otherwise variant spelling is refused with `invalid_target`. Accepting a
+variant would mint a token whose `aud` a resource server expecting the
+canonical value rejects.
+
+1. **Authorization request.** The endpoint reads zero or one `resource` with the
+   same rules as the client-credentials grant: one absolute URI without a
+   fragment, kept exactly as spelled. After sign-in and consent it calls
+   `acceptedResource(client, user, resource, scope, { grantType:
+   "authorization_code" })` with the signed-in user and the consented scope,
+   including when no resource was named, and also under `prompt=none`. Only `true`
+   accepts. A malformed or repeated value, or a refusal, is `invalid_target`,
+   redirected to the client like other authorization errors once its client
+   and `redirect_uri` are verified, and answered directly otherwise. The
+   accepted value is stored with the code. A token service without
+   `acceptedResource` fails the request with `server_error`.
+   `authenticateUser` and `handleConsent` receive the named resource as
+   `authentication.resource`, exactly as spelled: show it on the consent
+   screen. It is the syntactically valid resource the client asked for, not
+   yet accepted by `acceptedResource`, which runs after consent; do not record
+   consent for it as granted until a code is actually issued. If you remember consent by returning `authorizedScope` from
+   `authenticateUser`, which skips `handleConsent` (and lets `prompt=none`
+   succeed), key what you remember by resource where access differs between
+   resources, or a remembered consent for one resource silently covers
+   another the policy accepts.
+2. **Token request.** `resource` may be omitted or repeat the stored value
+   exactly. Anything else is `invalid_target`, and the code is consumed just as
+   when its `code_verifier` or `redirect_uri` does not match. The access token
+   and refresh token are bound to the stored resource. A code issued without a
+   resource yields unbound tokens, and naming a resource for it is
+   `invalid_target`: a resource can only be chosen at the authorization step.
+3. **Refresh.** For a bound refresh token, `resource` may be omitted or repeat
+   the binding exactly, and the successor access and refresh tokens keep it.
+   For an unbound token, any `resource` is `invalid_target`, so refresh never
+   adds a binding. A refused request is answered before rotation, so the
+   presented refresh token stays live and no reuse detection runs. Scope may
+   still narrow as usual.
+
+RFC 8707 lets a server issue a refresh token for several resources and narrow
+each refresh to any of them. This single-resource rule deliberately does not:
+a grant carries at most one resource for its whole life. Authorize again to
+use a different resource. The policy is consulted only at the authorization
+step; to withdraw a person's access to a resource, revoke their tokens.
+
+Your stores must keep the binding:
+
+- The authorization code store persists `AuthorizationCode.resource` and
+  returns it unchanged from `get`. The grant reads each bound code back after
+  saving it and, when the value is missing or different, revokes the code and
+  fails with `server_error` instead of redirecting with it.
+  `runAuthorizationCodeServiceContractTests` checks the round trip when you
+  pass `supportedResource`.
+- The token store persists `Token.resource` on access and refresh tokens,
+  including through `exchangeCode`, `rotate` and revoked records. The grants
+  read each bound token back through `getToken` and `getRefreshToken` and,
+  when the binding is missing or differs, revoke the token and fail with
+  `server_error`. Pass `supportedRefreshResource` to
+  `runTokenServiceContractTests` to check refresh tokens, rotation and
+  revoked records, and `supportedResource` to `runCodeExchangeContractTests`
+  to check `exchangeCode`: a store that drops the field on a later read
+  passes the grants' issuance checks but unbinds the next exchange or
+  refresh.
+- Leave `resourceIndicators` off the `RefreshTokenGrant` and a bound refresh
+  token is refused with `invalid_target`, never refreshed without its binding.
+
+`createJwtAccessTokenGenerator` puts the bound resource in `aud` in place of
+its configured `audience`, for every token the code and refresh grants issue,
+and introspection reports it as `aud` for access and refresh tokens alike. The
+id_token's `aud` remains the client. Tokens from a code issued without a
+resource keep the configured audience.
 
 Any endpoint you omit defaults to `${issuer}${path}` (e.g. `${issuer}/token`),
 so a server whose endpoints sit at the issuer root needs only `issuer`. The

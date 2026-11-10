@@ -130,6 +130,13 @@ export interface CodeExchangeContractOptions<
    * `exchangeCode` saved. Defaults to `true`.
    */
   revokeCodeChecksVerifier?: boolean;
+  /**
+   * A resource URI whose exact round trip through `exchangeCode` to check:
+   * the token it resolves and the token `getToken` reads back keep the
+   * code's `resource`. Supply it when this store backs an authorization code
+   * grant with `resourceIndicators` enabled; leave absent otherwise.
+   */
+  supportedResource?: string;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
 }
@@ -371,6 +378,23 @@ export function runCodeExchangeContractTests<
         ).toBe(true);
         expect(await live([token])).toStrictEqual([]);
       });
+
+      if (options.supportedResource !== undefined) {
+        it("keeps the code's resource on the token it saves", async () => {
+          const resource = options.supportedResource!;
+          const authorizationCode = await savedCode();
+          authorizationCode.resource = resource;
+          const token = { ...(await tokenFor(authorizationCode)), resource };
+
+          const saved = await exchangeCode(authorizationCode, token);
+
+          expect(saved?.resource).toBe(resource);
+          expect(
+            (await tokenService.getToken(token.accessToken))?.resource,
+            "a store must retain the binding, not just return its input",
+          ).toBe(resource);
+        });
+      }
 
       it("revokes the token it saved for the codeVerifierHash it was saved with", async () => {
         const authorizationCode = await savedCode();

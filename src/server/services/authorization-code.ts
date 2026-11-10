@@ -37,7 +37,10 @@ export interface AuthorizationCodeServiceInterface<
 
   /**
    * Saves an authorization code, preserving its `authenticationContext`
-   * snapshot on save and retrieval. Leave legacy context absent.
+   * snapshot on save and retrieval. Leave legacy context absent. When the
+   * authorization code grant enables `resourceIndicators`, also persist
+   * `resource` exactly and restore it from {@linkcode get}; the grant reads
+   * the code back after saving it and refuses to issue one that lost it.
    */
   save(
     authorizationCode: AuthorizationCode<Client, User, Scope>,

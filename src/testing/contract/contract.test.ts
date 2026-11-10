@@ -106,6 +106,7 @@ runClientServiceContractTests<TestClient, TestUser>({
 
 runTokenServiceContractTests<TestClient, TestUser>({
   describeName: "MemoryTokenService satisfies TokenServiceInterface contract",
+  supportedRefreshResource: "https://api.example.com/inventory",
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(
@@ -130,6 +131,7 @@ runTokenServiceContractTests<TestClient, TestUser>({
 runTokenServiceContractTests<TestClient, TestUser>({
   describeName:
     "MemoryTokenService without rotate satisfies TokenServiceInterface contract",
+  supportedRefreshResource: "https://api.example.com/inventory",
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(
@@ -157,6 +159,7 @@ runTokenServiceContractTests<TestClient, TestUser>({
 runTokenServiceContractTests<TestClient, TestUser>({
   describeName:
     "MemoryTokenService without rotate or revokeRotated satisfies TokenServiceInterface contract",
+  supportedRefreshResource: "https://api.example.com/inventory",
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(
@@ -205,6 +208,7 @@ runTokenRotationContractTests<TestClient, TestUser>({
 runCodeExchangeContractTests<TestClient, TestUser>({
   describeName:
     "MemoryTokenService paired with its code store satisfies the exchangeCode contract",
+  supportedResource: "https://api.example.com/inventory",
   exchangeAwaitsBarrier: false,
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
@@ -236,6 +240,7 @@ runCodeExchangeContractTests<TestClient, TestUser>({
 runAuthorizationCodeServiceContractTests<TestClient, TestUser>({
   describeName:
     "MemoryAuthorizationCodeService satisfies AuthorizationCodeServiceInterface contract",
+  supportedResource: "https://api.example.com/inventory",
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(

@@ -34,6 +34,15 @@ export interface AuthorizationCode<
   nonce?: string;
   /** Verified event captured at issuance; code stores must persist and restore it. */
   authenticationContext?: AuthenticationContext;
+  /**
+   * Exact resource URI (RFC 8707) the authorization request named and the
+   * resource policy accepted, set only by an authorization code grant with
+   * `resourceIndicators` enabled. Code stores used with that option must
+   * persist it and restore it unchanged from `get`: the grant refuses to issue
+   * a code whose stored record loses it, and the tokens issued from the code
+   * are bound to it. Absent for a code issued without a resource.
+   */
+  resource?: string;
 }
 
 /**
