@@ -36,23 +36,17 @@ Copy this directory, or:
 npx degit udibo/oauth2/templates/react-router my-app
 ```
 
-> This command activates once the repository is public. Until then, copy this
-> directory instead.
-
 ### Point `@udibo/oauth2` at a published version
 
 Inside this repository `package.json` depends on the package through
 `"@udibo/oauth2": "workspace:*"`, which resolves to the repository's own build.
 Everything else in `package.json` is a plain version range, so a copy outside
-the workspace needs one edit: replace that line with a version range.
+the workspace needs one edit: install the current published release, which
+replaces that line with its version range.
 
-```json
-"@udibo/oauth2": "^0.15.0"
+```bash
+pnpm add @udibo/oauth2@latest
 ```
-
-Until the package is on npm, the JSR registry serves it under an npm name; add
-`@jsr:registry=https://npm.jsr.io` to an `.npmrc` and use
-`"@udibo/oauth2": "npm:@jsr/udibo__oauth2@^0.14.1"`.
 
 Tests use MSW 3, which Vitest 5 does not list among its accepted peer ranges.
 If your package manager warns about it, allow it (pnpm:
