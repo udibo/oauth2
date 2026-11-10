@@ -1,3 +1,9 @@
+## [0.52.0](https://github.com/udibo/oauth2/compare/0.51.0...0.52.0) (2026-11-10)
+
+### Features
+
+* **server:** bind code-flow and refresh tokens to one resource ([#193](https://github.com/udibo/oauth2/issues/193)) ([1cb1c7f](https://github.com/udibo/oauth2/commit/1cb1c7f8e7d18697176ca00481ebe20517534e30))
+
 ## [0.51.0](https://github.com/udibo/oauth2/compare/0.50.0...0.51.0) (2026-11-09)
 
 ### Features
