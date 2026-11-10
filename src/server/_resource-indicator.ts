@@ -1,5 +1,9 @@
-/** Single-resource syntax for opted-in machine issuance. @module */
-import { InvalidTargetError } from "../errors.ts";
+/** Single-resource syntax for opted-in resource-bound issuance. @module */
+import { InvalidTargetError, ServerError } from "../errors.ts";
+import type { ClientInterface } from "../models/client.ts";
+import type { AbstractScope } from "../models/scope.ts";
+import type { RefreshToken, Token } from "../models/token.ts";
+import type { TokenServiceInterface } from "./services/token.ts";
 
 const PATH = /^(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[A-Fa-f0-9]{2})*$/;
 const QUERY = /^(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[A-Fa-f0-9]{2})*$/;
@@ -51,8 +55,10 @@ function absoluteUri(value: string): boolean {
  * Call only after opting into the single-resource policy.
  * @throws {InvalidTargetError} For an empty, repeated, non-string or malformed value.
  */
-export function resourceIndicatorOf(body: FormData): string | undefined {
-  const values = body.getAll("resource");
+export function resourceIndicatorOf(
+  parameters: Pick<FormData, "getAll"> | URLSearchParams,
+): string | undefined {
+  const values: readonly (string | File)[] = parameters.getAll("resource");
   if (values.length === 0) return undefined;
   const resource = values[0];
   if (
@@ -63,4 +69,52 @@ export function resourceIndicatorOf(body: FormData): string | undefined {
     throw new InvalidTargetError("invalid resource");
   }
   return resource;
+}
+
+/**
+ * Refuse a token whose store lost, changed or invented its resource binding:
+ * the saved result must carry `resource`, and a bound token must read back
+ * bound through `getToken` and, when it has one, `getRefreshToken`. A refused
+ * token is revoked on a best-effort basis before the error is thrown.
+ * @throws {ServerError} When storage does not round-trip the binding.
+ */
+export async function assertStoredResource<
+  Client extends ClientInterface,
+  User,
+  Scope extends AbstractScope,
+>(
+  tokenService: TokenServiceInterface<Client, User, Scope>,
+  saved: Token<Client, User, Scope> | RefreshToken<Client, User, Scope>,
+  resource: string | undefined,
+): Promise<void> {
+  if (await storeKeepsResource(tokenService, saved, resource)) return;
+  try {
+    await tokenService.revoke(saved);
+  } catch (error) {
+    console.error(
+      "[@udibo/oauth2] could not revoke a token whose store dropped its resource:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  throw new ServerError("token storage did not preserve resource");
+}
+
+async function storeKeepsResource<
+  Client extends ClientInterface,
+  User,
+  Scope extends AbstractScope,
+>(
+  tokenService: TokenServiceInterface<Client, User, Scope>,
+  saved: Token<Client, User, Scope> | RefreshToken<Client, User, Scope>,
+  resource: string | undefined,
+): Promise<boolean> {
+  if ((saved.resource ?? undefined) !== resource) return false;
+  if (resource === undefined) return true;
+  const access = await tokenService.getToken(saved.accessToken);
+  if (access?.resource !== resource) return false;
+  const refreshToken = "refreshToken" in saved ? saved.refreshToken : undefined;
+  if (!refreshToken) return true;
+  return (
+    (await tokenService.getRefreshToken(refreshToken))?.resource === resource
+  );
 }

@@ -43,6 +43,7 @@ import {
   AccessDeniedError,
   ConsentRequiredError,
   InvalidRequestError,
+  InvalidTargetError,
   InvalidTokenError,
   isOAuth2Error,
   LoginRequiredError,
@@ -57,6 +58,7 @@ import {
   authenticateClientCredentials,
   extractClientCredentials,
 } from "./client-authentication.ts";
+import { resourceIndicatorOf } from "./_resource-indicator.ts";
 import {
   assertSupportedValues,
   authenticationShortfall,
@@ -1550,6 +1552,13 @@ export class AuthorizationServer<
    * registered `redirect_uri` itself carries. A request that resolves no
    * `issuer` sends none.
    *
+   * When the authorization code grant enables `resourceIndicators`, the
+   * request may carry one `resource` (RFC 8707). A malformed or repeated value,
+   * or one the token service's `acceptedResource` policy does not accept for
+   * the signed-in user and the consented scope, is `invalid_target`, reported
+   * like the other failures above. The policy is consulted even when no
+   * resource was named, and the accepted value is stored with the code.
+   *
    * Requires a grant extending {@linkcode AuthorizationCodeGrant} registered
    * under `authorization_code`; without one the endpoint answers 500
    * `server_error` (or rethrows, with `throwOnError`).
@@ -1604,6 +1613,10 @@ export class AuthorizationServer<
     this.#validateResponseType(params.responseType);
     const requestedScope = grant.parseScope(params.scope);
     this.#validateChallenge(grant, params);
+    const resourcePolicy = this.#resourcePolicy(grant, services.tokenService);
+    const resource = resourcePolicy
+      ? resourceIndicatorOf(new URL(request.url).searchParams)
+      : undefined;
     const authentication = parseAuthenticationRequest(
       new URL(request.url).searchParams,
       this.#promptValuesSupported,
@@ -1647,6 +1660,18 @@ export class AuthorizationServer<
       authentication,
     });
     if (consented instanceof Response) return consented;
+    if (
+      resourcePolicy &&
+      (await resourcePolicy.call(
+        services.tokenService,
+        client,
+        user,
+        resource,
+        consented.scope,
+      )) !== true
+    ) {
+      throw new InvalidTargetError("invalid resource");
+    }
 
     const authorizationCode = await grant.generateAuthorizationCode(
       {
@@ -1657,6 +1682,7 @@ export class AuthorizationServer<
         challenge: params.challenge ?? null,
         challengeMethod: params.challengeMethod ?? null,
         nonce: params.nonce ?? null,
+        resource: resource ?? null,
         authenticationContext,
       },
       request,
@@ -1664,6 +1690,19 @@ export class AuthorizationServer<
 
     redirectUrl.searchParams.set("code", authorizationCode.code);
     return authorizationResponseRedirect({ url: redirectUrl, issuer });
+  }
+
+  #resourcePolicy(
+    grant: AuthorizationCodeGrant<Client, User, S>,
+    tokenService: TokenServiceInterface<Client, User, S>,
+  ): TokenServiceInterface<Client, User, S>["acceptedResource"] {
+    if (!grant.resourceIndicators) return undefined;
+    if (!tokenService.acceptedResource) {
+      throw new ServerError(
+        "resourceIndicators requires tokenService.acceptedResource",
+      );
+    }
+    return tokenService.acceptedResource;
   }
 
   #authorizeErrorResponse(

@@ -70,16 +70,22 @@ export interface TokenServiceInterface<
   ): Promise<Scope | null | undefined | false>;
 
   /**
-   * Opts client-credentials issuance into one RFC 8707 resource per token.
-   * Called after client authentication and scope acceptance, even when no
-   * resource was supplied. Only `true` accepts; other results refuse with
+   * Decides whether one RFC 8707 resource may be bound to a token. Its
+   * presence opts client-credentials issuance into one resource per token;
+   * the authorization code grant consults it at the authorization endpoint
+   * only when constructed with `resourceIndicators: true`. Called after
+   * client authentication and scope acceptance (after consent at the
+   * authorization endpoint, with the consented scope), even when no resource
+   * was supplied. Only `true` accepts; other results refuse with
    * `invalid_target`. The URI is validated and passed unchanged; decide
    * resource availability, client authority and scope compatibility here.
+   * `user` is the signed-in user at the authorization endpoint, and the
+   * client's own user, if any, for client credentials.
    *
    * Leave this method absent to preserve legacy extension-parameter behavior.
    * Enabling it requires persisting `Token.resource` and forwarding the sixth
-   * `generateAccessToken` argument to signed-token generation. Other grants
-   * do not support resource indicators yet.
+   * `generateAccessToken` argument to signed-token generation. The device
+   * authorization and password grants do not support resource indicators.
    */
   acceptedResource?(
     client: Client,
@@ -99,9 +105,11 @@ export interface TokenServiceInterface<
    * a signed token's `exp` never outlives what the server itself honors; the
    * grants always pass it, and a wrapper that drops it leaves offline
    * verifiers accepting the token past its stored expiry.
-   * `resource`, when supplied by an opted-in machine grant, is the accepted
-   * target URI. A signed token must restrict its audience to this value;
-   * dropping it can issue a token for a different API.
+   * `resource`, when supplied, is the URI the token is bound to: accepted by
+   * an opted-in client-credentials policy, or carried from a resource-bound
+   * authorization code or refresh token. A signed token must restrict its
+   * audience to this value; dropping it can issue a token for a different
+   * API.
    */
   generateAccessToken(
     client: Client,
@@ -175,8 +183,11 @@ export interface TokenServiceInterface<
    * Persists either token kind and returns the saved record. Preserve
    * `authenticationContext` on save and every read, including refresh and
    * revoked records; never reconstruct it from a user's current session.
-   * Preserve `resource` exactly too when resource policy is enabled. The
-   * client-credentials grant refuses a saved result that loses its binding.
+   * Preserve `resource` exactly too when resource policy is enabled, on
+   * access, refresh and revoked records alike. The grants refuse a saved
+   * result that loses its binding, and the authorization code and refresh
+   * grants also read a bound token back through `getToken` and
+   * `getRefreshToken` to check it.
    */
   save(
     token: Token<Client, User, Scope> | RefreshToken<Client, User, Scope>,

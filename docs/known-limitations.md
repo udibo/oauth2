@@ -229,14 +229,20 @@ has these limits:
 
 ## Deliberate deviations (stricter than spec)
 
-- **Resource indicators are opt-in and machine-only.** Implement
+- **Resource indicators are opt-in and single-resource.** Implement
   `TokenServiceInterface.acceptedResource` for single-resource
-  `client_credentials` issuance. Without it, `resource` remains an ignored
-  extension. Multiple resources and resource-bound authorization codes, device
-  flows, password grants and refreshes are unsupported. A stored bound refresh
-  parent is refused before rotation. See
+  `client_credentials` issuance, and also construct the authorization code and
+  refresh grants with `resourceIndicators: true` to bind user tokens. Without
+  them, `resource` remains an ignored extension. A token carries at most one
+  resource for its grant's whole life: multiple resources, and the narrowing
+  or switching between originally granted resources that RFC 8707 §2.2 allows
+  at the token and refresh requests, are unsupported, and so are resource
+  indicators on the device authorization and password grants. A bound refresh
+  token presented to a refresh grant without `resourceIndicators` is refused
+  before rotation. See
   [resource-bound machine tokens](guides/become-an-oauth-provider.md#restrict-machine-tokens-to-one-resource)
-  for policy, token-store and audience requirements.
+  and [resource-bound user tokens](guides/become-an-oauth-provider.md#bind-user-tokens-to-one-resource)
+  for policy, store and audience requirements.
 
 - **`state` is required at the authorize endpoint.** RFC 6749 §4.1.1 lists
   `state` as RECOMMENDED; this server rejects authorize requests without it

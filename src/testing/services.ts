@@ -860,6 +860,7 @@ interface StoredAuthorizationCode<S extends AbstractScope> {
   challenge?: string;
   challengeMethod?: string;
   nonce?: string;
+  resource?: string;
 }
 
 let claimStoredCode: <
@@ -918,7 +919,7 @@ export class MemoryAuthorizationCodeService<
     const client = await this.#clientService.get(stored.clientId);
     const user = await this.#userService.get(stored.userId);
     if (!client || !user) return undefined;
-    return {
+    const authorizationCode: AuthorizationCode<C, U, S> = {
       code,
       expiresAt: stored.expiresAt,
       client,
@@ -932,11 +933,15 @@ export class MemoryAuthorizationCodeService<
         stored.authenticationContext,
       ),
     };
+    if (stored.resource !== undefined) {
+      authorizationCode.resource = stored.resource;
+    }
+    return authorizationCode;
   }
 
   /**
    * Persists an authorization code indexed by its hash, including the PKCE
-   * challenge and redirect URI. Returns the input unchanged.
+   * challenge, redirect URI and resource. Returns the input unchanged.
    */
   async save(
     authorizationCode: AuthorizationCode<C, U, S>,
@@ -955,6 +960,9 @@ export class MemoryAuthorizationCodeService<
       authenticationContext: snapshotAuthenticationContext(
         authorizationCode.authenticationContext,
       ),
+      ...(authorizationCode.resource !== undefined
+        ? { resource: authorizationCode.resource }
+        : {}),
     });
     return authorizationCode;
   }

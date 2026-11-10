@@ -51,6 +51,13 @@ export interface AuthorizationCodeServiceContractOptions<
   makeClient?(seq: number): C;
   /** Overrides the name passed to the outer `describe` block. */
   describeName?: string;
+  /**
+   * A resource URI whose exact save/get round trip to check. Supply it when
+   * this store backs an authorization code grant with `resourceIndicators`
+   * enabled; leave absent for stores that only support codes without a
+   * resource.
+   */
+  supportedResource?: string;
 }
 
 const defaultMakeUser = <U extends MemoryUserShape>(seq: number): U =>
@@ -119,6 +126,25 @@ export function runAuthorizationCodeServiceContractTests<
         expect(fetched?.challenge).toStrictEqual("abc");
         expect(fetched?.nonce).toStrictEqual("nonce-1");
       });
+
+      if (options.supportedResource !== undefined) {
+        it("preserves the exact resource through save and get", async () => {
+          const resource = options.supportedResource!;
+          const code = await codeService.generateCode(client, user);
+          const saved = await codeService.save({
+            code,
+            expiresAt: await codeService.expiresAt(client, user),
+            client,
+            user,
+            resource,
+          });
+          expect(saved.resource).toBe(resource);
+          expect(
+            (await codeService.get(code))?.resource,
+            "a store must retain the accepted resource, not just return its input from save",
+          ).toBe(resource);
+        });
+      }
 
       it("get returns undefined for an unknown code", async () => {
         expect(await codeService.get("missing")).toBe(undefined);

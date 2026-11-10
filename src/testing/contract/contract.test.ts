@@ -236,6 +236,7 @@ runCodeExchangeContractTests<TestClient, TestUser>({
 runAuthorizationCodeServiceContractTests<TestClient, TestUser>({
   describeName:
     "MemoryAuthorizationCodeService satisfies AuthorizationCodeServiceInterface contract",
+  supportedResource: "https://api.example.com/inventory",
   makeServices: () => {
     const userService = new MemoryUserService<TestUser>();
     const clientService = new MemoryClientService<TestClient, TestUser>(

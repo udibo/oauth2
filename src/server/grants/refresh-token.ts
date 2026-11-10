@@ -15,6 +15,10 @@ import {
   InvalidTargetError,
 } from "../../errors.ts";
 import {
+  assertStoredResource,
+  resourceIndicatorOf,
+} from "../_resource-indicator.ts";
+import {
   AbstractGrant,
   type GrantOptions,
   type GrantServices,
@@ -101,6 +105,27 @@ export interface RefreshTokenGrantOptions<
    * indefinitely.
    */
   replayGraceSeconds?: number;
+  /**
+   * Opts refresh into single-resource indicators (RFC 8707). Defaults to
+   * `false`, which keeps refusing a resource-bound refresh token with
+   * `invalid_target` and ignores `resource` on the request.
+   *
+   * When `true`, a resource-bound refresh token refreshes: the request may
+   * repeat its exact {@linkcode RefreshToken.resource} or omit `resource`,
+   * and the successor access and refresh tokens keep the binding. For an
+   * unbound token any `resource` is `invalid_target`, so a binding is never
+   * added at refresh. A different, malformed or repeated value is
+   * `invalid_target` and is refused before rotation, leaving the presented
+   * token live. Narrowing to, or switching among, other resources is not
+   * supported: a token carries at most one.
+   *
+   * Requires a token store that round-trips {@linkcode Token.resource} on
+   * refresh tokens; the grant refuses a successor whose store loses it.
+   *
+   * @default false
+   * @see https://www.rfc-editor.org/rfc/rfc8707.html#section-2.2
+   */
+  resourceIndicators?: boolean;
 }
 
 /**
@@ -126,6 +151,11 @@ export class RefreshTokenGrant<
     event: TokenReuseEvent<Client, User>,
   ) => void | Promise<void>;
   readonly #replayGraceSeconds: number;
+  /**
+   * Whether single-resource indicators are enabled. See
+   * {@linkcode RefreshTokenGrantOptions.resourceIndicators}.
+   */
+  readonly resourceIndicators: boolean;
 
   /** Creates the grant from its {@linkcode RefreshTokenGrantOptions}. */
   constructor(options: RefreshTokenGrantOptions<Client, User, S>) {
@@ -138,6 +168,7 @@ export class RefreshTokenGrant<
       );
     }
     this.#replayGraceSeconds = graceSeconds;
+    this.resourceIndicators = options.resourceIndicators ?? false;
   }
 
   /**
@@ -168,8 +199,11 @@ export class RefreshTokenGrant<
    * claimed it.
    * @throws {InvalidClientError} If the token was issued to another client.
    * @throws {InvalidScopeError} If the requested scope exceeds the original grant.
-   * @throws {InvalidTargetError} If a stored parent is resource-bound; refreshing
-   * such a grant is unsupported and refuses before spending the parent.
+   * @throws {InvalidTargetError} Before spending the presented token: without
+   * {@linkcode resourceIndicators}, when it is resource-bound; with it, when
+   * the request names a resource other than the token's own binding.
+   * @throws {ServerError} If the token store does not round-trip a successor's
+   * resource.
    */
   async token(
     request: Request,
@@ -223,9 +257,15 @@ export class RefreshTokenGrant<
       );
     }
 
-    if (currentToken.resource !== undefined) {
-      // Resource-bound refresh is not implemented. Never spend the parent or
-      // issue a successor that silently loses its audience restriction.
+    const resource = this.resourceIndicators
+      ? (currentToken.resource ?? undefined)
+      : undefined;
+    if (this.resourceIndicators) {
+      const requested = resourceIndicatorOf(body);
+      if (requested !== undefined && requested !== resource) {
+        throw new InvalidTargetError("invalid resource");
+      }
+    } else if (currentToken.resource !== undefined) {
       throw new InvalidTargetError("resource-bound refresh is not supported");
     }
 
@@ -264,6 +304,7 @@ export class RefreshTokenGrant<
       tokenService,
       currentToken.authenticationContext,
       familyExpiresAt,
+      resource,
     );
 
     const nextRefreshToken: RefreshToken<Client, User, S> =
@@ -289,6 +330,9 @@ export class RefreshTokenGrant<
       if (!rotated) {
         throw new InvalidGrantError("refresh_token was already consumed");
       }
+      if (this.resourceIndicators) {
+        await assertStoredResource(tokenService, rotated, resource);
+      }
       return rotated;
     }
     const claimed = tokenService.revokeRotated
@@ -297,7 +341,11 @@ export class RefreshTokenGrant<
     if (!claimed) {
       throw new InvalidGrantError("refresh_token was already consumed");
     }
-    return await tokenService.save(nextRefreshToken);
+    const saved = await tokenService.save(nextRefreshToken);
+    if (this.resourceIndicators) {
+      await assertStoredResource(tokenService, saved, resource);
+    }
+    return saved;
   }
 
   async #withinReplayGrace(

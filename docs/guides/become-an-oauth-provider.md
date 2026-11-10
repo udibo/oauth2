@@ -191,10 +191,115 @@ extension claims. An opaque-token API must compare the stored resource; a JWT
 API must validate issuer and audience. Both still enforce current grants and
 scope: binding a token does not itself authorize a resource.
 
-This support is for the client-credentials grant only. It issues no refresh
-token. A refresh parent that already carries a resource is refused before
-rotation, rather than issuing a successor that loses the binding. Other grants,
-multiple-resource issuance and assistant authorization are outside this feature.
+The client-credentials grant issues no refresh token. To bind the tokens a user
+authorizes, opt the authorization code and refresh grants in as described next.
+Multiple-resource issuance, the device authorization grant and the password
+grant are outside this feature.
+
+### Bind user tokens to one resource
+
+Clients that follow RFC 8707, such as Model Context Protocol clients, send
+`resource` on both the authorization request and the token request. Construct
+the `AuthorizationCodeGrant` and the `RefreshTokenGrant` with
+`resourceIndicators: true` to bind the tokens from that flow to one resource,
+decided by the same `tokenService.acceptedResource` policy:
+
+```ts
+import {
+  AuthorizationCodeGrant,
+  RefreshTokenGrant,
+  type AuthorizationCodeServiceInterface,
+  type ClientServiceInterface,
+  type TokenServiceInterface,
+} from "@udibo/oauth2/server/authorization";
+
+interface McpClient { id: string; grants?: string[]; redirectUris?: string[] }
+interface Person { id: string }
+declare const clientService: ClientServiceInterface<McpClient, Person>;
+declare const tokenService: TokenServiceInterface<McpClient, Person>;
+declare const authorizationCodeService: AuthorizationCodeServiceInterface<
+  McpClient,
+  Person
+>;
+declare function personMayUse(
+  personId: string,
+  resource: string,
+  scopes: readonly string[],
+): Promise<boolean>;
+
+tokenService.acceptedResource = async (client, user, resource, scope) => {
+  if (resource === undefined) return true;
+  return user !== undefined &&
+    await personMayUse(user.id, resource, [...(scope ?? [])]);
+};
+
+const services = { clientService, tokenService, authorizationCodeService };
+const grants = {
+  authorization_code: new AuthorizationCodeGrant<McpClient, Person>({
+    resolve: () => services,
+    resourceIndicators: true,
+  }),
+  refresh_token: new RefreshTokenGrant<McpClient, Person>({
+    resolve: () => services,
+    resourceIndicators: true,
+  }),
+};
+```
+
+The binding is decided once and then carried; each step compares strings
+exactly, with no normalization, so `https://mcp.example.com/mcp`,
+`https://mcp.example.com/mcp/` and `https://MCP.example.com/mcp` are three
+different resources:
+
+1. **Authorization request.** The endpoint reads zero or one `resource` with the
+   same rules as the client-credentials grant: one absolute URI without a
+   fragment, kept exactly as spelled. After sign-in and consent it calls
+   `acceptedResource(client, user, resource, scope)` with the signed-in user
+   and the consented scope, including when no resource was named. Only `true`
+   accepts. A malformed or repeated value, or a refusal, is `invalid_target`,
+   redirected to the client like other authorization errors once its client
+   and `redirect_uri` are verified, and answered directly otherwise. The
+   accepted value is stored with the code. A token service without
+   `acceptedResource` fails the request with `server_error`.
+2. **Token request.** `resource` may be omitted or repeat the stored value
+   exactly. Anything else is `invalid_target`, and the code is consumed just as
+   when its `code_verifier` or `redirect_uri` does not match. The access token
+   and refresh token are bound to the stored resource. A code issued without a
+   resource yields unbound tokens, and naming a resource for it is
+   `invalid_target`: a resource can only be chosen at the authorization step.
+3. **Refresh.** For a bound refresh token, `resource` may be omitted or repeat
+   the binding exactly, and the successor access and refresh tokens keep it.
+   For an unbound token, any `resource` is `invalid_target`, so refresh never
+   adds a binding. A refused request is answered before rotation, so the
+   presented refresh token stays live and no reuse detection runs. Scope may
+   still narrow as usual.
+
+RFC 8707 lets a server issue a refresh token for several resources and narrow
+each refresh to any of them. This single-resource rule deliberately does not:
+a grant carries at most one resource for its whole life. Authorize again to
+use a different resource. The policy is consulted only at the authorization
+step; to withdraw a person's access to a resource, revoke their tokens.
+
+Your stores must keep the binding:
+
+- The authorization code store persists `AuthorizationCode.resource` and
+  returns it unchanged from `get`. The grant reads each bound code back after
+  saving it and, when the value is missing or different, revokes the code and
+  fails with `server_error` instead of redirecting with it.
+  `runAuthorizationCodeServiceContractTests` checks the round trip when you
+  pass `supportedResource`.
+- The token store persists `Token.resource` on access and refresh tokens,
+  including through `exchangeCode`, `rotate` and revoked records. The grants
+  read each bound token back through `getToken` and `getRefreshToken` and,
+  when the binding is missing, revoke the token and fail with `server_error`.
+- Leave `resourceIndicators` off the `RefreshTokenGrant` and a bound refresh
+  token is refused with `invalid_target`, never refreshed without its binding.
+
+`createJwtAccessTokenGenerator` puts the bound resource in `aud` in place of
+its configured `audience`, for every token the code and refresh grants issue,
+and introspection reports it as `aud` for access and refresh tokens alike. The
+id_token's `aud` remains the client. Tokens from a code issued without a
+resource keep the configured audience.
 
 RFC 6749 §4.4 limits that grant to confidential clients, so it refuses any
 request that presents no client secret with `401 invalid_client` — a public

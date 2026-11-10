@@ -24,10 +24,13 @@ export interface Token<
   /** The user this token was issued for (if applicable). */
   user?: User;
   /**
-   * Exact resource URI accepted by an opted-in client-credentials policy
-   * (RFC 8707). Persist and restore it on every token read; never derive it
-   * from a later request or the client's current configuration. Absent for
-   * legacy issuance. Resource authority still belongs to the application.
+   * Exact resource URI (RFC 8707) this token is bound to: accepted by an
+   * opted-in client-credentials policy, carried from a resource-bound
+   * authorization code, or inherited from a resource-bound refresh token.
+   * Persist and restore it on every token read, refresh-token and revoked
+   * records included; never derive it from a later request or the client's
+   * current configuration. Absent for unbound tokens. Resource authority
+   * still belongs to the application.
    */
   resource?: string;
   /** The scope granted to this token. */

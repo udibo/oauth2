@@ -17,6 +17,7 @@ import {
   InvalidClientError,
   InvalidGrantError,
   InvalidRequestError,
+  InvalidTargetError,
   isOAuth2Error,
   type OAuth2Error,
   ServerError,
@@ -27,6 +28,10 @@ import {
   getChallengeMethod,
   validateCodeVerifier,
 } from "../../utils/pkce.ts";
+import {
+  assertStoredResource,
+  resourceIndicatorOf,
+} from "../_resource-indicator.ts";
 import { authenticateClientCredentials } from "../client-authentication.ts";
 import { sha256Hash } from "../utils/hash.ts";
 import type { ClientServiceInterface } from "../services/client.ts";
@@ -142,6 +147,31 @@ export interface AuthorizationCodeGrantOptions<
    * client-facing `invalid_grant` a replayed code always yields.
    */
   onCodeReuse?: (event: CodeReuseEvent<Client>) => void | Promise<void>;
+  /**
+   * Opts this grant into single-resource indicators (RFC 8707). Defaults to
+   * `false`, which leaves `resource` an ignored extension parameter.
+   *
+   * When `true`, the authorization endpoint reads zero or one `resource` (an
+   * absolute URI without a fragment, kept exactly as spelled), asks the token
+   * service's `acceptedResource` policy whether it may be bound for the
+   * signed-in user and the consented scope, and stores the accepted value
+   * with the code. The token request may then repeat that exact value or omit
+   * it; any other value is `invalid_target`, and the code is consumed as on
+   * any failed exchange. The access and refresh tokens issued are bound to
+   * the stored resource, and a code issued without one yields unbound tokens.
+   *
+   * Requires a token service implementing `acceptedResource`, an
+   * authorization code store that round-trips
+   * {@linkcode AuthorizationCode.resource}, and a token store that
+   * round-trips {@linkcode Token.resource}; the grant refuses to issue a code
+   * or token whose store loses the binding. Enable `resourceIndicators` on the
+   * {@linkcode RefreshTokenGrant} as well, or refreshing a bound token is
+   * refused with `invalid_target`.
+   *
+   * @default false
+   * @see https://www.rfc-editor.org/rfc/rfc8707.html
+   */
+  resourceIndicators?: boolean;
 }
 
 interface CodeReplay<Client extends ClientInterface> {
@@ -179,6 +209,13 @@ export interface GenerateAuthorizationCodeOptions<
   challengeMethod?: string | null;
   /** OIDC nonce to bind to the code (echoed into the id_token). */
   nonce?: string | null;
+  /**
+   * Exact resource URI (RFC 8707) the resource policy accepted, to bind to the
+   * code and to the tokens issued from it. Only a grant with
+   * {@linkcode AuthorizationCodeGrantOptions.resourceIndicators} enabled
+   * accepts one.
+   */
+  resource?: string | null;
 }
 
 /**
@@ -219,6 +256,11 @@ export class AuthorizationCodeGrant<
    * @see https://datatracker.ietf.org/doc/html/rfc7636#section-4.5
    */
   requireClientAuthentication: boolean;
+  /**
+   * Whether single-resource indicators are enabled. See
+   * {@linkcode AuthorizationCodeGrantOptions.resourceIndicators}.
+   */
+  readonly resourceIndicators: boolean;
   readonly #onCodeReuse?: (
     event: CodeReuseEvent<Client>,
   ) => void | Promise<void>;
@@ -234,6 +276,7 @@ export class AuthorizationCodeGrant<
     this.requireClientAuthentication =
       options.requireClientAuthentication ?? true;
     this.#onCodeReuse = options.onCodeReuse;
+    this.resourceIndicators = options.resourceIndicators ?? false;
   }
 
   /**
@@ -347,6 +390,12 @@ export class AuthorizationCodeGrant<
   /**
    * Generates and saves an authorization code. Resolves its own
    * `authorizationCodeService` from the request.
+   *
+   * A code bound to a `resource` is read back after saving; when the store
+   * did not keep the exact value, the code is revoked and never returned.
+   *
+   * @throws {ServerError} When `resource` is given to a grant without
+   * `resourceIndicators`, or the store does not round-trip it.
    */
   async generateAuthorizationCode(
     options: GenerateAuthorizationCodeOptions<Client, User, S>,
@@ -364,7 +413,11 @@ export class AuthorizationCodeGrant<
       challenge,
       challengeMethod,
       nonce,
+      resource,
     } = options;
+    if (resource != null && !this.resourceIndicators) {
+      throw new ServerError("resource requires resourceIndicators");
+    }
 
     const authorizationCode: AuthorizationCode<Client, User, S> = {
       code: await authorizationCodeService.generateCode(client, user, scope),
@@ -381,8 +434,28 @@ export class AuthorizationCodeGrant<
     if (authenticationContext) {
       authorizationCode.authenticationContext = authenticationContext;
     }
+    if (resource != null) authorizationCode.resource = resource;
 
-    return await authorizationCodeService.save(authorizationCode);
+    const saved = await authorizationCodeService.save(authorizationCode);
+    if (
+      resource != null &&
+      (saved.resource !== resource ||
+        (await authorizationCodeService.get(authorizationCode.code))
+          ?.resource !== resource)
+    ) {
+      try {
+        await authorizationCodeService.revoke(authorizationCode);
+      } catch (error) {
+        console.error(
+          "[@udibo/oauth2] could not revoke a code whose store dropped its resource:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new ServerError(
+        "authorization code storage did not preserve resource",
+      );
+    }
+    return saved;
   }
 
   /**
@@ -421,9 +494,18 @@ export class AuthorizationCodeGrant<
    * {@linkcode getAuthenticatedClient} resolved from this same `request`.
    * A code redeemed with PKCE issues its token with `codeVerifierHash` set.
    *
+   * The tokens issued are bound to the code's
+   * {@linkcode AuthorizationCode.resource}, when it has one. With
+   * {@linkcode resourceIndicators} enabled, a `resource` on the token request
+   * must equal it exactly, character for character; a different, malformed
+   * or repeated value, or any value for a code issued without a resource, is
+   * `invalid_target` and consumes the code like the checks above.
+   *
    * @throws {InvalidRequestError} When `code` is missing, a required `code_verifier` is absent, or the verifier is malformed.
    * @throws {InvalidGrantError} When the code is unknown, expired, already claimed, or its verifier or `redirect_uri` does not match.
    * @throws {InvalidClientError} When the code was issued to another client.
+   * @throws {InvalidTargetError} When an opted-in token request names a resource other than the code's.
+   * @throws {ServerError} When the token store does not round-trip the code's resource.
    * @see https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3
    * @see https://datatracker.ietf.org/doc/html/rfc7636#section-4.5
    */
@@ -457,6 +539,7 @@ export class AuthorizationCodeGrant<
       throw await this.#refuseClaimedCode(tokenService, replay);
     }
 
+    const resource = authorizationCode.resource ?? undefined;
     let token: Token<Client, User, S>;
     try {
       await this.#checkExchange(authorizationCode, client, body);
@@ -466,6 +549,8 @@ export class AuthorizationCodeGrant<
         authorizationCode.scope,
         tokenService,
         authorizationCode.authenticationContext,
+        undefined,
+        resource,
       );
     } catch (error) {
       if (exchangeCode) {
@@ -504,6 +589,9 @@ export class AuthorizationCodeGrant<
     }
     if (!saved) {
       throw await this.#refuseClaimedCode(tokenService, replay);
+    }
+    if (resource !== undefined || this.resourceIndicators) {
+      await assertStoredResource(tokenService, saved, resource);
     }
     if (authorizationCode.nonce) saved.nonce = authorizationCode.nonce;
     return saved;
@@ -544,6 +632,16 @@ export class AuthorizationCodeGrant<
       }
     } else if (redirectUri) {
       throw new InvalidGrantError("did not expect redirect_uri parameter");
+    }
+
+    if (this.resourceIndicators) {
+      const requested = resourceIndicatorOf(body);
+      if (
+        requested !== undefined &&
+        requested !== (authorizationCode.resource ?? undefined)
+      ) {
+        throw new InvalidTargetError("invalid resource");
+      }
     }
   }
 
