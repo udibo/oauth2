@@ -850,6 +850,25 @@ describe("acceptedResource context and consent", () => {
     });
   }
 
+  it("refuses with invalid_target and saves no code when consent is approved but the policy refuses", async () => {
+    const f = await fixture({ policy: async () => false });
+    f.authenticateUser.mockResolvedValue({
+      user: ALICE,
+      authorizedScope: undefined as unknown as BasicScope,
+    });
+    const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(
+      async () => ({ approved: true }),
+    );
+    expectRedirectError(
+      await f.authorize([RESOURCE], {}, handleConsent),
+      "invalid_target",
+    );
+    expect(handleConsent).toHaveBeenCalledOnce();
+    expect(handleConsent.mock.calls[0]?.[3]?.resource).toBe(RESOURCE);
+    expect(f.policy).toHaveBeenCalledOnce();
+    expect(f.savedCodes).not.toHaveBeenCalled();
+  });
+
   it("still asks the policy under prompt=none with remembered consent", async () => {
     const f = await fixture({
       policy: async (_client, _user, resource) => resource === RESOURCE,

@@ -51,8 +51,10 @@ export interface AuthenticationRequest {
   /** Requested `acr_values` in preference order; empty when absent. */
   readonly acrValues: readonly string[];
   /**
-   * The validated `resource` (RFC 8707) the authorization request names,
-   * exactly as spelled. Set only when the authorization code grant enables
+   * The syntactically valid `resource` (RFC 8707) the client asked for,
+   * exactly as spelled. It is not yet accepted by `acceptedResource`, which
+   * runs after consent; do not record consent for it as granted until a code
+   * is actually issued. Set only when the authorization code grant enables
    * `resourceIndicators` and the request names a resource. Show it on the
    * consent screen, and key any remembered consent (the `authorizedScope`
    * that `authenticateUser` returns) by it where access differs between

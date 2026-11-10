@@ -530,7 +530,10 @@ export type AuthenticateUserFn<User> = (
  *
  * When the authorization code grant enables `resourceIndicators` and the
  * request names a `resource`, the fourth argument carries it as
- * `authentication.resource`, exactly as spelled. Show it to the person, and
+ * `authentication.resource`, exactly as spelled. It is the syntactically
+ * valid resource the client asked for, not yet accepted by
+ * `acceptedResource`, which runs after consent; do not record consent for it
+ * as granted until a code is actually issued. Show it to the person, and
  * key a remembered consent by resource where access differs between
  * resources: the handler is skipped when the `authorizedScope` that
  * `authenticateUser` returns already covers the scope, including under

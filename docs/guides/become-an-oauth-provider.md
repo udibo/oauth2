@@ -317,7 +317,9 @@ canonical value rejects.
    `acceptedResource` fails the request with `server_error`.
    `authenticateUser` and `handleConsent` receive the named resource as
    `authentication.resource`, exactly as spelled: show it on the consent
-   screen. If you remember consent by returning `authorizedScope` from
+   screen. It is the syntactically valid resource the client asked for, not
+   yet accepted by `acceptedResource`, which runs after consent; do not record
+   consent for it as granted until a code is actually issued. If you remember consent by returning `authorizedScope` from
    `authenticateUser`, which skips `handleConsent` (and lets `prompt=none`
    succeed), key what you remember by resource where access differs between
    resources, or a remembered consent for one resource silently covers
