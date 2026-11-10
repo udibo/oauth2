@@ -527,6 +527,16 @@ export type AuthenticateUserFn<User> = (
  * With `prompt=consent` the server calls it even when the scope is already
  * authorized, and the fourth argument, always passed, says so: ask again
  * rather than reusing a stored grant.
+ *
+ * When the authorization code grant enables `resourceIndicators` and the
+ * request names a `resource`, the fourth argument carries it as
+ * `authentication.resource`, exactly as spelled. Show it to the person, and
+ * key a remembered consent by resource where access differs between
+ * resources: the handler is skipped when the `authorizedScope` that
+ * `authenticateUser` returns already covers the scope, including under
+ * `prompt=none`, and `authenticateUser` receives the same
+ * `authentication.resource` so it can return a scope remembered for that
+ * resource only.
  */
 export type HandleConsentFn<
   Client extends ClientInterface,
@@ -1557,7 +1567,13 @@ export class AuthorizationServer<
    * or one the token service's `acceptedResource` policy does not accept for
    * the signed-in user and the consented scope, is `invalid_target`, reported
    * like the other failures above. The policy is consulted even when no
-   * resource was named, and the accepted value is stored with the code.
+   * resource was named, and the accepted value is stored with the code. The
+   * policy's fifth argument is `{ grantType: "authorization_code" }`, and
+   * `authenticateUser` and `handleConsent` receive the named resource as
+   * `authentication.resource`.
+   * A code returned without the accepted resource, such as from a
+   * `generateAuthorizationCode` override that drops it, is never sent: the
+   * request fails with `server_error`.
    *
    * Requires a grant extending {@linkcode AuthorizationCodeGrant} registered
    * under `authorization_code`; without one the endpoint answers 500
@@ -1617,10 +1633,12 @@ export class AuthorizationServer<
     const resource = resourcePolicy
       ? resourceIndicatorOf(new URL(request.url).searchParams)
       : undefined;
-    const authentication = parseAuthenticationRequest(
+    const requested = parseAuthenticationRequest(
       new URL(request.url).searchParams,
       this.#promptValuesSupported,
     );
+    const authentication: AuthenticationRequest =
+      resource === undefined ? requested : { ...requested, resource };
     const silent = authentication.prompt.includes("none");
 
     const authResult = await authenticateUser(request, authentication);
@@ -1668,6 +1686,7 @@ export class AuthorizationServer<
         user,
         resource,
         consented.scope,
+        { grantType: AUTHORIZATION_CODE_GRANT_TYPE },
       )) !== true
     ) {
       throw new InvalidTargetError("invalid resource");
@@ -1688,6 +1707,12 @@ export class AuthorizationServer<
       request,
     );
 
+    if (
+      resourcePolicy &&
+      (authorizationCode.resource ?? undefined) !== resource
+    ) {
+      throw new ServerError("authorization code did not keep its resource");
+    }
     redirectUrl.searchParams.set("code", authorizationCode.code);
     return authorizationResponseRedirect({ url: redirectUrl, issuer });
   }
@@ -2557,6 +2582,7 @@ export type {
 export {
   AbstractTokenService,
   type AbstractTokenServiceOptions,
+  type ResourcePolicyContext,
   type TokenServiceInterface,
 } from "./services/token.ts";
 export type { ClientServiceInterface } from "./services/client.ts";

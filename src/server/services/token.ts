@@ -8,6 +8,30 @@ import type { ClientServiceInterface } from "./client.ts";
 import type { UserServiceInterface } from "./user.ts";
 
 /**
+ * Identifies which grant is asking
+ * {@linkcode TokenServiceInterface.acceptedResource} for a decision, passed as
+ * its fifth argument. One policy serves machine issuance
+ * (`client_credentials`, where `user` is whatever
+ * `ClientServiceInterface.getUser` resolves for the client and nobody
+ * interacts) and user issuance at the authorization endpoint
+ * (`authorization_code`, after a person signed in and consented), so a policy
+ * that should treat them differently reads `grantType`.
+ *
+ * @example
+ * ```ts
+ * const context: ResourcePolicyContext = { grantType: "authorization_code" };
+ * ```
+ */
+export interface ResourcePolicyContext {
+  /**
+   * The grant asking: `client_credentials` at the token endpoint, or
+   * `authorization_code` at the authorization endpoint. A custom grant may
+   * pass its own `grant_type`.
+   */
+  readonly grantType: string;
+}
+
+/**
  * Minimal interface for reading/validating tokens.
  *
  * This is all a resource server needs to authenticate requests.
@@ -82,6 +106,15 @@ export interface TokenServiceInterface<
    * `user` is the signed-in user at the authorization endpoint, and the
    * client's own user, if any, for client credentials.
    *
+   * One policy serves both grants. The optional fifth argument names the
+   * grant asking ({@linkcode ResourcePolicyContext}); check `client` as well
+   * as `user`, or a machine client whose `getUser` resolves a person can be
+   * bound to any resource that person may use, with no interaction. The
+   * comparison of the bound value at later steps is exact, so accept only the
+   * canonical spelling of each resource: a variant spelling accepted here is
+   * stored as given and becomes the token's `aud`, which a resource server
+   * expecting the canonical value rejects.
+   *
    * Leave this method absent to preserve legacy extension-parameter behavior.
    * Enabling it requires persisting `Token.resource` and forwarding the sixth
    * `generateAccessToken` argument to signed-token generation. The device
@@ -92,6 +125,7 @@ export interface TokenServiceInterface<
     user: User | undefined,
     resource: string | undefined,
     scope?: Scope | null,
+    context?: ResourcePolicyContext,
   ): Promise<boolean>;
 
   /**

@@ -82,6 +82,18 @@ export interface TokenServiceContractOptions<
    */
   supportedResource?: string;
   /**
+   * A resource URI whose exact round trip through refresh tokens to check:
+   * `save` and `getRefreshToken` of a bound refresh token and `getToken` of
+   * its access token, the successor of a rotation (through `rotate` when the
+   * service implements it), and the rotated-out record from
+   * `getRevokedRefreshToken` when the service implements it. Supply it when
+   * this store backs the authorization code and refresh grants with
+   * `resourceIndicators` enabled; a store that drops the field on a later
+   * read silently unbinds the next exchange or refresh. Leave absent
+   * otherwise; it is independent of {@linkcode supportedResource}.
+   */
+  supportedRefreshResource?: string;
+  /**
    * Returns a new rotation-family id the store accepts as a
    * {@linkcode RefreshToken.familyId}, distinct on every call. The family cases
    * call it for each family they create and for a family that was never
@@ -249,6 +261,59 @@ export function runTokenServiceContractTests<
           ).toBe(resource);
         });
       }
+    }
+
+    if (options.supportedRefreshResource !== undefined) {
+      describe("resource-bound refresh tokens", () => {
+        const resource = options.supportedRefreshResource!;
+
+        async function boundMember(
+          familyId: string,
+        ): Promise<RefreshToken<C, U, S>> {
+          return {
+            ...(await familyMember(familyId)),
+            scope: makeScope(supportedScope),
+            resource,
+          };
+        }
+
+        it("preserves the exact resource through save, getToken and getRefreshToken", async () => {
+          const token = await boundMember(makeFamilyId());
+          expect((await tokenService.save(token)).resource).toBe(resource);
+          expect(
+            (await tokenService.getRefreshToken(token.refreshToken))?.resource,
+            "getRefreshToken must restore the binding, or refresh mints unbound tokens",
+          ).toBe(resource);
+          expect(
+            (await tokenService.getToken(token.accessToken))?.resource,
+          ).toBe(resource);
+        });
+
+        it("preserves the exact resource on a rotation's successor and on the rotated-out record", async () => {
+          const familyId = makeFamilyId();
+          const current = await boundMember(familyId);
+          await tokenService.save(current);
+          const next = await boundMember(familyId);
+          if (tokenService.rotate) {
+            const rotated = await tokenService.rotate(current, next);
+            expect(rotated?.resource).toBe(resource);
+          } else {
+            await rotateTo(current, next);
+          }
+          expect(
+            (await tokenService.getRefreshToken(next.refreshToken))?.resource,
+          ).toBe(resource);
+          expect(
+            (await tokenService.getToken(next.accessToken))?.resource,
+          ).toBe(resource);
+          if (tokenService.getRevokedRefreshToken) {
+            expect(
+              (await tokenService.getRevokedRefreshToken(current.refreshToken))
+                ?.resource,
+            ).toBe(resource);
+          }
+        });
+      });
     }
 
     describe("generateAccessToken / generateRefreshToken", () => {

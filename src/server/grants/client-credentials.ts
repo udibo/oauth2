@@ -127,7 +127,9 @@ export class ClientCredentialsGrant<
    *
    * Resource indicators are opt-in through `tokenService.acceptedResource`:
    * its presence validates one absolute resource URI and requires explicit
-   * policy acceptance. Its absence preserves legacy extension handling.
+   * policy acceptance, and the policy receives
+   * `{ grantType: "client_credentials" }` as its fifth argument. Its absence
+   * preserves legacy extension handling.
    *
    * @throws {InvalidScopeError} If the requested scope is rejected.
    * @throws {InvalidTargetError} If opted-in resource validation or policy refuses.
@@ -166,6 +168,7 @@ export class ClientCredentialsGrant<
           user,
           resource,
           scope,
+          { grantType: this.grantType },
         )) !== true
       ) {
         throw new InvalidTargetError("invalid resource");

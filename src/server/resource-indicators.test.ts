@@ -138,6 +138,7 @@ for (const transport of ["core", "hono"] as const) {
           bot ? BOT : undefined,
           RESOURCE,
           expect.any(BasicScope),
+          { grantType: "client_credentials" },
         );
       });
     }
@@ -251,6 +252,7 @@ describe("resource policy and persisted authority", () => {
       undefined,
       undefined,
       expect.any(BasicScope),
+      { grantType: "client_credentials" },
     );
   });
 
@@ -297,6 +299,7 @@ describe("resource policy and persisted authority", () => {
         undefined,
         target,
         expect.any(BasicScope),
+        { grantType: "client_credentials" },
       );
       expect(f.generated.mock.calls[0]?.at(5)).toBe(target);
       expect(f.saved.mock.calls[0]?.[0].resource).toBe(target);

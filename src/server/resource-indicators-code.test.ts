@@ -12,9 +12,13 @@ import {
   type TestUser,
 } from "../testing/_test_fixtures.ts";
 import { generateCodeChallenge, generateCodeVerifier } from "../utils/pkce.ts";
-import { AuthorizationServer } from "./authorization-server.ts";
+import {
+  AuthorizationServer,
+  type HandleConsentFn,
+} from "./authorization-server.ts";
 import { AuthorizationCodeGrant } from "./grants/authorization-code.ts";
 import { RefreshTokenGrant } from "./grants/refresh-token.ts";
+import type { ResourcePolicyContext } from "./services/token.ts";
 import { JwksTokenReader } from "./jwks-token-reader.ts";
 import {
   createJwtAccessTokenGenerator,
@@ -40,6 +44,7 @@ type Policy = (
   user: TestUser | undefined,
   resource: string | undefined,
   scope?: BasicScope | null,
+  context?: ResourcePolicyContext,
 ) => Promise<boolean>;
 type Bound = Token<TestClient, TestUser>;
 type BoundRefresh = RefreshToken<TestClient, TestUser>;
@@ -141,6 +146,7 @@ async function fixture(
   async function authorize(
     resources: readonly string[],
     extra: Record<string, string> = {},
+    handleConsent?: HandleConsentFn<TestClient, BasicScope>,
   ): Promise<Response> {
     const url = new URL(`${ISSUER}/authorize`);
     for (const [name, value] of Object.entries({
@@ -161,6 +167,7 @@ async function fixture(
     return await server.handleAuthorizeRequest(
       new Request(url),
       authenticateUser,
+      handleConsent,
     );
   }
 
@@ -180,11 +187,12 @@ async function fixture(
   async function token(
     parameters: Record<string, string>,
     resources: readonly string[] = [],
+    query = "",
   ): Promise<Response> {
     const body = new URLSearchParams(parameters);
     for (const resource of resources) body.append("resource", resource);
     return await server.handleTokenRequest(
-      new Request(`${ISSUER}/token`, {
+      new Request(`${ISSUER}/token${query}`, {
         method: "POST",
         headers: basicAuthHeader(CLIENT.id, SECRET),
         body,
@@ -196,6 +204,7 @@ async function fixture(
     code: string,
     resources: readonly string[] = [],
     codeVerifier = verifier,
+    query = "",
   ): Promise<Response> {
     return await token(
       {
@@ -205,6 +214,7 @@ async function fixture(
         code_verifier: codeVerifier,
       },
       resources,
+      query,
     );
   }
 
@@ -212,10 +222,12 @@ async function fixture(
     refreshToken: string,
     resources: readonly string[] = [],
     extra: Record<string, string> = {},
+    query = "",
   ): Promise<Response> {
     return await token(
       { grant_type: "refresh_token", refresh_token: refreshToken, ...extra },
       resources,
+      query,
     );
   }
 
@@ -232,6 +244,7 @@ async function fixture(
 
   return {
     server,
+    codeGrant,
     tokenService,
     authorizationCodeService,
     signingKey,
@@ -348,6 +361,7 @@ describe("authorization request with resourceIndicators", () => {
       ALICE,
       RESOURCE,
       expect.any(BasicScope),
+      { grantType: "authorization_code" },
     );
     expect(f.policy.mock.calls[0]?.[3]?.toString()).toBe("read");
   });
@@ -360,6 +374,7 @@ describe("authorization request with resourceIndicators", () => {
       ALICE,
       undefined,
       expect.any(BasicScope),
+      { grantType: "authorization_code" },
     );
     const stored = await f.authorizationCodeService.get(code);
     assert(stored);
@@ -770,5 +785,212 @@ describe("audience of tokens from the code and refresh grants", () => {
     }
     const unbound = await issueTokens(f, []);
     expect((await f.introspect(unbound.access_token)).aud).toBe(OTHER);
+  });
+});
+
+describe("acceptedResource context and consent", () => {
+  it("tells the policy the authorization endpoint is asking for the code grant", async () => {
+    const f = await fixture();
+    await f.issueCode([RESOURCE]);
+    expect(f.policy.mock.calls[0]?.[4]).toStrictEqual({
+      grantType: "authorization_code",
+    });
+  });
+
+  it("lets a policy separate machine from user issuance by grant type", async () => {
+    const f = await fixture({
+      policy: async (_client, _user, resource, _scope, context) =>
+        context?.grantType === "authorization_code" && resource === RESOURCE,
+    });
+    await f.issueCode([RESOURCE]);
+  });
+
+  it("passes the exact requested resource to the consent handler and to authenticateUser", async () => {
+    const spelled = "https://mcp.example.com/mcp?tenant=%41";
+    const f = await fixture({ policy: async () => true });
+    f.authenticateUser.mockResolvedValue({
+      user: ALICE,
+      authorizedScope: undefined as unknown as BasicScope,
+    });
+    const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(
+      async () => ({ approved: true }),
+    );
+    const code = await (async () => {
+      const response = await f.authorize([spelled], {}, handleConsent);
+      const location = new URL(response.headers.get("location")!);
+      return location.searchParams.get("code");
+    })();
+    assert(code);
+    expect(handleConsent).toHaveBeenCalledOnce();
+    expect(handleConsent.mock.calls[0]?.[3]?.resource).toBe(spelled);
+    const authenticateArgs = f.authenticateUser.mock.calls[0] as unknown[];
+    expect(
+      (authenticateArgs[1] as { resource?: string } | undefined)?.resource,
+    ).toBe(spelled);
+    expect((await f.authorizationCodeService.get(code))?.resource).toBe(
+      spelled,
+    );
+  });
+
+  for (const code of [false, true]) {
+    it(`gives the consent handler no resource ${code ? "when none was named" : "without resourceIndicators"}`, async () => {
+      const f = await fixture({ code });
+      f.authenticateUser.mockResolvedValue({
+        user: ALICE,
+        authorizedScope: undefined as unknown as BasicScope,
+      });
+      const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(
+        async () => ({ approved: true }),
+      );
+      await f.authorize(code ? [] : [RESOURCE], {}, handleConsent);
+      expect(handleConsent).toHaveBeenCalledOnce();
+      const authentication = handleConsent.mock.calls[0]?.[3];
+      assert(authentication);
+      expect("resource" in authentication).toBe(false);
+    });
+  }
+
+  it("still asks the policy under prompt=none with remembered consent", async () => {
+    const f = await fixture({
+      policy: async (_client, _user, resource) => resource === RESOURCE,
+    });
+    const handleConsent = vi.fn<HandleConsentFn<TestClient, BasicScope>>(
+      async () => ({ approved: true }),
+    );
+    expectRedirectError(
+      await f.authorize([OTHER], { prompt: "none" }, handleConsent),
+      "invalid_target",
+    );
+    expect(handleConsent).not.toHaveBeenCalled();
+    expect(f.policy).toHaveBeenCalledOnce();
+    expect(f.savedCodes).not.toHaveBeenCalled();
+    const response = await f.authorize(
+      [RESOURCE],
+      { prompt: "none" },
+      handleConsent,
+    );
+    const location = new URL(response.headers.get("location")!);
+    assert(location.searchParams.get("code"));
+    expect(handleConsent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a code that a generateAuthorizationCode override returned without the accepted resource", async () => {
+    const f = await fixture();
+    const original = f.codeGrant.generateAuthorizationCode.bind(f.codeGrant);
+    vi.spyOn(f.codeGrant, "generateAuthorizationCode").mockImplementation(
+      async (options, request) =>
+        await original({ ...options, resource: null }, request),
+    );
+    expectRedirectError(await f.authorize([RESOURCE]), "server_error");
+  });
+});
+
+describe("additional resource binding cases", () => {
+  it("refuses a token store that invents a binding on an unbound issuance", async () => {
+    const f = await fixture();
+    const code = await f.issueCode([]);
+    f.savedTokens.mockImplementation((async (token: Bound) => ({
+      ...(await MemoryTokenService.prototype.save.call(f.tokenService, token)),
+      resource: OTHER,
+    })) as typeof f.tokenService.save);
+    const response = await f.exchange(code);
+    expect(response.status).toBe(500);
+    expect((await response.json()).access_token).toBeUndefined();
+  });
+
+  for (const atomic of [false, true]) {
+    it(`never issues an unbound or mismatched token from concurrent exchanges of one code (${atomic ? "exchangeCode" : "revoke then save"})`, async () => {
+      const f = await fixture({ atomic });
+      const code = await f.issueCode();
+      const [matching, mismatching] = await Promise.all([
+        f.exchange(code, [RESOURCE]),
+        f.exchange(code, [OTHER]),
+      ]);
+      expect(mismatching.status).toBe(400);
+      expect(["invalid_target", "invalid_grant"]).toContain(
+        (await mismatching.json()).error,
+      );
+      expect([200, 400]).toContain(matching.status);
+      const body = await matching.json();
+      if (matching.status === 200) {
+        expect(
+          (await f.tokenService.getToken(body.access_token))?.resource,
+        ).toBe(RESOURCE);
+      }
+      for (const [saved] of f.savedTokens.mock.calls) {
+        expect(saved.resource).toBe(RESOURCE);
+      }
+      expect(f.savedTokens.mock.calls.length).toBeLessThanOrEqual(1);
+    });
+  }
+
+  it("never issues a mismatched successor from concurrent refreshes", async () => {
+    const f = await fixture();
+    const issued = await issueTokens(f);
+    const [matching, mismatching] = await Promise.all([
+      f.refresh(issued.refresh_token),
+      f.refresh(issued.refresh_token, [OTHER]),
+    ]);
+    expect(mismatching.status).toBe(400);
+    expect(["invalid_target", "invalid_grant"]).toContain(
+      (await mismatching.json()).error,
+    );
+    const body = await matching.json();
+    expect(matching.status, JSON.stringify(body)).toBe(200);
+    expect(
+      (await f.tokenService.getRefreshToken(body.refresh_token))?.resource,
+    ).toBe(RESOURCE);
+    for (const [, next] of f.rotate.mock.calls) {
+      expect(next.resource).toBe(RESOURCE);
+    }
+  });
+
+  it("keeps the binding when the token service does not rotate the refresh token", async () => {
+    const f = await fixture();
+    const issued = await issueTokens(f);
+    vi.spyOn(f.tokenService, "generateRefreshToken").mockResolvedValue(
+      undefined,
+    );
+    const response = await f.refresh(issued.refresh_token);
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect((await f.tokenService.getToken(body.access_token))?.resource).toBe(
+      RESOURCE,
+    );
+    expect(f.rotate.mock.calls[0]?.[1].refreshToken).toBe(issued.refresh_token);
+    expect(f.rotate.mock.calls[0]?.[1].resource).toBe(RESOURCE);
+  });
+
+  it("keeps a bound code bound after the code grant's option is turned off", async () => {
+    const f = await fixture();
+    const code = await f.issueCode();
+    Object.defineProperty(f.codeGrant, "resourceIndicators", { value: false });
+    const response = await f.exchange(code, [OTHER]);
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect((await f.tokenService.getToken(body.access_token))?.resource).toBe(
+      RESOURCE,
+    );
+    expect(
+      (await f.tokenService.getRefreshToken(body.refresh_token))?.resource,
+    ).toBe(RESOURCE);
+  });
+
+  it("ignores resource in the token endpoint's query string", async () => {
+    const f = await fixture();
+    const code = await f.issueCode([]);
+    const query = `?resource=${encodeURIComponent(RESOURCE)}`;
+    const response = await f.exchange(code, [], undefined, query);
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(
+      (await f.tokenService.getToken(body.access_token))?.resource,
+    ).toBeUndefined();
+    const refreshed = await f.refresh(body.refresh_token, [], {}, query);
+    const next = await refreshed.json();
+    expect(refreshed.status, JSON.stringify(next)).toBe(200);
+    expect(
+      (await f.tokenService.getRefreshToken(next.refresh_token))?.resource,
+    ).toBeUndefined();
   });
 });
