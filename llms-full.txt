@@ -590,15 +590,182 @@ webhooks — is covered in the
 
 # Quickstart: run auth for your application
 
-Run the Hono example to see login, an OAuth2 authorization server, a BFF, and a
-protected API working together. Everything runs locally; no Udibo account,
-external database, or email service is required.
+Two ways to see sign-in working, neither needing a Udibo account, an external
+database, or an email service:
+
+- **[Start from npm](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#start-from-npm-no-account)** installs the published
+  package, runs a local development identity provider, and signs a user in to a
+  small Hono app you write. It takes a few minutes and uses nothing from this
+  repository.
+- **[Run the full example](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#run-the-full-example-from-a-clone)** clones this
+  repository and runs a larger workspace example with its own login pages, an
+  authorization server, a BFF, and a protected API.
 
 If you want Udibo to host sign-in, use
 [the managed-service guide](https://github.com/udibo/oauth2/blob/main/docs/guides/use-udibo.md). It requires a Udibo account;
 see [udibo.com](https://www.udibo.com/) for how to get one.
 
-## Run the example
+## Start from npm, no account
+
+You need Node.js 22.18 or later, which runs the TypeScript app file directly,
+and npm. The local identity provider is for development and CI only: its users,
+sessions, and tokens live in memory and vanish when it exits, its config file
+holds plaintext passwords, and it has no persistence. It is not a way to
+self-host a production identity service. To host authorization in production,
+see [host authorization for your app](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md).
+
+### Install
+
+Pin exact versions so the steps below behave as written. These are the versions
+this guide was last run against:
+
+```sh
+mkdir local-signin && cd local-signin
+npm init -y
+npm pkg set type=module
+npm install --save-exact @udibo/oauth2@0.52.0 hono@4.13.17 @hono/node-server@2.1.6
+```
+
+### Configure the provider
+
+Save this as `idp.json`. It seeds one client and one user, and pins the
+provider's issuer and port so the app can be configured once:
+
+```json
+{
+  "port": 9000,
+  "issuer": "http://127.0.0.1:9000",
+  "clients": [
+    {
+      "id": "demo-app",
+      "secret": "demo-secret",
+      "redirectUris": ["http://127.0.0.1:3100/auth/callback"]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice@example.com",
+      "password": "password",
+      "claims": { "name": "Alice Example", "email": "alice@example.com" }
+    }
+  ]
+}
+```
+
+### Write the app
+
+Save this as `app.ts`. The `issuer`, `clientId`, `clientSecret`, and
+`redirectUri` in `DirectClient` are the values `idp.json` declares, and
+`DirectClient` discovers the provider's endpoints from the issuer.
+
+```ts
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { html } from "hono/html";
+import { DirectClient } from "@udibo/oauth2/client";
+import {
+  HonoBff,
+  MemoryAuthRequestStorageFactory,
+  MemorySessionStore,
+} from "@udibo/oauth2/hono/bff";
+
+const client = new DirectClient({
+  issuer: "http://127.0.0.1:9000",
+  clientId: "demo-app",
+  clientSecret: "demo-secret",
+  redirectUri: "http://127.0.0.1:3100/auth/callback",
+});
+
+const bff = new HonoBff({
+  client,
+  scope: "openid profile email",
+  cookie: { secure: false },
+  sessionStore: new MemorySessionStore(),
+  authRequestStorage: new MemoryAuthRequestStorageFactory(),
+});
+
+const app = new Hono();
+app.route("/auth", bff.routes());
+
+app.get("/", (c) =>
+  c.html(html`<a href="/auth/login?return_to=/dashboard">Sign in</a>`),
+);
+
+app.get("/dashboard", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const session = await bff.readSession(c);
+  if (!session.isAuthenticated) {
+    return c.redirect("/auth/login?return_to=/dashboard");
+  }
+  return c.html(html`
+    <h1>Hello, ${session.user?.name}</h1>
+    <a href="/auth/logout?return_to=/">Sign out</a>
+  `);
+});
+
+serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 3100 });
+```
+
+`bff.routes()` mounts `/auth/login`, `/auth/callback`, `/auth/logout`, and
+`/auth/session`. The dashboard is a server-rendered page behind the session
+cookie, so it asks the BFF who is signed in with `bff.readSession(c)` and checks
+`isAuthenticated`. The memory stores and `secure: false` cookies suit plain-HTTP
+local development only.
+
+### Run it
+
+Start the provider in one terminal and the app in another:
+
+```sh
+npx udibo-oauth2 idp dev --config idp.json
+node app.ts
+```
+
+Open <http://127.0.0.1:3100/>, select **Sign in**, and enter
+`alice@example.com` / `password` on the provider's page. You land on
+`/dashboard` showing "Hello, Alice Example". Opening `/dashboard` with no
+session sends you through the same sign-in. Stop each process with Ctrl+C.
+
+Selecting **Sign out** ends the app's session. The provider keeps its own
+browser session, so the next sign-in completes without asking for a password
+again. To see the sign-in page again, also open <http://127.0.0.1:9000/logout>.
+
+### Use `127.0.0.1` everywhere
+
+Open the app at `127.0.0.1`, not `localhost`. A redirect URI is compared exactly
+against the client's registered list, except that a loopback IP literal such as
+`http://127.0.0.1` matches on any port (RFC 8252 §7.3), and `localhost` is a
+different host from `127.0.0.1`. The provider's issuer, the registered redirect
+URI, the app's `redirectUri`, and the address in your browser then all name the
+same host. Browsing the app at `localhost` while the redirect URI says
+`127.0.0.1` ends in a 400 at `/auth/callback`, because the browser stored the
+pending sign-in on one host and returns on the other. The provider's own
+[issuer and port pairing](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md#pair-an-app-with-the-provider)
+explains each value.
+
+### Moving to a hosted OpenID Connect issuer
+
+The app code stays the same; the configuration changes:
+
+| Setting       | Local provider                  | Hosted issuer                                                  |
+| ------------- | ------------------------------- | -------------------------------------------------------------- |
+| Issuer        | `http://127.0.0.1:9000`         | The issuer URL your provider publishes, copied exactly         |
+| Client ID     | `demo-app`                      | The client ID of your registration                             |
+| Client secret | `demo-secret`                   | The registration's secret, kept in your secret store           |
+| Callback URL  | `http://127.0.0.1:3100/auth/callback` | Your deployed app's `/auth/callback`, registered with the issuer |
+| Scopes        | `openid profile email`          | Only scopes your registration allows                           |
+
+Before production, also replace what the local path leaves in memory or
+disabled: swap `MemorySessionStore` for a persistent `SessionStore` shared by
+every instance, swap `MemoryAuthRequestStorageFactory` for
+`EncryptedCookieAuthRequestStorage`, and remove `cookie: { secure: false }` from
+the BFF options so the HTTPS defaults apply. The
+[environments guide](https://github.com/udibo/oauth2/blob/main/docs/guides/deploy-across-environments.md) keeps these values
+together per environment, and the
+[deployment guide](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md) and
+[checklist](https://github.com/udibo/oauth2/blob/main/docs/guides/hardening-checklist.md) cover the rest.
+
+## Run the full example from a clone
 
 Install Node.js 24.2 or later, [pnpm](https://pnpm.io/installation), and Git,
 then check out the public package repository. The example is a workspace member
@@ -7310,6 +7477,11 @@ user without their password.
 > admin token can mint a token for any seeded user. Never point a production
 > application at it.
 
+To sign a real application in against it, with no account anywhere, follow
+[Start from npm, no account](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#start-from-npm-no-account). It
+holds the one complete app; [Pair an app with the provider](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md#pair-an-app-with-the-provider)
+below says which provider setting each app option must match.
+
 ## What is enforced, and what is only documented
 
 Three things the server enforces rather than leaving to your discipline:
@@ -7391,6 +7563,52 @@ actually uses:
 npx udibo-oauth2 idp dev \
   --hostname 0.0.0.0 --unsafe-remote-access --issuer http://idp:9000
 ```
+
+## Pair an app with the provider
+
+The [quickstart](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#start-from-npm-no-account) has the complete
+Hono app: redirect sign-in, callback, a protected page, and sign-out. What
+follows is how its settings line up with this server's, so nothing is copied by
+hand from the startup output.
+
+Pin the port and the issuer in the config (or with `--port` and `--issuer`) and
+give the app the same values, so the startup output never has to be copied by
+hand:
+
+| Provider (`idp.json`)    | App (`DirectClient`)     | Must match                                               |
+| ------------------------ | ------------------------ | -------------------------------------------------------- |
+| `issuer`                 | `issuer`                 | Character for character, including the port              |
+| `clients[].id`           | `clientId`               | Exactly                                                  |
+| `clients[].secret`       | `clientSecret`           | Exactly                                                  |
+| `clients[].redirectUris` | `redirectUri`            | Listed exactly (a loopback IP literal ignores the port)  |
+
+```sh
+npx udibo-oauth2 idp dev --config idp.json --port 9000 --issuer http://127.0.0.1:9000
+```
+
+Leave `port` unset and the server still starts on 9000, but `"port": 0` picks a
+new port each run, so no fixed issuer can match it. Use `127.0.0.1` in the issuer
+and the redirect URI, and browse the app at `127.0.0.1`: the app's pending-sign-in cookie is
+host-only, so a sign-in started at `localhost` returns to `127.0.0.1` without it
+and fails with a 400 at the callback.
+
+Three traps the quickstart's app avoids:
+
+- **`bff.protect()` needs a `resourceServer`.** Without that option it throws
+  when called. It guards `/api/*` routes with a session cookie or a bearer
+  token. For a page behind the session cookie, call `bff.readSession(c)` in the
+  handler instead.
+- **The session field is `isAuthenticated`.** `readSession` returns
+  `{ isAuthenticated, user, sessionExpiresIn, logoutUrl }`; names such as
+  `authenticated` or `signedIn` do not exist on it.
+- **A form `POST` to `/auth/logout` is refused with 403.** That route requires
+  the BFF's CSRF header, which a plain HTML form cannot send. A same-origin link
+  to `GET /auth/logout` works from a page.
+
+Signing out of the app does not sign out of this provider. Its discovery
+document advertises no end-session endpoint, so the BFF's `rpInitiatedLogout`
+option only logs a warning, and the next sign-in is silent. `GET /logout` on the
+provider (see [Signing in](https://github.com/udibo/oauth2/blob/main/docs/guides/run-a-local-identity-provider.md#signing-in)) ends its session too.
 
 ## Configuration
 
@@ -7757,6 +7975,8 @@ It is also not a self-host path for Udibo's hosted identity service, which adds
 tenants, persistence, and an administrative dashboard. `idp dev` is a
 development and test dependency, deliberately.
 
+To point the same app at a hosted OpenID Connect issuer, see
+[Moving to a hosted OpenID Connect issuer](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#moving-to-a-hosted-openid-connect-issuer).
 To build the real thing, see
 [Become an OAuth provider](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md). To wire an application
 to any provider — this one included — see the BFF wiring in

@@ -26,6 +26,11 @@ user without their password.
 > admin token can mint a token for any seeded user. Never point a production
 > application at it.
 
+To sign a real application in against it, with no account anywhere, follow
+[Start from npm, no account](../quickstart.md#start-from-npm-no-account). It
+holds the one complete app; [Pair an app with the provider](#pair-an-app-with-the-provider)
+below says which provider setting each app option must match.
+
 ## What is enforced, and what is only documented
 
 Three things the server enforces rather than leaving to your discipline:
@@ -107,6 +112,52 @@ actually uses:
 npx udibo-oauth2 idp dev \
   --hostname 0.0.0.0 --unsafe-remote-access --issuer http://idp:9000
 ```
+
+## Pair an app with the provider
+
+The [quickstart](../quickstart.md#start-from-npm-no-account) has the complete
+Hono app: redirect sign-in, callback, a protected page, and sign-out. What
+follows is how its settings line up with this server's, so nothing is copied by
+hand from the startup output.
+
+Pin the port and the issuer in the config (or with `--port` and `--issuer`) and
+give the app the same values, so the startup output never has to be copied by
+hand:
+
+| Provider (`idp.json`)    | App (`DirectClient`)     | Must match                                               |
+| ------------------------ | ------------------------ | -------------------------------------------------------- |
+| `issuer`                 | `issuer`                 | Character for character, including the port              |
+| `clients[].id`           | `clientId`               | Exactly                                                  |
+| `clients[].secret`       | `clientSecret`           | Exactly                                                  |
+| `clients[].redirectUris` | `redirectUri`            | Listed exactly (a loopback IP literal ignores the port)  |
+
+```sh
+npx udibo-oauth2 idp dev --config idp.json --port 9000 --issuer http://127.0.0.1:9000
+```
+
+Leave `port` unset and the server still starts on 9000, but `"port": 0` picks a
+new port each run, so no fixed issuer can match it. Use `127.0.0.1` in the issuer
+and the redirect URI, and browse the app at `127.0.0.1`: the app's pending-sign-in cookie is
+host-only, so a sign-in started at `localhost` returns to `127.0.0.1` without it
+and fails with a 400 at the callback.
+
+Three traps the quickstart's app avoids:
+
+- **`bff.protect()` needs a `resourceServer`.** Without that option it throws
+  when called. It guards `/api/*` routes with a session cookie or a bearer
+  token. For a page behind the session cookie, call `bff.readSession(c)` in the
+  handler instead.
+- **The session field is `isAuthenticated`.** `readSession` returns
+  `{ isAuthenticated, user, sessionExpiresIn, logoutUrl }`; names such as
+  `authenticated` or `signedIn` do not exist on it.
+- **A form `POST` to `/auth/logout` is refused with 403.** That route requires
+  the BFF's CSRF header, which a plain HTML form cannot send. A same-origin link
+  to `GET /auth/logout` works from a page.
+
+Signing out of the app does not sign out of this provider. Its discovery
+document advertises no end-session endpoint, so the BFF's `rpInitiatedLogout`
+option only logs a warning, and the next sign-in is silent. `GET /logout` on the
+provider (see [Signing in](#signing-in)) ends its session too.
 
 ## Configuration
 
@@ -473,6 +524,8 @@ It is also not a self-host path for Udibo's hosted identity service, which adds
 tenants, persistence, and an administrative dashboard. `idp dev` is a
 development and test dependency, deliberately.
 
+To point the same app at a hosted OpenID Connect issuer, see
+[Moving to a hosted OpenID Connect issuer](../quickstart.md#moving-to-a-hosted-openid-connect-issuer).
 To build the real thing, see
 [Become an OAuth provider](become-an-oauth-provider.md). To wire an application
 to any provider — this one included — see the BFF wiring in
