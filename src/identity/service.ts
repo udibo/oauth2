@@ -259,6 +259,87 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    */
   failedSignInFloorMs?: number;
   /**
+   * Resolve a sign-in whose identifier matches no account, typically by
+   * checking the password against the system your users are moving from and
+   * creating the account on a match. {@link IdentityService.signIn} calls it
+   * only after the sign-in throttle admits the attempt and
+   * {@link IdentityUserStore.findByIdentifier} finds no account. It receives
+   * the trimmed identifier and the password exactly as submitted.
+   *
+   * Return the user to sign them in: typically the account you just created
+   * for this identifier with this password. The service signs it in only when
+   * {@link IdentityUserStore.findByIdentifier} now finds that same account for
+   * the identifier and its stored credential accepts the submitted password, so
+   * a resolver can never sign in an account the identifier does not reach (a
+   * casing variant, an account your store hides from sign-in) or one whose own
+   * password differs. On a uniqueness conflict, return `null` or throw rather
+   * than the existing row. The service then refuses a locked account under
+   * `"enforce"`, as for any other sign-in, and otherwise resets the throttle
+   * and the lockout count and emits `sign_in.succeeded`. Return `null` to
+   * refuse; an account that fails the check above is refused the same way.
+   * A throw
+   * also refuses: the service logs that the resolver threw, never the error
+   * itself, which may carry the password. A refusal returns the same `null`,
+   * runs the same equalizing password hash, emits the same `sign_in.failed`
+   * event with reason `unknown_identifier`, and is held to the same
+   * {@link failedSignInFloorMs} as an unknown identifier with no resolver.
+   *
+   * The resolver's own running time adds to the refusal's work, so set
+   * {@link failedSignInFloorMs} above its slowest refusal plus one password
+   * hash. A refusal after the other system accepted the password (the create
+   * failed) is usually the slowest: your request timeout, the hash and write
+   * of the create, then the service's hash. Below that, response time tells an
+   * unauthenticated caller which identifiers had no local account, or that a
+   * guessed password works on the other system. Only the
+   * per-identifier throttle bounds how often it runs, and only when a
+   * sign-in rate limiter (`rateLimiter` or `rateLimiters.signIn`) is
+   * configured: there is no account to lock, the throttle
+   * never stops one password tried across many identifiers, and under
+   * `protectionMode: "log-only"` it reports without stopping anything. Limit
+   * calls inside the resolver when it reaches another system. Compare the
+   * other system's answer against the identifier in the same normalized form
+   * your store resolves accounts by.
+   *
+   * @example Create an account from a password check against another system
+   * ```ts
+   * import {
+   *   IdentityService,
+   *   type IdentityUser,
+   *   type IdentityUserStore,
+   *   PasswordIdentityService,
+   * } from "@udibo/oauth2/identity";
+   *
+   * interface AppUser extends IdentityUser {
+   *   email: string;
+   * }
+   *
+   * declare const users: IdentityUserStore<AppUser>;
+   * declare function checkPreviousSystem(
+   *   email: string,
+   *   password: string,
+   * ): Promise<{ email: string } | null>;
+   *
+   * const passwords = new PasswordIdentityService();
+   * const identity = new IdentityService<AppUser>({
+   *   users,
+   *   passwords,
+   *   failedSignInFloorMs: 3_000,
+   *   resolveUnknownIdentifier: async ({ identifier, password }) => {
+   *     const profile = await checkPreviousSystem(identifier, password);
+   *     if (profile?.email !== identifier) return null;
+   *     return await users.create(
+   *       { email: profile.email },
+   *       await passwords.hash(password),
+   *     );
+   *   },
+   * });
+   * ```
+   */
+  resolveUnknownIdentifier?: (input: {
+    identifier: string;
+    password: string;
+  }) => Promise<User | null>;
+  /**
    * Session revocation, called on a successful password reset. Optional. When
    * the user store implements {@link IdentityUserStore.resetCredential}, the
    * reset still calls `revokeAllByUser` after that transaction commits, so
@@ -570,6 +651,7 @@ export class IdentityService<User extends IdentityUser> {
   readonly #onEvent?: IdentityEventHook;
   readonly #legacyVerifiers?: readonly LegacyPasswordVerifier[];
   readonly #failedSignInFloorMs: number;
+  readonly #resolveUnknownIdentifier?: IdentityServiceOptions<User>["resolveUnknownIdentifier"];
 
   /** Wires the user store and optional collaborators; applies the TTL and hasher defaults. */
   constructor(options: IdentityServiceOptions<User>) {
@@ -615,6 +697,7 @@ export class IdentityService<User extends IdentityUser> {
       Number.isFinite(floor) && floor >= 0
         ? floor
         : DEFAULT_FAILED_SIGN_IN_FLOOR_MS;
+    this.#resolveUnknownIdentifier = options.resolveUnknownIdentifier;
   }
 
   /**
@@ -656,6 +739,10 @@ export class IdentityService<User extends IdentityUser> {
    * longer (typically a foreign KDF) stays visible by its excess. A success
    * returns as soon as it is done.
    *
+   * With {@link IdentityServiceOptions.resolveUnknownIdentifier} set, an
+   * identifier that finds no account is offered to it first; a user it returns
+   * signs in, and a refusal is the same `null` an unknown identifier gets.
+   *
    * @throws {IdentityError} `rate_limited` (with `retryAfterMs`) when a
    * `rateLimiter` is configured, the identifier's limit is hit, and
    * `protectionMode` is `"enforce"`. Rate-limit rejections throw before the
@@ -674,13 +761,11 @@ export class IdentityService<User extends IdentityUser> {
     });
     const user = await this.#users.findByIdentifier(identifier);
     if (!user) {
-      await this.#equalizeTiming(input.password);
-      await this.#emit({
-        type: "sign_in.failed",
+      return await this.#signInUnknownIdentifier(
         identifier,
-        reason: "unknown_identifier",
-      });
-      return await this.#rejectSignIn(startedAt);
+        input.password,
+        startedAt,
+      );
     }
     const lockReported = await this.#reportLock(user.id, identifier);
     if (lockReported && this.#enforce) {
@@ -706,6 +791,77 @@ export class IdentityService<User extends IdentityUser> {
       if (outcome === "wrong_password") await attempt.fail();
       return await this.#rejectSignIn(startedAt);
     }
+    return await this.#completeSignIn(user, identifier);
+  }
+
+  async #signInUnknownIdentifier(
+    identifier: string,
+    password: string,
+    startedAt: number,
+  ): Promise<User | null> {
+    const resolved = await this.#tryResolveUnknownIdentifier(
+      identifier,
+      password,
+    );
+    const user =
+      resolved &&
+      (await this.#bindResolvedUser(resolved, identifier, password));
+    if (user) {
+      if ((await this.#reportLock(user.id, identifier)) && this.#enforce) {
+        await this.#equalizeTiming(password);
+        return await this.#rejectSignIn(startedAt);
+      }
+      return await this.#completeSignIn(user, identifier);
+    }
+    await this.#equalizeTiming(password);
+    await this.#emit({
+      type: "sign_in.failed",
+      identifier,
+      reason: "unknown_identifier",
+    });
+    return await this.#rejectSignIn(startedAt);
+  }
+
+  async #tryResolveUnknownIdentifier(
+    identifier: string,
+    password: string,
+  ): Promise<User | null> {
+    if (!this.#resolveUnknownIdentifier) return null;
+    try {
+      return (
+        (await this.#resolveUnknownIdentifier({ identifier, password })) ?? null
+      );
+    } catch {
+      // Never log the error object: it may echo the submitted password.
+      console.error("[@udibo/oauth2] resolveUnknownIdentifier threw");
+      return null;
+    }
+  }
+
+  async #bindResolvedUser(
+    resolved: User,
+    identifier: string,
+    password: string,
+  ): Promise<User | null> {
+    const found = await this.#users.findByIdentifier(identifier);
+    const credential =
+      found?.id === resolved.id
+        ? await this.#users.getCredential(found.id)
+        : undefined;
+    if (
+      found &&
+      credential &&
+      (await this.#passwords.verify(password, credential))
+    ) {
+      return found;
+    }
+    console.error(
+      "[@udibo/oauth2] resolveUnknownIdentifier returned an account the identifier and password do not sign in to; refused",
+    );
+    return null;
+  }
+
+  async #completeSignIn(user: User, identifier: string): Promise<User> {
     await this.#resetThrottle("signIn", identifier);
     if (this.#lockout) await this.#lockout.reset(user.id);
     await this.#emit({
