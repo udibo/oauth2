@@ -6902,8 +6902,11 @@ The resolver decides who the person is, so keep these in mind:
 
 - **Raise the floor above the resolver.** Its running time adds to a refusal.
   Give the outbound call a deadline and set `failedSignInFloorMs` above that
-  deadline plus one password hash. Otherwise response time tells a caller
-  which identifiers have no account yet.
+  deadline plus two password hashes plus the account write: the slowest
+  refusal is a create that fails after the old system accepted the password,
+  followed by the service's own equalizing hash. Otherwise response time tells
+  a caller which identifiers have no account yet, or that a guessed password
+  works on the old system.
 - **Bound the calls yourself.** There is no account to lock. The throttle is
   per identifier and exists only when you configure a `rateLimiter`; it never
   stops one password tried across many identifiers, and under

@@ -285,9 +285,12 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * {@link failedSignInFloorMs} as an unknown identifier with no resolver.
    *
    * The resolver's own running time adds to the refusal's work, so set
-   * {@link failedSignInFloorMs} above its slowest answer (your request
-   * timeout) plus one password hash, or response time tells an
-   * unauthenticated caller which identifiers had no local account. Only the
+   * {@link failedSignInFloorMs} above its slowest refusal plus one password
+   * hash. A refusal after the other system accepted the password (the create
+   * failed) is usually the slowest: your request timeout, the hash and write
+   * of the create, then the service's hash. Below that, response time tells an
+   * unauthenticated caller which identifiers had no local account, or that a
+   * guessed password works on the other system. Only the
    * per-identifier throttle bounds how often it runs, and only when a
    * `rateLimiter` is configured: there is no account to lock, the throttle
    * never stops one password tried across many identifiers, and under
