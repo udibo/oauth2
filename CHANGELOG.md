@@ -1,3 +1,9 @@
+## [0.53.0](https://github.com/udibo/oauth2/compare/0.52.0...0.53.0) (2026-11-11)
+
+### Features
+
+* **identity:** resolve an unknown identifier at sign-in ([#197](https://github.com/udibo/oauth2/issues/197)) ([b73e107](https://github.com/udibo/oauth2/commit/b73e1072e531df36669507ea504c7412785c0c5a)), closes [#signInUnknownIdentifier](https://github.com/udibo/oauth2/issues/signInUnknownIdentifier) [#bindResolvedUser](https://github.com/udibo/oauth2/issues/bindResolvedUser) [#completeSignIn](https://github.com/udibo/oauth2/issues/completeSignIn) [#completeSignIn](https://github.com/udibo/oauth2/issues/completeSignIn) [#195](https://github.com/udibo/oauth2/issues/195) [#196](https://github.com/udibo/oauth2/issues/196)
+
 ## [0.52.0](https://github.com/udibo/oauth2/compare/0.51.0...0.52.0) (2026-11-10)
 
 ### Features
