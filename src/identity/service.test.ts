@@ -3005,6 +3005,263 @@ describe("IdentityService failed sign-in timing", () => {
   });
 });
 
+describe("IdentityService resolveUnknownIdentifier", () => {
+  const RESOLVER_MS = 40;
+
+  function makeResolverService(
+    resolve: IdentityServiceOptions<TestUser>["resolveUnknownIdentifier"],
+    options?: Partial<IdentityServiceOptions<TestUser>>,
+  ) {
+    const { store } = makeLegacyStore();
+    const events: IdentityEvent[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      resolveUnknownIdentifier: resolve,
+      onEvent: (event) => {
+        events.push(event);
+      },
+      ...options,
+    });
+    return { store, service, events };
+  }
+
+  async function failedSignInEvents(
+    options: Partial<IdentityServiceOptions<TestUser>>,
+  ): Promise<IdentityEvent[]> {
+    const { service, events } = makeResolverService(undefined, options);
+    using _errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      await service.signIn({ identifier: "ghost@b.co", password: "pw-ghost" }),
+    ).toStrictEqual(null);
+    return events;
+  }
+
+  it("is not consulted when the identifier finds an account", async () => {
+    const resolve = vi.fn(() => Promise.resolve(null));
+    const { store, service } = makeResolverService(resolve);
+    await store.create(
+      { email: "known@b.co" },
+      await new PasswordIdentityService().hash("right-password"),
+    );
+
+    expect(
+      await service.signIn({
+        identifier: "known@b.co",
+        password: "wrong-password",
+      }),
+    ).toStrictEqual(null);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("is consulted after the throttle, so a rate-limited identifier never reaches it", async () => {
+    const resolve = vi.fn(() => Promise.resolve(null));
+    const { service } = makeResolverService(resolve, {
+      rateLimiter: new RateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        store: new MemoryRateLimitStore(),
+      }),
+    });
+
+    await service.signIn({ identifier: "ghost@b.co", password: "pw" });
+    await rejection(
+      () => service.signIn({ identifier: "ghost@b.co", password: "pw" }),
+      IdentityError,
+    );
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("receives the trimmed identifier and the password as submitted", async () => {
+    const resolve = vi.fn(() => Promise.resolve(null));
+    const { service } = makeResolverService(resolve);
+
+    await service.signIn({
+      identifier: "  ghost@b.co ",
+      password: " pw with spaces ",
+    });
+
+    expect(resolve.mock.calls).toStrictEqual([
+      [{ identifier: "ghost@b.co", password: " pw with spaces " }],
+    ]);
+  });
+
+  it("signs in the user it returns", async () => {
+    let created: TestUser | undefined;
+    const { store, service, events } = makeResolverService(
+      async ({ identifier }) => {
+        created = await store.create(
+          { email: identifier },
+          await new PasswordIdentityService().hash("pw-remote"),
+        );
+        return created;
+      },
+    );
+
+    const user = await service.signIn({
+      identifier: "new@b.co",
+      password: "pw-remote",
+    });
+
+    assert.exists(created);
+    expect(user).toStrictEqual(created);
+    expect(events).toStrictEqual([
+      { type: "sign_in.succeeded", userId: created.id, identifier: "new@b.co" },
+    ]);
+  });
+
+  it("resets the identifier's throttle when its user signs in", async () => {
+    let answer: TestUser | null = null;
+    const { store, service } = makeResolverService(
+      () => Promise.resolve(answer),
+      {
+        rateLimiter: new RateLimiter({
+          limit: 2,
+          windowMs: 60_000,
+          store: new MemoryRateLimitStore(),
+        }),
+      },
+    );
+
+    await service.signIn({ identifier: "new@b.co", password: "pw" });
+    answer = await store.create(
+      { email: "remote-only" },
+      await new PasswordIdentityService().hash("pw"),
+    );
+    assert.exists(
+      await service.signIn({ identifier: "new@b.co", password: "pw" }),
+    );
+    answer = null;
+    await service.signIn({ identifier: "new@b.co", password: "pw" });
+
+    expect(
+      await service.signIn({ identifier: "new@b.co", password: "pw" }),
+      "a third failure inside a limit of 2 throws unless the success reset the window",
+    ).toStrictEqual(null);
+  });
+
+  it("does not sign in a returned account that is locked", async () => {
+    const locked = { userId: "", overBudgetUserId: "" };
+    let answer: TestUser | undefined;
+    const { store, service, events } = makeResolverService(
+      () => Promise.resolve(answer ?? null),
+      { lockout: lockoutHolding(locked) },
+    );
+    answer = await store.create(
+      { email: "locked@b.co" },
+      await new PasswordIdentityService().hash("pw"),
+    );
+    locked.userId = answer.id;
+
+    expect(
+      await service.signIn({ identifier: "alias@b.co", password: "pw" }),
+    ).toStrictEqual(null);
+    expect(eventsOfType(events, "sign_in.succeeded")).toStrictEqual([]);
+    expect(eventsOfType(events, "sign_in.locked")).toStrictEqual([
+      {
+        type: "sign_in.locked",
+        userId: answer.id,
+        identifier: "alias@b.co",
+        enforced: true,
+      },
+    ]);
+  });
+
+  it("emits the same unknown_identifier failure as having no resolver when it refuses", async () => {
+    const withoutResolver = await failedSignInEvents({});
+
+    expect(withoutResolver).toStrictEqual([
+      {
+        type: "sign_in.failed",
+        identifier: "ghost@b.co",
+        reason: "unknown_identifier",
+      },
+    ]);
+    expect(
+      await failedSignInEvents({
+        resolveUnknownIdentifier: () => Promise.resolve(null),
+      }),
+    ).toStrictEqual(withoutResolver);
+    expect(
+      await failedSignInEvents({
+        resolveUnknownIdentifier: () =>
+          Promise.reject(new Error("remote unavailable")),
+      }),
+    ).toStrictEqual(withoutResolver);
+  });
+
+  it("fails closed on a throw without logging its message or the password", async () => {
+    const { service } = makeResolverService(() =>
+      Promise.reject(new Error("upstream echoed pw-sentinel-7c1")),
+    );
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(
+      await service.signIn({
+        identifier: "ghost@b.co",
+        password: "pw-sentinel-7c1",
+      }),
+    ).toStrictEqual(null);
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const logged = errorLog.mock.calls
+      .flat()
+      .map((arg) =>
+        arg instanceof Error ? `${arg.message} ${arg.stack}` : String(arg),
+      )
+      .join("\n");
+    expect(logged).not.toContain("pw-sentinel-7c1");
+  });
+
+  it("holds a refusal and a throw to the failed sign-in floor, measured from entry", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    using _errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outcomes = {
+      refuses: async (): Promise<null> => {
+        await delay(RESOLVER_MS);
+        return null;
+      },
+      throws: async (): Promise<null> => {
+        await delay(RESOLVER_MS);
+        throw new Error("remote unavailable");
+      },
+    };
+    const timings: Record<string, number> = {};
+
+    for (const [outcome, resolve] of Object.entries(outcomes)) {
+      const { service } = makeResolverService(resolve, {
+        passwords: costedHasher(NATIVE_KDF_MS),
+        failedSignInFloorMs: FLOOR_MS,
+      });
+      timings[outcome] = await elapsedMs(time, () =>
+        service.signIn({ identifier: "ghost@b.co", password: "pw" }),
+      );
+    }
+
+    expect(timings).toStrictEqual({ refuses: FLOOR_MS, throws: FLOOR_MS });
+  });
+
+  it("still spends the equalizing hash after a refusal", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    const { service } = makeResolverService(
+      async () => {
+        await delay(RESOLVER_MS);
+        return null;
+      },
+      { passwords: costedHasher(NATIVE_KDF_MS), failedSignInFloorMs: 0 },
+    );
+
+    const took = await elapsedMs(time, () =>
+      service.signIn({ identifier: "ghost@b.co", password: "pw" }),
+    );
+
+    expect(
+      took,
+      "with no floor, a refusal that skipped the hash would return sooner than an unknown identifier does without a resolver",
+    ).toBe(RESOLVER_MS + NATIVE_KDF_MS);
+  });
+});
+
 describe("IdentityService passwordless", () => {
   function makePasswordlessService(options?: {
     limit?: number;

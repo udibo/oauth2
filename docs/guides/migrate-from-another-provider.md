@@ -13,6 +13,7 @@ already have; the migration completes one login at a time.
 - **[Wiring it up](#wiring-it-up)**
 - **[Bring-your-own verifiers (bcrypt / argon2 / scrypt)](#bring-your-own-verifiers)**
 - **[Bulk-importing your users](#bulk-importing-your-users)**
+- **[Users with no hash to import](#users-with-no-hash-to-import)**
 - **[Auditing the migration](#auditing-the-migration)**
 
 Automatic upgrades require the optional `IdentityUserStore.replaceCredential`
@@ -255,6 +256,76 @@ users a password-reset link.
 Before the cutover, do a dry-run validation pass with `verifyLegacyPassword` to
 confirm your verifiers accept the exported hashes (against a known test
 account).
+
+## Users with no hash to import
+
+When the old system cannot export a password hash, a user it still knows has no
+account in your application yet. Set `resolveUnknownIdentifier` to check such a
+sign-in against the old system and create the account on a match.
+`IdentityService.signIn` calls it only when `findByIdentifier` finds no account,
+and only after the sign-in throttle admits the attempt. It receives the trimmed
+identifier and the password as submitted:
+
+```ts
+import {
+  IdentityService,
+  type IdentityUser,
+  type IdentityUserStore,
+  PasswordIdentityService,
+} from "@udibo/oauth2/identity";
+
+interface User extends IdentityUser {
+  email: string;
+}
+
+declare const users: IdentityUserStore<User>;
+declare function checkOldSystem(
+  email: string,
+  password: string,
+  options: { signal: AbortSignal },
+): Promise<{ email: string } | null>;
+
+const passwords = new PasswordIdentityService();
+const identity = new IdentityService({
+  users,
+  passwords,
+  failedSignInFloorMs: 3_000,
+  resolveUnknownIdentifier: async ({ identifier, password }) => {
+    const profile = await checkOldSystem(identifier, password, {
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (profile?.email !== identifier) return null;
+    return await users.create(
+      { email: profile.email },
+      await passwords.hash(password),
+    );
+  },
+});
+```
+
+A user the resolver returns signs in, unless that account is locked, and
+`sign_in.succeeded` is emitted. Returning `null` refuses. A throw refuses too and
+is logged without its message, since that may echo the password. Every refusal
+looks exactly like an unknown identifier with no resolver: the same `null`, the
+same equalizing hash, the same `sign_in.failed` event with reason
+`unknown_identifier`, and the same `failedSignInFloorMs` floor.
+
+The resolver decides who the person is, so keep these in mind:
+
+- **Raise the floor above the resolver.** Its running time adds to a refusal.
+  Give the outbound call a deadline and set `failedSignInFloorMs` above that
+  deadline plus one password hash. Otherwise response time tells a caller
+  which identifiers have no account yet.
+- **Bound the calls yourself.** There is no account to lock. Under
+  `protectionMode: "log-only"` the throttle reports without blocking, so the
+  resolver runs on every attempt. Cap how often it reaches the old system, and
+  challenge bots at your route.
+- **Return only the account that proved the password.** Match the old system's
+  answer to the identifier that was submitted. Create the account so that two
+  concurrent first sign-ins produce one account, for example with a unique
+  constraint on the identifier.
+- **Every call sends a plaintext password.** Send it only over HTTPS to a
+  destination you control or trust, and keep it out of logs.
 
 ## Auditing the migration
 
