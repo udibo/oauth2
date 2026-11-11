@@ -6889,8 +6889,10 @@ const identity = new IdentityService({
 });
 ```
 
-A user the resolver returns signs in, unless that account is locked, and
-`sign_in.succeeded` is emitted. Returning `null` refuses. A throw refuses too and
+A user the resolver returns signs in only when `findByIdentifier` now finds
+that same account for the identifier and its stored credential accepts the
+submitted password, so create the account with that password. A locked account
+is refused, and otherwise `sign_in.succeeded` is emitted. Returning `null` refuses. A throw refuses too and
 is logged without its message, since that may echo the password. Every refusal
 looks exactly like an unknown identifier with no resolver: the same `null`, the
 same equalizing hash, the same `sign_in.failed` event with reason
@@ -6902,14 +6904,19 @@ The resolver decides who the person is, so keep these in mind:
   Give the outbound call a deadline and set `failedSignInFloorMs` above that
   deadline plus one password hash. Otherwise response time tells a caller
   which identifiers have no account yet.
-- **Bound the calls yourself.** There is no account to lock. Under
-  `protectionMode: "log-only"` the throttle reports without blocking, so the
-  resolver runs on every attempt. Cap how often it reaches the old system, and
-  challenge bots at your route.
-- **Return only the account that proved the password.** Match the old system's
-  answer to the identifier that was submitted. Create the account so that two
-  concurrent first sign-ins produce one account, for example with a unique
-  constraint on the identifier.
+- **Bound the calls yourself.** There is no account to lock. The throttle is
+  per identifier and exists only when you configure a `rateLimiter`; it never
+  stops one password tried across many identifiers, and under
+  `protectionMode: "log-only"` it reports without blocking. Cap the resolver's
+  total calls to the old system, and challenge bots at your route.
+- **Return only the account you just created.** Match the old system's answer
+  to the identifier in the same normalized form your store looks accounts up
+  by. Create the account so that two concurrent first sign-ins produce one
+  account, for example with a unique constraint on the identifier. On a
+  conflict, throw or return `null`, never the existing row: the losing attempt
+  is refused and the person signs in normally next time.
+- **Carry over what the old system verified.** Mark the email verified only
+  when the old system says it was.
 - **Every call sends a plaintext password.** Send it only over HTTPS to a
   destination you control or trust, and keep it out of logs.
 

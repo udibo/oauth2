@@ -3110,60 +3110,222 @@ describe("IdentityService resolveUnknownIdentifier", () => {
     ]);
   });
 
-  it("resets the identifier's throttle when its user signs in", async () => {
-    let answer: TestUser | null = null;
+  function provision(
+    store: IdentityUserStore<TestUser>,
+    hasher: PasswordHasherLike = new PasswordIdentityService(),
+    onCreate?: (user: TestUser) => void,
+  ): NonNullable<IdentityServiceOptions<TestUser>["resolveUnknownIdentifier"]> {
+    return async ({ identifier, password }) => {
+      const user = await store.create(
+        { email: identifier },
+        await hasher.hash(password),
+      );
+      onCreate?.(user);
+      return user;
+    };
+  }
+
+  it("resets the identifier's throttle and the account's lockout count when its user signs in", async () => {
+    let accept = false;
+    const resets: string[] = [];
+    const locked = { userId: "", overBudgetUserId: "" };
+    const lockout = lockoutHolding(locked);
+    let provisioner: ReturnType<typeof provision> | undefined;
     const { store, service } = makeResolverService(
-      () => Promise.resolve(answer),
+      (input) => (accept ? provisioner!(input) : Promise.resolve(null)),
       {
         rateLimiter: new RateLimiter({
           limit: 2,
           windowMs: 60_000,
           store: new MemoryRateLimitStore(),
         }),
+        lockout: {
+          ...lockout,
+          reset: (userId) => {
+            resets.push(userId);
+            return Promise.resolve();
+          },
+        },
       },
     );
+    provisioner = provision(store);
 
     await service.signIn({ identifier: "new@b.co", password: "pw" });
-    answer = await store.create(
-      { email: "remote-only" },
-      await new PasswordIdentityService().hash("pw"),
-    );
-    assert.exists(
-      await service.signIn({ identifier: "new@b.co", password: "pw" }),
-    );
-    answer = null;
-    await service.signIn({ identifier: "new@b.co", password: "pw" });
+    accept = true;
+    const user = await service.signIn({
+      identifier: "new@b.co",
+      password: "pw",
+    });
+    assert.exists(user);
+    expect(resets).toStrictEqual([user.id]);
+    await service.signIn({ identifier: "new@b.co", password: "wrong" });
 
     expect(
-      await service.signIn({ identifier: "new@b.co", password: "pw" }),
+      await service.signIn({ identifier: "new@b.co", password: "wrong" }),
       "a third failure inside a limit of 2 throws unless the success reset the window",
     ).toStrictEqual(null);
   });
 
-  it("does not sign in a returned account that is locked", async () => {
-    const locked = { userId: "", overBudgetUserId: "" };
-    let answer: TestUser | undefined;
-    const { store, service, events } = makeResolverService(
-      () => Promise.resolve(answer ?? null),
-      { lockout: lockoutHolding(locked) },
+  it("refuses an existing account that the submitted identifier does not find", async () => {
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    let victim: TestUser | undefined;
+    const { store, service, events } = makeResolverService(() =>
+      Promise.resolve(victim ?? null),
     );
-    answer = await store.create(
-      { email: "locked@b.co" },
-      await new PasswordIdentityService().hash("pw"),
+    victim = await store.create(
+      { email: "victim@b.co" },
+      await new PasswordIdentityService().hash("old-leaked-pw"),
     );
-    locked.userId = answer.id;
 
     expect(
-      await service.signIn({ identifier: "alias@b.co", password: "pw" }),
+      await service.signIn({
+        identifier: "Victim@b.co",
+        password: "old-leaked-pw",
+      }),
     ).toStrictEqual(null);
+    expect(events).toStrictEqual([
+      {
+        type: "sign_in.failed",
+        identifier: "Victim@b.co",
+        reason: "unknown_identifier",
+      },
+    ]);
+    expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a different account than the one the identifier now finds", async () => {
+    using _errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    let other: TestUser | undefined;
+    const { store, service, events } = makeResolverService(
+      async ({ identifier, password }) => {
+        await store.create(
+          { email: identifier },
+          await new PasswordIdentityService().hash(password),
+        );
+        return other ?? null;
+      },
+    );
+    other = await store.create(
+      { email: "other@b.co" },
+      await new PasswordIdentityService().hash("shared-pw"),
+    );
+
+    expect(
+      await service.signIn({ identifier: "new@b.co", password: "shared-pw" }),
+    ).toStrictEqual(null);
+    expect(eventsOfType(events, "sign_in.succeeded")).toStrictEqual([]);
+  });
+
+  it("refuses an account whose stored credential rejects the submitted password", async () => {
+    using _errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store, service, events } = makeResolverService(
+      async ({ identifier }) =>
+        await store.create(
+          { email: identifier },
+          await new PasswordIdentityService().hash("a-different-password"),
+        ),
+    );
+
+    expect(
+      await service.signIn({ identifier: "new@b.co", password: "pw-remote" }),
+    ).toStrictEqual(null);
+    expect(eventsOfType(events, "sign_in.succeeded")).toStrictEqual([]);
+    expect(eventsOfType(events, "sign_in.failed")).toStrictEqual([
+      {
+        type: "sign_in.failed",
+        identifier: "new@b.co",
+        reason: "unknown_identifier",
+      },
+    ]);
+  });
+
+  it("refuses an account with no stored credential", async () => {
+    using _errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store, creds } = makeLegacyStore();
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      resolveUnknownIdentifier: async ({ identifier }) => {
+        const user = await store.create(
+          { email: identifier },
+          await new PasswordIdentityService().hash("pw"),
+        );
+        creds.delete(user.id);
+        return user;
+      },
+    });
+
+    expect(
+      await service.signIn({ identifier: "new@b.co", password: "pw" }),
+    ).toStrictEqual(null);
+  });
+
+  it("refuses a returned account that is locked, held to the floor", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    const locked = { userId: "", overBudgetUserId: "" };
+    const hasher = costedHasher(NATIVE_KDF_MS);
+    const { store } = makeLegacyStore();
+    const events: IdentityEvent[] = [];
+    const service = new IdentityService<TestUser>({
+      users: store,
+      passwords: hasher,
+      failedSignInFloorMs: FLOOR_MS,
+      lockout: lockoutHolding(locked),
+      onEvent: (event) => {
+        events.push(event);
+      },
+      resolveUnknownIdentifier: provision(store, hasher, (user) => {
+        locked.userId = user.id;
+      }),
+    });
+
+    let result: TestUser | null | undefined;
+    const took = await elapsedMs(time, async () => {
+      result = await service.signIn({ identifier: "new@b.co", password: "pw" });
+    });
+
+    expect(result).toStrictEqual(null);
+    expect(took).toBe(FLOOR_MS);
     expect(eventsOfType(events, "sign_in.succeeded")).toStrictEqual([]);
     expect(eventsOfType(events, "sign_in.locked")).toStrictEqual([
       {
         type: "sign_in.locked",
-        userId: answer.id,
-        identifier: "alias@b.co",
+        userId: locked.userId,
+        identifier: "new@b.co",
         enforced: true,
       },
+    ]);
+  });
+
+  it("signs in a locked returned account under log-only, reporting the lock", async () => {
+    const locked = { userId: "", overBudgetUserId: "" };
+    const { store } = makeLegacyStore();
+    const events: IdentityEvent[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      protectionMode: "log-only",
+      lockout: lockoutHolding(locked),
+      onEvent: (event) => {
+        events.push(event);
+      },
+      resolveUnknownIdentifier: provision(store, undefined, (user) => {
+        locked.userId = user.id;
+      }),
+    });
+
+    const user = await service.signIn({
+      identifier: "new@b.co",
+      password: "pw",
+    });
+
+    assert.exists(user);
+    expect(events).toStrictEqual([
+      {
+        type: "sign_in.locked",
+        userId: user.id,
+        identifier: "new@b.co",
+        enforced: false,
+      },
+      { type: "sign_in.succeeded", userId: user.id, identifier: "new@b.co" },
     ]);
   });
 
