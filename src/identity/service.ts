@@ -292,7 +292,8 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * unauthenticated caller which identifiers had no local account, or that a
    * guessed password works on the other system. Only the
    * per-identifier throttle bounds how often it runs, and only when a
-   * `rateLimiter` is configured: there is no account to lock, the throttle
+   * sign-in rate limiter (`rateLimiter` or `rateLimiters.signIn`) is
+   * configured: there is no account to lock, the throttle
    * never stops one password tried across many identifiers, and under
    * `protectionMode: "log-only"` it reports without stopping anything. Limit
    * calls inside the resolver when it reaches another system. Compare the
