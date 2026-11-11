@@ -3110,6 +3110,25 @@ describe("IdentityService resolveUnknownIdentifier", () => {
     ]);
   });
 
+  it("returns the stored account, not the object the resolver returned", async () => {
+    let created: TestUser | undefined;
+    const { store, service } = makeResolverService(async ({ identifier }) => {
+      created = await store.create(
+        { email: identifier },
+        await new PasswordIdentityService().hash("pw-remote"),
+      );
+      return { ...created, email: "other@b.co" };
+    });
+
+    const user = await service.signIn({
+      identifier: "new@b.co",
+      password: "pw-remote",
+    });
+
+    assert.exists(created);
+    expect(user).toStrictEqual(created);
+  });
+
   function provision(
     store: IdentityUserStore<TestUser>,
     hasher: PasswordHasherLike = new PasswordIdentityService(),
