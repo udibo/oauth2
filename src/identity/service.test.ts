@@ -5278,6 +5278,128 @@ describe("IdentityService legacy verifier that did not check the password", () =
     ).toStrictEqual(userId);
   });
 
+  function gateVerifier(remote: ReturnType<typeof switchableVerifier>) {
+    const gate = Promise.withResolvers<void>();
+    const held = { entered: 0, open: () => gate.resolve() };
+    const verify = remote.verifier.verify;
+    remote.verifier.verify = async (password, phc) => {
+      held.entered++;
+      await gate.promise;
+      return await verify(password, phc);
+    };
+    return held;
+  }
+
+  it("does not keep a sign-in counted that reserved after an unchecked attempt's transient lock landed", async () => {
+    const { service, remote, lockout, userId, store, events } =
+      makeNotCheckedService();
+    const parked = Promise.withResolvers<void>();
+    let parkedReads = 0;
+    const getLegacyCredential = store.getLegacyCredential!.bind(store);
+    store.getLegacyCredential = async (id) => {
+      if (++parkedReads <= MAX_ATTEMPTS) await parked.promise;
+      return await getLegacyCredential(id);
+    };
+    const late = Array.from({ length: MAX_ATTEMPTS }, () =>
+      service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+    );
+    await vi.waitFor(() => {
+      expect(parkedReads).toStrictEqual(MAX_ATTEMPTS);
+    });
+    const held = gateVerifier(remote);
+    const unchecked = Array.from({ length: MAX_ATTEMPTS }, () =>
+      service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+    );
+    await vi.waitFor(() => {
+      expect(held.entered).toStrictEqual(MAX_ATTEMPTS);
+    });
+    parked.resolve();
+    expect(await Promise.all(late)).toStrictEqual(
+      Array(MAX_ATTEMPTS).fill(null),
+    );
+    held.open();
+    await Promise.all(unchecked);
+
+    const status = await lockout.status(userId);
+    expect(
+      status.locked,
+      "no password was checked, so no lock may stand",
+    ).toStrictEqual(false);
+    expect(status.failures).toStrictEqual(0);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
+    remote.state.checking = true;
+    expect(
+      (await service.signIn({ identifier: IMPORTED, password: PASSWORD }))?.id,
+    ).toStrictEqual(userId);
+  });
+
+  it("announces the lock once when an unchecked attempt reached the threshold and the lock survives its release", async () => {
+    const { service, remote, lockout, userId, events } = makeNotCheckedService({
+      protectionMode: "log-only",
+    });
+    remote.state.checking = true;
+    await service.signIn({ identifier: IMPORTED, password: "wrong-1" });
+    await service.signIn({ identifier: IMPORTED, password: "wrong-2" });
+    const held = gateVerifier(remote);
+    const verify = remote.verifier.verify;
+    remote.verifier.verify = (password, phc) =>
+      password === "not-checked"
+        ? verify(password, phc).then(() => {
+            throw new PasswordNotCheckedError();
+          })
+        : verify(password, phc);
+    const unchecked = service.signIn({
+      identifier: IMPORTED,
+      password: "not-checked",
+    });
+    await vi.waitFor(() => {
+      expect(held.entered).toStrictEqual(1);
+    });
+    const checkedWhileHeld = service.signIn({
+      identifier: IMPORTED,
+      password: "wrong-3",
+    });
+    await vi.waitFor(() => {
+      expect(held.entered).toStrictEqual(2);
+    });
+    held.open();
+    await Promise.all([unchecked, checkedWhileHeld]);
+
+    expect((await lockout.status(userId)).locked).toStrictEqual(true);
+    expect(
+      eventsOfType(events, "lockout").map((event) => event.failures),
+      "the lock that stands must be announced, or no unlock email goes out",
+    ).toStrictEqual([MAX_ATTEMPTS]);
+  });
+
+  it("announces the lock before rethrowing when the release itself fails", async () => {
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const failingRelease: AccountLockoutLike = {
+      status: (userId, now) => lockout.status(userId, now),
+      recordFailure: (userId, now) => lockout.recordFailure(userId, now),
+      reserveAttempt: (userId, now) => lockout.reserveAttempt(userId, now),
+      releaseAttempt: () => Promise.reject(new Error("store down")),
+      reset: (userId) => lockout.reset(userId),
+    };
+    const { service, events } = makeNotCheckedService({
+      lockout: failingRelease,
+    });
+
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await expect(
+        service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+      ).rejects.toThrow("store down");
+    }
+
+    expect(
+      eventsOfType(events, "lockout").map((event) => event.failures),
+    ).toStrictEqual([MAX_ATTEMPTS]);
+  });
+
   it("leaves the account unlocked when a flood of unchecked attempts is refused by the transient lock", async () => {
     const { service, remote, lockout, userId, events } =
       makeNotCheckedService();

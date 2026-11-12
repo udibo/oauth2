@@ -218,8 +218,8 @@ const scryptVerifier: LegacyPasswordVerifier = {
 ### When a verifier cannot check the password
 
 A verifier that calls another system may sometimes decline to check at all: its
-call budget is spent, a circuit breaker is open, or it runs in monitor-only
-mode. Report that by throwing `PasswordNotCheckedError` rather than resolving
+call budget is spent, a circuit breaker is open, or remote checking is switched
+off (monitor-only) so no request is made. Report that by throwing `PasswordNotCheckedError` rather than resolving
 `false`, so the attempt is not mistaken for a wrong password:
 
 ```ts
@@ -255,10 +255,13 @@ to the other system, report that system's answer, and resolve `false` on a
 timeout or a reply that is not a verdict: the other system may already have
 counted the attempt, and some systems answer a correct password with a
 follow-up challenge instead of a plain yes. Any other throw still counts as a
-wrong password.
+wrong password, and so does a `PasswordNotCheckedError` from a different copy
+of the package than the one `IdentityService` runs from, because the service
+recognizes it with `instanceof`.
 
 With `AccountLockout`, the attempt is counted before the password is checked
-and taken back afterwards, which needs the optional `LockoutStore.release`.
+and taken back afterwards, which needs the optional `LockoutStore.release`. An
+attempt refused because the account is locked is taken back the same way.
 `MemoryLockoutStore` implements it; for your own store, implement it as one
 atomic write, and run `runLockoutStoreContractTests` with `release: true`.
 Without it the attempt stays counted. A lockout of your own that implements

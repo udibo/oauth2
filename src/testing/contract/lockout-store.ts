@@ -352,13 +352,39 @@ export function runLockoutStoreContractTests(
         const release = store.release.bind(store);
         await Promise.all([
           ...Array.from({ length: 3 }, () => release(USER, 100, now)),
-          ...Array.from({ length: 2 }, () => store.increment(USER, now)),
+          ...Array.from({ length: 3 }, () => store.increment(USER, now)),
         ]);
         expect(
           (await store.get(USER, now))?.failures,
-          "a read-modify-write lets a release share another's decrement or " +
-            "overwrite a concurrent attempt's count",
-        ).toStrictEqual(4);
+          "a read-modify-write lets a release overwrite a concurrent " +
+            "attempt's count",
+        ).toStrictEqual(5);
+      });
+
+      it("takes back one attempt per concurrent release", async ({ skip }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 5; i++) await store.increment(USER, now);
+        const release = store.release.bind(store);
+        await Promise.all(
+          Array.from({ length: 3 }, () => release(USER, 100, now)),
+        );
+        expect(
+          (await store.get(USER, now))?.failures,
+          "a read-modify-write lets concurrent releases share one decrement",
+        ).toStrictEqual(2);
+      });
+
+      it("leaves a record whose lock has expired as it is", async ({
+        skip,
+      }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.set(USER, { failures: MAX_ATTEMPTS, lockedUntil: now - 1 });
+        await store.release(USER, MAX_ATTEMPTS, now);
+        expect(
+          (await store.increment(USER, now)).failures,
+          "the expired lock's window is over, so the next attempt starts a " +
+            "fresh count",
+        ).toStrictEqual(1);
       });
 
       it("releases only the account it is given", async ({ skip }) => {

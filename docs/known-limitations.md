@@ -504,14 +504,19 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   the count until a successful sign-in clears it.
 - An attempt a legacy verifier did not check (`PasswordNotCheckedError`) is
   counted before the verifier runs and taken back afterwards, so while it is in
-  flight it holds a place in the account's count. When overlapping unchecked
-  attempts reach `maxAttempts`, the account is locked until they are taken
-  back. A sign-in that reads the account unlocked and reserves its attempt
-  after that lock lands is refused and stays counted, so a flood timed into
-  that window can leave the account locked. The window lasts one password
-  hash, and a sign-in that reads the lock first is refused without being
-  counted. A `LockoutStore` without `release` keeps every unchecked attempt
-  counted.
+  flight it holds a place in the account's count. Overlapping unchecked
+  attempts that reach `maxAttempts` lock the account until they are taken
+  back; sign-ins refused by that lock meanwhile are taken back too. A release
+  takes back a count, not a particular attempt, so two cases are approximate.
+  When the count is reset while an unchecked attempt is in flight (a
+  successful sign-in or an unlock) and a wrong password is counted before
+  the release lands, the release takes back the wrong password's count, which
+  allows one more guess per such attempt. When a wrong password reaches the
+  threshold while an unchecked attempt is in flight, the lockout event fires,
+  and the release can then drop that lock, because only the checked attempts
+  are left and they are below the threshold; the next wrong password locks
+  and announces again. A `LockoutStore` without `release` keeps every
+  unchecked attempt counted.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

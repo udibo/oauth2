@@ -6818,8 +6818,8 @@ const scryptVerifier: LegacyPasswordVerifier = {
 ### When a verifier cannot check the password
 
 A verifier that calls another system may sometimes decline to check at all: its
-call budget is spent, a circuit breaker is open, or it runs in monitor-only
-mode. Report that by throwing `PasswordNotCheckedError` rather than resolving
+call budget is spent, a circuit breaker is open, or remote checking is switched
+off (monitor-only) so no request is made. Report that by throwing `PasswordNotCheckedError` rather than resolving
 `false`, so the attempt is not mistaken for a wrong password:
 
 ```ts
@@ -6855,10 +6855,13 @@ to the other system, report that system's answer, and resolve `false` on a
 timeout or a reply that is not a verdict: the other system may already have
 counted the attempt, and some systems answer a correct password with a
 follow-up challenge instead of a plain yes. Any other throw still counts as a
-wrong password.
+wrong password, and so does a `PasswordNotCheckedError` from a different copy
+of the package than the one `IdentityService` runs from, because the service
+recognizes it with `instanceof`.
 
 With `AccountLockout`, the attempt is counted before the password is checked
-and taken back afterwards, which needs the optional `LockoutStore.release`.
+and taken back afterwards, which needs the optional `LockoutStore.release`. An
+attempt refused because the account is locked is taken back the same way.
 `MemoryLockoutStore` implements it; for your own store, implement it as one
 atomic write, and run `runLockoutStoreContractTests` with `release: true`.
 Without it the attempt stays counted. A lockout of your own that implements
@@ -9046,14 +9049,19 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   the count until a successful sign-in clears it.
 - An attempt a legacy verifier did not check (`PasswordNotCheckedError`) is
   counted before the verifier runs and taken back afterwards, so while it is in
-  flight it holds a place in the account's count. When overlapping unchecked
-  attempts reach `maxAttempts`, the account is locked until they are taken
-  back. A sign-in that reads the account unlocked and reserves its attempt
-  after that lock lands is refused and stays counted, so a flood timed into
-  that window can leave the account locked. The window lasts one password
-  hash, and a sign-in that reads the lock first is refused without being
-  counted. A `LockoutStore` without `release` keeps every unchecked attempt
-  counted.
+  flight it holds a place in the account's count. Overlapping unchecked
+  attempts that reach `maxAttempts` lock the account until they are taken
+  back; sign-ins refused by that lock meanwhile are taken back too. A release
+  takes back a count, not a particular attempt, so two cases are approximate.
+  When the count is reset while an unchecked attempt is in flight (a
+  successful sign-in or an unlock) and a wrong password is counted before
+  the release lands, the release takes back the wrong password's count, which
+  allows one more guess per such attempt. When a wrong password reaches the
+  threshold while an unchecked attempt is in flight, the lockout event fires,
+  and the release can then drop that lock, because only the checked attempts
+  are left and they are below the threshold; the next wrong password locks
+  and announces again. A `LockoutStore` without `release` keeps every
+  unchecked attempt counted.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

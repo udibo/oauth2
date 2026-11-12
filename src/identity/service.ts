@@ -1536,12 +1536,24 @@ export class IdentityService<User extends IdentityUser> {
         reservation = await reserve(userId);
         if (!reservation.locked || reservation.justLocked) return true;
         if (!lockReported) await this.#emitSignInLocked(userId, identifier);
-        return !this.#enforce;
+        if (!this.#enforce) return true;
+        await unreserve?.(userId);
+        return false;
       },
       fail: announceLock,
       release: async () => {
-        if (reservation && unreserve && (await unreserve(userId))) return;
-        await announceLock();
+        if (!reservation) return;
+        let released: boolean;
+        try {
+          released = (await unreserve?.(userId)) ?? false;
+        } catch (error) {
+          await announceLock();
+          throw error;
+        }
+        if (!released) return await announceLock();
+        if (reservation.justLocked) {
+          await this.#announceSurvivingLock(userId, identifier);
+        }
       },
       abandon: announceLock,
     };
@@ -1651,6 +1663,20 @@ export class IdentityService<User extends IdentityUser> {
       `[@udibo/oauth2] ${operation} persist failed:`,
       error instanceof Error ? error.message : error,
     );
+  }
+
+  async #announceSurvivingLock(
+    userId: string,
+    identifier: string,
+  ): Promise<void> {
+    const status = await this.#lockout!.status(userId);
+    if (!status.locked) return;
+    await this.#emitLockout(userId, identifier, {
+      failures: status.failures,
+      locked: true,
+      justLocked: true,
+      lockedUntil: status.lockedUntil,
+    });
   }
 
   async #recordSignInFailure(

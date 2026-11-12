@@ -83,7 +83,9 @@ export interface LegacyPasswordVerifier {
  * password at all, as distinct from finding it wrong.
  *
  * Throw it only when the password never left your process: a call budget is
- * spent, a circuit breaker is open, or the check runs in monitor-only mode.
+ * spent, a circuit breaker is open, or remote checking is switched off
+ * (monitor-only) so no request is made. Never send the password and then
+ * throw it.
  * Once the password has been sent to another system, report that system's
  * answer, and treat a timeout or a non-answer as a wrong password, because the
  * other system may already have counted the attempt.
@@ -92,7 +94,9 @@ export interface LegacyPasswordVerifier {
  * password (the same `null`, equalizing hash and `failedSignInFloorMs`), does
  * not count it toward the account lockout, and emits `sign_in.failed` with
  * reason `not_checked`. The service never logs or returns the error, but keep
- * the password out of its message anyway.
+ * the password out of its message anyway. The service recognizes it with
+ * `instanceof`, so import it from the same copy of the package the service
+ * runs from; an error from another copy is treated as a wrong password.
  *
  * @example A verifier that declines once its call budget is spent
  * ```ts
