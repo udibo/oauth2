@@ -120,7 +120,8 @@ Hono app: redirect sign-in, callback, a protected page, and sign-out. What
 follows is how its settings line up with this server's.
 
 Pin the port and the issuer in the config and give the app the same values, so
-the startup output never has to be copied by hand:
+the startup output never has to be copied by hand. The quickstart's app does
+this by reading `idp.json` itself, so each value below is written once:
 
 | Provider (`idp.json`)    | App (`DirectClient`)     | Must match                                               |
 | ------------------------ | ------------------------ | -------------------------------------------------------- |
