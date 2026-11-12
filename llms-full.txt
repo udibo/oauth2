@@ -616,20 +616,21 @@ see [host authorization for your app](https://github.com/udibo/oauth2/blob/main/
 
 ### Install
 
-Pin exact versions so the steps below behave as written. These are the versions
-this guide was last run against:
-
 ```sh
 mkdir local-signin && cd local-signin
 npm init -y
 npm pkg set type=module
-npm install --save-exact @udibo/oauth2@0.52.0 hono@4.13.17 @hono/node-server@2.1.6
+npm install @udibo/oauth2@latest hono @hono/node-server
 ```
+
+`@latest` installs the current release. If a later release changes an option
+used below, the [changelog](https://github.com/udibo/oauth2/blob/main/CHANGELOG.md) says what moved.
 
 ### Configure the provider
 
 Save this as `idp.json`. It seeds one client and one user, and pins the
-provider's issuer and port so the app can be configured once:
+provider's issuer and port. It is the only place those values are written: the
+app below reads this same file, so the two cannot drift apart.
 
 ```json
 {
@@ -654,30 +655,40 @@ provider's issuer and port so the app can be configured once:
 
 ### Write the app
 
-Save this as `app.ts`. The `issuer`, `clientId`, `clientSecret`, and
-`redirectUri` in `DirectClient` come from environment variables, defaulting to
-the values `idp.json` declares, and `DirectClient` discovers the provider's
-endpoints from the issuer. The defaults are local demo values: never commit a
-real client secret, and set `AUTH_CLIENT_SECRET` from your secret store when you
-use a real registration.
+Save this as `app.ts`. It reads `idp.json` from the directory you start it in and builds the `DirectClient`
+settings (`issuer`, `clientId`, `clientSecret`, `redirectUri`) from the issuer
+and the first client the provider declares, so changing the issuer or the client
+in one place changes it for both. Environment variables override each value,
+which is how the same code later points at a hosted issuer, and `DirectClient`
+discovers the provider's endpoints from the issuer. The values in `idp.json` are
+local demo values: never commit a real client secret, and set
+`AUTH_CLIENT_SECRET` from your secret store when you use a real registration.
 
 ```ts
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { html } from "hono/html";
 import { DirectClient } from "@udibo/oauth2/client";
+import { readFileSync } from "node:fs";
 import {
   HonoBff,
   MemoryAuthRequestStorageFactory,
   MemorySessionStore,
 } from "@udibo/oauth2/hono/bff";
 
+interface ProviderConfig {
+  issuer: string;
+  clients: { id: string; secret: string; redirectUris: string[] }[];
+}
+
+const idp: ProviderConfig = JSON.parse(readFileSync("idp.json", "utf8"));
+const registered = idp.clients[0];
+
 const client = new DirectClient({
-  issuer: process.env.AUTH_ISSUER ?? "http://127.0.0.1:9000",
-  clientId: process.env.AUTH_CLIENT_ID ?? "demo-app",
-  clientSecret: process.env.AUTH_CLIENT_SECRET ?? "demo-secret",
-  redirectUri:
-    process.env.AUTH_CALLBACK_URL ?? "http://127.0.0.1:3100/auth/callback",
+  issuer: process.env.AUTH_ISSUER ?? idp.issuer,
+  clientId: process.env.AUTH_CLIENT_ID ?? registered.id,
+  clientSecret: process.env.AUTH_CLIENT_SECRET ?? registered.secret,
+  redirectUri: process.env.AUTH_CALLBACK_URL ?? registered.redirectUris[0],
 });
 
 const bff = new HonoBff({
@@ -7672,7 +7683,8 @@ Hono app: redirect sign-in, callback, a protected page, and sign-out. What
 follows is how its settings line up with this server's.
 
 Pin the port and the issuer in the config and give the app the same values, so
-the startup output never has to be copied by hand:
+the startup output never has to be copied by hand. The quickstart's app does
+this by reading `idp.json` itself, so each value below is written once:
 
 | Provider (`idp.json`)    | App (`DirectClient`)     | Must match                                               |
 | ------------------------ | ------------------------ | -------------------------------------------------------- |
