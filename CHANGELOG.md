@@ -1,3 +1,9 @@
+## [0.54.0](https://github.com/udibo/oauth2/compare/0.53.0...0.54.0) (2026-11-12)
+
+### Features
+
+* **identity:** let a legacy verifier report a password it did not check ([#200](https://github.com/udibo/oauth2/issues/200)) ([724cc26](https://github.com/udibo/oauth2/commit/724cc26daf6afb59483536a856987e730ccb38ac)), closes [#195](https://github.com/udibo/oauth2/issues/195)
+
 ## [0.53.0](https://github.com/udibo/oauth2/compare/0.52.0...0.53.0) (2026-11-11)
 
 ### Features
