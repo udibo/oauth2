@@ -23,7 +23,9 @@ export interface LockoutRecord {
   /**
    * Consecutive sign-in attempts counted since the last success/unlock. An
    * attempt is counted before its password is checked, so an attempt still in
-   * flight is included until a success clears the record.
+   * flight is included until a success clears the record or, for an attempt
+   * whose password is never checked, {@link LockoutStore.release} takes it
+   * back.
    */
   failures: number;
   /** When the active lock expires (epoch ms); absent when not locked. */
@@ -72,6 +74,23 @@ export interface LockoutStore {
     record: LockoutRecord & { lockedUntil: number },
     now: number,
   ): Promise<boolean>;
+  /**
+   * Optional: take back one attempt `increment` counted, as one atomic write:
+   * `failures - 1` (never below zero), dropping `lockedUntil` when the new
+   * count is below `maxAttempts`
+   * (`UPDATE … SET failures = failures - 1, locked_until = CASE WHEN
+   * failures - 1 < $max THEN NULL ELSE locked_until END WHERE failures > 0
+   * AND (locked_until IS NULL OR locked_until > $now)`). An account with no
+   * live record, or whose lock has expired, is left as it is, so the next
+   * attempt still starts a fresh count; a record left at zero may be kept or
+   * dropped. `now` is the clock `increment` was given, for a
+   * store that expires records.
+   *
+   * `AccountLockout.releaseAttempt` calls it for an attempt whose password was
+   * never checked, including an attempt refused because the account was
+   * locked. Without it the attempt stays counted.
+   */
+  release?(userId: string, maxAttempts: number, now: number): Promise<void>;
   /** Clear the account's record (successful sign-in or unlock). */
   clear(userId: string): Promise<void>;
 }
@@ -171,7 +190,9 @@ export interface AccountLockoutLike {
    * report the resulting state the way {@link AccountLockoutLike.recordFailure}
    * does. `IdentityService` checks the password only when the result is
    * unlocked or `justLocked` — the attempt that reaches the threshold is still
-   * checked — and refuses the rest under `"enforce"`. A wrong password then
+   * checked — and refuses the rest under `"enforce"`, taking a refused
+   * attempt back through {@link AccountLockoutLike.releaseAttempt} when it is
+   * implemented. A wrong password then
    * fires the lockout event off the reservation's `justLocked`; a success
    * calls {@link AccountLockoutLike.reset}; an attempt that throws stays
    * counted and, when its reservation was `justLocked`, still fires the
@@ -184,6 +205,23 @@ export interface AccountLockoutLike {
    * implements it.
    */
   reserveAttempt?(userId: string, now?: number): Promise<LockoutFailureResult>;
+  /**
+   * Take back one attempt {@link AccountLockoutLike.reserveAttempt} counted,
+   * because its password was never checked, and resolve whether it is no
+   * longer counted. Undo any lock that attempt's count created, unless the
+   * attempts still counted reach the threshold on their own.
+   *
+   * Optional, and used only alongside `reserveAttempt`. `IdentityService`
+   * calls it when a legacy verifier throws `PasswordNotCheckedError` and, under
+   * `"enforce"`, for an attempt it refuses because the account is locked. When
+   * the released reservation was `justLocked` and the account is still locked
+   * afterwards, the service fires the lockout event. When it is absent,
+   * resolves `false` or throws, the attempt stays counted and, when its
+   * reservation was `justLocked`, the lockout event still fires.
+   * {@link AccountLockout} implements it when its store implements
+   * {@link LockoutStore.release}.
+   */
+  releaseAttempt?(userId: string, now?: number): Promise<boolean>;
   /** Clear the account's failures and any lock (successful sign-in, unlock). */
   reset(userId: string): Promise<void>;
 }
@@ -257,6 +295,21 @@ export class AccountLockout implements AccountLockoutLike {
     now: number = Date.now(),
   ): Promise<LockoutFailureResult> {
     return this.#count(userId, now);
+  }
+
+  /**
+   * Take back one attempt {@link reserveAttempt} counted whose password was
+   * never checked, dropping the lock when the remaining count is below
+   * `maxAttempts`. Resolves `false`, leaving the attempt counted, when the
+   * store does not implement {@link LockoutStore.release}.
+   */
+  async releaseAttempt(
+    userId: string,
+    now: number = Date.now(),
+  ): Promise<boolean> {
+    if (!this.#store.release) return false;
+    await this.#store.release(userId, this.#maxAttempts, now);
+    return true;
   }
 
   async #count(
@@ -462,6 +515,29 @@ export class MemoryLockoutStore implements LockoutStore {
     }
     entry.record = { ...entry.record, lockedUntil: record.lockedUntil };
     return Promise.resolve(true);
+  }
+
+  /**
+   * Take back one counted attempt for `userId`, dropping its lock once the
+   * count falls below `maxAttempts`. A record that reaches zero is dropped.
+   */
+  release(userId: string, maxAttempts: number, now: number): Promise<void> {
+    const entry = this.#entries.get(userId);
+    if (!entry || this.#expired(entry, now)) return Promise.resolve();
+    const { lockedUntil } = entry.record;
+    if (lockedUntil !== undefined && lockedUntil <= now) {
+      return Promise.resolve();
+    }
+    const failures = entry.record.failures - 1;
+    if (failures <= 0) {
+      this.#entries.delete(userId);
+    } else {
+      entry.record =
+        lockedUntil !== undefined && failures >= maxAttempts
+          ? { failures, lockedUntil }
+          : { failures };
+    }
+    return Promise.resolve();
   }
 
   /** Drop `userId`'s record. */

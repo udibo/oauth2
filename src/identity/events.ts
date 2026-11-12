@@ -32,7 +32,8 @@ import type { DeliveryHooks } from "./delivery.ts";
 export type SignInFailureReason =
   | "unknown_identifier"
   | "no_password"
-  | "wrong_password";
+  | "wrong_password"
+  | "not_checked";
 
 /**
  * Why a sign-in code verification failed. Internal detail — never shown to the

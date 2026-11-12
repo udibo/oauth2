@@ -3024,6 +3024,9 @@ threshold or slipping a burst past the limiter. Implement the optional
 `LockoutStore.lock` as one conditional write as well: it locks the account only
 while the stored count still stands, so a lock computed by an over-budget
 attempt cannot land after a concurrent successful sign-in cleared the count.
+Implement the optional `LockoutStore.release` as one atomic write too: it takes
+back an attempt whose password was never checked
+([a verifier that cannot check](https://github.com/udibo/oauth2/blob/main/docs/guides/migrate-from-another-provider.md#when-a-verifier-cannot-check-the-password)).
 
 ```ts
 import {
@@ -6812,6 +6815,62 @@ const scryptVerifier: LegacyPasswordVerifier = {
 };
 ```
 
+### When a verifier cannot check the password
+
+A verifier that calls another system may sometimes decline to check at all: its
+call budget is spent, a circuit breaker is open, or remote checking is switched
+off (monitor-only) so no request is made. Report that by throwing `PasswordNotCheckedError` rather than resolving
+`false`, so the attempt is not mistaken for a wrong password:
+
+```ts
+import {
+  type LegacyPasswordVerifier,
+  PasswordNotCheckedError,
+} from "@udibo/oauth2/identity/migration";
+
+declare const breaker: { isOpen(): boolean };
+declare function checkOldSystem(
+  password: string,
+  phc: string,
+): Promise<boolean>;
+
+const oldSystemVerifier: LegacyPasswordVerifier = {
+  id: "old-system",
+  canVerify: (phc) => phc.startsWith("old-system$"),
+  async verify(password, phc) {
+    if (breaker.isOpen()) throw new PasswordNotCheckedError("breaker open");
+    return await checkOldSystem(password, phc);
+  },
+};
+```
+
+`signIn` refuses that attempt exactly as it refuses a wrong password: the same
+`null`, the same equalizing hash and the same `failedSignInFloorMs`. It does not
+count the attempt toward the account lockout, so an attacker who drains your
+budget cannot lock accounts they never guessed against, and it emits
+`sign_in.failed` with reason `not_checked`, which you can alert on.
+
+Throw it only when the password never left your process. Once you have sent it
+to the other system, report that system's answer, and resolve `false` on a
+timeout or a reply that is not a verdict: the other system may already have
+counted the attempt, and some systems answer a correct password with a
+follow-up challenge instead of a plain yes. Any other throw still counts as a
+wrong password, and so does a `PasswordNotCheckedError` from a different copy
+of the package than the one `IdentityService` runs from, because the service
+recognizes it with `instanceof`.
+
+With `AccountLockout`, the attempt is counted before the password is checked
+and taken back afterwards, which needs the optional `LockoutStore.release`. An
+attempt refused because the account is locked is taken back the same way.
+`MemoryLockoutStore` implements it; for your own store, implement it as one
+atomic write, and run `runLockoutStoreContractTests` with `release: true`.
+Without it the attempt stays counted. A lockout of your own that implements
+`reserveAttempt` takes the attempt back through `releaseAttempt`; one without
+`reserveAttempt` simply does not record a failure.
+
+`verifyLegacyPassword` rethrows `PasswordNotCheckedError` instead of resolving
+`false`, so a dry run does not report an unchecked password as wrong.
+
 ## Bulk-importing your users
 
 > **Handle the export as password material.** A foreign hash export is not a
@@ -6907,7 +6966,11 @@ is refused, and otherwise `sign_in.succeeded` is emitted. Returning `null` refus
 is logged without its message, since that may echo the password. Every refusal
 looks exactly like an unknown identifier with no resolver: the same `null`, the
 same equalizing hash, the same `sign_in.failed` event with reason
-`unknown_identifier`, and the same `failedSignInFloorMs` floor.
+`unknown_identifier`, and the same `failedSignInFloorMs` floor. A resolver that
+did not check the password at all, under the same rule as a verifier
+([when a verifier cannot check the password](https://github.com/udibo/oauth2/blob/main/docs/guides/migrate-from-another-provider.md#when-a-verifier-cannot-check-the-password)),
+throws `PasswordNotCheckedError` instead: the refusal is the same, the event
+reason is `not_checked`, and nothing is logged.
 
 The resolver decides who the person is, so keep these in mind:
 
@@ -8205,8 +8268,8 @@ unless the row says otherwise.
 | Trigger point      | Symbol                                                    | Fires                                                                                | Required                                  | Control                  | On throw                                                                                                                                                                                                                                                                                                                                 |
 | ------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | user-store         | `IdentityUserStore<User>` (`users`)                       | Every flow (`create` in `signUp`, `findByIdentifier`/`getCredential` in `signIn`, …) | yes                                       | blocks                   | Propagates and aborts the flow. **Throwing from `create` is the only pre-registration veto** (see Known gaps). `markEmailVerified` runs _before_ the token is consumed, so a throw leaves the verification link retryable                                                                                                                |
-| credential-import  | `LegacyPasswordVerifier` (`legacyVerifiers`)              | `signIn`, when a user has an imported hash but no native credential                  | no                                        | blocks                   | **Fail-closed:** `canVerify`/`verify` throws are caught → verifier skipped / returns `false`; never authenticates, never aborts                                                                                                                                                                                                          |
-| unknown-identifier | `resolveUnknownIdentifier`                                | `signIn`, after the throttle, when `findByIdentifier` finds no account               | no                                        | blocks                   | **Fail-closed:** a throw is caught and logged without its message, and the sign-in is refused exactly as an unknown identifier is (same `null`, floor and `unknown_identifier` event)                                                                                                                                                    |
+| credential-import  | `LegacyPasswordVerifier` (`legacyVerifiers`)              | `signIn`, when a user has an imported hash but no native credential                  | no                                        | blocks                   | **Fail-closed:** `canVerify`/`verify` throws are caught → verifier skipped / returns `false`; never authenticates, never aborts. A `PasswordNotCheckedError` from `verify` refuses the same way but is not counted toward lockout and reports reason `not_checked`                                                                                                                                                                                                          |
+| unknown-identifier | `resolveUnknownIdentifier`                                | `signIn`, after the throttle, when `findByIdentifier` finds no account               | no                                        | blocks                   | **Fail-closed:** a throw is caught and logged without its message, and the sign-in is refused exactly as an unknown identifier is (same `null`, floor and `unknown_identifier` event); a `PasswordNotCheckedError` is refused the same way, unlogged, with reason `not_checked`                                                                                                                                                    |
 | delivery           | `DeliveryHooks` (`delivery`)                              | After a verify/reset/unlock/sign-in token or code is minted                          | no (omit a hook → that message disabled)  | blocks (side-effect)     | A throw is caught for every hook, code included: the minted token or code is invalidated (that exact one) and the flow still resolves with its uniform result — no orphaned credential, no mailer-outage enumeration oracle. Emits `delivery.failed`; `invalidated: false` means the cleanup failed too and the credential is still live |
 | event              | `IdentityEventHook` (`onEvent`)                           | After every flow outcome                                                             | no                                        | fire-and-forget          | Caught and logged, never rethrown — cannot break the flow (deliberate)                                                                                                                                                                                                                                                                   |
 | password-policy    | `PasswordPolicy.validators` (`passwordPolicy`)            | `signUp` and `resetPassword`, before hashing (defaults apply when unset)             | no                                        | blocks                   | Return an issue string to reject (→ `weak_password`); a validator that _throws_ is trapped to `weak_password` too                                                                                                                                                                                                                        |
@@ -8984,6 +9047,27 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   locked. The TTL also means a slow guesser who waits a day between failures
   never reaches the threshold in this store; a store over your database keeps
   the count until a successful sign-in clears it.
+- An attempt a legacy verifier did not check (`PasswordNotCheckedError`) is
+  counted before the verifier runs and taken back afterwards, so while it is in
+  flight it holds a place in the account's count. Overlapping unchecked
+  attempts that reach `maxAttempts` lock the account until they are taken
+  back; sign-ins refused by that lock meanwhile are taken back too. A release
+  takes back a count, not a particular attempt, so two cases are approximate.
+  When the count is reset while an unchecked attempt is in flight (a
+  successful sign-in or an unlock) and a wrong password is counted before
+  the release lands, the release takes back the wrong password's count, which
+  allows one more guess per such attempt. When a wrong password reaches the
+  threshold while an unchecked attempt is in flight, the lockout event fires,
+  and the release can then drop that lock, because only the checked attempts
+  are left and they are below the threshold; the next wrong password locks
+  and announces again. When a release lands between an attempt's count
+  reaching `maxAttempts` and its conditional `lock` write, the write is
+  refused and `AccountLockout` counts that attempt a second time, leaving one
+  extra count until a successful sign-in clears the record. And when a
+  released unchecked attempt that reached the threshold drops its lock, a wrong
+  password that locks the account again before the service re-reads the lock
+  state is announced twice. A `LockoutStore`
+  without `release` keeps every unchecked attempt counted.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

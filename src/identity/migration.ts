@@ -67,10 +67,66 @@ export interface LegacyPasswordVerifier {
   /**
    * Verify `password` against the stored foreign hash `phc`. Called only when
    * {@link LegacyPasswordVerifier.canVerify} returned `true`. Resolve `false`
-   * (never throw) on a mismatch or a malformed hash. Use a constant-time
-   * comparison.
+   * on a mismatch or a malformed hash. Use a constant-time comparison.
+   *
+   * Throw {@link PasswordNotCheckedError} only when the password was never
+   * checked and never left your process, such as a spent call budget or an
+   * open circuit breaker: the sign-in is refused without counting toward the
+   * account lockout. Any other throw is treated as a wrong password.
    */
   verify(password: string, phc: string): Promise<boolean>;
+}
+
+/**
+ * Thrown by a {@link LegacyPasswordVerifier.verify} or an
+ * `IdentityServiceOptions.resolveUnknownIdentifier` that did not check the
+ * password at all, as distinct from finding it wrong.
+ *
+ * Throw it only when the password never left your process: a call budget is
+ * spent, a circuit breaker is open, or remote checking is switched off
+ * (monitor-only) so no request is made. Never send the password and then
+ * throw it.
+ * Once the password has been sent to another system, report that system's
+ * answer, and treat a timeout or a non-answer as a wrong password, because the
+ * other system may already have counted the attempt.
+ *
+ * `IdentityService.signIn` refuses the attempt exactly as it refuses a wrong
+ * password (the same `null`, equalizing hash and `failedSignInFloorMs`), does
+ * not count it toward the account lockout, and emits `sign_in.failed` with
+ * reason `not_checked`. The service never logs or returns the error, but keep
+ * the password out of its message anyway. The service recognizes it with
+ * `instanceof`, so import it from the same copy of the package the service
+ * runs from; an error from another copy is treated as a wrong password.
+ *
+ * @example A verifier that declines once its call budget is spent
+ * ```ts
+ * import {
+ *   type LegacyPasswordVerifier,
+ *   PasswordNotCheckedError,
+ * } from "@udibo/oauth2/identity/migration";
+ *
+ * declare const budget: { take(): boolean };
+ * declare function checkRemotely(
+ *   password: string,
+ *   phc: string,
+ * ): Promise<boolean>;
+ *
+ * const remoteVerifier: LegacyPasswordVerifier = {
+ *   id: "remote",
+ *   canVerify: (phc) => phc.startsWith("remote$"),
+ *   async verify(password, phc) {
+ *     if (!budget.take()) throw new PasswordNotCheckedError("budget spent");
+ *     return await checkRemotely(password, phc);
+ *   },
+ * };
+ * ```
+ */
+export class PasswordNotCheckedError extends Error {
+  /** Creates the error. Keep the password out of `message`. */
+  constructor(message = "password not checked") {
+    super(message);
+    this.name = "PasswordNotCheckedError";
+  }
 }
 
 /**
@@ -94,9 +150,14 @@ export function findLegacyVerifier(
 /**
  * Verify `password` against a stored foreign hash `phc` using the first matching
  * verifier in `verifiers`. Resolves `false` when no verifier recognizes `phc` or
- * the matched verifier rejects the password or throws. Useful for a
- * bulk-import dry-run/validation pass; {@link IdentityService.signIn} uses the
- * same selection for upgrade-on-login.
+ * the matched verifier rejects the password or throws, except that a
+ * {@link PasswordNotCheckedError} is rethrown so a password that was never
+ * checked is not reported as wrong. Useful for a bulk-import
+ * dry-run/validation pass; {@link IdentityService.signIn} uses the same
+ * selection for upgrade-on-login.
+ *
+ * @throws {PasswordNotCheckedError} When the matched verifier did not check
+ * the password.
  */
 export async function verifyLegacyPassword(
   verifiers: readonly LegacyPasswordVerifier[],
@@ -107,7 +168,8 @@ export async function verifyLegacyPassword(
   if (!verifier) return false;
   try {
     return await verifier.verify(password, phc);
-  } catch {
+  } catch (error) {
+    if (error instanceof PasswordNotCheckedError) throw error;
     return false;
   }
 }
