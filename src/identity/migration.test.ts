@@ -166,6 +166,13 @@ describe("findLegacyVerifier / verifyLegacyPassword", () => {
     expect((error as Error).name).toStrictEqual("PasswordNotCheckedError");
   });
 
+  it("PasswordNotCheckedError names itself and carries no password by default", () => {
+    const error = new PasswordNotCheckedError();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toStrictEqual("PasswordNotCheckedError");
+    expect(error.message).toStrictEqual("password not checked");
+  });
+
   it("verifyLegacyPassword still resolves false when a verifier throws anything else", async () => {
     const broken: LegacyPasswordVerifier = {
       id: "broken",

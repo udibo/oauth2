@@ -1542,7 +1542,6 @@ export class IdentityService<User extends IdentityUser> {
       },
       fail: announceLock,
       release: async () => {
-        if (!reservation) return;
         let released: boolean;
         try {
           released = (await unreserve?.(userId)) ?? false;
@@ -1551,7 +1550,7 @@ export class IdentityService<User extends IdentityUser> {
           throw error;
         }
         if (!released) return await announceLock();
-        if (reservation.justLocked) {
+        if (reservation?.justLocked) {
           await this.#announceSurvivingLock(userId, identifier);
         }
       },

@@ -467,6 +467,20 @@ runLockoutStoreContractTests({
   release: true,
 });
 
+runLockoutStoreContractTests({
+  describeName:
+    "a LockoutStore without the optional lock and release satisfies the required contract",
+  makeStore: () => {
+    const inner = new MemoryLockoutStore();
+    return {
+      get: (userId, now) => inner.get(userId, now),
+      increment: (userId, now) => inner.increment(userId, now),
+      set: (userId, record) => inner.set(userId, record),
+      clear: (userId) => inner.clear(userId),
+    };
+  },
+});
+
 runTenantContractTests({
   describeName: "createFakeTenant satisfies the Udibo Identity tenant contract",
   setup: async () => {
