@@ -8,8 +8,8 @@
  * guess for every attempt sharing it: the brute-force floor the lockout is
  * meant to be moves up by however many attempts an attacker can land at once.
  *
- * The optional `lock` cases run when the store implements it and are skipped,
- * with a note naming the gap, when it does not.
+ * The optional `lock` and `release` cases run when the store implements the
+ * method and are skipped, with a note naming the gap, when it does not.
  *
  * @example Verify a database-backed store
  * ```ts
@@ -56,6 +56,13 @@ export interface LockoutStoreContractOptions {
    * it does not.
    */
   lock?: boolean;
+  /**
+   * Set to `true` to require the optional {@link LockoutStore.release}: the
+   * suite then fails a store that does not implement it. Left unset, the
+   * `release` cases run when the store implements it and are skipped with a
+   * note when it does not.
+   */
+  release?: boolean;
   /**
    * Overrides the name passed to the outer `describe` block. Defaults to
    * `"LockoutStore contract"`.
@@ -265,6 +272,101 @@ export function runLockoutStoreContractTests(
         await store.increment(OTHER_USER, now);
         await store.lock(USER, { failures: 3, lockedUntil: now + 60_000 }, now);
         expect((await store.get(OTHER_USER))?.lockedUntil).toBe(undefined);
+      });
+    });
+
+    describe("release (optional)", () => {
+      const NOT_IMPLEMENTED =
+        "release is not implemented — an attempt whose password was never " +
+        "checked stays counted toward the lockout";
+      const MAX_ATTEMPTS = 3;
+
+      if (options.release) {
+        it("is implemented", () => {
+          assert(
+            typeof store.release === "function",
+            `${NOT_IMPLEMENTED}. Implement it, or drop \`release: true\`.`,
+          );
+        });
+      }
+
+      it("takes back one counted attempt", async ({ skip }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.increment(USER, now);
+        await store.increment(USER, now);
+        await store.release(USER, MAX_ATTEMPTS, now);
+        expect((await store.get(USER, now))?.failures).toStrictEqual(1);
+        expect((await store.increment(USER, now)).failures).toStrictEqual(2);
+      });
+
+      it("leaves no count behind for the last attempt", async ({ skip }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.increment(USER, now);
+        await store.release(USER, MAX_ATTEMPTS, now);
+        expect((await store.get(USER, now))?.failures ?? 0).toStrictEqual(0);
+        expect((await store.increment(USER, now)).failures).toStrictEqual(1);
+      });
+
+      it("never takes the count below zero", async ({ skip }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.release(USER, MAX_ATTEMPTS, now);
+        await store.release(USER, MAX_ATTEMPTS, now);
+        expect((await store.get(USER, now))?.failures ?? 0).toStrictEqual(0);
+        expect((await store.increment(USER, now)).failures).toStrictEqual(1);
+      });
+
+      it("drops the lock once the count falls below maxAttempts", async ({
+        skip,
+      }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.set(USER, {
+          failures: MAX_ATTEMPTS,
+          lockedUntil: now + 60_000,
+        });
+        await store.release(USER, MAX_ATTEMPTS, now);
+        const record = await store.get(USER, now);
+        expect(record?.failures).toStrictEqual(MAX_ATTEMPTS - 1);
+        expect(
+          record?.lockedUntil,
+          "a lock the counted attempts no longer reach must not stand",
+        ).toBe(undefined);
+      });
+
+      it("keeps the lock while the count still reaches maxAttempts", async ({
+        skip,
+      }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        const lockedUntil = now + 60_000;
+        await store.set(USER, { failures: MAX_ATTEMPTS + 1, lockedUntil });
+        await store.release(USER, MAX_ATTEMPTS, now);
+        const record = await store.get(USER, now);
+        expect(record?.failures).toStrictEqual(MAX_ATTEMPTS);
+        expect(record?.lockedUntil).toBe(lockedUntil);
+      });
+
+      it("takes back exactly one attempt per release among concurrent attempts", async ({
+        skip,
+      }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        for (let i = 0; i < 5; i++) await store.increment(USER, now);
+        const release = store.release.bind(store);
+        await Promise.all([
+          ...Array.from({ length: 3 }, () => release(USER, 100, now)),
+          ...Array.from({ length: 2 }, () => store.increment(USER, now)),
+        ]);
+        expect(
+          (await store.get(USER, now))?.failures,
+          "a read-modify-write lets a release share another's decrement or " +
+            "overwrite a concurrent attempt's count",
+        ).toStrictEqual(4);
+      });
+
+      it("releases only the account it is given", async ({ skip }) => {
+        if (!store.release) return skip(NOT_IMPLEMENTED);
+        await store.increment(USER, now);
+        await store.increment(OTHER_USER, now);
+        await store.release(USER, MAX_ATTEMPTS, now);
+        expect((await store.get(OTHER_USER, now))?.failures).toStrictEqual(1);
       });
     });
 

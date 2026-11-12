@@ -359,6 +359,81 @@ describe("AccountLockout", () => {
   });
 });
 
+describe("AccountLockout.releaseAttempt", () => {
+  const now = 1_000_000;
+
+  function lockoutOver(store: LockoutStore): AccountLockout {
+    return new AccountLockout({
+      maxAttempts: 3,
+      lockDurationMs: 60_000,
+      store,
+    });
+  }
+
+  it("takes back one reserved attempt", async () => {
+    const lockout = lockoutOver(new MemoryLockoutStore());
+    await lockout.reserveAttempt("u1", now);
+    await lockout.reserveAttempt("u1", now);
+
+    expect(await lockout.releaseAttempt("u1", now)).toStrictEqual(true);
+
+    expect(await lockout.status("u1", now)).toStrictEqual({
+      locked: false,
+      failures: 1,
+      lockedUntil: undefined,
+    });
+  });
+
+  it("drops the lock the released attempt's count created", async () => {
+    const lockout = lockoutOver(new MemoryLockoutStore());
+    for (let i = 0; i < 3; i++) await lockout.reserveAttempt("u1", now);
+    expect((await lockout.status("u1", now)).locked).toStrictEqual(true);
+
+    await lockout.releaseAttempt("u1", now);
+
+    expect(await lockout.status("u1", now)).toStrictEqual({
+      locked: false,
+      failures: 2,
+      lockedUntil: undefined,
+    });
+    expect(
+      (await lockout.reserveAttempt("u1", now)).justLocked,
+      "the next counted attempt reaches the threshold again and announces it",
+    ).toStrictEqual(true);
+  });
+
+  it("keeps a lock the remaining attempts still reach", async () => {
+    const lockout = lockoutOver(new MemoryLockoutStore());
+    for (let i = 0; i < 4; i++) await lockout.reserveAttempt("u1", now);
+
+    await lockout.releaseAttempt("u1", now);
+
+    expect(await lockout.status("u1", now)).toStrictEqual({
+      locked: true,
+      failures: 3,
+      lockedUntil: now + 60_000,
+    });
+  });
+
+  it("leaves an account with no record untouched", async () => {
+    const store = new MemoryLockoutStore();
+    const lockout = lockoutOver(store);
+
+    expect(await lockout.releaseAttempt("u1", now)).toStrictEqual(true);
+
+    expect(await store.get("u1", now)).toBe(undefined);
+  });
+
+  it("resolves false and keeps the attempt counted when the store cannot release", async () => {
+    const lockout = lockoutOver(withoutLock(new MemoryLockoutStore()));
+    await lockout.reserveAttempt("u1", now);
+
+    expect(await lockout.releaseAttempt("u1", now)).toStrictEqual(false);
+
+    expect((await lockout.status("u1", now)).failures).toStrictEqual(1);
+  });
+});
+
 describe("MemoryLockoutStore", () => {
   const now = 1_000_000;
   const hour = 60 * 60_000;

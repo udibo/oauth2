@@ -59,6 +59,7 @@ import {
 import {
   findLegacyVerifier,
   type LegacyPasswordVerifier,
+  PasswordNotCheckedError,
 } from "./migration.ts";
 
 /** The minimum the identity flows require of your user record. */
@@ -233,6 +234,9 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * upgrade. The package ships
    * {@link pbkdf2Verifier} built-in; bcrypt/argon2/scrypt are bring-your-own via
    * the {@link LegacyPasswordVerifier} seam (no dep-free implementation exists).
+   * A verifier that throws {@link PasswordNotCheckedError} is refused like a
+   * wrong password but not counted toward the `lockout`, and `sign_in.failed`
+   * reports reason `not_checked`.
    */
   legacyVerifiers?: LegacyPasswordVerifier[];
   /**
@@ -282,7 +286,10 @@ export interface IdentityServiceOptions<User extends IdentityUser> {
    * itself, which may carry the password. A refusal returns the same `null`,
    * runs the same equalizing password hash, emits the same `sign_in.failed`
    * event with reason `unknown_identifier`, and is held to the same
-   * {@link failedSignInFloorMs} as an unknown identifier with no resolver.
+   * {@link failedSignInFloorMs} as an unknown identifier with no resolver. A
+   * resolver that did not check the password at all throws
+   * {@link PasswordNotCheckedError} instead: it is refused the same way, not
+   * logged, and the event reports reason `not_checked`.
    *
    * The resolver's own running time adds to the refusal's work, so set
    * {@link failedSignInFloorMs} above its slowest refusal plus one password
@@ -617,13 +624,19 @@ type AuthenticateOutcome =
   | "authenticated"
   | "no_password"
   | "wrong_password"
+  | "not_checked"
   | "refused";
+
+type LegacyCheck = "verified" | "rejected" | "not_checked";
 
 interface SignInAttempt {
   admit(): Promise<boolean>;
   fail(): Promise<void>;
+  release(): Promise<void>;
   abandon(): Promise<void>;
 }
+
+const NOT_CHECKED = Symbol("not checked");
 
 /**
  * Composable own-auth flows. Construct once with your dependencies and call the
@@ -789,6 +802,7 @@ export class IdentityService<User extends IdentityUser> {
         userId: user.id,
       });
       if (outcome === "wrong_password") await attempt.fail();
+      if (outcome === "not_checked") await attempt.release();
       return await this.#rejectSignIn(startedAt);
     }
     return await this.#completeSignIn(user, identifier);
@@ -804,7 +818,8 @@ export class IdentityService<User extends IdentityUser> {
       password,
     );
     const user =
-      resolved &&
+      resolved !== null &&
+      resolved !== NOT_CHECKED &&
       (await this.#bindResolvedUser(resolved, identifier, password));
     if (user) {
       if ((await this.#reportLock(user.id, identifier)) && this.#enforce) {
@@ -817,7 +832,7 @@ export class IdentityService<User extends IdentityUser> {
     await this.#emit({
       type: "sign_in.failed",
       identifier,
-      reason: "unknown_identifier",
+      reason: resolved === NOT_CHECKED ? "not_checked" : "unknown_identifier",
     });
     return await this.#rejectSignIn(startedAt);
   }
@@ -825,13 +840,14 @@ export class IdentityService<User extends IdentityUser> {
   async #tryResolveUnknownIdentifier(
     identifier: string,
     password: string,
-  ): Promise<User | null> {
+  ): Promise<User | typeof NOT_CHECKED | null> {
     if (!this.#resolveUnknownIdentifier) return null;
     try {
       return (
         (await this.#resolveUnknownIdentifier({ identifier, password })) ?? null
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof PasswordNotCheckedError) return NOT_CHECKED;
       // Never log the error object: it may echo the submitted password.
       console.error("[@udibo/oauth2] resolveUnknownIdentifier threw");
       return null;
@@ -1225,16 +1241,17 @@ export class IdentityService<User extends IdentityUser> {
     verifier: LegacyPasswordVerifier,
     password: string,
     phc: string,
-  ): Promise<boolean> {
+  ): Promise<LegacyCheck> {
     try {
-      return await verifier.verify(password, phc);
-    } catch {
+      return (await verifier.verify(password, phc)) ? "verified" : "rejected";
+    } catch (error) {
+      if (error instanceof PasswordNotCheckedError) return "not_checked";
       // Never log the error object: a BYO verifier may echo the hash or the
       // submitted password in its message. Fail closed.
       console.error(
         `[@udibo/oauth2] legacy password verifier ${verifier.id} threw`,
       );
-      return false;
+      return "rejected";
     }
   }
 
@@ -1505,9 +1522,11 @@ export class IdentityService<User extends IdentityUser> {
       return {
         admit: () => Promise.resolve(true),
         fail: () => this.#recordSignInFailure(userId, identifier),
+        release: () => Promise.resolve(),
         abandon: () => Promise.resolve(),
       };
     }
+    const unreserve = this.#lockout?.releaseAttempt?.bind(this.#lockout);
     let reservation: LockoutFailureResult | undefined;
     const announceLock = async (): Promise<void> => {
       if (reservation) await this.#emitLockout(userId, identifier, reservation);
@@ -1520,6 +1539,10 @@ export class IdentityService<User extends IdentityUser> {
         return !this.#enforce;
       },
       fail: announceLock,
+      release: async () => {
+        if (reservation && unreserve && (await unreserve(userId))) return;
+        await announceLock();
+      },
       abandon: announceLock,
     };
   }
@@ -1550,9 +1573,12 @@ export class IdentityService<User extends IdentityUser> {
     }
     if (!legacyHash) return "wrong_password";
     const verifier = findLegacyVerifier(this.#legacyVerifiers!, legacyHash);
-    if (!verifier || !(await this.#tryLegacy(verifier, password, legacyHash))) {
+    const check = verifier
+      ? await this.#tryLegacy(verifier, password, legacyHash)
+      : "rejected";
+    if (!verifier || check !== "verified") {
       await this.#equalizeTiming(password);
-      return "wrong_password";
+      return check === "not_checked" ? "not_checked" : "wrong_password";
     }
     return (await this.#upgradeCredential(userId, password, verifier.id))
       ? "authenticated"

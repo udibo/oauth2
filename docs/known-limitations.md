@@ -502,6 +502,16 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   locked. The TTL also means a slow guesser who waits a day between failures
   never reaches the threshold in this store; a store over your database keeps
   the count until a successful sign-in clears it.
+- An attempt a legacy verifier did not check (`PasswordNotCheckedError`) is
+  counted before the verifier runs and taken back afterwards, so while it is in
+  flight it holds a place in the account's count. When overlapping unchecked
+  attempts reach `maxAttempts`, the account is locked until they are taken
+  back. A sign-in that reads the account unlocked and reserves its attempt
+  after that lock lands is refused and stays counted, so a flood timed into
+  that window can leave the account locked. The window lasts one password
+  hash, and a sign-in that reads the lock first is refused without being
+  counted. A `LockoutStore` without `release` keeps every unchecked attempt
+  counted.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.

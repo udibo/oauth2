@@ -38,7 +38,11 @@ import {
   type IdentityServiceOptions,
   type IdentityUserStore,
 } from "./service.ts";
-import { type LegacyPasswordVerifier, pbkdf2Verifier } from "./migration.ts";
+import {
+  type LegacyPasswordVerifier,
+  PasswordNotCheckedError,
+  pbkdf2Verifier,
+} from "./migration.ts";
 import {
   createSignInLinkBinding,
   SIGN_IN_LINK_BINDING_PARAM,
@@ -2796,6 +2800,14 @@ function costedVerifier(costMs: number): LegacyPasswordVerifier {
   };
 }
 
+function uncheckedVerifier(): LegacyPasswordVerifier {
+  return {
+    id: "unchecked",
+    canVerify: (phc) => phc.startsWith("unchecked$"),
+    verify: () => Promise.reject(new PasswordNotCheckedError()),
+  };
+}
+
 async function elapsedMs(
   time: FakeTime,
   run: () => Promise<unknown>,
@@ -2814,7 +2826,7 @@ describe("IdentityService failed sign-in timing", () => {
     const service = new IdentityService<TestUser>({
       users: legacyStore.store,
       passwords: costedHasher(NATIVE_KDF_MS),
-      legacyVerifiers: [costedVerifier(LEGACY_KDF_MS)],
+      legacyVerifiers: [costedVerifier(LEGACY_KDF_MS), uncheckedVerifier()],
       failedSignInFloorMs: FLOOR_MS,
       lockout: lockoutHolding(locked),
       ...options,
@@ -2833,6 +2845,7 @@ describe("IdentityService failed sign-in timing", () => {
     );
     importUser("imported@b.co", "costed-legacy$right-password");
     importUser("unreadable@b.co", "no-verifier-claims-this");
+    importUser("unchecked@b.co", "unchecked$right-password");
     const passwordless = await store.create(
       { email: "none@b.co" },
       {
@@ -2858,6 +2871,7 @@ describe("IdentityService failed sign-in timing", () => {
         "wrong native password": "native@b.co",
         "wrong imported password": "imported@b.co",
         "imported hash no verifier claims": "unreadable@b.co",
+        "imported password not checked": "unchecked@b.co",
         "account with no password at all": "none@b.co",
         "locked account": "locked@b.co",
         "attempt refused by its reservation": "over-budget@b.co",
@@ -2931,6 +2945,31 @@ describe("IdentityService failed sign-in timing", () => {
     ).toStrictEqual({
       "wrong native password": NATIVE_KDF_MS,
       "attempt refused by its reservation": NATIVE_KDF_MS,
+    });
+  });
+
+  it("spends a password hash on an attempt whose password was not checked, as when no verifier claims the hash", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    const { service, branches } = await seedBranches({
+      failedSignInFloorMs: 0,
+    });
+    const timings: Record<string, number> = {};
+
+    for (const branch of [
+      "imported hash no verifier claims",
+      "imported password not checked",
+    ]) {
+      timings[branch] = await elapsedMs(time, () =>
+        service.signIn({
+          identifier: branches[branch],
+          password: "wrong-password",
+        }),
+      );
+    }
+
+    expect(timings).toStrictEqual({
+      "imported hash no verifier claims": NATIVE_KDF_MS,
+      "imported password not checked": NATIVE_KDF_MS,
     });
   });
 
@@ -5075,5 +5114,317 @@ describe("IdentityService mailed links bind to the address they were sent to", (
       status: "success",
       userId: user.id,
     });
+  });
+});
+
+describe("IdentityService legacy verifier that did not check the password", () => {
+  const MAX_ATTEMPTS = 3;
+  const IMPORTED = "imported@b.co";
+  const PASSWORD = "s3cret-pw";
+
+  function switchableVerifier() {
+    const state = { checking: false, calls: 0 };
+    const verifier: LegacyPasswordVerifier = {
+      id: "remote",
+      canVerify: (phc) => phc.startsWith("remote$"),
+      verify(password, phc) {
+        state.calls++;
+        if (!state.checking) {
+          return Promise.reject(new PasswordNotCheckedError("budget spent"));
+        }
+        return Promise.resolve(phc === `remote$${password}`);
+      },
+    };
+    return { verifier, state };
+  }
+
+  function makeNotCheckedService(
+    options?: Partial<IdentityServiceOptions<TestUser>>,
+  ) {
+    const legacyStore = makeLegacyStore();
+    const userId = legacyStore.importUser(IMPORTED, `remote$${PASSWORD}`);
+    const remote = switchableVerifier();
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const events: IdentityEvent[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: legacyStore.store,
+      legacyVerifiers: [remote.verifier],
+      lockout,
+      onEvent: (event) => {
+        events.push(event);
+      },
+      ...options,
+    });
+    return { ...legacyStore, userId, remote, lockout, events, service };
+  }
+
+  it("leaves the account unlocked after more than maxAttempts consecutive unchecked attempts", async () => {
+    const { service, remote, lockout, userId, events } =
+      makeNotCheckedService();
+
+    for (let i = 0; i < MAX_ATTEMPTS + 2; i++) {
+      expect(
+        await service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+      ).toStrictEqual(null);
+    }
+
+    expect(remote.state.calls).toStrictEqual(MAX_ATTEMPTS + 2);
+    const status = await lockout.status(userId);
+    expect(
+      status.failures,
+      "an attempt whose password was never checked must not count toward the lockout",
+    ).toStrictEqual(0);
+    expect(status.locked).toStrictEqual(false);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
+
+    remote.state.checking = true;
+    expect(
+      (await service.signIn({ identifier: IMPORTED, password: PASSWORD }))?.id,
+    ).toStrictEqual(userId);
+  });
+
+  it("reports a distinct sign_in.failed reason for an unchecked attempt", async () => {
+    const { service, remote, userId, events } = makeNotCheckedService();
+
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+    remote.state.checking = true;
+    await service.signIn({ identifier: IMPORTED, password: "wrong-pw" });
+
+    expect(eventsOfType(events, "sign_in.failed")).toStrictEqual([
+      {
+        type: "sign_in.failed",
+        identifier: IMPORTED,
+        reason: "not_checked",
+        userId,
+      },
+      {
+        type: "sign_in.failed",
+        identifier: IMPORTED,
+        reason: "wrong_password",
+        userId,
+      },
+    ]);
+  });
+
+  it("does not log an unchecked attempt as a verifier that threw", async () => {
+    const { service } = makeNotCheckedService();
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  it("keeps counting the wrong passwords around an unchecked attempt", async () => {
+    const { service, remote, lockout, userId, events } =
+      makeNotCheckedService();
+    remote.state.checking = true;
+
+    await service.signIn({ identifier: IMPORTED, password: "wrong-1" });
+    await service.signIn({ identifier: IMPORTED, password: "wrong-2" });
+    remote.state.checking = false;
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+    expect((await lockout.status(userId)).failures).toStrictEqual(2);
+    remote.state.checking = true;
+    await service.signIn({ identifier: IMPORTED, password: "wrong-3" });
+
+    expect((await lockout.status(userId)).locked).toStrictEqual(true);
+    expect(lastEventOfType(events, "lockout").failures).toStrictEqual(
+      MAX_ATTEMPTS,
+    );
+  });
+
+  it("leaves the account unlocked when maxAttempts unchecked attempts overlap", async () => {
+    const { service, remote, lockout, userId, events } =
+      makeNotCheckedService();
+    const gate = Promise.withResolvers<void>();
+    let entered = 0;
+    const verify = remote.verifier.verify;
+    remote.verifier.verify = async (password, phc) => {
+      entered++;
+      await gate.promise;
+      return await verify(password, phc);
+    };
+
+    const attempts = Array.from({ length: MAX_ATTEMPTS }, () =>
+      service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+    );
+    await vi.waitFor(() => {
+      expect(entered).toStrictEqual(MAX_ATTEMPTS);
+    });
+    expect(
+      (await lockout.status(userId)).locked,
+      "the last overlapping reservation reaches the threshold before any is released",
+    ).toStrictEqual(true);
+    gate.resolve();
+
+    expect(await Promise.all(attempts)).toStrictEqual(
+      Array(MAX_ATTEMPTS).fill(null),
+    );
+    const status = await lockout.status(userId);
+    expect(
+      status.locked,
+      "releasing the attempt that reached the threshold must drop its lock",
+    ).toStrictEqual(false);
+    expect(status.failures).toStrictEqual(0);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
+    remote.state.checking = true;
+    expect(
+      (await service.signIn({ identifier: IMPORTED, password: PASSWORD }))?.id,
+    ).toStrictEqual(userId);
+  });
+
+  it("leaves the account unlocked when a flood of unchecked attempts is refused by the transient lock", async () => {
+    const { service, remote, lockout, userId, events } =
+      makeNotCheckedService();
+    const gate = Promise.withResolvers<void>();
+    let entered = 0;
+    const verify = remote.verifier.verify;
+    remote.verifier.verify = async (password, phc) => {
+      entered++;
+      await gate.promise;
+      return await verify(password, phc);
+    };
+
+    const checked = Array.from({ length: MAX_ATTEMPTS }, () =>
+      service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+    );
+    await vi.waitFor(() => {
+      expect(entered).toStrictEqual(MAX_ATTEMPTS);
+    });
+    const refused = await Promise.all(
+      Array.from({ length: MAX_ATTEMPTS * 2 }, () =>
+        service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+      ),
+    );
+    expect(refused).toStrictEqual(Array(MAX_ATTEMPTS * 2).fill(null));
+    expect(
+      entered,
+      "a refused attempt never reaches the verifier",
+    ).toStrictEqual(MAX_ATTEMPTS);
+    gate.resolve();
+    await Promise.all(checked);
+
+    const status = await lockout.status(userId);
+    expect(
+      status.locked,
+      "attempts refused only by a lock no checked password created must not keep it",
+    ).toStrictEqual(false);
+    expect(status.failures).toStrictEqual(0);
+    expect(eventsOfType(events, "lockout")).toStrictEqual([]);
+  });
+
+  it("never records a failure for an unchecked attempt when the lockout has no reserveAttempt", async () => {
+    const failures: string[] = [];
+    const { service, remote, userId } = makeNotCheckedService({
+      lockout: countingLockout(failures),
+    });
+
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+    expect(failures).toStrictEqual([]);
+    remote.state.checking = true;
+    await service.signIn({ identifier: IMPORTED, password: "wrong-pw" });
+
+    expect(failures).toStrictEqual([userId]);
+  });
+
+  it("keeps the attempt counted and reports the lock when the lockout cannot release it", async () => {
+    const lockout = new AccountLockout({
+      maxAttempts: MAX_ATTEMPTS,
+      lockDurationMs: 60_000,
+      store: new MemoryLockoutStore(),
+    });
+    const withoutRelease: AccountLockoutLike = {
+      status: (userId, now) => lockout.status(userId, now),
+      recordFailure: (userId, now) => lockout.recordFailure(userId, now),
+      reserveAttempt: (userId, now) => lockout.reserveAttempt(userId, now),
+      reset: (userId) => lockout.reset(userId),
+    };
+    const { service, userId, events } = makeNotCheckedService({
+      lockout: withoutRelease,
+    });
+
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+    }
+
+    expect((await lockout.status(userId)).locked).toStrictEqual(true);
+    expect(
+      eventsOfType(events, "lockout").map((event) => event.failures),
+      "a lock that stands must announce itself once, or no unlock email goes out",
+    ).toStrictEqual([MAX_ATTEMPTS]);
+  });
+
+  it("still counts an ordinary verifier throw as a wrong password", async () => {
+    const { service, remote, lockout, userId, events } =
+      makeNotCheckedService();
+    remote.verifier.verify = () => Promise.reject(new Error("bad hash"));
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+
+    expect((await lockout.status(userId)).failures).toStrictEqual(1);
+    expect(lastEventOfType(events, "sign_in.failed").reason).toStrictEqual(
+      "wrong_password",
+    );
+    expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an unchecked attempt with the same result and floor a wrong password gets", async () => {
+    using time = new FakeTime(undefined, { performance: true });
+    const { service, remote } = makeNotCheckedService({
+      passwords: costedHasher(NATIVE_KDF_MS),
+      failedSignInFloorMs: FLOOR_MS,
+    });
+
+    const unchecked = await elapsedMs(time, async () =>
+      expect(
+        await service.signIn({ identifier: IMPORTED, password: PASSWORD }),
+      ).toStrictEqual(null),
+    );
+    remote.state.checking = true;
+    const wrong = await elapsedMs(time, async () =>
+      expect(
+        await service.signIn({ identifier: IMPORTED, password: "wrong-pw" }),
+      ).toStrictEqual(null),
+    );
+
+    expect({ unchecked, wrong }).toStrictEqual({
+      unchecked: FLOOR_MS,
+      wrong: FLOOR_MS,
+    });
+  });
+});
+
+describe("IdentityService resolveUnknownIdentifier that did not check the password", () => {
+  it("refuses like an unknown identifier and reports reason not_checked", async () => {
+    const { store } = makeLegacyStore();
+    const events: IdentityEvent[] = [];
+    const service = serviceWithoutSignInFloor({
+      users: store,
+      resolveUnknownIdentifier: () =>
+        Promise.reject(new PasswordNotCheckedError("circuit open")),
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    using errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(
+      await service.signIn({ identifier: "ghost@b.co", password: "pw-ghost" }),
+    ).toStrictEqual(null);
+
+    expect(events).toStrictEqual([
+      {
+        type: "sign_in.failed",
+        identifier: "ghost@b.co",
+        reason: "not_checked",
+      },
+    ]);
+    expect(errorLog).not.toHaveBeenCalled();
   });
 });

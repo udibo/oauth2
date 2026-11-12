@@ -215,6 +215,59 @@ const scryptVerifier: LegacyPasswordVerifier = {
 };
 ```
 
+### When a verifier cannot check the password
+
+A verifier that calls another system may sometimes decline to check at all: its
+call budget is spent, a circuit breaker is open, or it runs in monitor-only
+mode. Report that by throwing `PasswordNotCheckedError` rather than resolving
+`false`, so the attempt is not mistaken for a wrong password:
+
+```ts
+import {
+  type LegacyPasswordVerifier,
+  PasswordNotCheckedError,
+} from "@udibo/oauth2/identity/migration";
+
+declare const breaker: { isOpen(): boolean };
+declare function checkOldSystem(
+  password: string,
+  phc: string,
+): Promise<boolean>;
+
+const oldSystemVerifier: LegacyPasswordVerifier = {
+  id: "old-system",
+  canVerify: (phc) => phc.startsWith("old-system$"),
+  async verify(password, phc) {
+    if (breaker.isOpen()) throw new PasswordNotCheckedError("breaker open");
+    return await checkOldSystem(password, phc);
+  },
+};
+```
+
+`signIn` refuses that attempt exactly as it refuses a wrong password: the same
+`null`, the same equalizing hash and the same `failedSignInFloorMs`. It does not
+count the attempt toward the account lockout, so an attacker who drains your
+budget cannot lock accounts they never guessed against, and it emits
+`sign_in.failed` with reason `not_checked`, which you can alert on.
+
+Throw it only when the password never left your process. Once you have sent it
+to the other system, report that system's answer, and resolve `false` on a
+timeout or a reply that is not a verdict: the other system may already have
+counted the attempt, and some systems answer a correct password with a
+follow-up challenge instead of a plain yes. Any other throw still counts as a
+wrong password.
+
+With `AccountLockout`, the attempt is counted before the password is checked
+and taken back afterwards, which needs the optional `LockoutStore.release`.
+`MemoryLockoutStore` implements it; for your own store, implement it as one
+atomic write, and run `runLockoutStoreContractTests` with `release: true`.
+Without it the attempt stays counted. A lockout of your own that implements
+`reserveAttempt` takes the attempt back through `releaseAttempt`; one without
+`reserveAttempt` simply does not record a failure.
+
+`verifyLegacyPassword` rethrows `PasswordNotCheckedError` instead of resolving
+`false`, so a dry run does not report an unchecked password as wrong.
+
 ## Bulk-importing your users
 
 > **Handle the export as password material.** A foreign hash export is not a
@@ -310,7 +363,11 @@ is refused, and otherwise `sign_in.succeeded` is emitted. Returning `null` refus
 is logged without its message, since that may echo the password. Every refusal
 looks exactly like an unknown identifier with no resolver: the same `null`, the
 same equalizing hash, the same `sign_in.failed` event with reason
-`unknown_identifier`, and the same `failedSignInFloorMs` floor.
+`unknown_identifier`, and the same `failedSignInFloorMs` floor. A resolver that
+did not check the password at all, under the same rule as a verifier
+([when a verifier cannot check the password](#when-a-verifier-cannot-check-the-password)),
+throws `PasswordNotCheckedError` instead: the refusal is the same, the event
+reason is `not_checked`, and nothing is logged.
 
 The resolver decides who the person is, so keep these in mind:
 

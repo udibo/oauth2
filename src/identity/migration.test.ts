@@ -3,6 +3,7 @@ import {
   findLegacyVerifier,
   type LegacyPasswordVerifier,
   parsePhc,
+  PasswordNotCheckedError,
   pbkdf2Verifier,
   verifyLegacyPassword,
 } from "./migration.ts";
@@ -146,6 +147,35 @@ describe("findLegacyVerifier / verifyLegacyPassword", () => {
     expect(
       await verifyLegacyPassword(verifiers, "nope", "$2b$12$x"),
     ).toBeFalsy();
+  });
+
+  it("verifyLegacyPassword rethrows a password that was not checked rather than reporting it wrong", async () => {
+    const unchecked: LegacyPasswordVerifier = {
+      id: "remote",
+      canVerify: (phc) => phc.startsWith("remote$"),
+      verify: () => Promise.reject(new PasswordNotCheckedError("budget spent")),
+    };
+
+    const error = await verifyLegacyPassword(
+      [unchecked],
+      "secret",
+      "remote$x",
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(PasswordNotCheckedError);
+    expect((error as Error).name).toStrictEqual("PasswordNotCheckedError");
+  });
+
+  it("verifyLegacyPassword still resolves false when a verifier throws anything else", async () => {
+    const broken: LegacyPasswordVerifier = {
+      id: "broken",
+      canVerify: () => true,
+      verify: () => Promise.reject(new Error("malformed")),
+    };
+
+    expect(await verifyLegacyPassword([broken], "secret", "$x")).toStrictEqual(
+      false,
+    );
   });
 
   it("returns false when no verifier claims the hash — scrypt is BYO, not built-in", async () => {

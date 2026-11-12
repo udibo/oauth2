@@ -626,6 +626,9 @@ threshold or slipping a burst past the limiter. Implement the optional
 `LockoutStore.lock` as one conditional write as well: it locks the account only
 while the stored count still stands, so a lock computed by an over-budget
 attempt cannot land after a concurrent successful sign-in cleared the count.
+Implement the optional `LockoutStore.release` as one atomic write too: it takes
+back an attempt whose password was never checked
+([a verifier that cannot check](migrate-from-another-provider.md#when-a-verifier-cannot-check-the-password)).
 
 ```ts
 import {

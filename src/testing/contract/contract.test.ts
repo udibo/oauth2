@@ -464,6 +464,7 @@ runLockoutStoreContractTests({
   describeName: "MemoryLockoutStore satisfies LockoutStore contract",
   makeStore: () => new MemoryLockoutStore(),
   lock: true,
+  release: true,
 });
 
 runTenantContractTests({
