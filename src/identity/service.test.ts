@@ -5372,6 +5372,24 @@ describe("IdentityService legacy verifier that did not check the password", () =
     ).toStrictEqual([MAX_ATTEMPTS]);
   });
 
+  it("does not announce again when an unchecked attempt is released over a lock another attempt announced", async () => {
+    const { service, remote, lockout, userId, events } = makeNotCheckedService({
+      protectionMode: "log-only",
+    });
+    remote.state.checking = true;
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await service.signIn({ identifier: IMPORTED, password: "wrong-pw" });
+    }
+    remote.state.checking = false;
+
+    await service.signIn({ identifier: IMPORTED, password: PASSWORD });
+
+    expect((await lockout.status(userId)).locked).toStrictEqual(true);
+    expect(
+      eventsOfType(events, "lockout").map((event) => event.failures),
+    ).toStrictEqual([MAX_ATTEMPTS]);
+  });
+
   it("announces the lock before rethrowing when the release itself fails", async () => {
     const lockout = new AccountLockout({
       maxAttempts: MAX_ATTEMPTS,

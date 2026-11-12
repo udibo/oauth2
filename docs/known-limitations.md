@@ -515,8 +515,14 @@ fetch redirects. A trusted provider configuration is part of that boundary.
   threshold while an unchecked attempt is in flight, the lockout event fires,
   and the release can then drop that lock, because only the checked attempts
   are left and they are below the threshold; the next wrong password locks
-  and announces again. A `LockoutStore` without `release` keeps every
-  unchecked attempt counted.
+  and announces again. When a release lands between an attempt's count
+  reaching `maxAttempts` and its conditional `lock` write, the write is
+  refused and `AccountLockout` counts that attempt a second time, leaving one
+  extra count until a successful sign-in clears the record. And when a
+  released unchecked attempt that reached the threshold drops its lock, a wrong
+  password that locks the account again before the service re-reads the lock
+  state is announced twice. A `LockoutStore`
+  without `release` keeps every unchecked attempt counted.
 - `rateLimiter` covers every flow, keyed only by prefix, so a single threshold
   applies until you override the email-sending flows through `rateLimiters` —
   per-flow limiters are configuration, not a default.
