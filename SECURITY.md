@@ -27,8 +27,8 @@ Email **security@udibo.com** with:
 - The impact you believe it has (what an attacker gains).
 - Any suggested remediation, if you have one.
 
-You will receive an acknowledgment within **72 hours** and a substantive
-assessment within **7 days**. We ask that you give us **90 days** to remediate
+You will receive an acknowledgment within **5 business days** and a substantive
+assessment within **14 days**. We ask that you give us **90 days** to remediate
 before public disclosure; we will credit you in the release notes unless you
 prefer otherwise. We do not operate a paid bounty program.
 
