@@ -13,7 +13,7 @@ reports seriously and value the time of security researchers.
 
 Pre-1.0, security fixes land on the latest release only. From 1.0 on, the latest
 minor of the current major receives fixes, and the final minor of the previous
-major receives critical fixes for 6 months after a new major ships.
+major receives critical fixes for 6 months after a new major ships. Security fixes are announced through a GitHub security advisory or by deprecating affected versions on npm, so a pinned release that a fix affects can be found.
 
 ## Reporting a vulnerability
 
