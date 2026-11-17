@@ -15,6 +15,7 @@ import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
 import { ResetPasswordForm } from "./reset-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
+import { ChangePasswordForm } from "./change-password-form.tsx";
 import type { AuthFormResult } from "./types.ts";
 
 type HeldSubmit = () => Promise<AuthFormResult>;
@@ -71,6 +72,12 @@ const FORMS: FormCase[] = [
         onSubmit={onSubmit}
       />
     ),
+  },
+  {
+    name: "ChangePasswordForm",
+    label: "Update password",
+    pendingLabel: "Updating…",
+    render: (onSubmit) => <ChangePasswordForm onSubmit={onSubmit} />,
   },
 ];
 

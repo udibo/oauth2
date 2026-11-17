@@ -42,6 +42,11 @@ const FORMS = [
   },
   { name: "MfaChallengeForm", label: "Verify", pendingLabel: "Verifying…" },
   { name: "MfaEnrollmentForm", label: "Confirm", pendingLabel: "Confirming…" },
+  {
+    name: "ChangePasswordForm",
+    label: "Update password",
+    pendingLabel: "Updating…",
+  },
 ] as const;
 
 const PAGE_ENTRY = fileURLToPath(

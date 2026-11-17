@@ -4236,12 +4236,128 @@ failure. `onSuccess` is a UI side effect, not an authorization gate; errors in
 that callback are isolated. For a no-JavaScript form post, `action`/`method`
 identify the backend route and that route must return the appropriate redirect.
 
+## Account settings components
+
+Three components cover the signed-in half of an account page: where the account
+is signed in, which social accounts are linked, and its password. Each takes
+its data as props and reports each action through a callback or `onSubmit`.
+They do not load data, call your server, or add routes. Load the data in your
+route and pass it in, then pass the updated data once an action succeeds.
+Applications that use Udibo's hosted sign-in already have this page there; use
+these where your application runs its own account backend.
+
+| Component            | Use                                                                    |
+| -------------------- | ---------------------------------------------------------------------- |
+| `SessionList`        | Signed-in sessions, with sign-out for one session or every other one    |
+| `LinkedAccounts`     | Linked social accounts, with disconnect and connect                    |
+| `ChangePasswordForm` | Change a password, or set a first one on an account that has none      |
+
+```tsx
+import {
+  ChangePasswordForm,
+  type LinkedAccount,
+  LinkedAccounts,
+  SessionList,
+  type SessionListItem,
+} from "@udibo/oauth2/react/components";
+
+async function send(path: string, init: RequestInit) {
+  const response = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", "x-csrf": "1" },
+  });
+  if (!response.ok) return { error: "That didn't work. Try again." };
+}
+
+export function SecurityPage(props: {
+  sessions: SessionListItem[];
+  accounts: LinkedAccount[];
+  hasPassword: boolean;
+  reload: () => void;
+}) {
+  return (
+    <>
+      <h2>Sessions</h2>
+      <SessionList
+        sessions={props.sessions}
+        onRevoke={async (session) => {
+          const failed = await send(`/account/sessions/${session.id}`, {
+            method: "DELETE",
+          });
+          if (failed) return failed;
+          props.reload();
+        }}
+        onRevokeOthers={async () => {
+          const failed = await send("/account/sessions", { method: "DELETE" });
+          if (failed) return failed;
+          props.reload();
+        }}
+      />
+
+      <h2>Connected accounts</h2>
+      <LinkedAccounts
+        accounts={props.accounts.map((account) => ({
+          ...account,
+          canUnlink: props.hasPassword || props.accounts.length > 1,
+        }))}
+        onUnlink={async (account) => {
+          const failed = await send(`/account/identities/${account.id}`, {
+            method: "DELETE",
+          });
+          if (failed) return failed;
+          props.reload();
+        }}
+      />
+
+      <h2>Password</h2>
+      <ChangePasswordForm
+        hasPassword={props.hasPassword}
+        minLength={12}
+        onSubmit={(values) =>
+          send("/account/password", {
+            method: "POST",
+            body: JSON.stringify(values),
+          })
+        }
+        onSuccess={props.reload}
+      />
+    </>
+  );
+}
+```
+
+The components only offer actions; your server decides them. Check on the
+server that the session or linked account belongs to the signed-in person, and
+refuse an unlink that would leave no way to sign in. `canUnlink: false` only
+hides that account's Disconnect button.
+
+`SessionList` never offers to sign out the session marked `current`. Summarize
+each session's user agent into `device` on your server. Leave out `onRevoke` and
+`onRevokeOthers`, or `onUnlink`, for a read-only list.
+
+`ChangePasswordForm` sends `revokeOtherSessions: true` by default and says that
+other sessions will be signed out. Pass `revokeOtherSessions="optional"` to give
+the person a checkbox, or `false` to keep other sessions. Your server signs the
+sessions out. With `hasPassword={false}` the form drops the current-password
+field to set a first password. Without a current password, check on the server
+that the request comes from the account owner, for example with a recent
+sign-in, a passkey, or a code.
+
+Dates use the runtime's locale and time zone by default. On a server-rendered
+page, pass `formatDate` with a fixed locale and `timeZone` so the server and
+browser render the same text. With `action` set, each Sign out and Disconnect
+button posts a form when JavaScript has not loaded. Sign out posts
+`intent=revoke-session` and `sessionId`, sign out everywhere else posts
+`intent=revoke-other-sessions`, and Disconnect posts `intent=unlink-identity`
+and `identityId`.
+
 ## Styling and custom markup
 
 Components are unstyled. Use `className`, the per-slot `classNames` map, or
 stable `data-oauth2-*` attributes. `AuthFormClassNamesProvider` supplies shared
-form classes; an individual form can override a slot. `UserMenu` has its own
-styling props.
+form classes, including `ChangePasswordForm`'s; an individual form can override
+a slot. `UserMenu`, `SessionList` and `LinkedAccounts` have their own styling
+props.
 
 While a submit is in flight, the submit button shows its pending label and
 carries `aria-disabled="true"` instead of `disabled`, so it keeps keyboard

@@ -11,6 +11,9 @@ import { ResetPasswordForm } from "./reset-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
 import { UserMenu } from "./user-menu.tsx";
+import { SessionList } from "./session-list.tsx";
+import { LinkedAccounts } from "./linked-accounts.tsx";
+import { ChangePasswordForm } from "./change-password-form.tsx";
 import { createMockOAuth2Client, MockOAuth2Provider } from "../testing.tsx";
 import { useAuthForm } from "./use-auth-form.ts";
 import { ErrorSummary, TextField, useFocusFirstError } from "./internal.tsx";
@@ -111,6 +114,58 @@ describe("auth component accessibility (axe-core)", () => {
     expect(trigger.getAttribute("aria-controls")).toStrictEqual(
       container.querySelector("[data-oauth2-user-panel]")?.id,
     );
+    await assertNoViolations(container);
+  });
+
+  it("SessionList has no axe violations, including after a failed action", async () => {
+    const { container } = render(
+      <SessionList
+        sessions={[
+          { id: "a", current: true, device: "Firefox on Linux" },
+          { id: "b", device: "Safari on iPhone", ipAddress: "203.0.113.7" },
+        ]}
+        onRevoke={() => ({ error: "Try again." })}
+        onRevokeOthers={() => {}}
+      />,
+    );
+    await assertNoViolations(container);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Sign out Safari on iPhone" }),
+      );
+    });
+    await assertNoViolations(container);
+  });
+
+  it("LinkedAccounts has no axe violations", async () => {
+    const { container } = render(
+      <LinkedAccounts
+        accounts={[
+          { id: "a", providerName: "GitHub", email: "ada@example.com" },
+          { id: "b", providerName: "Google", canUnlink: false },
+        ]}
+        providers={[{ id: "gitlab", name: "GitLab" }]}
+        onUnlink={() => {}}
+        onLink={() => {}}
+      />,
+    );
+    await assertNoViolations(container);
+  });
+
+  it("ChangePasswordForm has no axe violations in either mode or with errors", async () => {
+    const { container, rerender } = render(
+      <ChangePasswordForm
+        revokeOtherSessions="optional"
+        minLength={12}
+        onSubmit={() => {}}
+      />,
+    );
+    await assertNoViolations(container);
+    await act(async () => {
+      fireEvent.submit(getForm(container));
+    });
+    await assertNoViolations(container);
+    rerender(<ChangePasswordForm hasPassword={false} onSubmit={() => {}} />);
     await assertNoViolations(container);
   });
 });
