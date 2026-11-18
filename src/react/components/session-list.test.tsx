@@ -260,6 +260,117 @@ describe("SessionList", () => {
     ).toStrictEqual(["post", "post", "post"]);
   });
 
+  it("still moves focus to the list when re-renders keep the row before it goes away", async () => {
+    const onRevoke = (): void => {};
+    const copies = (): SessionListItem[] =>
+      SESSIONS.map((session) => ({ ...session }));
+    const { container, rerender } = render(
+      <SessionList sessions={copies()} onRevoke={onRevoke} />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    rerender(<SessionList sessions={copies()} onRevoke={onRevoke} />);
+    expect(document.activeElement).toStrictEqual(button);
+    rerender(
+      <SessionList
+        sessions={copies().filter((session) => session.id !== "s-phone")}
+        onRevoke={onRevoke}
+      />,
+    );
+    expect(document.activeElement).toStrictEqual(
+      container.querySelector("[data-oauth2-session-list]"),
+    );
+  });
+
+  it("moves focus to the list when the row goes away in the same update as the success", async () => {
+    let sessions = SESSIONS;
+    let renderList: () => void = () => {};
+    const onRevoke = (session: SessionListItem): void => {
+      sessions = sessions.filter((item) => item.id !== session.id);
+      renderList();
+    };
+    const { container, rerender } = render(
+      <SessionList sessions={sessions} onRevoke={onRevoke} />,
+    );
+    renderList = () =>
+      rerender(<SessionList sessions={sessions} onRevoke={onRevoke} />);
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(document.activeElement).toStrictEqual(
+      container.querySelector("[data-oauth2-session-list]"),
+    );
+  });
+
+  it("leaves focus where the person moved it when the row goes away", async () => {
+    const onRevoke = (): void => {};
+    const { rerender } = render(
+      <SessionList sessions={SESSIONS} onRevoke={onRevoke} />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    const other = screen.getByRole("button", {
+      name: "Sign out Unknown device",
+    });
+    other.focus();
+    rerender(
+      <SessionList
+        sessions={SESSIONS.filter((session) => session.id !== "s-phone")}
+        onRevoke={onRevoke}
+      />,
+    );
+    expect(document.activeElement).toStrictEqual(other);
+  });
+
+  it("stops watching once the person leaves the button, even if its row goes later", async () => {
+    const onRevoke = (): void => {};
+    const copies = (): SessionListItem[] =>
+      SESSIONS.map((session) => ({ ...session }));
+    const { rerender } = render(
+      <SessionList sessions={copies()} onRevoke={onRevoke} />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    button.blur();
+    rerender(<SessionList sessions={copies()} onRevoke={onRevoke} />);
+    rerender(
+      <SessionList
+        sessions={copies().filter((session) => session.id !== "s-phone")}
+        onRevoke={onRevoke}
+      />,
+    );
+    expect(document.activeElement).toStrictEqual(document.body);
+  });
+
+  it("does not take focus after a click that never focused the button", async () => {
+    render(<SessionList sessions={SESSIONS} onRevoke={() => {}} />);
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Sign out Safari on iPhone" }),
+      );
+    });
+    expect(document.activeElement).toStrictEqual(document.body);
+  });
+
   it("moves focus to the list when a signed-out session's row goes away", async () => {
     const onRevoke = (): void => {};
     const { container, rerender } = render(

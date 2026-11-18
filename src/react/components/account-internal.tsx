@@ -15,6 +15,8 @@ export interface AccountActionRunner {
   pendingKey: string | null;
   error: string | null;
   successCount: number;
+  /** The element that had focus when the last action started. */
+  focusedAtStart: RefObject<Element | null>;
   run(
     key: string,
     action: () =>
@@ -34,10 +36,13 @@ export function useAccountAction(): AccountActionRunner {
   const [error, setError] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
   const runningRef = useRef(false);
+  const focusedAtStart = useRef<Element | null>(null);
 
   const run = useCallback<AccountActionRunner["run"]>(async (key, action) => {
     if (runningRef.current) return;
     runningRef.current = true;
+    focusedAtStart.current =
+      typeof document === "undefined" ? null : document.activeElement;
     setPendingKey(key);
     setError(null);
     let message: string | null = null;
@@ -55,14 +60,14 @@ export function useAccountAction(): AccountActionRunner {
     else setSuccessCount((count) => count + 1);
   }, []);
 
-  return { pendingKey, error, successCount, run };
+  return { pendingKey, error, successCount, focusedAtStart, run };
 }
 
 /**
- * Moves focus to the list root when the control focused at a successful
- * action leaves the page with the next data change (a removed row's button
- * drops focus to `<body>`). A data change that keeps that control, or any
- * change without a success before it, leaves focus alone.
+ * Moves focus to the list root when the control that had focus as a
+ * successful action started leaves the page (a removed row's button drops
+ * focus to `<body>`). It stops watching once focus moves away from that
+ * control, and never moves focus that is somewhere else on the page.
  */
 export function useFocusAfterRemoval(
   runner: AccountActionRunner,
@@ -70,24 +75,27 @@ export function useFocusAfterRemoval(
 ): RefObject<HTMLDivElement | null> {
   const rootRef = useRef<HTMLDivElement>(null);
   const handled = useRef(0);
-  const heldControl = useRef<Element | null>(null);
-  const itemsAtSuccess = useRef<unknown>(null);
+  const watched = useRef<Element | null>(null);
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const active = document.activeElement;
-    const onBody = active === null || active === document.body;
     if (runner.successCount !== handled.current) {
       handled.current = runner.successCount;
-      itemsAtSuccess.current = items;
-      heldControl.current = onBody ? null : active;
-      if (onBody) rootRef.current?.focus();
-      return;
+      const control = runner.focusedAtStart.current;
+      watched.current =
+        control === null || control === document.body ? null : control;
     }
-    const control = heldControl.current;
-    if (!control || items === itemsAtSuccess.current) return;
-    heldControl.current = null;
-    if (!control.isConnected && onBody) rootRef.current?.focus();
-  }, [runner.successCount, items]);
+    const control = watched.current;
+    if (!control) return;
+    const active = document.activeElement;
+    if (!control.isConnected) {
+      watched.current = null;
+      if (active === null || active === document.body) {
+        rootRef.current?.focus({ preventScroll: true });
+      }
+    } else if (active !== control) {
+      watched.current = null;
+    }
+  }, [runner.successCount, items, runner.focusedAtStart]);
   return rootRef;
 }
 
