@@ -235,10 +235,10 @@ export interface BaseAuthFormProps<V extends AuthFormValues> {
    */
   classNames?: AuthFormClassNames;
   /**
-   * `action` for the rendered `<form>`. Set it (with {@link method}) on a
-   * server-rendered page so the form still posts when JavaScript never
-   * arrives; every rendered field carries its `name`, so a native post sends
-   * those fields under the keys `onSubmit` receives. A value the form holds
+   * `action` for the rendered `<form>`. Set it on a server-rendered page so
+   * the form still posts to that route when JavaScript never arrives; every
+   * rendered field carries its `name`, so a native post sends those fields
+   * under the keys `onSubmit` receives. A value the form holds
    * without a rendered field (such as `ResetPasswordForm`'s `token`) is not
    * posted, so the server's handler must obtain it another way. Once React is
    * running, `onSubmit` handles the submit and the native post is suppressed.
@@ -247,11 +247,12 @@ export interface BaseAuthFormProps<V extends AuthFormValues> {
    */
   action?: string;
   /**
-   * `method` for the rendered `<form>`. Defaults to `"post"` whenever
-   * {@link action} is set, because the fields these forms render — passwords
-   * and one-time codes — must never reach a URL, where a `get` form
-   * would put them: browser history, the `Referer` sent to every third-party
-   * asset on the destination page, and the server's access log.
+   * `method` for the rendered `<form>`. Defaults to `"post"`, with or without
+   * {@link action}. A submit before React hydrates, or after its bundle fails
+   * to load, is a native one; with no `action` it posts back to the current
+   * page. Do not pass `"get"`: it puts the fields these forms render —
+   * passwords, one-time codes, email addresses — in the URL, browser history
+   * and the server's access log.
    */
   method?: "get" | "post";
   /**

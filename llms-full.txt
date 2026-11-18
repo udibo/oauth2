@@ -4207,7 +4207,6 @@ export function SignInPage() {
   return (
     <SignInForm
       action="/auth/signin"
-      method="post"
       onSubmit={async (values) => {
         const response = await fetch("/auth/signin", {
           method: "POST",
@@ -4233,8 +4232,21 @@ navigating to an authenticated page; see [MFA](https://github.com/udibo/oauth2/b
 
 `onSubmit` returns nothing for success or `{ error, fieldErrors }` for a form
 failure. `onSuccess` is a UI side effect, not an authorization gate; errors in
-that callback are isolated. For a no-JavaScript form post, `action`/`method`
-identify the backend route and that route must return the appropriate redirect.
+that callback are isolated.
+
+Every form renders `method="post"` unless you pass `method`, with or without an
+`action`. A submit before React hydrates, or after the bundle fails to load, is
+a native browser submit, and posting keeps passwords and codes out of the URL,
+browser history and access logs. Without an `action` it posts back to the
+current page, so that route must accept a `POST` or the person sees an error;
+set `action` to the backend route that handles a no-JavaScript submit and
+return the appropriate redirect from it. Do not pass `method="get"` to these
+forms: it puts their fields in the URL.
+
+A route that handles that native submit receives a form-encoded `POST`, which
+any other site can also send with the person's cookies. Point `action` at the
+`honoIdentityRoutes` route, which checks the request is same-origin, or check
+`Origin` or `Sec-Fetch-Site` in your own handler.
 
 ## Account settings components
 
@@ -4384,7 +4396,8 @@ Style the pending state with `[data-oauth2-submit][aria-disabled="true"]`, not
 `aria-disabled={form.isSubmitting || undefined}`.
 
 For full markup control, use `useAuthForm` or a component's render-prop
-children. Keep labels, error associations, focus behavior, and autocomplete
+children. Your own `<form>` does not get the `method="post"` default: set it,
+or a submit before hydration puts the fields in the URL. Keep labels, error associations, focus behavior, and autocomplete
 attributes when replacing markup. The
 [component API](https://jsr.io/@udibo/oauth2/doc/react/components) lists the
 slots and props.

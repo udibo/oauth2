@@ -68,7 +68,7 @@ export function AuthFormShell<V extends AuthFormValues>(props: {
             <form
               onSubmit={form.handleSubmit}
               action={action}
-              method={method ?? (action ? "post" : undefined)}
+              method={method ?? "post"}
               ref={formRef}
               noValidate
               data-oauth2-form-element=""
