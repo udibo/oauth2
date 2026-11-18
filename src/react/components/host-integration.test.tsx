@@ -53,6 +53,30 @@ describe("server-rendered forms post without JavaScript", () => {
       expect(form.getAttribute("method")).toStrictEqual("post");
     });
 
+    it(`${name} posts when the app gives no action, so a submit before hydration keeps credentials out of the URL`, () => {
+      const { container } = render(renderForm({ onSubmit: () => {} }));
+      const form = getForm(container);
+      expect(form.getAttribute("action")).toStrictEqual(null);
+      expect(form.getAttribute("method")).toStrictEqual("post");
+      expect(form.method).toStrictEqual("post");
+    });
+
+    it(`${name} posts by default when the app gives an action`, () => {
+      const { container } = render(
+        renderForm({ onSubmit: () => {}, action: "/auth/go" }),
+      );
+      const form = getForm(container);
+      expect(form.getAttribute("action")).toStrictEqual("/auth/go");
+      expect(form.getAttribute("method")).toStrictEqual("post");
+    });
+
+    it(`${name} honours an explicit get method`, () => {
+      const { container } = render(
+        renderForm({ onSubmit: () => {}, method: "get" }),
+      );
+      expect(getForm(container).getAttribute("method")).toStrictEqual("get");
+    });
+
     it(`${name} hands the form element to formRef`, () => {
       let captured: HTMLFormElement | null = null;
       const { container } = render(
@@ -106,33 +130,6 @@ describe("server-rendered forms post without JavaScript", () => {
       notPrevented,
       "the submit event must be prevented so the browser does not also post",
     ).toStrictEqual(false);
-  });
-
-  it("posts by default, so credentials never reach the URL a get form would build", () => {
-    const { container } = render(
-      <SignInForm onSubmit={() => {}} action="/identity/signin" />,
-    );
-    const form = getForm(container);
-    expect(form.getAttribute("method")).toStrictEqual("post");
-    expect(form.method).toStrictEqual("post");
-  });
-
-  it("still honours an explicit method", () => {
-    const { container } = render(
-      <RequestPasswordResetForm
-        onSubmit={() => {}}
-        action="/identity/lookup"
-        method="get"
-      />,
-    );
-    expect(getForm(container).getAttribute("method")).toStrictEqual("get");
-  });
-
-  it("omits action and method when the app does not ask for a native post", () => {
-    const { container } = render(<SignInForm onSubmit={() => {}} />);
-    const form = getForm(container);
-    expect(form.getAttribute("action")).toStrictEqual(null);
-    expect(form.getAttribute("method")).toStrictEqual(null);
   });
 });
 

@@ -111,7 +111,6 @@ export function SignInPage() {
   return (
     <SignInForm
       action="/auth/signin"
-      method="post"
       onSubmit={async (values) => {
         const response = await fetch("/auth/signin", {
           method: "POST",
@@ -137,8 +136,16 @@ navigating to an authenticated page; see [MFA](add-mfa.md).
 
 `onSubmit` returns nothing for success or `{ error, fieldErrors }` for a form
 failure. `onSuccess` is a UI side effect, not an authorization gate; errors in
-that callback are isolated. For a no-JavaScript form post, `action`/`method`
-identify the backend route and that route must return the appropriate redirect.
+that callback are isolated.
+
+Every form renders `method="post"` unless you pass `method`, with or without an
+`action`. A submit before React hydrates, or after the bundle fails to load, is
+a native browser submit, and posting keeps passwords and codes out of the URL,
+browser history and access logs. Without an `action` it posts back to the
+current page, so that route must accept a `POST` or the person sees an error;
+set `action` to the backend route that handles a no-JavaScript submit and
+return the appropriate redirect from it. Do not pass `method="get"` to these
+forms: it puts their fields in the URL.
 
 ## Account settings components
 
