@@ -267,6 +267,23 @@ describe("ChangePasswordForm", () => {
     );
   });
 
+  it("treats an empty form error as absent when moving a current-password error to the summary", async () => {
+    const { container } = render(
+      <ChangePasswordForm
+        hasPassword={false}
+        onSubmit={() => ({
+          error: "",
+          fieldErrors: { currentPassword: "Enter your current password." },
+        })}
+      />,
+    );
+    await submit(container);
+    expect(screen.getByRole("alert").textContent).toStrictEqual(
+      "Enter your current password.",
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("hands onSuccess the same values onSubmit received", async () => {
     const received: { submit?: ChangePasswordValues; success?: unknown } = {};
     const props = {

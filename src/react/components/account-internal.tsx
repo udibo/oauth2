@@ -59,9 +59,10 @@ export function useAccountAction(): AccountActionRunner {
 }
 
 /**
- * After a successful action, once the data the list renders changes, moves
- * focus to the list root when the control that held it is gone (a removed
- * row's button leaves focus on `<body>`).
+ * Moves focus to the list root when the control focused at a successful
+ * action leaves the page with the next data change (a removed row's button
+ * drops focus to `<body>`). A data change that keeps that control, or any
+ * change without a success before it, leaves focus alone.
  */
 export function useFocusAfterRemoval(
   runner: AccountActionRunner,
@@ -69,14 +70,23 @@ export function useFocusAfterRemoval(
 ): RefObject<HTMLDivElement | null> {
   const rootRef = useRef<HTMLDivElement>(null);
   const handled = useRef(0);
+  const heldControl = useRef<Element | null>(null);
+  const itemsAtSuccess = useRef<unknown>(null);
   useEffect(() => {
-    if (runner.successCount === handled.current) return;
     if (typeof document === "undefined") return;
     const active = document.activeElement;
-    if (active === null || active === document.body) {
+    const onBody = active === null || active === document.body;
+    if (runner.successCount !== handled.current) {
       handled.current = runner.successCount;
-      rootRef.current?.focus();
+      itemsAtSuccess.current = items;
+      heldControl.current = onBody ? null : active;
+      if (onBody) rootRef.current?.focus();
+      return;
     }
+    const control = heldControl.current;
+    if (!control || items === itemsAtSuccess.current) return;
+    heldControl.current = null;
+    if (!control.isConnected && onBody) rootRef.current?.focus();
   }, [runner.successCount, items]);
   return rootRef;
 }

@@ -254,6 +254,41 @@ describe("LinkedAccounts", () => {
     );
   });
 
+  it("never moves focus later for a success that kept the focused control", async () => {
+    const onLink = (): void => {};
+    const { container, rerender } = render(
+      <LinkedAccounts
+        accounts={ACCOUNTS.map((account) => ({ ...account }))}
+        providers={PROVIDERS}
+        onLink={onLink}
+      />,
+    );
+    const connect = screen.getByRole("button", { name: "Connect GitLab" });
+    connect.focus();
+    await act(async () => {
+      fireEvent.click(connect);
+    });
+    expect(document.activeElement).toStrictEqual(connect);
+    connect.blur();
+    rerender(
+      <LinkedAccounts
+        accounts={ACCOUNTS.map((account) => ({ ...account }))}
+        providers={PROVIDERS}
+        onLink={onLink}
+      />,
+    );
+    expect(document.activeElement).toStrictEqual(document.body);
+    assert(container.querySelector("[data-oauth2-linked-accounts]"));
+  });
+
+  it("never moves focus for a data change without a successful action", () => {
+    const { rerender } = render(
+      <LinkedAccounts accounts={ACCOUNTS} onUnlink={() => {}} />,
+    );
+    rerender(<LinkedAccounts accounts={[ACCOUNTS[0]!]} onUnlink={() => {}} />);
+    expect(document.activeElement).toStrictEqual(document.body);
+  });
+
   it("posts, never gets, even without an action", () => {
     const { container } = render(
       <LinkedAccounts accounts={ACCOUNTS} onUnlink={() => {}} />,

@@ -139,7 +139,7 @@ function withoutCurrentPasswordField(
   const message = result?.fieldErrors?.currentPassword;
   if (!result || message === undefined) return result;
   const { currentPassword: _moved, ...fieldErrors } = result.fieldErrors ?? {};
-  return { ...result, error: result.error ?? message, fieldErrors };
+  return { ...result, error: result.error || message, fieldErrors };
 }
 
 const CLEARED_PASSWORDS = {
