@@ -192,9 +192,10 @@ uploaded artifact. The local dry run verifies packaging, not account settings,
 repository permissions, or the eventual registry upload. It also cannot show how
 JSR renders the README's relative links.
 
-If the release fixes a security issue, announce it once the version is confirmed
-on npm and JSR: publish a GitHub security advisory for the repository, or
-deprecate the affected versions with
+Before 1.0, a release that fixes a security issue is announced in its release
+notes alone, since the package has no known users yet. From 1.0 on, announce it
+once the version is confirmed on npm and JSR: publish a GitHub security advisory
+for the repository, or deprecate the affected versions with
 `npm deprecate "@udibo/oauth2@<affected range>" "<message naming the fixed version>"`.
 Downstream projects and templates often pin a release a few days old on purpose,
 behind release-age gates. A fix that appears only in the changelog has no advisory
