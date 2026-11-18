@@ -1,3 +1,9 @@
+## [0.55.0](https://github.com/udibo/oauth2/compare/0.54.0...0.55.0) (2026-11-18)
+
+### Features
+
+* **react:** add session list, linked accounts and change-password components ([#204](https://github.com/udibo/oauth2/issues/204)) ([6e4c065](https://github.com/udibo/oauth2/commit/6e4c065e401452355aa1e0b31fd2abded3ad43de))
+
 ## [0.54.0](https://github.com/udibo/oauth2/compare/0.53.0...0.54.0) (2026-11-12)
 
 ### Features
