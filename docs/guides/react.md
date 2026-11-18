@@ -239,21 +239,37 @@ hides that account's Disconnect button.
 each session's user agent into `device` on your server. Leave out `onRevoke` and
 `onRevokeOthers`, or `onUnlink`, for a read-only list.
 
+Give each session and linked account an opaque, non-secret `id`, such as a
+public row id. Never use the session token or cookie value: the id is not shown
+as text, but it is written into the page's attributes and hidden inputs.
+
 `ChangePasswordForm` sends `revokeOtherSessions: true` by default and says that
 other sessions will be signed out. Pass `revokeOtherSessions="optional"` to give
 the person a checkbox, or `false` to keep other sessions. Your server signs the
 sessions out. With `hasPassword={false}` the form drops the current-password
 field to set a first password. Without a current password, check on the server
 that the request comes from the account owner, for example with a recent
-sign-in, a passkey, or a code.
+sign-in, a passkey, or a code. Decide between setting and changing from the
+account your server has stored, not from the request: refuse a request without
+the current password for an account that already has one.
 
 Dates use the runtime's locale and time zone by default. On a server-rendered
 page, pass `formatDate` with a fixed locale and `timeZone` so the server and
-browser render the same text. With `action` set, each Sign out and Disconnect
-button posts a form when JavaScript has not loaded. Sign out posts
-`intent=revoke-session` and `sessionId`, sign out everywhere else posts
-`intent=revoke-other-sessions`, and Disconnect posts `intent=unlink-identity`
-and `identityId`.
+browser render the same text.
+
+With `action` set, the components post a form when JavaScript has not loaded.
+Their forms always use `post`, so passwords and ids never reach a URL:
+
+- Sign out posts `intent=revoke-session` and `sessionId`.
+- Sign out everywhere else posts `intent=revoke-other-sessions`.
+- Disconnect posts `intent=unlink-identity` and `identityId`.
+- `ChangePasswordForm` posts `currentPassword` (when it has the field),
+  `newPassword`, `confirmPassword`, and `revokeOtherSessions` as `"true"` or
+  `"false"`. With `revokeOtherSessions="optional"`, an unchecked box posts no
+  `revokeOtherSessions`.
+
+A native post cannot carry a CSRF header such as `x-csrf`, so the route that
+receives it checks the `Origin` or `Sec-Fetch-Site` header instead.
 
 ## Styling and custom markup
 

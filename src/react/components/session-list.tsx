@@ -19,15 +19,18 @@ import {
   ActionForm,
   formatAccountDate,
   useAccountAction,
+  useFocusAfterRemoval,
 } from "./account-internal.tsx";
 import { combineClassNames } from "./internal.tsx";
 
 /** One signed-in session, as {@link SessionList} renders it. */
 export interface SessionListItem {
   /**
-   * The session's identifier. It is handed back to `onRevoke` and posted as
-   * `sessionId` by a no-JavaScript submit, so it must identify the session to
-   * your server; it is never shown.
+   * The session's identifier: an opaque, non-secret id such as a public row
+   * id, **never the session token or cookie value**. It is handed back to
+   * `onRevoke`, and although it is not displayed as text, it is written into
+   * the page — `data-oauth2-*` attributes and the hidden `sessionId` input a
+   * no-JavaScript submit posts.
    */
   id: string;
   /**
@@ -41,7 +44,7 @@ export interface SessionListItem {
    * Summarize the user agent on your server; the component shows this text as
    * given, or the `unknownDevice` label when it is absent.
    */
-  device?: string;
+  device?: string | null;
   /** The IP address the session was last seen from. */
   ipAddress?: string | null;
   /** When the session signed in. */
@@ -166,11 +169,11 @@ export interface SessionListProps {
    * "Sign out" posts `intent=revoke-session` and `sessionId`, and "Sign out
    * everywhere else" posts `intent=revoke-other-sessions`. Once React is
    * running, the callbacks handle the submit and the native post is
-   * suppressed.
+   * suppressed. The forms always use `post`. A native post cannot carry a
+   * CSRF header, so check `Origin` or `Sec-Fetch-Site` on the route that
+   * receives it.
    */
   action?: string;
-  /** `method` for each button's `<form>`. Defaults to `"post"` whenever `action` is set. */
-  method?: "get" | "post";
   /** Class for the root wrapper (merged with `classNames.root`). */
   className?: string;
   /** Per-slot class hooks for theming. See {@link SessionListClassNames}. */
@@ -230,13 +233,13 @@ export function SessionList(props: SessionListProps): ReactNode {
     onRevokeOthers,
     formatDate = formatAccountDate,
     action,
-    method,
     className,
     classNames,
     labels,
     children,
   } = props;
   const runner = useAccountAction();
+  const rootRef = useFocusAfterRemoval(runner, sessions);
 
   const revoke = async (session: SessionListItem): Promise<void> => {
     if (!onRevoke || session.current) return;
@@ -269,12 +272,13 @@ export function SessionList(props: SessionListProps): ReactNode {
 
   return (
     <div
+      ref={rootRef}
+      tabIndex={-1}
       data-oauth2-session-list=""
       className={combineClassNames(className, classNames?.root)}
     >
       <AccountActionError
         error={runner.error}
-        focusTrigger={runner.errorCount}
         className={classNames?.errorSummary}
       />
       {sessions.length === 0 ? (
@@ -329,7 +333,6 @@ export function SessionList(props: SessionListProps): ReactNode {
                   <ActionForm
                     fields={{ intent: "revoke-session", sessionId: session.id }}
                     action={action}
-                    method={method}
                     onActivate={() => {
                       void revoke(session);
                     }}
@@ -352,7 +355,6 @@ export function SessionList(props: SessionListProps): ReactNode {
           <ActionForm
             fields={{ intent: "revoke-other-sessions" }}
             action={action}
-            method={method}
             onActivate={() => {
               void revokeOthers();
             }}

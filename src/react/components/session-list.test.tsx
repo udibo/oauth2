@@ -245,6 +245,88 @@ describe("SessionList", () => {
     ]);
   });
 
+  it("posts, never gets, even without an action", () => {
+    const { container } = render(
+      <SessionList
+        sessions={SESSIONS}
+        onRevoke={() => {}}
+        onRevokeOthers={() => {}}
+      />,
+    );
+    expect(
+      [...container.querySelectorAll("form")].map((form) =>
+        form.getAttribute("method"),
+      ),
+    ).toStrictEqual(["post", "post", "post"]);
+  });
+
+  it("moves focus to the list when a signed-out session's row goes away", async () => {
+    const onRevoke = (): void => {};
+    const { container, rerender } = render(
+      <SessionList sessions={SESSIONS} onRevoke={onRevoke} />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    rerender(
+      <SessionList
+        sessions={SESSIONS.filter((session) => session.id !== "s-phone")}
+        onRevoke={onRevoke}
+      />,
+    );
+    expect(document.activeElement).toStrictEqual(
+      container.querySelector("[data-oauth2-session-list]"),
+    );
+  });
+
+  it("leaves focus alone after a success that keeps the focused control", async () => {
+    const { container } = render(
+      <SessionList sessions={SESSIONS} onRevoke={() => {}} />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign out Safari on iPhone",
+    });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(document.activeElement).toStrictEqual(button);
+    assert(container.querySelector("[data-oauth2-session-list]"));
+  });
+
+  it("reports pending sign-out-everywhere and errors to a render-prop child", async () => {
+    let release: () => void = () => {};
+    let state: SessionListState | undefined;
+    render(
+      <SessionList
+        sessions={SESSIONS}
+        onRevokeOthers={() =>
+          new Promise<AccountActionResult>((resolve) => {
+            release = () => resolve({ error: "Couldn't sign them out." });
+          })
+        }
+      >
+        {(live) => {
+          state = live;
+          return null;
+        }}
+      </SessionList>,
+    );
+    assert(state);
+    await act(async () => {
+      void state!.revokeOthers();
+    });
+    expect(state.revokingOthers).toStrictEqual(true);
+    expect(state.pendingSessionId).toBeNull();
+    await act(async () => release());
+    expect(state.revokingOthers).toStrictEqual(false);
+    expect(state.error).toStrictEqual("Couldn't sign them out.");
+  });
+
   it("suppresses the native post once React handles the submit", async () => {
     const { container } = render(
       <SessionList

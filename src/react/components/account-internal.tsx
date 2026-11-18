@@ -2,6 +2,7 @@ import {
   type FormEvent,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useRef,
@@ -13,7 +14,7 @@ import type { AccountActionResult } from "./types.ts";
 export interface AccountActionRunner {
   pendingKey: string | null;
   error: string | null;
-  errorCount: number;
+  successCount: number;
   run(
     key: string,
     action: () =>
@@ -31,7 +32,7 @@ export interface AccountActionRunner {
 export function useAccountAction(): AccountActionRunner {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [errorCount, setErrorCount] = useState(0);
+  const [successCount, setSuccessCount] = useState(0);
   const runningRef = useRef(false);
 
   const run = useCallback<AccountActionRunner["run"]>(async (key, action) => {
@@ -50,25 +51,45 @@ export function useAccountAction(): AccountActionRunner {
       runningRef.current = false;
       setPendingKey(null);
     }
-    if (message) {
-      setError(message);
-      setErrorCount((count) => count + 1);
-    }
+    if (message) setError(message);
+    else setSuccessCount((count) => count + 1);
   }, []);
 
-  return { pendingKey, error, errorCount, run };
+  return { pendingKey, error, successCount, run };
+}
+
+/**
+ * After a successful action, once the data the list renders changes, moves
+ * focus to the list root when the control that held it is gone (a removed
+ * row's button leaves focus on `<body>`).
+ */
+export function useFocusAfterRemoval(
+  runner: AccountActionRunner,
+  items: unknown,
+): RefObject<HTMLDivElement | null> {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const handled = useRef(0);
+  useEffect(() => {
+    if (runner.successCount === handled.current) return;
+    if (typeof document === "undefined") return;
+    const active = document.activeElement;
+    if (active === null || active === document.body) {
+      handled.current = runner.successCount;
+      rootRef.current?.focus();
+    }
+  }, [runner.successCount, items]);
+  return rootRef;
 }
 
 export function AccountActionError(props: {
   error: string | null;
-  focusTrigger: number;
   className: string | undefined;
 }): ReactNode {
-  const { error, focusTrigger, className } = props;
+  const { error, className } = props;
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (error) ref.current?.focus();
-  }, [error, focusTrigger]);
+  }, [error]);
   if (!error) return null;
   return (
     <div
@@ -90,12 +111,12 @@ function ignoreActivation(event: MouseEvent<HTMLButtonElement>): void {
 
 /**
  * A one-button `<form>`: its hidden `fields` post natively to `action` before
- * JavaScript runs, and `onActivate` handles the submit once it does.
+ * JavaScript runs, and `onActivate` handles the submit once it does. Always
+ * `post`, so a pre-hydration submit never puts the fields in a URL.
  */
 export function ActionForm(props: {
   fields: Record<string, string>;
   action: string | undefined;
-  method: "get" | "post" | undefined;
   onActivate: () => void;
   pending: boolean;
   label: string;
@@ -108,7 +129,6 @@ export function ActionForm(props: {
   const {
     fields,
     action,
-    method,
     onActivate,
     pending,
     label,
@@ -127,7 +147,7 @@ export function ActionForm(props: {
     <form
       onSubmit={onSubmit}
       action={action}
-      method={method ?? (action ? "post" : undefined)}
+      method="post"
       data-oauth2-action-form=""
     >
       {Object.entries(fields).map(([name, value]) => (

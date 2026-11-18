@@ -238,6 +238,53 @@ describe("LinkedAccounts", () => {
     ]);
   });
 
+  it("moves focus to the list when a disconnected account's row goes away", async () => {
+    const onUnlink = (): void => {};
+    const { container, rerender } = render(
+      <LinkedAccounts accounts={ACCOUNTS} onUnlink={onUnlink} />,
+    );
+    const button = screen.getByRole("button", { name: "Disconnect Google" });
+    button.focus();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    rerender(<LinkedAccounts accounts={[ACCOUNTS[0]!]} onUnlink={onUnlink} />);
+    expect(document.activeElement).toStrictEqual(
+      container.querySelector("[data-oauth2-linked-accounts]"),
+    );
+  });
+
+  it("posts, never gets, even without an action", () => {
+    const { container } = render(
+      <LinkedAccounts accounts={ACCOUNTS} onUnlink={() => {}} />,
+    );
+    expect(
+      [...container.querySelectorAll("form")].map((form) =>
+        form.getAttribute("method"),
+      ),
+    ).toStrictEqual(["post", "post"]);
+  });
+
+  it("reports a failed action's error to a render-prop child", async () => {
+    let state: LinkedAccountsState | undefined;
+    render(
+      <LinkedAccounts
+        accounts={ACCOUNTS}
+        onUnlink={() => ({ error: "Add another way to sign in first." })}
+      >
+        {(live) => {
+          state = live;
+          return null;
+        }}
+      </LinkedAccounts>,
+    );
+    assert(state);
+    await act(async () => {
+      await state!.unlink(ACCOUNTS[0]!);
+    });
+    expect(state.error).toStrictEqual("Add another way to sign in first.");
+  });
+
   it("renders the empty label when nothing is linked", () => {
     render(<LinkedAccounts accounts={[]} />);
     assert(screen.getByText("No accounts connected yet."));

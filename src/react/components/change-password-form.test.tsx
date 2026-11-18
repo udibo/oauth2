@@ -249,6 +249,96 @@ describe("ChangePasswordForm", () => {
     ]);
   });
 
+  it("shows a current-password error in the summary when setting a first password, since that field is not rendered", async () => {
+    const { container } = render(
+      <ChangePasswordForm
+        hasPassword={false}
+        onSubmit={() => ({
+          fieldErrors: { currentPassword: "Enter your current password." },
+        })}
+      />,
+    );
+    await submit(container);
+    expect(screen.getByRole("alert").textContent).toStrictEqual(
+      "Enter your current password.",
+    );
+    expect(document.activeElement).toStrictEqual(
+      container.querySelector("[data-oauth2-error-summary]"),
+    );
+  });
+
+  it("hands onSuccess the same values onSubmit received", async () => {
+    const received: { submit?: ChangePasswordValues; success?: unknown } = {};
+    const props = {
+      onSubmit: (values: ChangePasswordValues) => {
+        received.submit = values;
+      },
+      onSuccess: (values: ChangePasswordValues) => {
+        received.success = values;
+      },
+    };
+    const { container, rerender } = render(
+      <ChangePasswordForm revokeOtherSessions={false} {...props} />,
+    );
+    type("Current password", "old-secret");
+    rerender(
+      <ChangePasswordForm hasPassword={false} revokeOtherSessions {...props} />,
+    );
+    await submit(container);
+    assert(received.submit);
+    expect(received.submit.currentPassword).toStrictEqual("");
+    expect(received.submit.revokeOtherSessions).toStrictEqual(true);
+    expect(received.success).toStrictEqual(received.submit);
+  });
+
+  it("keeps announcing the first password as set after the account reloads with one", async () => {
+    const { container, rerender } = render(
+      <ChangePasswordForm hasPassword={false} onSubmit={() => {}} />,
+    );
+    await submit(container);
+    rerender(<ChangePasswordForm hasPassword onSubmit={() => {}} />);
+    expect(screen.getByRole("status").textContent).toStrictEqual(
+      "Password set.",
+    );
+  });
+
+  it("starts the checkbox checked when the option is offered after mount", () => {
+    const { rerender } = render(
+      <ChangePasswordForm revokeOtherSessions={false} onSubmit={() => {}} />,
+    );
+    rerender(
+      <ChangePasswordForm revokeOtherSessions="optional" onSubmit={() => {}} />,
+    );
+    const checkbox = screen.getByRole("checkbox");
+    assert(checkbox instanceof HTMLInputElement);
+    expect(checkbox.checked).toStrictEqual(true);
+  });
+
+  it("posts, never gets, even without an action, so passwords never reach a URL", () => {
+    const { container } = render(<ChangePasswordForm onSubmit={() => {}} />);
+    expect(getForm(container).getAttribute("method")).toStrictEqual("post");
+  });
+
+  it("carries the sign-out choice in a no-JavaScript post", () => {
+    const posted = (
+      revokeOtherSessions: boolean | "optional",
+    ): FormDataEntryValue | null => {
+      const { container, unmount } = render(
+        <ChangePasswordForm
+          action="/account/password"
+          revokeOtherSessions={revokeOtherSessions}
+          onSubmit={() => {}}
+        />,
+      );
+      const value = new FormData(getForm(container)).get("revokeOtherSessions");
+      unmount();
+      return value;
+    };
+    expect(posted(true)).toStrictEqual("true");
+    expect(posted(false)).toStrictEqual("false");
+    expect(posted("optional")).toStrictEqual("true");
+  });
+
   it("takes its classes from an AuthFormClassNamesProvider", () => {
     const { container } = render(
       <AuthFormClassNamesProvider

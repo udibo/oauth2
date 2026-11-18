@@ -20,14 +20,17 @@ import {
   ActionForm,
   formatAccountDate,
   useAccountAction,
+  useFocusAfterRemoval,
 } from "./account-internal.tsx";
 import { combineClassNames } from "./internal.tsx";
 
 /** One linked account, as {@link LinkedAccounts} renders it. */
 export interface LinkedAccount {
   /**
-   * The link's identifier. It is handed back to `onUnlink` and posted as
-   * `identityId` by a no-JavaScript submit; it is never shown.
+   * The link's identifier: an opaque, non-secret id such as a public row id,
+   * never a provider token. It is handed back to `onUnlink`, and although it
+   * is not displayed as text, it is written into the page — `data-oauth2-*`
+   * attributes and the hidden `identityId` input a no-JavaScript submit posts.
    */
   id: string;
   /** The provider's name, such as `"GitHub"`. */
@@ -168,12 +171,12 @@ export interface LinkedAccountsProps {
    * server-rendered page so the button still posts when JavaScript never
    * arrives, with `intent=unlink-identity` and `identityId`. Once React is
    * running, `onUnlink` handles the submit and the native post is
-   * suppressed. Connect controls never post: use `linkHref` for a link that
+   * suppressed. The forms always use `post`. A native post cannot carry a
+   * CSRF header, so check `Origin` or `Sec-Fetch-Site` on the route that
+   * receives it. Connect controls never post: use `linkHref` for a link that
    * works without JavaScript.
    */
   action?: string;
-  /** `method` for each "Disconnect" `<form>`. Defaults to `"post"` whenever `action` is set. */
-  method?: "get" | "post";
   /** Class for the root wrapper (merged with `classNames.root`). */
   className?: string;
   /** Per-slot class hooks for theming. See {@link LinkedAccountsClassNames}. */
@@ -237,13 +240,13 @@ export function LinkedAccounts(props: LinkedAccountsProps): ReactNode {
     linkHref,
     formatDate = formatAccountDate,
     action,
-    method,
     className,
     classNames,
     labels,
     children,
   } = props;
   const runner = useAccountAction();
+  const rootRef = useFocusAfterRemoval(runner, accounts);
 
   const unlink = async (account: LinkedAccount): Promise<void> => {
     if (!onUnlink || account.canUnlink === false) return;
@@ -280,12 +283,13 @@ export function LinkedAccounts(props: LinkedAccountsProps): ReactNode {
 
   return (
     <div
+      ref={rootRef}
+      tabIndex={-1}
       data-oauth2-linked-accounts=""
       className={combineClassNames(className, classNames?.root)}
     >
       <AccountActionError
         error={runner.error}
-        focusTrigger={runner.errorCount}
         className={classNames?.errorSummary}
       />
       {accounts.length === 0 ? (
@@ -334,7 +338,6 @@ export function LinkedAccounts(props: LinkedAccountsProps): ReactNode {
                       identityId: account.id,
                     }}
                     action={action}
-                    method={method}
                     onActivate={() => {
                       void unlink(account);
                     }}

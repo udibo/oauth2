@@ -8,11 +8,15 @@
  * @module
  */
 
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { useAuthForm } from "./use-auth-form.ts";
 import type { AuthFormState } from "./use-auth-form.ts";
-import type { AuthFormErrors, BaseAuthFormProps } from "./types.ts";
+import type {
+  AuthFormErrors,
+  AuthFormResult,
+  BaseAuthFormProps,
+} from "./types.ts";
 import {
   AuthFormShell,
   SubmitButton,
@@ -91,6 +95,13 @@ export interface ChangePasswordFormProps extends BaseAuthFormProps<ChangePasswor
    * password: the current-password field is dropped and the button reads
    * "Set password". Confirm it is the account owner on your server before
    * setting one, since no current password proves it.
+   *
+   * Your server decides between setting and changing from the account it has
+   * stored, never from this prop or an empty `currentPassword`: refuse a
+   * request without the current password for an account that has one.
+   * Should it return `fieldErrors.currentPassword` anyway — `hasPassword` was
+   * stale — the form shows that message in its error summary, since there is
+   * no field to attach it to.
    */
   hasPassword?: boolean;
   /**
@@ -99,6 +110,11 @@ export interface ChangePasswordFormProps extends BaseAuthFormProps<ChangePasswor
    * `revokeOtherSessions: true`. `"optional"` renders a checkbox, checked to
    * start, so the person decides. `false` keeps them and says nothing. Your
    * server performs the sign-out; this only states and forwards the intent.
+   *
+   * A no-JavaScript post carries the same choice as `revokeOtherSessions`:
+   * `"true"` or `"false"` from a hidden field when the prop fixes it, or
+   * `"true"` from the checked checkbox (absent when unchecked) in
+   * `"optional"` mode.
    */
   revokeOtherSessions?: boolean | "optional";
   /**
@@ -115,6 +131,15 @@ export interface ChangePasswordFormProps extends BaseAuthFormProps<ChangePasswor
    * client-side checks and submit.
    */
   children?: (state: AuthFormState<ChangePasswordValues>) => ReactNode;
+}
+
+function withoutCurrentPasswordField(
+  result: AuthFormResult | void,
+): AuthFormResult | void {
+  const message = result?.fieldErrors?.currentPassword;
+  if (!result || message === undefined) return result;
+  const { currentPassword: _moved, ...fieldErrors } = result.fieldErrors ?? {};
+  return { ...result, error: result.error ?? message, fieldErrors };
 }
 
 const CLEARED_PASSWORDS = {
@@ -187,21 +212,29 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
     children,
   } = props;
 
+  const [submittedWithPassword, setSubmittedWithPassword] =
+    useState(hasPassword);
+  const normalize = (values: ChangePasswordValues): ChangePasswordValues => ({
+    ...values,
+    currentPassword: hasPassword ? values.currentPassword : "",
+    revokeOtherSessions:
+      revokeOtherSessions === "optional"
+        ? values.revokeOtherSessions
+        : revokeOtherSessions,
+  });
+  const { onSuccess } = props;
+
   const form = useAuthForm<ChangePasswordValues>({
     initialValues: {
       ...CLEARED_PASSWORDS,
       revokeOtherSessions: revokeOtherSessions !== false,
     },
-    onSubmit: (values) =>
-      onSubmit({
-        ...values,
-        currentPassword: hasPassword ? values.currentPassword : "",
-        revokeOtherSessions:
-          revokeOtherSessions === "optional"
-            ? values.revokeOtherSessions
-            : revokeOtherSessions,
-      }),
-    onSuccess: props.onSuccess,
+    onSubmit: async (values) => {
+      setSubmittedWithPassword(hasPassword);
+      const result = await onSubmit(normalize(values));
+      return hasPassword ? result : withoutCurrentPasswordField(result);
+    },
+    onSuccess: onSuccess ? (values) => onSuccess(normalize(values)) : undefined,
     validate: (values) => {
       const errors: AuthFormErrors<ChangePasswordValues> = {};
       if (minLength !== undefined && values.newPassword.length < minLength) {
@@ -216,10 +249,13 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
     },
   });
 
-  const { setValues, succeeded, submitCount } = form;
+  const { setValue, setValues, succeeded, submitCount } = form;
   useEffect(() => {
     if (succeeded) setValues(CLEARED_PASSWORDS);
   }, [succeeded, submitCount, setValues]);
+  useEffect(() => {
+    setValue("revokeOtherSessions", revokeOtherSessions !== false);
+  }, [revokeOtherSessions, setValue]);
   useFocusFirstError(form);
   const classNames = useAuthFormClassNames(props.classNames);
 
@@ -236,7 +272,7 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
       classNames={classNames}
       render={children}
       action={props.action}
-      method={props.method}
+      method={props.method ?? "post"}
       formRef={props.formRef}
       aboveForm={
         form.succeeded ? (
@@ -246,7 +282,7 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
             className={classNames.success}
           >
             {labels?.success ??
-              (hasPassword ? "Password updated." : "Password set.")}
+              (submittedWithPassword ? "Password updated." : "Password set.")}
           </div>
         ) : null
       }
@@ -290,6 +326,7 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
           >
             <input
               {...revokeField}
+              value="true"
               type="checkbox"
               data-oauth2-input=""
               className={classNames.input}
@@ -297,7 +334,13 @@ export function ChangePasswordForm(props: ChangePasswordFormProps): ReactNode {
             {labels?.revokeOtherSessions ?? "Sign out of my other sessions"}
           </label>
         </div>
-      ) : null}
+      ) : (
+        <input
+          type="hidden"
+          name="revokeOtherSessions"
+          value={String(revokeOtherSessions)}
+        />
+      )}
       {revokeOtherSessions === true && notice ? (
         <p data-oauth2-revoke-notice="" className={classNames.hint}>
           {notice}
