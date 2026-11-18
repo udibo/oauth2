@@ -1,3 +1,9 @@
+## [0.55.1](https://github.com/udibo/oauth2/compare/0.55.0...0.55.1) (2026-11-18)
+
+### Bug Fixes
+
+* **react:** post auth forms when no method is given ([#205](https://github.com/udibo/oauth2/issues/205)) ([4ec1926](https://github.com/udibo/oauth2/commit/4ec192682f225ffd042332693acac3e8bcc727db))
+
 ## [0.55.0](https://github.com/udibo/oauth2/compare/0.54.0...0.55.0) (2026-11-18)
 
 ### Features
