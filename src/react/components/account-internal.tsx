@@ -1,0 +1,193 @@
+import {
+  type FormEvent,
+  type MouseEvent,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import type { AccountActionResult } from "./types.ts";
+
+export interface AccountActionRunner {
+  pendingKey: string | null;
+  error: string | null;
+  successCount: number;
+  /** The element that had focus when the last action started. */
+  focusedAtStart: RefObject<Element | null>;
+  run(
+    key: string,
+    action: () =>
+      | Promise<AccountActionResult | void>
+      | AccountActionResult
+      | void,
+  ): Promise<void>;
+}
+
+/**
+ * One in-flight action at a time across a list's buttons: a second activation
+ * while one is pending is ignored, and a returned `error` or a throw becomes
+ * the list's error message.
+ */
+export function useAccountAction(): AccountActionRunner {
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successCount, setSuccessCount] = useState(0);
+  const runningRef = useRef(false);
+  const focusedAtStart = useRef<Element | null>(null);
+
+  const run = useCallback<AccountActionRunner["run"]>(async (key, action) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    focusedAtStart.current =
+      typeof document === "undefined" ? null : document.activeElement;
+    setPendingKey(key);
+    setError(null);
+    let message: string | null = null;
+    try {
+      const result = await action();
+      if (result?.error) message = result.error;
+    } catch (thrown) {
+      message =
+        thrown instanceof Error ? thrown.message : "Something went wrong.";
+    } finally {
+      runningRef.current = false;
+      setPendingKey(null);
+    }
+    if (message) setError(message);
+    else setSuccessCount((count) => count + 1);
+  }, []);
+
+  return { pendingKey, error, successCount, focusedAtStart, run };
+}
+
+/**
+ * Moves focus to the list root when the control that had focus as a
+ * successful action started leaves the page (a removed row's button drops
+ * focus to `<body>`). It stops watching once focus moves away from that
+ * control, and never moves focus that is somewhere else on the page.
+ */
+export function useFocusAfterRemoval(
+  runner: AccountActionRunner,
+  items: unknown,
+): RefObject<HTMLDivElement | null> {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const handled = useRef(0);
+  const watched = useRef<Element | null>(null);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (runner.successCount !== handled.current) {
+      handled.current = runner.successCount;
+      const control = runner.focusedAtStart.current;
+      watched.current =
+        control === null || control === document.body ? null : control;
+    }
+    const control = watched.current;
+    if (!control) return;
+    const active = document.activeElement;
+    if (!control.isConnected) {
+      watched.current = null;
+      if (active === null || active === document.body) {
+        rootRef.current?.focus({ preventScroll: true });
+      }
+    } else if (active !== control) {
+      watched.current = null;
+    }
+  }, [runner.successCount, items, runner.focusedAtStart]);
+  return rootRef;
+}
+
+export function AccountActionError(props: {
+  error: string | null;
+  className: string | undefined;
+}): ReactNode {
+  const { error, className } = props;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) ref.current?.focus();
+  }, [error]);
+  if (!error) return null;
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      data-oauth2-error-summary=""
+      className={className}
+    >
+      <span role="alert" data-oauth2-error-summary-message="">
+        {error}
+      </span>
+    </div>
+  );
+}
+
+function ignoreActivation(event: MouseEvent<HTMLButtonElement>): void {
+  event.preventDefault();
+}
+
+/**
+ * A one-button `<form>`: its hidden `fields` post natively to `action` before
+ * JavaScript runs, and `onActivate` handles the submit once it does. Always
+ * `post`, so a pre-hydration submit never puts the fields in a URL.
+ */
+export function ActionForm(props: {
+  fields: Record<string, string>;
+  action: string | undefined;
+  onActivate: () => void;
+  pending: boolean;
+  label: string;
+  pendingLabel: string;
+  accessibleName?: string;
+  dataAttribute: `data-oauth2-${string}`;
+  dataValue?: string;
+  className: string | undefined;
+}): ReactNode {
+  const {
+    fields,
+    action,
+    onActivate,
+    pending,
+    label,
+    pendingLabel,
+    accessibleName,
+    dataAttribute,
+    dataValue = "",
+    className,
+  } = props;
+  const onSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    onActivate();
+  };
+  const text = pending ? pendingLabel : label;
+  return (
+    <form
+      onSubmit={onSubmit}
+      action={action}
+      method="post"
+      data-oauth2-action-form=""
+    >
+      {Object.entries(fields).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
+      <button
+        type="submit"
+        aria-disabled={pending ? true : undefined}
+        aria-label={accessibleName ? `${text} ${accessibleName}` : undefined}
+        onClick={pending ? ignoreActivation : undefined}
+        {...{ [dataAttribute]: dataValue }}
+        className={className}
+      >
+        {text}
+      </button>
+    </form>
+  );
+}
+
+export function formatAccountDate(date: Date): string {
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}

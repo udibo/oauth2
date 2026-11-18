@@ -119,6 +119,7 @@ export function TextField(props: {
   type?: string;
   autoComplete?: string;
   required?: boolean;
+  minLength?: number;
   error?: string;
   inputRef?: Ref<HTMLInputElement>;
   children?: ReactNode;
@@ -129,6 +130,7 @@ export function TextField(props: {
     type = "text",
     autoComplete,
     required,
+    minLength,
     error,
     inputRef,
     children,
@@ -148,6 +150,7 @@ export function TextField(props: {
         type={type}
         autoComplete={autoComplete}
         required={required}
+        minLength={minLength}
         data-oauth2-input=""
         className={classNames.input}
         ref={inputRef}

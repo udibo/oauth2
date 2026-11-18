@@ -16,6 +16,11 @@
  *   {@link RequestPasswordResetForm}, {@link ResetPasswordForm},
  *   {@link MfaEnrollmentForm}, {@link MfaChallengeForm}, {@link UserMenu} —
  *   render accessible markup with class hooks.
+ * - **Account components** — {@link SessionList}, {@link LinkedAccounts} and
+ *   {@link ChangePasswordForm} — the signed-in half: the sessions and linked
+ *   accounts come in as props, and each action goes out through a callback
+ *   ({@link AccountActionHandler}) or `onSubmit`. They are a small set for an
+ *   account page you build, not a profile page of their own.
  * - **Headless** — {@link useAuthForm} owns values, errors, and the submit
  *   lifecycle with no markup. Every default component is built on it; "eject"
  *   by using the hook directly, or by passing a function as a component's
@@ -93,6 +98,8 @@ export type {
 } from "./use-auth-form.ts";
 
 export type {
+  AccountActionHandler,
+  AccountActionResult,
   AuthFormClassNames,
   AuthFormErrors,
   AuthFormResult,
@@ -161,3 +168,28 @@ export type {
   UserMenuLabels,
   UserMenuProps,
 } from "./user-menu.tsx";
+
+export { SessionList } from "./session-list.tsx";
+export type {
+  SessionListClassNames,
+  SessionListItem,
+  SessionListLabels,
+  SessionListProps,
+  SessionListState,
+} from "./session-list.tsx";
+
+export { LinkedAccounts } from "./linked-accounts.tsx";
+export type {
+  LinkedAccount,
+  LinkedAccountsClassNames,
+  LinkedAccountsLabels,
+  LinkedAccountsProps,
+  LinkedAccountsState,
+} from "./linked-accounts.tsx";
+
+export { ChangePasswordForm } from "./change-password-form.tsx";
+export type {
+  ChangePasswordFormProps,
+  ChangePasswordLabels,
+  ChangePasswordValues,
+} from "./change-password-form.tsx";

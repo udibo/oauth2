@@ -53,6 +53,28 @@ export type AuthSubmitHandler<V extends AuthFormValues> = (
 ) => Promise<AuthFormResult | void> | AuthFormResult | void;
 
 /**
+ * The result an account action — signing out a session, disconnecting a linked
+ * account — may return. Return nothing to signal success; return `error` to
+ * show a message in the component's error summary, which takes focus. A thrown
+ * error is shown the same way, using its message.
+ */
+export interface AccountActionResult {
+  /** The message shown in the component's error summary. */
+  error?: string;
+}
+
+/**
+ * The app-provided function an account component calls for one of its row
+ * actions, with the item the person acted on. Resolve to nothing on success;
+ * the component shows its pending label until the returned promise settles.
+ * Update the data you pass the component yourself, for example by
+ * revalidating, so the row disappears.
+ */
+export type AccountActionHandler<T> = (
+  item: T,
+) => Promise<AccountActionResult | void> | AccountActionResult | void;
+
+/**
  * A social / federated identity provider to render a "Continue with …" button
  * for. Supply an array of these to a sign-in or sign-up component and the
  * buttons appear automatically; omit or pass an empty array for no social
@@ -97,14 +119,16 @@ export interface PasskeyOption {
 
 /**
  * The class hook every prebuilt component shares. Component-specific class-name
- * maps ({@link AuthFormClassNames}, `UserMenuClassNames`) extend this, so `root`
+ * maps ({@link AuthFormClassNames}, `UserMenuClassNames`,
+ * `SessionListClassNames`, `LinkedAccountsClassNames`) extend this, so `root`
  * means the same thing everywhere.
  */
 export interface BaseClassNames {
   /**
    * The component's outermost element — the one carrying its
-   * `data-oauth2-form` / `data-oauth2-user-menu` marker. Merged with the
-   * component's top-level `className` prop.
+   * `data-oauth2-form`, `data-oauth2-user-menu`, `data-oauth2-session-list` or
+   * `data-oauth2-linked-accounts` marker. Merged with the component's
+   * top-level `className` prop.
    */
   root?: string;
 }

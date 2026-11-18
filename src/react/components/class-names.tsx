@@ -130,8 +130,9 @@ export interface AuthFormClassNamesProviderProps {
  * own `classNames` prop — overrides the inherited map slot by slot, leaving the
  * slots it does not name intact.
  *
- * It themes the auth **forms**; `UserMenu` is deliberately outside its reach
- * and takes its classes from its own `className` / `classNames` props.
+ * It themes the auth **forms**, `ChangePasswordForm` included; `UserMenu`,
+ * `SessionList` and `LinkedAccounts` are deliberately outside its reach and
+ * take their classes from their own `className` / `classNames` props.
  *
  * An inline `classNames` literal is fine here — the published map is cached on
  * the slot values rather than on the object's identity, so re-rendering with an
