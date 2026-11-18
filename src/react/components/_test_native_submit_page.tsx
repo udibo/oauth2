@@ -9,6 +9,7 @@
 import type { ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 
+import { ChangePasswordForm } from "./change-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
 import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
@@ -34,6 +35,7 @@ const FORMS: Record<string, ReactNode> = {
       onSubmit={onSubmit}
     />
   ),
+  ChangePasswordForm: <ChangePasswordForm onSubmit={onSubmit} />,
 };
 
 /** The full HTML document for the drop-in form called `name`. */

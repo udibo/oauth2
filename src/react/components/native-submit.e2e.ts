@@ -23,6 +23,7 @@ const FORMS = [
   { name: "ResetPasswordForm", field: "password" },
   { name: "MfaChallengeForm", field: "code" },
   { name: "MfaEnrollmentForm", field: "code" },
+  { name: "ChangePasswordForm", field: "newPassword" },
 ] as const;
 
 const SECRET = "s3cret-value-9137";

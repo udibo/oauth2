@@ -31,8 +31,10 @@
  *
  * ## Server-rendered pages
  *
- * Pass `action` + `method` and the rendered `<form>` carries them, so a
- * server-rendered page still posts when JavaScript never arrives — every
+ * Every rendered `<form>` uses `method="post"` unless you pass `method`, so a
+ * submit before React hydrates never puts credentials in the URL. Pass
+ * `action` and the form carries it, so a server-rendered page still posts to
+ * that route when JavaScript never arrives — every
  * rendered field carries its `name`, so the native post sends those fields
  * under the keys `onSubmit` receives. Values a form holds without rendering a
  * field for them are absent from a native post: `ResetPasswordForm`'s

@@ -4243,6 +4243,11 @@ set `action` to the backend route that handles a no-JavaScript submit and
 return the appropriate redirect from it. Do not pass `method="get"` to these
 forms: it puts their fields in the URL.
 
+A route that handles that native submit receives a form-encoded `POST`, which
+any other site can also send with the person's cookies. Point `action` at the
+`honoIdentityRoutes` route, which checks the request is same-origin, or check
+`Origin` or `Sec-Fetch-Site` in your own handler.
+
 ## Account settings components
 
 Three components cover the signed-in half of an account page: where the account
@@ -4391,7 +4396,8 @@ Style the pending state with `[data-oauth2-submit][aria-disabled="true"]`, not
 `aria-disabled={form.isSubmitting || undefined}`.
 
 For full markup control, use `useAuthForm` or a component's render-prop
-children. Keep labels, error associations, focus behavior, and autocomplete
+children. Your own `<form>` does not get the `method="post"` default: set it,
+or a submit before hydration puts the fields in the URL. Keep labels, error associations, focus behavior, and autocomplete
 attributes when replacing markup. The
 [component API](https://jsr.io/@udibo/oauth2/doc/react/components) lists the
 slots and props.

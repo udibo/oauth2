@@ -130,7 +130,7 @@ export interface AuthFormState<V extends AuthFormValues> {
  *   },
  * });
  * return (
- *   <form onSubmit={form.handleSubmit}>
+ *   <form method="post" onSubmit={form.handleSubmit}>
  *     <input {...form.getFieldProps("identifier")} />
  *     <input {...form.getFieldProps("password")} type="password" />
  *     {form.formError ? <p role="alert">{form.formError}</p> : null}

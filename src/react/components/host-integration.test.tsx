@@ -9,6 +9,7 @@ import { RequestPasswordResetForm } from "./request-password-reset-form.tsx";
 import { ResetPasswordForm } from "./reset-password-form.tsx";
 import { MfaChallengeForm } from "./mfa-challenge-form.tsx";
 import { MfaEnrollmentForm } from "./mfa-enrollment-form.tsx";
+import { ChangePasswordForm } from "./change-password-form.tsx";
 
 interface HostProps {
   onSubmit: () => void;
@@ -40,6 +41,7 @@ const FORMS: [name: string, render: (props: HostProps) => ReactNode][] = [
       />
     ),
   ],
+  ["ChangePasswordForm", (props) => <ChangePasswordForm {...props} />],
 ];
 
 describe("server-rendered forms post without JavaScript", () => {
@@ -70,11 +72,18 @@ describe("server-rendered forms post without JavaScript", () => {
       expect(form.getAttribute("method")).toStrictEqual("post");
     });
 
-    it(`${name} honours an explicit get method`, () => {
-      const { container } = render(
-        renderForm({ onSubmit: () => {}, method: "get" }),
+    it(`${name} honours an explicit get method, with or without an action`, () => {
+      const bare = render(renderForm({ onSubmit: () => {}, method: "get" }));
+      expect(getForm(bare.container).getAttribute("method")).toStrictEqual(
+        "get",
       );
-      expect(getForm(container).getAttribute("method")).toStrictEqual("get");
+      bare.unmount();
+      const routed = render(
+        renderForm({ onSubmit: () => {}, action: "/auth/go", method: "get" }),
+      );
+      expect(getForm(routed.container).getAttribute("method")).toStrictEqual(
+        "get",
+      );
     });
 
     it(`${name} hands the form element to formRef`, () => {
