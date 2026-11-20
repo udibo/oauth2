@@ -104,12 +104,20 @@ describe("release configuration", () => {
 
   it("commits the version files semantic-release rewrites, and no Deno file", () => {
     const assets = pluginOptions("@semantic-release/git").assets as string[];
-    expect(assets).toEqual(["CHANGELOG.md", "package.json", "jsr.json"]);
+    expect(assets).toEqual([
+      "CHANGELOG.md",
+      "package.json",
+      "jsr.json",
+      "skills/udibo-oauth2/SKILL.md",
+    ]);
   });
 
   it("verifies the release before any file is prepared or published", () => {
     expect(pluginNames.indexOf("@semantic-release/exec")).toBeLessThan(
       pluginNames.indexOf("@semantic-release/npm"),
+    );
+    expect(pluginOptions("@semantic-release/exec").prepareCmd).toBe(
+      "node scripts/skill-version.ts ${nextRelease.version}",
     );
     expect(pluginOptions("@semantic-release/exec")).toHaveProperty(
       "verifyReleaseCmd",
