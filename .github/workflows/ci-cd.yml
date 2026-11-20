@@ -97,7 +97,12 @@ jobs:
       - name: Upgrade npm past the npm 10 peer-resolution crash
         if: matrix.node == 22
         run: npm install -g npm@11.21.0
+      - name: Install Chromium for the hosted quickstart
+        if: matrix.node == 24
+        run: pnpm exec playwright install --with-deps chromium
       - name: Install the packed tarball and run it from Node
+        env:
+          QUICKSTART_BROWSER: ${{ matrix.node == 24 && '1' || '0' }}
         run: pnpm smoke
       - name: Verify the package publishes to JSR (dry run)
         if: matrix.node == 24

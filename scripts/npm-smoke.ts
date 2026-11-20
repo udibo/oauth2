@@ -9,6 +9,8 @@
  * given no JSR registry, so the install itself fails when a runtime dependency
  * can only come from JSR, and the run also fails when one resolves through JSR
  * at all, which a published package must not do.
+ * Set `QUICKSTART_BROWSER=1` on Node 24+ with Playwright Chromium installed
+ * to exercise the quickstart's first sign-in and sign-out from this consumer.
  *
  * The pinned consumer needs npm 11.6.0 or later: earlier npm crashes resolving
  * it whenever the Vitest pin trails Vitest's newest release
@@ -51,6 +53,7 @@ const releaseMode = process.argv.includes("--release");
 const installOnly = process.argv.includes("--install-only");
 const PINNED_CONSUMER_MIN_NPM = [11, 6, 0] as const;
 const CONSUMER_PINS = [
+  "@hono/node-server",
   "hono",
   "react",
   "react-dom",
@@ -105,12 +108,12 @@ function readManifest(path: string): PackageManifest {
 }
 
 function exactVersions(
-  devDependencies: Record<string, string>,
+  dependencies: Record<string, string>,
 ): Record<string, string> {
   const pinned: Record<string, string> = {};
   for (const name of CONSUMER_PINS) {
-    const range = devDependencies[name];
-    if (range === undefined) fail(`devDependencies does not pin ${name}`);
+    const range = dependencies[name];
+    if (range === undefined) fail(`package.json does not declare ${name}`);
     const installed = readManifest(
       join(packageDir, "node_modules", name, "package.json"),
     );
@@ -275,7 +278,10 @@ async function main(): Promise<void> {
         type: "module",
         dependencies: installOnly
           ? {}
-          : exactVersions(manifest.devDependencies ?? {}),
+          : exactVersions({
+              ...manifest.dependencies,
+              ...manifest.devDependencies,
+            }),
       }),
     );
     if (!releaseMode) {
@@ -404,6 +410,14 @@ async function main(): Promise<void> {
       }),
     );
     run(process.execPath, [tscPath, "-p", "."], consumerDir);
+
+    if (process.env.QUICKSTART_BROWSER === "1") {
+      const { checkHostedQuickstart } = await import("./quickstart-browser.ts");
+      await checkHostedQuickstart(consumerDir);
+      console.log(
+        "npm smoke: hosted quickstart passed first sign-in and sign-out from both entry points",
+      );
+    }
 
     const output = run(process.execPath, ["main.mjs"], consumerDir);
     if (!output.includes("imported")) fail(`unexpected output: ${output}`);
