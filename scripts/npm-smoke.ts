@@ -213,7 +213,7 @@ async function checkIdpDev(consumerDir: string): Promise<void> {
     });
     const response = await fetch(`${url}/.well-known/openid-configuration`);
     if (!response.ok)
-      fail(`idp dev answered discovery with ${response.status}`);
+      throw new Error(`idp dev answered discovery with ${response.status}`);
     const metadata = (await response.json()) as {
       issuer?: string;
       scopes_supported?: string[];
@@ -222,7 +222,7 @@ async function checkIdpDev(consumerDir: string): Promise<void> {
       metadata.issuer !== url ||
       !metadata.scopes_supported?.includes("skill-smoke")
     ) {
-      fail(
+      throw new Error(
         "discovery did not describe the locally configured issuer and scopes",
       );
     }

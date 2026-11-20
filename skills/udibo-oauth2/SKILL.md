@@ -81,7 +81,8 @@ node node_modules/@udibo/oauth2/dist/cli/bin.js idp dev --config idp.json
 
 Open the app's protected page in a signed-out browser, sign in through the
 provider, and check that the callback returns to the protected page. Sign
-out and verify that the protected page asks for sign-in again. Stop the
+out and verify the application session was cleared. To check that the provider
+prompts for sign-in again, revisit the protected page from a fresh browser session. Stop the
 development provider when finished. Its in-memory state and local credentials
 are for development and CI.
 
@@ -109,7 +110,8 @@ a request without a token and a request whose token lacks the route's scope.
 
 ## Hosted path: connect a tenant
 
-Only after the person approves the hosted path, they create the application in their tenant and registers the callback.
+Proceed only after the person approves the hosted path. They create the
+application in their tenant and register the callback.
 Ask for its public issuer and client ID, and the name of the environment
 variable holding the secret. Use those settings on the server and repeat the
 client sign-in and protected API checks.
