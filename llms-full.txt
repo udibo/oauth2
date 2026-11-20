@@ -703,14 +703,25 @@ const app = new Hono();
 app.route("/auth", bff.routes());
 
 app.get("/", (c) =>
-  c.html(html`<a href="/auth/login?return_to=/dashboard">Sign in</a>`),
+  c.html(html`<a href="/auth/login?return_to=/signed-in">Sign in</a>`),
+);
+
+app.get("/signed-in", (c) =>
+  c.html(html`<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Opening your dashboard</title>
+        <meta http-equiv="refresh" content="0;url=/dashboard" />
+      </head>
+      <body><a href="/dashboard">Continue to your dashboard</a></body>
+    </html>`),
 );
 
 app.get("/dashboard", async (c) => {
   c.header("Cache-Control", "private, no-store");
   const session = await bff.readSession(c);
   if (!session.isAuthenticated) {
-    return c.redirect("/auth/login?return_to=/dashboard");
+    return c.redirect("/auth/login?return_to=/signed-in");
   }
   return c.html(html`
     <h1>Hello, ${session.user?.name}</h1>
@@ -718,13 +729,20 @@ app.get("/dashboard", async (c) => {
   `);
 });
 
-serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 3100 });
+serve(
+  { fetch: app.fetch, hostname: "127.0.0.1", port: Number(process.env.PORT ?? 3100) },
+  ({ port }) => console.log(`Listening on http://127.0.0.1:${port}`),
+);
 ```
 
 `bff.routes()` mounts `/auth/login`, `/auth/callback`, `/auth/logout`, and
 `/auth/session`. The dashboard is a server-rendered page behind the session
 cookie, so it asks the BFF who is signed in with `bff.readSession(c)` and checks
-`isAuthenticated`. The memory stores and `secure: false` cookies suit plain-HTTP
+`isAuthenticated`. The callback returns to `/signed-in`, a public page on your
+app’s origin. That page opens the dashboard automatically, or you can follow
+its link. Starting this navigation on the app’s own page lets the browser send
+the default `SameSite=Strict` session cookie even when the issuer is on a
+different site. The memory stores and `secure: false` cookies suit plain-HTTP
 local development only.
 
 ### Run it
@@ -764,15 +782,22 @@ explains each value.
 
 ### Moving to a hosted OpenID Connect issuer
 
-The app code stays the same; set the `AUTH_*` environment variables it reads:
+Register a confidential web application with the hosted issuer. To try it with
+the app still running locally, register the callback
+`http://127.0.0.1:3100/auth/callback` and open the app at
+`http://127.0.0.1:3100/`. Set the four environment variables below and restart
+`node app.ts`. Select **Sign in** and sign in as a user of that issuer. On the
+first return, the app opens `/dashboard` and greets the signed-in user.
 
-| Setting       | Local provider                  | Hosted issuer                                                  |
-| ------------- | ------------------------------- | -------------------------------------------------------------- |
-| Issuer        | `http://127.0.0.1:9000`         | The issuer URL your provider publishes, copied exactly         |
-| Client ID     | `demo-app`                      | The client ID of your registration                             |
-| Client secret | `demo-secret`                   | The registration's secret, kept in your secret store           |
-| Callback URL  | `http://127.0.0.1:3100/auth/callback` | Your deployed app's `/auth/callback`, registered with the issuer |
-| Scopes        | `openid profile email`          | Only scopes your registration allows                           |
+| Setting              | Local provider                        | Hosted issuer                                          |
+| -------------------- | ------------------------------------- | ------------------------------------------------------ |
+| `AUTH_ISSUER`        | `http://127.0.0.1:9000`               | The issuer URL your provider publishes, copied exactly |
+| `AUTH_CLIENT_ID`     | `demo-app`                            | The client ID of your registration                     |
+| `AUTH_CLIENT_SECRET` | `demo-secret`                         | The registration’s secret, kept in your secret store   |
+| `AUTH_CALLBACK_URL`  | `http://127.0.0.1:3100/auth/callback` | The app’s exact registered callback URL                |
+
+The sample requests `openid profile email` in the BFF options. Choose only
+scopes your registration allows.
 
 Before production, also replace what the local path leaves in memory or
 disabled:
