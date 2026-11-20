@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isMain } from "./_main.ts";
+import { SKILL_FILE } from "./skill-version.ts";
 
 interface PackageManifest {
   name: string;
@@ -182,10 +183,22 @@ async function checkIdpDev(consumerDir: string): Promise<void> {
     "cli",
     "bin.js",
   );
-  const child = spawn(process.execPath, [entry, "idp", "dev", "--port", "0"], {
-    cwd: consumerDir,
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+  writeFileSync(
+    join(consumerDir, "idp.json"),
+    JSON.stringify({
+      port: 0,
+      scopesSupported: ["openid", "skill-smoke"],
+      users: [{ username: "reader@example.test", password: "local-fixture" }],
+    }),
+  );
+  const child = spawn(
+    process.execPath,
+    [entry, "idp", "dev", "--config", "idp.json"],
+    {
+      cwd: consumerDir,
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
   const exited = new Promise<void>((resolve) => child.once("close", resolve));
   try {
     const url = await new Promise<string>((resolve, reject) => {
@@ -201,6 +214,18 @@ async function checkIdpDev(consumerDir: string): Promise<void> {
     const response = await fetch(`${url}/.well-known/openid-configuration`);
     if (!response.ok)
       fail(`idp dev answered discovery with ${response.status}`);
+    const metadata = (await response.json()) as {
+      issuer?: string;
+      scopes_supported?: string[];
+    };
+    if (
+      metadata.issuer !== url ||
+      !metadata.scopes_supported?.includes("skill-smoke")
+    ) {
+      fail(
+        "discovery did not describe the locally configured issuer and scopes",
+      );
+    }
   } finally {
     child.kill("SIGTERM");
     await exited;
@@ -279,10 +304,23 @@ async function main(): Promise<void> {
     const listing = readdirSync(installedDir, { recursive: true })
       .map(String)
       .map((entry) => entry.replaceAll("\\", "/"));
-    for (const required of ["README.md", "LICENSE", "package.json"]) {
+    for (const required of [
+      "README.md",
+      "LICENSE",
+      "package.json",
+      SKILL_FILE,
+    ]) {
       if (!listing.includes(required)) {
         fail(`the tarball is missing ${required}`);
       }
+    }
+    const packedSkill = readFileSync(join(installedDir, SKILL_FILE), "utf8");
+    if (
+      !packedSkill.split("\n").includes(`  version: "${installed.version}"`)
+    ) {
+      fail(
+        "the packaged skill version differs from the installed package version",
+      );
     }
     const unexpected = listing.filter(
       (entry) =>

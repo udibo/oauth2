@@ -68,7 +68,8 @@
     [
       "@semantic-release/exec",
       {
-        "verifyReleaseCmd": "node scripts/verify-release.ts ${lastRelease.gitHead || ''}"
+        "verifyReleaseCmd": "node scripts/verify-release.ts ${lastRelease.gitHead || ''}",
+        "prepareCmd": "node scripts/skill-version.ts ${nextRelease.version}"
       }
     ],
     "@sebbo2002/semantic-release-jsr",
@@ -85,7 +86,8 @@
         "assets": [
           "CHANGELOG.md",
           "package.json",
-          "jsr.json"
+          "jsr.json",
+          "skills/udibo-oauth2/SKILL.md"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

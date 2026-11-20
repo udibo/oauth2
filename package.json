@@ -28,6 +28,7 @@
   },
   "files": [
     "dist",
+    "skills/udibo-oauth2/SKILL.md",
     "!dist/**/*.test.*",
     "README.md",
     "LICENSE",
