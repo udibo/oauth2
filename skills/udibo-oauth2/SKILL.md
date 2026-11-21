@@ -4,8 +4,8 @@ description: Build an OAuth2 authorization server for a Node application with @u
 license: MIT
 compatibility: Node.js 22.18 or later for the TypeScript quickstart.
 metadata:
-  version: "0.55.1"
-  targets: "@udibo/oauth2@0.55.1"
+  version: "0.55.2"
+  targets: "@udibo/oauth2@0.55.2"
 ---
 
 # Build authorization with @udibo/oauth2
@@ -63,12 +63,12 @@ the person's local secret storage and out of the conversation.
 
 ## Your own authorization server
 
-For a local sign-in, follow the complete app in the [versioned quickstart](https://github.com/udibo/oauth2/blob/0.55.1/docs/quickstart.md).
+For a local sign-in, follow the complete app in the [versioned quickstart](https://github.com/udibo/oauth2/blob/0.55.2/docs/quickstart.md).
 In an existing project, keep its lockfile and package manager. Pin the package
 to the version this skill targets. For an npm project:
 
 ```sh
-npm install --save-exact @udibo/oauth2@0.55.1
+npm install --save-exact @udibo/oauth2@0.55.2
 ```
 
 For a local provider, create the quickstart's development configuration with
@@ -101,7 +101,7 @@ rotation atomic. Wire the authorization-code grant with PKCE and the refresh
 grant the application needs. Configure the issuer and registered redirects
 from the deployment settings. Run the package's store contract tests and
 exercise sign-in, refresh and revocation before switching application traffic.
-[Authorization server guide](https://github.com/udibo/oauth2/blob/0.55.1/docs/guides/become-an-oauth-provider.md) · [Production deployment](https://github.com/udibo/oauth2/blob/0.55.1/docs/guides/production-deployment.md)
+[Authorization server guide](https://github.com/udibo/oauth2/blob/0.55.2/docs/guides/become-an-oauth-provider.md) · [Production deployment](https://github.com/udibo/oauth2/blob/0.55.2/docs/guides/production-deployment.md)
 
 ## Connect a client and protect an API
 
@@ -115,7 +115,7 @@ For an API, mount the bearer middleware from
 scope required by the route. Check the verified subject's application
 permissions before returning a private record. Exercise a permitted request,
 a request without a token and a request whose token lacks the route's scope.
-[Protect an API](https://github.com/udibo/oauth2/blob/0.55.1/docs/guides/protect-an-api.md)
+[Protect an API](https://github.com/udibo/oauth2/blob/0.55.2/docs/guides/protect-an-api.md)
 
 ## Hosted path: connect a tenant
 
@@ -124,7 +124,7 @@ application in their tenant and register the callback.
 Ask for its public issuer and client ID, and the name of the environment
 variable holding the secret. Use those settings on the server and repeat the
 client sign-in and protected API checks.
-[Hosted integration guide](https://github.com/udibo/oauth2/blob/0.55.1/docs/guides/use-udibo.md)
+[Hosted integration guide](https://github.com/udibo/oauth2/blob/0.55.2/docs/guides/use-udibo.md)
 
 ## Migrating between authorization servers
 
@@ -132,4 +132,4 @@ First adopt the package against the existing issuer. Verify sign-in, sign-out,
 session continuity and one protected request on that issuer. Before switching
 issuers or moving users, present a separate plan covering account identifiers,
 credentials, registrations, cutover and rollback. Wait for approval.
-[Migration guide](https://github.com/udibo/oauth2/blob/0.55.1/docs/guides/migrate-from-another-provider.md)
+[Migration guide](https://github.com/udibo/oauth2/blob/0.55.2/docs/guides/migrate-from-another-provider.md)

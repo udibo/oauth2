@@ -1,3 +1,9 @@
+## [0.55.2](https://github.com/udibo/oauth2/compare/0.55.1...0.55.2) (2026-11-21)
+
+### Bug Fixes
+
+* **skill:** run the installed CLI from the app workspace ([#210](https://github.com/udibo/oauth2/issues/210)) ([2414f9d](https://github.com/udibo/oauth2/commit/2414f9da2363177b58cf7cc18df8235df5240f14))
+
 ## [0.55.1](https://github.com/udibo/oauth2/compare/0.55.0...0.55.1) (2026-11-18)
 
 ### Bug Fixes
