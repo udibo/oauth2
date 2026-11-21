@@ -50,9 +50,11 @@ describe("the package skill", () => {
     expect(subpaths).toContain("./hono/resource-server");
     for (const subpath of subpaths)
       expect(manifest.exports[subpath]?.types).toBeDefined();
+    expect(manifest.bin["udibo-oauth2"]).toBeDefined();
     expect(skill).toContain(
-      `node node_modules/@udibo/oauth2/${manifest.bin["udibo-oauth2"]!.slice(2)} idp dev --config idp.json`,
+      '"auth:dev": "udibo-oauth2 idp dev --config idp.json"',
     );
+    expect(skill).toContain("`npm run auth:dev`");
   });
 
   it("updates the complete skill for a release and can safely repeat preparation", () => {

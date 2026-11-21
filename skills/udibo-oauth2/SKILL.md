@@ -73,11 +73,20 @@ npm install --save-exact @udibo/oauth2@0.55.1
 
 For a local provider, create the quickstart's development configuration with
 a synthetic user and a loopback issuer. Match its port and exact callback to
-the app configuration. Run the installed CLI in a local terminal:
+the app configuration. In the app's `package.json`, add this entry to
+`scripts`, keeping any existing scripts. If the name is taken, choose an unused one.
 
-```sh
-node node_modules/@udibo/oauth2/dist/cli/bin.js idp dev --config idp.json
+```json
+{
+  "scripts": {
+    "auth:dev": "udibo-oauth2 idp dev --config idp.json"
+  }
+}
 ```
+
+From the app directory, run that script with the project's package manager
+(`npm run auth:dev`, `pnpm run auth:dev` or `yarn run auth:dev`). The script
+uses the CLI installed for the app and reads its local `idp.json`.
 
 Open the app's protected page in a signed-out browser, sign in through the
 provider, and check that the callback returns to the protected page. Sign
