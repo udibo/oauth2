@@ -84,9 +84,13 @@ the app configuration. In the app's `package.json`, add this entry to
 }
 ```
 
-From the app directory, run that script with the project's package manager
-(`npm run auth:dev`, `pnpm run auth:dev` or `yarn run auth:dev`). The script
-uses the CLI installed for the app and reads its local `idp.json`.
+From the app directory, run that script with the project's package manager.
+For an npm project, run the following command. It uses the CLI installed
+for the app and reads its local `idp.json`.
+
+```sh
+npm run auth:dev
+```
 
 Open the app's protected page in a signed-out browser, sign in through the
 provider, and check that the callback returns to the protected page. Sign

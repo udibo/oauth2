@@ -54,7 +54,7 @@ describe("the package skill", () => {
     expect(skill).toContain(
       '"auth:dev": "udibo-oauth2 idp dev --config idp.json"',
     );
-    expect(skill).toContain("`npm run auth:dev`");
+    expect(skill).toContain("\n```sh\nnpm run auth:dev\n```\n");
   });
 
   it("updates the complete skill for a release and can safely repeat preparation", () => {
