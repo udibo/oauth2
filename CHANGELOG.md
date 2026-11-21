@@ -1,3 +1,9 @@
+## [0.55.3](https://github.com/udibo/oauth2/compare/0.55.2...0.55.3) (2026-11-21)
+
+### Bug Fixes
+
+* **skill:** keep the local provider command runnable in the marketplace ([#211](https://github.com/udibo/oauth2/issues/211)) ([5d17b9a](https://github.com/udibo/oauth2/commit/5d17b9a3bfaab39d598f3dd356baab289d597912))
+
 ## [0.55.2](https://github.com/udibo/oauth2/compare/0.55.1...0.55.2) (2026-11-21)
 
 ### Bug Fixes
