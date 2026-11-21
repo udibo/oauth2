@@ -31,7 +31,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { isMain } from "./_main.ts";
 import { SKILL_FILE } from "./skill-version.ts";
@@ -270,11 +270,23 @@ async function main(): Promise<void> {
     }
     const tarball = join(packDir, tarballs[0]!);
 
+    const appDir = join(consumerDir, "app");
+    mkdirSync(appDir);
+    writeFileSync(
+      join(appDir, "package.json"),
+      JSON.stringify({
+        name: "oauth2-smoke-app",
+        private: true,
+        dependencies: { "@udibo/oauth2": pathToFileURL(tarball).href },
+        scripts: { "auth:dev": "udibo-oauth2 idp dev --config idp.json" },
+      }),
+    );
     writeFileSync(
       join(consumerDir, "package.json"),
       JSON.stringify({
         name: "oauth2-smoke-consumer",
         private: true,
+        workspaces: ["app"],
         type: "module",
         dependencies: installOnly
           ? {}
@@ -365,6 +377,15 @@ async function main(): Promise<void> {
     }
 
     checkBin(consumerDir, listing);
+    const workspaceHelp = run(
+      "npm",
+      ["run", "auth:dev", "--", "--help"],
+      appDir,
+      "pipe",
+    );
+    if (!workspaceHelp.includes("Run a local identity provider")) {
+      fail("the workspace's auth:dev script did not resolve the installed CLI");
+    }
     await checkIdpDev(consumerDir);
 
     const nonNpm = Object.entries(installed.dependencies ?? {}).filter(
